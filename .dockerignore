@@ -1,9 +1,40 @@
+# Python bytecode and tool caches
 **/__pycache__
 **/*.pyc
 **/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/htmlcov
+
+# Runtime data: the database and uploaded covers belong in a mounted volume
 backend/data/
+data/
+
+# Installed dependencies and build output; both stages build these themselves
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+backend/.venv/
+
+# Test suites: published as source, but of no use inside the runtime image
+backend/tests/
+frontend/tests/
+
+# Repository and release machinery
 .git
 .gitignore
-data/
+.github
+.gitlab-ci.yml
+ci/
+docs/
+CLAUDE.md
+# The stripped tree that ci/make-public-tree.sh materialises at the repo root.
+# Unanchored and without **, this matches only ./public. frontend/public/,
+# which holds the PWA icons and manifest, is untouched and still built in.
+./public/
+
+# Secrets, never in the build context
+.env
+*.pem
+*.key

@@ -1,0 +1,4208 @@
+{
+  "components": {
+    "schemas": {
+      "AuthConfigOut": {
+        "description": "Read by the login page before anyone holds a token.",
+        "properties": {
+          "auth_mode": {
+            "$ref": "#/components/schemas/AuthMode"
+          },
+          "registration_enabled": {
+            "title": "Registration Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auth_mode",
+          "registration_enabled"
+        ],
+        "title": "AuthConfigOut",
+        "type": "object"
+      },
+      "AuthMode": {
+        "description": "How members are authenticated.\n\nLOCAL   accounts and bcrypt hashes in this database (the default).\nLDAP    credentials are checked against a directory; no local signup.\nPROXY   an upstream (Authelia, oauth2-proxy, ...) has already authenticated\n        the request and asserts who it is in a header. No login screen.",
+        "enum": [
+          "local",
+          "ldap",
+          "proxy"
+        ],
+        "title": "AuthMode",
+        "type": "string"
+      },
+      "Body_import_goodreads": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_goodreads",
+        "type": "object"
+      },
+      "Body_set_login_image": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_set_login_image",
+        "type": "object"
+      },
+      "Body_upload_cover": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_cover",
+        "type": "object"
+      },
+      "BookCreate": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "is_private": {
+            "default": false,
+            "title": "Is Private",
+            "type": "boolean"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 2200.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "BookCreate",
+        "type": "object"
+      },
+      "BookDetailsUpdate": {
+        "description": "The fields a person edits by hand after a book exists.\n\nEvery field is optional and absent means \"leave alone\", so the form can\nsend only what changed. An explicit `null` clears, which is how a series is\nunset; the two cases are distinguished with `model_fields_set`.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "maximum": 2200.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "title": "BookDetailsUpdate",
+        "type": "object"
+      },
+      "BookEnrichmentOut": {
+        "description": "The outcome of an enrichment run.\n\n`updated_fields` is what makes this honest: enrichment often finds a volume\nbut has nothing to add, and reporting \"done\" would look like a no-op bug.",
+        "properties": {
+          "book": {
+            "$ref": "#/components/schemas/BookOut"
+          },
+          "found": {
+            "title": "Found",
+            "type": "boolean"
+          },
+          "updated_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Updated Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "book",
+          "updated_fields",
+          "found"
+        ],
+        "title": "BookEnrichmentOut",
+        "type": "object"
+      },
+      "BookLookup": {
+        "description": "Metadata fetched for an ISBN. Nothing is persisted at this point: the\nclient edits it and posts it back to /api/books/scan.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "isbn": {
+            "title": "Isbn",
+            "type": "string"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "suggested_tag_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Suggested Tag Ids",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "isbn",
+          "title"
+        ],
+        "title": "BookLookup",
+        "type": "object"
+      },
+      "BookOut": {
+        "properties": {
+          "active_loan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoanOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "added_at": {
+            "format": "date-time",
+            "title": "Added At",
+            "type": "string"
+          },
+          "added_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "google_books_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Books Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_private": {
+            "default": false,
+            "title": "Is Private",
+            "type": "boolean"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "my_finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Finished At"
+          },
+          "my_rating": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Rating"
+          },
+          "my_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Started At"
+          },
+          "my_status": {
+            "$ref": "#/components/schemas/ReadStatus",
+            "default": "unread"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/OwnershipStatus",
+            "default": "owned"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TagOut"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "isbn",
+          "title",
+          "subtitle",
+          "author",
+          "publisher",
+          "year",
+          "description",
+          "cover_url",
+          "added_at"
+        ],
+        "title": "BookOut",
+        "type": "object"
+      },
+      "BookRatingUpdate": {
+        "description": "A personal rating, or `null` to clear it.\n\nSeparate from the status update because rating and progress are not the\nsame act: finishing a book and deciding what you thought of it happen at\ndifferent moments, and often days apart.",
+        "properties": {
+          "rating": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          }
+        },
+        "title": "BookRatingUpdate",
+        "type": "object"
+      },
+      "BookSort": {
+        "description": "Accepted values for `GET /api/books?sort=`.\n\nTITLE_ASC is the default and is spelled out rather than left implicit, so\nthe client can round-trip the current sort without a special empty case.",
+        "enum": [
+          "title_asc",
+          "title_desc",
+          "author",
+          "year_asc",
+          "year_desc",
+          "newest",
+          "series"
+        ],
+        "title": "BookSort",
+        "type": "string"
+      },
+      "BookStatusUpdate": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ReadStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BookStatusUpdate",
+        "type": "object"
+      },
+      "BulkAction": {
+        "description": "What a bulk selection does to the books in it.\n\nOne endpoint per verb would be four near-identical handlers sharing the\nsame permission walk and the same three-way result. The verb is a field\ninstead.",
+        "enum": [
+          "add_tag",
+          "remove_tag",
+          "set_status",
+          "set_ownership",
+          "set_location",
+          "delete"
+        ],
+        "title": "BulkAction",
+        "type": "string"
+      },
+      "BulkOwnershipResult": {
+        "description": "What the bulk update did.\n\n`skipped` is not an error: a selection can include a book the caller may\nnot modify, and silently reporting success for it would be a lie.",
+        "properties": {
+          "skipped": {
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unchanged": {
+            "minimum": 0.0,
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "minimum": 0.0,
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated",
+          "unchanged",
+          "skipped"
+        ],
+        "title": "BulkOwnershipResult",
+        "type": "object"
+      },
+      "BulkOwnershipUpdate": {
+        "description": "Mark several books at once.\n\nThe flow this exists for: import a Goodreads library, then pick out the\nones actually on the shelf. Doing that one book at a time for a few hundred\nimported rows is not a realistic ask.",
+        "properties": {
+          "book_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Book Ids",
+            "type": "array"
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/OwnershipStatus"
+          }
+        },
+        "required": [
+          "book_ids",
+          "ownership"
+        ],
+        "title": "BulkOwnershipUpdate",
+        "type": "object"
+      },
+      "BulkRequest": {
+        "description": "One verb applied to a selection.\n\n`value` is deliberately loose: which field it fills depends on the action,\nand the handler validates it against that action rather than the schema\ncarrying six mutually exclusive optional fields.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/BulkAction"
+          },
+          "book_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Book Ids",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "book_ids",
+          "action"
+        ],
+        "title": "BulkRequest",
+        "type": "object"
+      },
+      "BulkResult": {
+        "description": "What a bulk action did.\n\n`skipped` is not an error: a selection can include a book the caller may\nnot modify, and reporting success for it would be a lie. `unchanged`\nseparates \"already in that state\" from \"changed\", so the UI can say what\nactually happened rather than implying work that did not occur.",
+        "properties": {
+          "skipped": {
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "unchanged": {
+            "minimum": 0.0,
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "minimum": 0.0,
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated",
+          "unchanged",
+          "skipped"
+        ],
+        "title": "BulkResult",
+        "type": "object"
+      },
+      "DuplicateGroup": {
+        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: the unique ISBN\nalready prevents exact repeats, and the case worth catching is a hardback\nand a paperback, which are legitimately two different ISBNs.",
+        "properties": {
+          "books": {
+            "items": {
+              "$ref": "#/components/schemas/BookOut"
+            },
+            "title": "Books",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "books"
+        ],
+        "title": "DuplicateGroup",
+        "type": "object"
+      },
+      "ExportFormat": {
+        "enum": [
+          "csv",
+          "txt"
+        ],
+        "title": "ExportFormat",
+        "type": "string"
+      },
+      "FeatureFlagsOut": {
+        "description": "What the frontend needs in order to decide what to render.\n\nReadable by anyone, deliberately: the login page is localised, so the\ndefault language has to be known before a token exists. It carries no\nsecrets and nothing about the catalogue.",
+        "properties": {
+          "default_locale": {
+            "$ref": "#/components/schemas/Locale"
+          },
+          "goodreads_lookup_enabled": {
+            "title": "Goodreads Lookup Enabled",
+            "type": "boolean"
+          },
+          "google_books_enabled": {
+            "title": "Google Books Enabled",
+            "type": "boolean"
+          },
+          "google_books_ready": {
+            "default": false,
+            "title": "Google Books Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "google_books_enabled",
+          "goodreads_lookup_enabled",
+          "default_locale"
+        ],
+        "title": "FeatureFlagsOut",
+        "type": "object"
+      },
+      "GoodreadsImportOut": {
+        "description": "What an import actually did.\n\nReported field by field rather than as a single count, because the useful\nquestion after an import is usually \"why did it not pick up book X?\" and\nthe answer is almost always one of: the shelf was not one we map, the book\nis not in the catalogue, or the status was already correct.",
+        "properties": {
+          "created": {
+            "description": "Books added from the export",
+            "minimum": 0.0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "matched": {
+            "description": "Rows matched to a book already here",
+            "minimum": 0.0,
+            "title": "Matched",
+            "type": "integer"
+          },
+          "rows_read": {
+            "description": "Rows with a shelf we understand",
+            "minimum": 0.0,
+            "title": "Rows Read",
+            "type": "integer"
+          },
+          "skipped": {
+            "description": "Rows on a shelf we do not map",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "statuses_updated": {
+            "description": "Statuses actually changed",
+            "minimum": 0.0,
+            "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "unmatched_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched Titles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows_read",
+          "matched",
+          "created",
+          "statuses_updated",
+          "skipped"
+        ],
+        "title": "GoodreadsImportOut",
+        "type": "object"
+      },
+      "GoogleBooksMatch": {
+        "description": "One candidate from a free-text search, for picking the right edition.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "categories": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "google_books_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Books Id"
+          },
+          "isbn13": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn13"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "suggested_tag_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Suggested Tag Ids",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "title": "GoogleBooksMatch",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LoanCreate": {
+        "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "loaned_to_user_id": {
+            "title": "Loaned To User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "book_id",
+          "loaned_to_user_id"
+        ],
+        "title": "LoanCreate",
+        "type": "object"
+      },
+      "LoanOut": {
+        "properties": {
+          "book": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_overdue": {
+            "default": false,
+            "title": "Is Overdue",
+            "type": "boolean"
+          },
+          "loaned_at": {
+            "format": "date-time",
+            "title": "Loaned At",
+            "type": "string"
+          },
+          "loaned_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loaned_by_user_id": {
+            "title": "Loaned By User Id",
+            "type": "integer"
+          },
+          "loaned_to": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loaned_to_user_id": {
+            "title": "Loaned To User Id",
+            "type": "integer"
+          },
+          "returned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returned At"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "loaned_to_user_id",
+          "loaned_by_user_id",
+          "loaned_at",
+          "returned_at"
+        ],
+        "title": "LoanOut",
+        "type": "object"
+      },
+      "Locale": {
+        "enum": [
+          "en",
+          "de"
+        ],
+        "title": "Locale",
+        "type": "string"
+      },
+      "LocationOut": {
+        "description": "A distinct shelf location and how much is on it.",
+        "properties": {
+          "book_count": {
+            "minimum": 0.0,
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "book_count"
+        ],
+        "title": "LocationOut",
+        "type": "object"
+      },
+      "LoginImageOut": {
+        "description": "Where the login background lives, as a path under the /covers mount.",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LoginImageOut",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "description": "Sign-in. Deliberately does NOT enforce the registration password policy.\n\nTwo reasons. Accounts created before the policy existed have shorter\npasswords, and validating length here would lock those members out of their\nown library rather than merely asking them to pick a better one. And a 422\nfor \"too short\" is a different response from a 401 for \"wrong\", which tells\nan attacker something about the stored password.",
+        "properties": {
+          "password": {
+            "maxLength": 72,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MergeRequest": {
+        "description": "Fold several books into one.\n\n`keep_id` survives and must appear in `book_ids`, spelled out rather than\ninferred so a mistyped request fails instead of silently keeping whichever\nrow sorted first.",
+        "properties": {
+          "book_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Book Ids",
+            "type": "array"
+          },
+          "keep_id": {
+            "title": "Keep Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "book_ids",
+          "keep_id"
+        ],
+        "title": "MergeRequest",
+        "type": "object"
+      },
+      "MonthStat": {
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "month": {
+            "pattern": "^\\d{4}-\\d{2}$",
+            "title": "Month",
+            "type": "string"
+          }
+        },
+        "required": [
+          "month",
+          "count"
+        ],
+        "title": "MonthStat",
+        "type": "object"
+      },
+      "NoteCreate": {
+        "properties": {
+          "content": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "NoteCreate",
+        "type": "object"
+      },
+      "NoteOut": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "user_id",
+          "content",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "NoteOut",
+        "type": "object"
+      },
+      "OwnershipStatus": {
+        "description": "Whether a book is physically on the shelf.\n\nDeliberately separate from ReadStatus, which is about a person, not an\nobject. \"I have read this\" and \"we own a copy of this\" are independent\nclaims: a library borrowing is read but not owned, and an unread gift is\nowned but not read. Conflating them is what makes an imported reading\nhistory look like a catalogue of possessions.\n\nUNKNOWN exists because a Goodreads export cannot answer the question at\nall. Defaulting those rows to OWNED would assert something nobody checked;\ndefaulting them to NOT_OWNED would be an equally unfounded guess. So they\narrive unverified and wait to be confirmed.",
+        "enum": [
+          "owned",
+          "not_owned",
+          "unknown"
+        ],
+        "title": "OwnershipStatus",
+        "type": "string"
+      },
+      "OwnershipUpdate": {
+        "properties": {
+          "ownership": {
+            "$ref": "#/components/schemas/OwnershipStatus"
+          }
+        },
+        "required": [
+          "ownership"
+        ],
+        "title": "OwnershipUpdate",
+        "type": "object"
+      },
+      "Page_BookOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BookOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[BookOut]",
+        "type": "object"
+      },
+      "Page_LoanOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LoanOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[LoanOut]",
+        "type": "object"
+      },
+      "PerUserStat": {
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "count"
+        ],
+        "title": "PerUserStat",
+        "type": "object"
+      },
+      "PrivacyUpdate": {
+        "properties": {
+          "is_private": {
+            "title": "Is Private",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_private"
+        ],
+        "title": "PrivacyUpdate",
+        "type": "object"
+      },
+      "ReadStatus": {
+        "description": "A member's own progress through a book. Stored in `user_books.status`.\n\nWANT_TO_READ is deliberately distinct from UNREAD: \"on the shelf, not\nstarted\" and \"I intend to read this\" are different statements, and\nGoodreads exports carry the distinction (its `to-read` shelf), so\ncollapsing them would lose information on import.",
+        "enum": [
+          "unread",
+          "want_to_read",
+          "reading",
+          "read"
+        ],
+        "title": "ReadStatus",
+        "type": "string"
+      },
+      "SeriesOut": {
+        "description": "One series, as the browse list shows it.",
+        "properties": {
+          "book_count": {
+            "minimum": 0.0,
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "missing_indexes": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Missing Indexes",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "book_count"
+        ],
+        "title": "SeriesOut",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "description": "The admin view. The API key is masked, never returned in full.",
+        "properties": {
+          "default_locale": {
+            "$ref": "#/components/schemas/Locale"
+          },
+          "goodreads_lookup_enabled": {
+            "title": "Goodreads Lookup Enabled",
+            "type": "boolean"
+          },
+          "google_books_api_key_from_env": {
+            "default": false,
+            "title": "Google Books Api Key From Env",
+            "type": "boolean"
+          },
+          "google_books_api_key_preview": {
+            "title": "Google Books Api Key Preview",
+            "type": "string"
+          },
+          "google_books_enabled": {
+            "title": "Google Books Enabled",
+            "type": "boolean"
+          },
+          "has_google_books_api_key": {
+            "title": "Has Google Books Api Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "google_books_enabled",
+          "google_books_api_key_preview",
+          "has_google_books_api_key",
+          "goodreads_lookup_enabled",
+          "default_locale"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "description": "A partial update. Every field is optional; absent means \"leave alone\".\n\nThat matters for the API key: a form that always submitted every field\nwould blank the key whenever an admin toggled something else, since the\nbrowser never received the real value to send back.",
+        "properties": {
+          "default_locale": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Locale"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "goodreads_lookup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goodreads Lookup Enabled"
+          },
+          "google_books_api_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Books Api Key"
+          },
+          "google_books_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Google Books Enabled"
+          }
+        },
+        "title": "SettingsUpdate",
+        "type": "object"
+      },
+      "StatsOut": {
+        "description": "Collection statistics, scoped to what the requesting member may see.\n\nPreviously this endpoint returned a bare dict, so the generated client had\nno idea of its shape. Every aggregation applies the privacy predicate\nindependently, so a member never sees another member's private books\nreflected in any of these counts.",
+        "properties": {
+          "average_rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Rating"
+          },
+          "by_month": {
+            "items": {
+              "$ref": "#/components/schemas/MonthStat"
+            },
+            "title": "By Month",
+            "type": "array"
+          },
+          "by_tag": {
+            "items": {
+              "$ref": "#/components/schemas/TagStat"
+            },
+            "title": "By Tag",
+            "type": "array"
+          },
+          "finished_by_month": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MonthStat"
+            },
+            "title": "Finished By Month",
+            "type": "array"
+          },
+          "per_user": {
+            "items": {
+              "$ref": "#/components/schemas/PerUserStat"
+            },
+            "title": "Per User",
+            "type": "array"
+          },
+          "rated_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Rated Count",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "per_user",
+          "by_tag",
+          "by_month"
+        ],
+        "title": "StatsOut",
+        "type": "object"
+      },
+      "TagCategory": {
+        "description": "The three groups tags are presented in throughout the UI.",
+        "enum": [
+          "type",
+          "genre",
+          "age"
+        ],
+        "title": "TagCategory",
+        "type": "string"
+      },
+      "TagOut": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/TagCategory"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category"
+        ],
+        "title": "TagOut",
+        "type": "object"
+      },
+      "TagStat": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/TagCategory"
+          },
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "category",
+          "count"
+        ],
+        "title": "TagStat",
+        "type": "object"
+      },
+      "Token": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "access_token",
+          "user"
+        ],
+        "title": "Token",
+        "type": "object"
+      },
+      "UserCreate": {
+        "description": "Registration. The length floor is a policy for *new* passwords only.",
+        "properties": {
+          "password": {
+            "maxLength": 72,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 50,
+            "minLength": 1,
+            "pattern": "^\\S.*$",
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "UserCreate",
+        "type": "object"
+      },
+      "UserOut": {
+        "description": "A member as seen by other members. Deliberately has no password field.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_admin": {
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "is_admin",
+          "created_at"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "OAuth2PasswordBearer": {
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/auth/login"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  },
+  "info": {
+    "description": "Catalogue, lend and track a family's physical book collection.",
+    "title": "Endpaper",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/books": {
+      "get": {
+        "operationId": "list_books",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReadStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Comma-separated tag ids",
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated tag ids",
+              "title": "Tags"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ownership",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OwnershipStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ownership"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Series"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Location"
+            }
+          },
+          {
+            "description": "Only books you have not rated",
+            "in": "query",
+            "name": "unrated",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only books you have not rated",
+              "title": "Unrated",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/BookSort",
+              "default": "title_asc"
+            }
+          },
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BookOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Books",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "operationId": "add_book",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Book",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/bulk": {
+      "post": {
+        "description": "Apply one verb to a selection of books.\n\nOne endpoint rather than six, because every verb shares the same three\nsteps: resolve the ids the caller may actually touch, apply, and report\nupdated/unchanged/skipped. Six handlers would be six copies of the\npermission walk, and the fifth one added would be the one that forgot it.\n\n`/bulk/ownership` predates this and is kept: it is the older, narrower\nshape and something may already be calling it.",
+        "operationId": "bulk_action",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Bulk Action",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/bulk/ownership": {
+      "post": {
+        "description": "Mark a selection of books as owned, not owned, or unverified.\n\nDeclared before /{book_id} would match \"bulk\" as an id, which is the same\ntrap /export sits behind.\n\nOnly books the caller may modify are touched. A selection containing\nsomeone else's private book reports it as skipped rather than failing the\nwhole request: the member cannot see that book to deselect it, so failing\nwould leave them stuck with no way to tell which entry was the problem.",
+        "operationId": "bulk_set_ownership",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkOwnershipUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkOwnershipResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Bulk Set Ownership",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/duplicates": {
+      "get": {
+        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. The unique ISBN\nalready makes exact repeats impossible, so the case left to catch is the\none it cannot see: a hardback and a paperback are the same book and two\nlegitimately different ISBNs.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.",
+        "operationId": "list_duplicates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DuplicateGroup"
+                  },
+                  "title": "Response List Duplicates",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Duplicates",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/export": {
+      "get": {
+        "operationId": "export_books",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExportFormat",
+              "default": "csv"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Export Books",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/google/search": {
+      "get": {
+        "description": "Free-text search, for adding a book nobody can scan.\n\nThe barcode path covers a book that is physically to hand. This covers the\nrest: a book with no barcode, a damaged one, or one being added from a\nlist rather than from the shelf. The caller picks a result and the client\nprefills the form from it, so nothing is written until a person confirms.\n\nTwo segments (`/google/search`) rather than one, so it cannot be confused\nwith `/{book_id}` however the routes are later reordered.",
+        "operationId": "search_google_books",
+        "parameters": [
+          {
+            "description": "Title, author or both",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Title, author or both",
+              "maxLength": 200,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GoogleBooksMatch"
+                  },
+                  "title": "Response Search Google Books",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Search Google Books",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/locations": {
+      "get": {
+        "description": "The distinct shelf locations in use, most-populated first.\n\nDoubles as the autocomplete source for the location field. Free text with\nno suggestions turns into six spellings of \"living room\" within a week.",
+        "operationId": "list_locations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LocationOut"
+                  },
+                  "title": "Response List Locations",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Locations",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/lookup": {
+      "get": {
+        "operationId": "lookup_isbn",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "isbn",
+            "required": true,
+            "schema": {
+              "maxLength": 20,
+              "minLength": 10,
+              "title": "Isbn",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookLookup"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Lookup Isbn",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/merge": {
+      "post": {
+        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, loans and reading statuses are repointed rather than dropped.\nA status collision (both rows read by the same person) keeps the one on the\nsurvivor, because deleting somebody's reading history to satisfy a unique\nindex is not an acceptable way to resolve it.",
+        "operationId": "merge_books",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Merge Books",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/scan": {
+      "post": {
+        "description": "Confirm-add after an ISBN lookup. Same as POST /api/books, named for the\nscan flow so the client's intent is visible in logs and metrics.",
+        "operationId": "scan_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Scan Add",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/series": {
+      "get": {
+        "description": "Every series on the shelf, with the gaps in it.\n\n\"Which ones are we missing\" is the question a series view exists to answer,\nand it is answered here rather than in the client so the whole catalogue is\nconsidered rather than the current page.",
+        "operationId": "list_series",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesOut"
+                  },
+                  "title": "Response List Series",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Series",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/tags": {
+      "get": {
+        "operationId": "list_tags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagOut"
+                  },
+                  "title": "Response List Tags",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Tags",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}": {
+      "delete": {
+        "operationId": "delete_book",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Book",
+        "tags": [
+          "books"
+        ]
+      },
+      "get": {
+        "operationId": "get_book",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Book",
+        "tags": [
+          "books"
+        ]
+      },
+      "patch": {
+        "description": "Correct the catalogue entry by hand.\n\n`exclude_unset` is what makes a partial update partial: an absent field is\nleft alone and an explicit null clears. Without it every unsent field would\narrive as None and wipe the record, which is the classic PATCH bug.",
+        "operationId": "update_book_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookDetailsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Book Details",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/cover": {
+      "post": {
+        "operationId": "upload_cover",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_cover"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Upload Cover",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/enrich": {
+      "post": {
+        "description": "Fill in the fields Open Library usually lacks, from Google Books.\n\nMatched by ISBN when there is one, otherwise by title and author. Only\nempty fields are filled unless `overwrite` is set: enrichment adds what is\nmissing, it does not overrule what somebody typed.",
+        "operationId": "enrich_book",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Replace fields that already have a value",
+            "in": "query",
+            "name": "overwrite",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Replace fields that already have a value",
+              "title": "Overwrite",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookEnrichmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Enrich Book",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/enrich/candidates": {
+      "get": {
+        "description": "Editions Google offers for this book, so the right one can be chosen.\n\nUseful when the automatic match picks a different printing: the page count\nand cover of a paperback and its hardback are not the same.",
+        "operationId": "enrichment_candidates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GoogleBooksMatch"
+                  },
+                  "title": "Response Enrichment Candidates",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Enrichment Candidates",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/notes": {
+      "get": {
+        "description": "Requires read access to the book. Without that check, the notes on a\nprivate book were readable by anyone who guessed its id.",
+        "operationId": "get_notes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoteOut"
+                  },
+                  "title": "Response Get Notes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Notes",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "operationId": "add_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Note",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/notes/{note_id}": {
+      "delete": {
+        "operationId": "delete_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Note",
+        "tags": [
+          "books"
+        ]
+      },
+      "put": {
+        "operationId": "edit_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Edit Note",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/ownership": {
+      "patch": {
+        "operationId": "set_ownership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnershipUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Ownership",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/privacy": {
+      "patch": {
+        "operationId": "set_privacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivacyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Privacy",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/rating": {
+      "patch": {
+        "description": "Rate a book, or clear the rating with a null.\n\nRead access, like status, and for the same reason: a rating is one person's\nopinion and changes nothing for anyone else. It deliberately does not touch\nthe reading dates, because rating a book is not a claim about having\nfinished it just now.",
+        "operationId": "set_rating",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookRatingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Rating",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/refresh": {
+      "put": {
+        "operationId": "refresh_metadata",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Refresh Metadata",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/status": {
+      "put": {
+        "description": "Set the caller's own reading status. Read access is enough: a status is\npersonal to the member setting it and changes nothing for anyone else.",
+        "operationId": "update_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Status",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/tags/{tag_id}": {
+      "delete": {
+        "operationId": "remove_book_tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Remove Book Tag",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "operationId": "add_book_tag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Book Tag",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/imports/goodreads": {
+      "post": {
+        "description": "Apply the reading statuses from a Goodreads export.\n\nStatuses are **personal**, so this only ever writes the importing member's\nown `user_books` rows. Importing your shelves does not change what anyone\nelse has read, and two members can import their own exports without\nfighting over the same books.\n\nBooks created by `create_missing` are marked `ownership=unknown`: a reading\nhistory is not evidence of possession. They can then be confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.",
+        "operationId": "import_goodreads",
+        "parameters": [
+          {
+            "description": "Add books from the export that are not in the catalogue",
+            "in": "query",
+            "name": "create_missing",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Add books from the export that are not in the catalogue",
+              "title": "Create Missing",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_goodreads"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoodreadsImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Import Goodreads",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/loans": {
+      "get": {
+        "operationId": "list_loans",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdue_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Overdue Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_LoanOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Loans",
+        "tags": [
+          "loans"
+        ]
+      },
+      "post": {
+        "operationId": "create_loan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoanCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Loan",
+        "tags": [
+          "loans"
+        ]
+      }
+    },
+    "/api/loans/{loan_id}/return": {
+      "put": {
+        "description": "Recording a return is a shelf action, not an ownership one, so any member\nmay do it, for any book they can see.",
+        "operationId": "return_loan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loan_id",
+            "required": true,
+            "schema": {
+              "title": "Loan Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Return Loan",
+        "tags": [
+          "loans"
+        ]
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Apply a partial update.\n\nOnly fields actually present are written. That is what lets the admin form\nsubmit without the API key: the browser never received the real value, so\nsending the field back would blank it.",
+        "operationId": "update_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/features": {
+      "get": {
+        "description": "What the UI needs to decide what to render.\n\nPublic on purpose: the login page is localised, so the default language has\nto be known before anyone holds a token. Carries no secrets.",
+        "operationId": "get_feature_flags",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Feature Flags",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/login-image": {
+      "get": {
+        "description": "Public: the login page renders before anyone holds a token.",
+        "operationId": "get_login_image",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginImageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Login Image",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "set_login_image",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_set_login_image"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginImageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Login Image",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/stats": {
+      "get": {
+        "description": "Collection statistics, scoped to what this member may see.\n\nEvery aggregation applies `visible_to` independently. Omitting it from any\none of them would leak another member's private books as a count, which is\nquieter than leaking a title but leaks all the same.",
+        "operationId": "get_stats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Stats",
+        "tags": [
+          "stats"
+        ]
+      }
+    },
+    "/api/users": {
+      "get": {
+        "description": "The member list.\n\nReadable by every member, not just admins, because the book detail page\nneeds it to populate the \"Loan to\u2026\" picker. `UserOut` has no password\nfield, so this exposes usernames and the admin flag and nothing else.",
+        "operationId": "list_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response List Users",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Users",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/auth/config": {
+      "get": {
+        "description": "Public: the login page reads this before anyone holds a token.\n\nRead per request rather than captured at import, so closing registration\ntakes effect without restarting the container.",
+        "operationId": "auth_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Config",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    }
+  }
+}

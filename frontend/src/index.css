@@ -1,9 +1,40 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Tailwind 4 takes its configuration from CSS rather than tailwind.config.js.
+   Custom design tokens go in @theme, where each --color-* entry generates the
+   matching utilities (bg-library-500, text-library-700, and so on). */
+@theme {
+  --color-library-50: #f0f9ff;
+  --color-library-100: #e0f2fe;
+  --color-library-500: #0ea5e9;
+  --color-library-600: #0284c7;
+  --color-library-700: #0369a1;
+}
+
+/* Tailwind 4's `dark:` follows prefers-color-scheme out of the box, which is
+   the right default and the wrong mechanism for a toggle: a media query cannot
+   be overridden by a person. Redefining the variant to key off a class lets
+   both work, because the class is *set* from the media query when nobody has
+   chosen. See src/theme/index.tsx for that resolution.
+
+   `:where()` keeps specificity at zero, so `dark:` utilities still lose to
+   anything more specific exactly as they did before. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
+  /* Tells the browser which palette its own UI should use: form controls, the
+     scrollbar, and the flash of background before the first paint. Without it
+     a dark page keeps white scrollbars and light-styled date pickers. */
+  :root {
+    color-scheme: light;
+  }
+
+  :root.dark {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-gray-50 text-gray-900 min-h-screen;
+    @apply dark:bg-gray-950 dark:text-gray-100;
   }
 }

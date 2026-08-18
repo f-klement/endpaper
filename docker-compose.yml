@@ -7,10 +7,15 @@ services:
     ports:
       - "8000:8000" # change left side to any free host port e.g. 8123:8000
     volumes:
+      # The container runs as uid 1000, so this directory must be writable by
+      # uid 1000 on the host. On most Linux desktops your own account is 1000
+      # already; otherwise: mkdir -p data && sudo chown 1000:1000 data
       - ./data:/app/data
     environment:
+      # Signs the login tokens. Change it before deploying, and changing it
+      # later invalidates every session, which is the only way to revoke one.
       - SECRET_KEY=change-this-in-production
-      - DATABASE_URL=sqlite:///./data/library.db
-      - PUID=1000 #set to your user, or remove to run as root
-      - PGID=100 #set to your user, or remove to run as root
+      # DATABASE_URL is intentionally unset: it defaults to a SQLite file
+      # inside DATA_DIR (/app/data), which is the volume mounted above.
+      # - ALLOW_REGISTRATION=false   # uncomment once everyone has an account
     restart: unless-stopped

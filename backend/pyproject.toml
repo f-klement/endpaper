@@ -1,0 +1,82 @@
+[project]
+name = "endpaper-backend"
+version = "1.0.0"
+description = "Endpaper backend (FastAPI)"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115.8",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy>=2.0.38",
+    "pyjwt>=2.10.1",
+    "bcrypt>=4.2.1",
+    "python-multipart>=0.0.20",
+    "httpx>=0.28.1",
+    "pydantic>=2.10.6",
+    "pydantic-settings>=2.7.1",
+    "alembic>=1.14",
+    "ldap3>=2.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "pytest-asyncio>=0.25.2",
+    "respx>=0.22.0",
+    "ruff>=0.9.4",
+    "mypy>=1.14.1",
+    "pip-audit>=2.9.0",
+]
+
+[tool.pytest.ini_options]
+# Tests live in a mirror tree, never beside the module under test.
+testpaths = ["tests"]
+# The application modules are imported flat ("from models import Book"), the
+# way uvicorn imports them with backend/ as the working directory.
+pythonpath = ["."]
+# importlib import mode is required, not cosmetic: the test tree mirrors the
+# source tree, so tests/test_auth.py and tests/routers/test_auth.py share a
+# basename. The default "prepend" mode derives module names from the basename
+# and refuses to collect the second one.
+addopts = "-q --strict-markers --import-mode=importlib"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", ".venv/*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = [
+    # FastAPI's dependency-injection idiom is a function call in a default
+    # argument, which B008 exists to forbid.
+    "B008",
+]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
+exclude = ["^\\.venv/"]
+# Required, not cosmetic: the test tree mirrors the source tree, so
+# tests/test_auth.py and tests/routers/test_auth.py share a basename. Without
+# these two, mypy derives module names from the basename, hits the collision
+# and aborts before checking anything at all.
+explicit_package_bases = true
+mypy_path = "."
+
+[[tool.mypy.overrides]]
+# Tests assert on loosely-typed response bodies and deliberately pass invalid
+# values to check validation. Full strictness there costs more than it catches.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+warn_return_any = false

@@ -1,0 +1,193 @@
+/**
+ * Tests for src/pages/ScanPage/components/BarcodeScanner.tsx.
+ *
+ * @zxing/library is mocked wholesale: there is no camera in jsdom, and what
+ * is worth testing is the ISBN filter and the camera lifecycle, not ZXing's
+ * decoding.
+ */
+
+import { screen, waitFor } from "@testing-library/react";
+import { renderLocalised } from "../../../utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const decodeFromVideoDevice = vi.fn();
+const reset = vi.fn();
+
+vi.mock("@zxing/library", () => {
+  class NotFoundException extends Error {}
+  class BrowserMultiFormatReader {
+    decodeFromVideoDevice = decodeFromVideoDevice;
+    reset = reset;
+  }
+  return { BrowserMultiFormatReader, NotFoundException };
+});
+
+import { NotFoundException } from "@zxing/library";
+
+import BarcodeScanner, {
+  readIsbnBarcode,
+} from "../../../../src/pages/ScanPage/components/BarcodeScanner";
+
+beforeEach(() => {
+  decodeFromVideoDevice.mockReset();
+  reset.mockReset();
+  decodeFromVideoDevice.mockResolvedValue(undefined);
+});
+
+/** Hand the component a decoded barcode through ZXing's callback. */
+function emitBarcode(text: string) {
+  const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
+    result: { getText: () => string } | null,
+    error: Error | null,
+  ) => void;
+  callback({ getText: () => text }, null);
+}
+
+describe("readIsbnBarcode", () => {
+  it.each(["9780441013593", "9791234567896", "0441013597"])(
+    "accepts %s",
+    (code) => {
+      expect(readIsbnBarcode(code)).not.toBeNull();
+    },
+  );
+
+  it("accepts an ISBN-10 ending in X", () => {
+    // Roughly one ISBN-10 in eleven ends this way, and the previous regex
+    // rejected every one of them.
+    expect(readIsbnBarcode("043942089X")).not.toBeNull();
+  });
+
+  it("returns the canonical ISBN-13 for an ISBN-10 barcode", () => {
+    // So a paperback's ISBN-10 barcode and its ISBN-13 reprint resolve to one
+    // book rather than two catalogue entries.
+    expect(readIsbnBarcode("0441013597")).toBe("9780441013593");
+  });
+
+  it.each([
+    ["1234567890123", "an EAN-13 that is not Bookland"],
+    ["5012345678900", "a real product barcode"],
+    ["9780441013594", "a book ISBN with one digit misread"],
+    ["12345", "too short"],
+    ["97804410135931", "too long"],
+    ["", "empty"],
+  ])("rejects %s (%s)", (code) => {
+    expect(readIsbnBarcode(code)).toBeNull();
+  });
+});
+
+describe("BarcodeScanner", () => {
+  it("starts the camera when active", async () => {
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+  });
+
+  it("does not start the camera when inactive", () => {
+    renderLocalised(<BarcodeScanner active={false} onDetected={vi.fn()} />);
+    expect(decodeFromVideoDevice).not.toHaveBeenCalled();
+  });
+
+  it("reports an ISBN barcode", async () => {
+    const onDetected = vi.fn();
+    renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    emitBarcode("9780441013593");
+
+    expect(onDetected).toHaveBeenCalledWith("9780441013593");
+  });
+
+  it("reports a misread frame to nobody", async () => {
+    // A single wrong digit still looks like an ISBN. Without a checksum this
+    // fired a lookup for a book that cannot exist.
+    const onDetected = vi.fn();
+    renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    emitBarcode("9780441013594");
+
+    expect(onDetected).not.toHaveBeenCalled();
+  });
+
+  it("ignores a barcode that is not a book", async () => {
+    // Otherwise pointing the camera at a cereal box fires a lookup.
+    const onDetected = vi.fn();
+    renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    emitBarcode("5012345678900");
+
+    expect(onDetected).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet on NotFoundException, which fires constantly", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
+      result: null,
+      error: Error,
+    ) => void;
+    callback(null, new NotFoundException("no barcode in frame"));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("logs a genuine scanner error", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
+      result: null,
+      error: Error,
+    ) => void;
+    callback(null, new Error("device lost"));
+
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("shows the viewfinder prompt while scanning", async () => {
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    expect(await screen.findByText("Point at barcode")).toBeInTheDocument();
+  });
+
+  it("explains a denied camera permission", async () => {
+    decodeFromVideoDevice.mockRejectedValue(new Error("Permission denied"));
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+
+    expect(await screen.findByText("Camera unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("hides the viewfinder once the camera has failed", async () => {
+    decodeFromVideoDevice.mockRejectedValue(new Error("Permission denied"));
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+
+    await screen.findByText("Camera unavailable");
+    expect(screen.queryByText("Point at barcode")).not.toBeInTheDocument();
+  });
+
+  it("releases the camera on unmount", async () => {
+    // Otherwise the phone's camera light stays on after navigating away.
+    const { unmount } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn()} />,
+    );
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    unmount();
+
+    expect(reset).toHaveBeenCalled();
+  });
+
+  it("releases the camera when it goes inactive", async () => {
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn()} />,
+    );
+    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+
+    rerender(<BarcodeScanner active={false} onDetected={vi.fn()} />);
+
+    expect(reset).toHaveBeenCalled();
+  });
+});
