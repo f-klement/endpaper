@@ -1,0 +1,15 @@
+# Bun configuration for the Endpaper frontend.
+
+[install.security]
+# Socket screens every package Bun is about to install against its supply-chain
+# database: malware, typosquats, install-time scripts that phone home. It runs
+# on `bun install`, `bun add` and `bun update`, before any package code is
+# executed, which is the only moment that actually helps.
+#
+# Findings come back at two levels: `fatal` aborts the install with a non-zero
+# exit code, `warn` prompts in an interactive terminal and aborts in CI.
+#
+# No account is needed. Without SOCKET_API_KEY it uses Socket's free public
+# API. Set that variable (scope: `packages`) only if this ever gets pointed at
+# a Socket organisation with custom policy.
+scanner = "@socketsecurity/bun-security-scanner"

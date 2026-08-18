@@ -1,40 +1,54 @@
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+import bcrypt
 import jwt
-from passlib.context import CryptContext
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from config import auth_mode, secret_key
 from database import get_db
+from enums import AuthMode
 from models import User
 
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# bcrypt hashes at most the first 72 bytes of a password and ignores the rest.
+# The C implementation truncates silently; the Python binding raises instead, so
+# truncation is done here to keep the behaviour of previously stored hashes.
+BCRYPT_MAX_BYTES = 72
+
+# auto_error=False so a missing token is not an automatic 401: in proxy mode
+# there is no token at all, and the caller is identified by a header instead.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+
+
+def _password_bytes(password: str) -> bytes:
+    return password.encode("utf-8")[:BCRYPT_MAX_BYTES]
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(_password_bytes(plain), hashed.encode("utf-8"))
+    except ValueError:
+        # Malformed hash in the database: treat as a failed login, not a 500.
+        return False
 
 
 def create_access_token(user_id: int, username: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": str(user_id), "username": username, "exp": expire}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, secret_key(), algorithm=ALGORITHM)
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
@@ -42,13 +56,29 @@ def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if auth_mode() is AuthMode.PROXY:
+        # Imported here rather than at module scope: auth_backends imports this
+        # module for verify_password, so a top-level import would be circular.
+        from auth_backends import user_from_proxy_headers
+
+        proxied = user_from_proxy_headers(db, request)
+        if proxied is None:
+            raise credentials_exception
+        return proxied
+
+    if token is None:
+        raise credentials_exception
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: Optional[str] = payload.get("sub")
+        payload = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
+        user_id: str | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception
     except jwt.PyJWTError:
-        raise credentials_exception
+        # `from None` deliberately: the JWT failure detail must not reach the
+        # client, and a chained traceback would be noise in the logs.
+        raise credentials_exception from None
 
     user = db.get(User, int(user_id))
     if user is None:

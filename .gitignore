@@ -1,8 +1,30 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 backend/data/
+backend/.venv/
 frontend/node_modules/
 frontend/dist/
 data/
 .env
+CLAUDE.md
+plan.md
+
+# Test artefacts
+.coverage
+htmlcov/
+frontend/coverage/
+
+# Output of ci/make-public-tree.sh
+/public/
+
+# CI-generated, never committed. Trivy's vulnerability DB is a GitLab cache path and the
+# JUnit files are artifacts, but both are written into the project directory, so a local
+# `trivy fs .` or `pytest --junitxml` would otherwise show up as untracked noise.
+.trivycache/
+runtime-requirements.txt
+junit-*.xml
+trivy-*.json
+.uv-cache/

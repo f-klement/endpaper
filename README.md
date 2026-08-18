@@ -4,6 +4,20 @@ A self-hosted PWA for cataloging your household's physical book collection.
 
 ## Quick Start
 
+Run the published image. No build step, nothing to clone:
+
+```bash
+curl -O https://raw.githubusercontent.com/f-klement/endpaper/main/docker-compose.deploy.yml
+# edit SECRET_KEY first: it signs the login tokens
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+Images are on Docker Hub as [`fklement/endpaper`](https://hub.docker.com/r/fklement/endpaper):
+`:latest` tracks the newest release; every release also gets an immutable `:vX.Y.Z` tag.
+Pin that one to decide for yourself when to upgrade. Currently amd64 only.
+
+Or build from source instead:
+
 ```bash
 docker compose up --build
 ```
@@ -12,59 +26,141 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 
 ## Features
 
-- **Barcode scanning** — point your phone camera at any book's barcode (alternatively can manually enter ISBN)
-- **Auto metadata** — title, author, cover art fetched from Open Library / Google Books
-- **Reading status** — per-user "unread / reading / read" tracking
-- **Loan tracking** — record who borrowed what, mark returned
-- **Multiple accounts** — first registered user becomes admin
-- **PWA installable** — "Add to Home Screen" on iOS & Android
-- **Tags** — Select tags for fiction, non-fiction, genres, age demographic
-- **Search** — Lookup authors or title names
+- **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
+- **Auto metadata**: title, author and cover art from Open Library or Google Books
+- **Reading status**: per-person "unread / want to read / reading / read"
+- **Loan tracking**: record who borrowed what, mark it returned
+- **Multiple accounts**: the first to register becomes admin
+- **PWA installable**: "Add to Home Screen" on iOS and Android
+- **Tags**: type, genre and age, from a curated list
+- **Search**: by title, author or ISBN
+- **Add without a barcode**: search Google Books by title and pick the edition
+- **Extra book details**: page count, language and categories, filled in on request
+- **On the shelf or not**: what you own, tracked separately from what you have read
+- **Goodreads import**: upload an export to bring across your reading history
+- **German and English**: switch in Settings; new visitors follow their browser
+- **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
 
 ## Local Development
 
-**Backend** (requires Python 3.12+):
+Two processes: the API on `:8000` and the Vite dev server on `:5173`, which proxies
+`/api`, `/auth` and `/covers` across to the API. Run them in separate terminals.
+
+**Backend**, with [uv](https://docs.astral.sh/uv/) and Python 3.14:
 ```bash
 cd backend
-pip install -r requirements.txt
-DATABASE_URL=sqlite:///./data/library.db uvicorn main:app --reload
+uv sync                       # creates .venv and installs from uv.lock
+DATA_DIR=./data uv run uvicorn main:app --reload
 ```
+`DATA_DIR` decides where the SQLite file and uploaded covers live. It defaults to
+`/app/data` (the path inside the container), so set it when running outside one.
+Interactive API docs are then at `http://localhost:8000/docs`.
 
-**Frontend** (requires Node 20+):
+**Frontend**, with [Bun](https://bun.com) 1.3:
 ```bash
 cd frontend
-npm install
-npm run dev    # proxies /api and /auth to localhost:8000
+bun install
+bun run dev
 ```
+
+### Testing
+
+Tests live in a mirror tree, never beside the file under test. `backend/tests/` mirrors
+`backend/`; `frontend/tests/` mirrors `frontend/src/`. So `backend/routers/books.py` is
+tested at `backend/tests/routers/test_books.py`.
+
+What each suite covers is written down: [`backend/tests/COVERAGE.md`](backend/tests/COVERAGE.md)
+and [`frontend/tests/COVERAGE.md`](frontend/tests/COVERAGE.md).
+
+```bash
+cd backend   && uv run pytest              # pytest, no network access
+cd frontend  && bun run test               # vitest + Testing Library
+```
+
+Useful variants:
+
+| Command | What it does |
+|---|---|
+| `uv run pytest --cov` | Backend coverage report |
+| `uv run ruff check .` | Backend lint |
+| `uv run mypy .` | Backend type check (strict) |
+| `bun run api:generate` | Regenerate the API client from the backend schema |
+| `bun run test:watch` | Re-run frontend tests on change |
+| `bun run test:coverage` | Frontend coverage report |
+| `bun run typecheck` | TypeScript, no emit |
+
+Neither suite touches the network or a real database. The backend tests run against a
+throwaway SQLite file and stub outbound calls; the frontend tests stub `fetch` outright.
+
+### Dependency security
+
+`bun install` screens every incoming package through Bun's security-scanner API
+(`frontend/bunfig.toml`) before any package code executes. A critical finding aborts the
+install. No account needed.
 
 ## Production Notes
 
-- Change `SECRET_KEY` in `docker-compose.yml` before deploying
-- For camera access on phones, HTTPS is required — deploy behind Caddy or nginx with TLS
-- SQLite data is persisted in `./data/library.db` (Docker volume bind-mount)
-- Backup: just copy `./data/library.db`
+- Change `SECRET_KEY` before deploying. It signs the login tokens.
+- Camera access on phones requires HTTPS. Deploy behind Caddy or nginx with TLS.
+- Data lives in `./data/library.db` (bind-mounted). Back up by copying it.
+- `ALLOW_REGISTRATION=false` closes signups without affecting existing accounts.
 
 ## Architecture
 
-Single Docker container: FastAPI (Python) serves the REST API and the compiled React PWA as static files. SQLite for storage.
+Single Docker container: FastAPI (Python 3.14) serves the REST API and the compiled
+React 19 PWA as static files. SQLite for storage. The multi-stage build compiles the
+frontend with Bun, then copies only the built assets into the Python image. Bun and
+`node_modules` are not in the shipped image.
 
 ```
 Phone (PWA) ──► FastAPI ──► Open Library API
-                  │
+                  │              ↳ Google Books (fallback)
               SQLite DB (./data/)
 ```
 
-## Screenshots
+Environment variables:
 
-### Library Landing Page
-<img width="958" height="1023" alt="image" src="https://github.com/user-attachments/assets/38ddc03e-40c8-40c5-b2a8-bfd5fc0d1ee7" />
+| Variable | Default | Purpose |
+|---|---|---|
+| `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
+| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL |
+| `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
+| `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
+| `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
+| `AUTH_MODE` | `local` | `local`, `ldap` or `proxy`. See below. |
+| `GOOGLE_BOOKS_API_KEY` | none | Supplies the key from the deployment instead of the settings screen |
 
-### Scanning New Books
-<img width="954" height="1023" alt="image" src="https://github.com/user-attachments/assets/1b043403-7b92-4e4c-a34b-cb322f03f620" />
+**Where the Google Books key lives.** By default an admin pastes it into Settings and it is
+stored in the database. Setting `GOOGLE_BOOKS_API_KEY` instead hands that job to the
+deployment: the environment value **wins**, the field in Settings is greyed out, and the
+app refuses to overwrite it rather than accepting a change that would be undone at the
+next restart. Either way the key is never shown again once set.
 
-### ISBN Lookup
-- Pulls cover image if available
-- Option to manually load cover if needed
-- Change Tags, select age, select private (visible only to user)
-<img width="951" height="1024" alt="image" src="https://github.com/user-attachments/assets/4b0b4d0f-069d-4bc8-86ad-66fc40c648e9" />
+**Directory sign-in.** `AUTH_MODE=ldap` checks credentials against a directory instead of
+this app's own table. Accounts are created here on first sign-in, so books and notes still
+have an owner. `AUTH_MODE=proxy` takes the identity from headers set by a reverse proxy and
+hides the login form entirely.
 
+| Variable | Default | Purpose |
+|---|---|---|
+| `LDAP_URL` | none | e.g. `ldaps://directory.example:636`. Required for `ldap` |
+| `LDAP_USER_BASE_DN` | none | Where to search for accounts. Required for `ldap` |
+| `LDAP_BIND_DN` | none | Service account for the search. Leave empty to search anonymously |
+| `LDAP_BIND_PASSWORD` | none | **Required if `LDAP_BIND_DN` is set.** The app refuses to start otherwise. |
+| `LDAP_USER_FILTER` | `(&(objectClass=person)(uid={username}))` | `{username}` is substituted and escaped |
+| `LDAP_USERNAME_ATTRIBUTE` | `uid` | The attribute holding the login name |
+| `LDAP_ADMIN_GROUP` | none | Members of this group get admin, re-checked at each sign-in |
+| `LDAP_START_TLS` | `false` | Upgrade a plain connection with StartTLS |
+| `PROXY_USER_HEADER` | `Remote-User` | Header naming the signed-in account |
+| `PROXY_GROUPS_HEADER` | `Remote-Groups` | Comma-separated group list |
+| `PROXY_ADMIN_GROUP` | none | Membership of this group grants admin |
+
+> **`AUTH_MODE=proxy` trusts headers.** Safe only behind a proxy that sets them itself
+> *and strips any arriving from the client*. Exposed directly, anyone can claim to be admin.
+> An `LDAP_BIND_DN` with a blank password is refused at startup for a similar reason: most
+> directories accept it as an anonymous bind and quietly return nothing.
+
+**Google Books and Goodreads** are configured in the app, not here: sign in as an admin
+and open Settings. The API key is stored in the database and never shown again after saving.
+
+Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
