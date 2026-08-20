@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.3.0
+
+Four bug reports, and what fixing them turned up underneath.
+
+### Fixed
+
+**No cover appeared on a German shelf.** Every stored cover was blocked by the
+browser, with a 200 on the record and nothing in any log. `covers.py` resolves a
+978-3 ISBN through the DNB's cover service, and that host was never added to the
+Content-Security-Policy, which was a hand-written list beside it. The policy is
+now derived from the one list of hosts, and a test walks the AST of every backend
+module to keep cover URLs from being written anywhere else: `metadata.py` held six
+of them, which is the door the same bug would have come back through.
+
+**Google Books thumbnails could not render either.** Google serves them over plain
+http, which is mixed content on an https page and blocked whatever the policy
+says. They are upgraded on the way in, on every path that stores a cover, and a
+one-shot migration upgrades the rows already stored.
+
+**A cover that failed to load took the layout with it.** The old handler removed
+the image from the flow, which collapsed the book page's header to nothing and
+dropped the back button on top of the title. Every cover in the app now falls back
+to the same placeholder, at the same size.
+
+**The back button did nothing on a deep link.** It was `navigate(-1)`, and a
+shared link, a reload or a PWA cold start has no prior entry to go back to. It now
+goes back where there is somewhere to go, and to the library where there is not.
+
+**Registration refused the attempt and charged you for it.** Under `ldap` and
+`proxy` auth the rate limiter ran before the refusal, so an anonymous caller could
+exhaust a real budget on a route that can never succeed. The refusal also told
+proxy deployments their accounts were "managed by the directory", where there need
+not be one.
+
+**A backup restored covers the browser blocks.** A restore inserts through Core,
+so the column validator never fired. It calls the upgrade itself now.
+
+### Added
+
+**Lend to somebody who has no account.** A neighbour, a colleague, a book club.
+The borrower is either a member or a typed name, exactly one of the two, enforced
+by a CHECK constraint rather than by the schema alone, because a restore and an
+import do not go through the schema.
+
+**A top bar instead of a left rail.** Library, scan and loans stay on the bar as
+icons; everything else moved into a menu behind the account trigger, which still
+names the person signed in. The rail spent 56px of a phone's width on every screen
+and had nowhere to open a menu into. Under proxy auth the menu no longer offers
+sign out or switch account: the upstream owns the session and both were inert.
+
+**A network failure says so.** A rejected request used to print the browser's own
+"Failed to fetch", untranslated, to whoever was standing in a tunnel.
+
+### Security
+
+A cover URL is now required to be `https://` or one of our own uploads. Nothing
+was exploitable through the values this rejects, and all of them become
+exploitable the day `img-src` gains a wildcard or a cover is rendered outside an
+image tag.
+
+### Tested
+
+The login and registration flow through the HTTP routes and the UI in all three
+auth modes, which had thorough unit tests for the backends and nothing for the
+routes.
+
 ## v0.2.1
 
 Documentation only. No code change, and the image is a rebuild of the same

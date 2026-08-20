@@ -18,6 +18,7 @@ export interface LoanOut {
   loaned_by?: UserOut | null;
   loaned_by_user_id: number;
   loaned_to?: UserOut | null;
-  loaned_to_user_id: number;
+  loaned_to_name?: string | null;
+  loaned_to_user_id: number | null;
   returned_at: string | null;
 }

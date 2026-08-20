@@ -7,6 +7,7 @@ then check it is adopted without losing data.
 
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
@@ -319,3 +320,237 @@ class TestHyphenatingTheAgeTags:
         command.downgrade(schema._alembic_config(), "a7feb2db74ac")
 
         assert self.OLD_NAME in self.tag_names()
+
+
+class TestLendingToSomeoneWithoutAnAccount:
+    """Revision d5c31b7a09fe, which rewrites the loans table.
+
+    Batch mode rebuilds a SQLite table by reflecting it, and the partial unique
+    index on `loans` is the thing most likely to come back subtly wrong: as a
+    plain unique index it would forbid ever lending a book twice. So the
+    migration drops it first and recreates it, and these tests check both the
+    new column and the old rule.
+    """
+
+    PREVIOUS = "f2b8d6a03c17"
+
+    def build_database_with_a_loan(self) -> None:
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, is_private, added_at, ownership) "
+                    "VALUES ('Dune', 0, datetime('now'), 'owned')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, "
+                    "loaned_at) VALUES (1, 1, 1, datetime('now'))"
+                )
+            )
+            connection.commit()
+
+    def test_the_existing_loan_survives(self):
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT COUNT(*) FROM loans")).scalar() == 1
+            assert (
+                connection.execute(text("SELECT loaned_to_user_id FROM loans")).scalar() == 1
+            )
+
+    def test_the_borrower_name_column_arrives(self):
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        columns = {column["name"] for column in inspect(engine).get_columns("loans")}
+        assert "loaned_to_name" in columns
+
+    def test_a_loan_with_no_member_becomes_possible(self):
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
+                    "loaned_at, returned_at) "
+                    "VALUES (1, 'the neighbour', 1, datetime('now'), datetime('now'))"
+                )
+            )
+            connection.commit()
+            assert connection.execute(text("SELECT COUNT(*) FROM loans")).scalar() == 2
+
+    def test_naming_both_borrowers_is_refused_by_the_database(self):
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_user_id, loaned_to_name, "
+                    "loaned_by_user_id, loaned_at) "
+                    "VALUES (1, 1, 'the neighbour', 1, datetime('now'))"
+                )
+            )
+
+    def test_the_open_loan_index_is_still_partial(self):
+        """A plain unique index would make a returned book unlendable for good."""
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, "
+                    "loaned_at) VALUES (1, 1, 1, datetime('now'))"
+                )
+            )
+            connection.commit()
+            assert connection.execute(text("SELECT COUNT(*) FROM loans")).scalar() == 2
+
+    def test_two_open_loans_on_one_book_are_still_refused(self):
+        self.build_database_with_a_loan()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
+                    "loaned_at) VALUES (1, 'the neighbour', 1, datetime('now'))"
+                )
+            )
+
+    def test_the_downgrade_drops_loans_it_cannot_represent(self):
+        from alembic import command
+
+        self.build_database_with_a_loan()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE loans SET returned_at = datetime('now') WHERE id = 1")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, "
+                    "loaned_at) VALUES (1, 'the neighbour', 1, datetime('now'))"
+                )
+            )
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        with engine.connect() as connection:
+            remaining = connection.execute(text("SELECT id FROM loans")).scalars().all()
+        assert remaining == [1]
+
+
+class TestUpgradingStoredCovers:
+    """Revision b8e2f04c17aa, which rewrites data rather than schema.
+
+    The column validator applies to new writes, but it fires on a write, and a
+    book enriched from Google last month is not going to be written again. Its
+    cover would stay blocked by the browser for good.
+
+    The second statement follows the same argument to its end: a legacy
+    `data:` or `//host` value is refused on every new write and nothing
+    rewrites an old row to find out.
+    """
+
+    PREVIOUS = "d5c31b7a09fe"
+
+    def build_database_with_covers(self) -> None:
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            for title, cover in (
+                ("Insecure", "http://books.google.com/c.jpg"),
+                ("Secure", "https://covers.openlibrary.org/b/isbn/1-L.jpg"),
+                ("Uploaded", "/covers/3.jpg"),
+                ("None", None),
+                ("Script", "javascript:alert(1)"),
+                ("Data", "data:image/svg+xml,<svg/>"),
+                ("SchemeRelative", "//evil.invalid/x.jpg"),
+                ("Traversal", "/covers/../api/books/export"),
+                ("ShoutedScheme", "HTTPS://covers.openlibrary.org/b/isbn/2-L.jpg"),
+            ):
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, cover_url, is_private, added_at, "
+                        "ownership) VALUES (:t, :c, 0, datetime('now'), 'owned')"
+                    ),
+                    {"t": title, "c": cover},
+                )
+            connection.commit()
+
+    def cover_of(self, title: str) -> str | None:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT cover_url FROM books WHERE title = :t"), {"t": title}
+            ).scalar()
+
+    def test_an_http_cover_is_upgraded(self):
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of("Insecure") == "https://books.google.com/c.jpg"
+
+    def test_an_https_cover_is_untouched(self):
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of("Secure") == "https://covers.openlibrary.org/b/isbn/1-L.jpg"
+
+    def test_a_locally_uploaded_cover_is_untouched(self):
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of("Uploaded") == "/covers/3.jpg"
+
+    def test_a_book_with_no_cover_is_untouched(self):
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of("None") is None
+
+    def test_an_uppercase_scheme_is_kept(self):
+        """The match is case-insensitive on the scheme, exactly like
+        `covers.is_renderable`. The two disagreeing about one row is the whole
+        class of bug this release keeps finding."""
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of("ShoutedScheme") is not None
+
+    @pytest.mark.parametrize(
+        "title", ["Script", "Data", "SchemeRelative", "Traversal"]
+    )
+    def test_a_legacy_value_no_image_tag_should_load_is_nulled(self, title):
+        """Nothing rewrites these rows, so nothing else would ever refuse them.
+        `data:` is still listed in `img-src`, so such a row does not merely
+        fail to load: it renders whatever it carries."""
+        self.build_database_with_covers()
+
+        schema.upgrade_to_head()
+
+        assert self.cover_of(title) is None

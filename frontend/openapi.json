@@ -1533,14 +1533,32 @@
             ],
             "title": "Due At"
           },
+          "loaned_to_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaned To Name"
+          },
           "loaned_to_user_id": {
-            "title": "Loaned To User Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaned To User Id"
           }
         },
         "required": [
-          "book_id",
-          "loaned_to_user_id"
+          "book_id"
         ],
         "title": "LoanCreate",
         "type": "object"
@@ -1611,9 +1629,27 @@
               }
             ]
           },
+          "loaned_to_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaned To Name"
+          },
           "loaned_to_user_id": {
-            "title": "Loaned To User Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaned To User Id"
           },
           "returned_at": {
             "anyOf": [

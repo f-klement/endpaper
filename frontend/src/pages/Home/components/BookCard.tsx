@@ -8,6 +8,7 @@ import {
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { TAG_PILL_CLASSES } from "../../types";
 import { Icon } from "../../../components";
+import { CoverImage } from "../../components";
 
 // Exhaustive by type: adding a status to the backend enum makes this a
 // compile error until it is given a presentation here, which is how the
@@ -65,21 +66,14 @@ export default function BookCard({
       }`}
     >
       <div className="aspect-[2/3] bg-paper-100 relative overflow-hidden dark:bg-paper-800">
-        {book.cover_url ? (
-          <img
-            src={book.cover_url}
-            alt={book.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-            // Open Library cover URLs 404 often; a broken-image icon reads
-            // as a bug in our app rather than a gap in their catalogue.
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-            }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-accent-100 to-accent-200"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
-        )}
+        {/* Open Library cover URLs 404 often; a broken-image icon reads as a
+            bug in our app rather than a gap in their catalogue. */}
+        <CoverImage
+          src={book.cover_url}
+          alt={book.title}
+          loading="lazy"
+          className="w-full h-full object-cover bg-gradient-to-br from-accent-100 to-accent-200"
+        />
 
         {isSelecting && (
           <div

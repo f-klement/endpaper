@@ -18,6 +18,7 @@ import pytest
 
 import backup
 from backup import RestoreError
+from database import SessionLocal
 from models import Book, Loan, Note, Tag, UserBook
 
 
@@ -488,6 +489,86 @@ class TestRestoringAnOlderArchive:
         db.expire_all()
         invented = db.query(Tag).filter(Tag.name == "Holiday reads").one()
         assert invented.is_predefined is False
+
+
+class TestRestoringPreHttpsCovers:
+    """A restore inserts through Core, so the ORM validator never fires.
+
+    Demonstrated before it was fixed: the ORM path stored `https://` and the
+    Core insert stored `http://` from the same value. Restoring an archive
+    taken before this release therefore put every blocked cover back, after
+    the one-shot migration had just cleaned them, with nothing saying so.
+    """
+
+    def restore_with_cover(
+        self, client, admin, library, cover: str | None
+    ) -> str | None:
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["books"]:
+            row["cover_url"] = cover
+
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+
+        session = SessionLocal()
+        try:
+            restored = session.query(Book).first()
+            assert restored is not None
+            return restored.cover_url
+        finally:
+            session.close()
+
+    def test_an_http_cover_in_the_archive_is_upgraded(self, client, admin, library):
+        assert (
+            self.restore_with_cover(
+                client, admin, library, "http://books.google.com/c.jpg"
+            )
+            == "https://books.google.com/c.jpg"
+        )
+
+    def test_an_uploaded_cover_path_is_left_alone(self, client, admin, library):
+        assert (
+            self.restore_with_cover(client, admin, library, "/covers/1.jpg")
+            == "/covers/1.jpg"
+        )
+
+    def test_a_book_with_no_cover_restores_without_one(self, client, admin, library):
+        assert self.restore_with_cover(client, admin, library, None) is None
+
+    @pytest.mark.parametrize(
+        "cover",
+        [
+            "javascript:alert(1)",
+            "data:image/svg+xml,<svg/>",
+            "//evil.invalid/x.jpg",
+            "/api/books/export",
+            "/covers/../api/books/export",
+        ],
+    )
+    def test_a_cover_no_image_tag_should_load_is_dropped(
+        self, client, admin, library, cover
+    ):
+        """An archive is admin-supplied, and an admin is not a reason to trust
+        a file: it may have come from another deployment or been edited by
+        hand. A Core insert fires no validator, so the restore path has to
+        repeat the acceptance rule as well as the scheme upgrade.
+        """
+        assert self.restore_with_cover(client, admin, library, cover) is None
+
+    def test_a_dropped_cover_does_not_fail_the_restore(
+        self, client, admin, library, db
+    ):
+        """One odd cover is not a reason to lose the rest of the library."""
+        self.restore_with_cover(client, admin, library, "javascript:alert(1)")
+
+        db.expire_all()
+        assert db.query(Book).count() > 0
 
 
 class TestADecompressionBomb:

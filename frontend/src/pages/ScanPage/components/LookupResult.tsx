@@ -5,7 +5,7 @@ import { BookFormat } from "../../../api/generated/model";
 import type { LocationOut, TagOut } from "../../../api/generated/model";
 import { ErrorState } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
-import { LocationField, TagPicker } from "../../components";
+import { CoverImage, LocationField, TagPicker } from "../../components";
 import type { BookDraft } from "../types";
 
 interface LookupResultProps {
@@ -71,14 +71,14 @@ export default function LookupResult({
   const { t } = useTranslation();
   return (
     <div className="bg-white rounded-2xl border border-paper-100 shadow-sm overflow-hidden dark:bg-paper-900 dark:border-paper-800">
+      {/* The outer condition stays: a book with no cover at all shows nothing
+          here, rather than a placeholder above a form. A cover that fails to
+          load is a different case and does get the placeholder. */}
       {draft.cover_url && !draft.notFound && (
-        <img
+        <CoverImage
           src={draft.cover_url}
           alt={draft.title}
-          className="w-32 mx-auto mt-5 rounded shadow-md"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
+          className="w-32 h-44 mx-auto mt-5 rounded shadow-md object-cover bg-paper-100 dark:bg-paper-800"
         />
       )}
 

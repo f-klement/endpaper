@@ -65,6 +65,27 @@ class TestBookCreate:
         with pytest.raises(ValidationError):
             BookCreate(title="x", year="nineteen twenty five")
 
+    def test_an_http_cover_is_upgraded(self):
+        book = BookCreate(title="x", cover_url="http://books.google.com/c.jpg")
+        assert book.cover_url == "https://books.google.com/c.jpg"
+
+    def test_an_uploaded_cover_path_is_accepted(self):
+        assert BookCreate(title="x", cover_url="/covers/1.jpg").cover_url == "/covers/1.jpg"
+
+    def test_a_script_url_is_rejected(self):
+        """This is the one schema a member supplies a cover URL through, and
+        the value reaches an `<img src>`."""
+        with pytest.raises(ValidationError):
+            BookCreate(title="x", cover_url="javascript:alert(1)")
+
+    def test_a_scheme_relative_url_is_rejected(self):
+        with pytest.raises(ValidationError):
+            BookCreate(title="x", cover_url="//evil.invalid/x.jpg")
+
+    def test_a_data_url_is_rejected(self):
+        with pytest.raises(ValidationError):
+            BookCreate(title="x", cover_url="data:image/svg+xml,<svg/>")
+
 
 class TestBookStatusUpdate:
     @pytest.mark.parametrize("status", ["unread", "reading", "read"])
@@ -108,10 +129,6 @@ class TestBookOut:
 
 
 class TestSmallSchemas:
-    def test_loan_create_requires_both_ids(self):
-        with pytest.raises(ValidationError):
-            LoanCreate(book_id=1)  # type: ignore[call-arg]  # omission is the point
-
     def test_note_create_requires_content(self):
         with pytest.raises(ValidationError):
             NoteCreate()  # type: ignore[call-arg]  # omission is the point
@@ -121,3 +138,34 @@ class TestSmallSchemas:
         indistinguishable from a rendering bug."""
         with pytest.raises(ValidationError):
             NoteCreate(content="")
+
+
+class TestLoanCreate:
+    """Exactly one borrower. The database says the same thing; this layer is
+    what turns a violation into a 422 naming the field rather than a 500.
+    """
+
+    def test_a_member_alone_is_valid(self):
+        assert LoanCreate(book_id=1, loaned_to_user_id=2).loaned_to_name is None
+
+    def test_a_name_alone_is_valid(self):
+        assert LoanCreate(book_id=1, loaned_to_name="Ada").loaned_to_user_id is None
+
+    def test_both_is_rejected(self):
+        with pytest.raises(ValidationError):
+            LoanCreate(book_id=1, loaned_to_user_id=2, loaned_to_name="Ada")
+
+    def test_neither_is_rejected(self):
+        with pytest.raises(ValidationError):
+            LoanCreate(book_id=1)
+
+    def test_a_whitespace_name_counts_as_no_name(self):
+        with pytest.raises(ValidationError):
+            LoanCreate(book_id=1, loaned_to_name="   ")
+
+    def test_a_name_is_trimmed(self):
+        assert LoanCreate(book_id=1, loaned_to_name="  Ada  ").loaned_to_name == "Ada"
+
+    def test_an_overlong_name_is_rejected(self):
+        with pytest.raises(ValidationError):
+            LoanCreate(book_id=1, loaned_to_name="x" * 121)

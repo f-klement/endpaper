@@ -330,11 +330,76 @@ describe("BookDetail", () => {
         expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
           book_id: 1,
           loaned_to_user_id: OTHER.id,
+          // Exactly one borrower: the API rejects both or neither with a 422.
+          loaned_to_name: null,
           // Explicitly null rather than absent: a loan with no deadline is the
           // common case, and the field is always sent.
           due_at: null,
         }),
       );
+    });
+
+    it("records a loan to somebody with no account", async () => {
+      // The people most likely to keep a book are the ones who will never have
+      // an account here.
+      stubLoad();
+      api.on(/\/api\/loans$/, { body: makeLoan() });
+      renderDetail(OWNER);
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByLabelText("Someone else"));
+      await user.type(screen.getByLabelText("Borrower's name"), "the neighbour");
+      await user.click(screen.getByRole("button", { name: "Loan" }));
+
+      await waitFor(() =>
+        expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
+          book_id: 1,
+          // Exactly one of the two. Both is a 422.
+          loaned_to_user_id: null,
+          loaned_to_name: "the neighbour",
+          due_at: null,
+        }),
+      );
+    });
+
+    it("keeps the Loan button disabled until a name is typed", async () => {
+      stubLoad();
+      renderDetail(OWNER);
+
+      await userEvent.setup().click(await screen.findByLabelText("Someone else"));
+
+      expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
+    });
+
+    it("will not lend to a name that is only whitespace", async () => {
+      stubLoad();
+      renderDetail(OWNER);
+
+      const user = userEvent.setup();
+      await user.click(await screen.findByLabelText("Someone else"));
+      await user.type(screen.getByLabelText("Borrower's name"), "   ");
+
+      expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
+    });
+
+    it("names an external borrower on the badge", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          active_loan: makeLoan({
+            id: 9,
+            loaned_to: null,
+            loaned_to_user_id: null,
+            loaned_to_name: "the neighbour",
+          }),
+        }),
+      });
+      renderDetail();
+
+      expect(
+        await screen.findByText(/the neighbour, who has no account/),
+      ).toBeInTheDocument();
     });
 
     it("keeps the Loan button disabled until a borrower is picked", async () => {

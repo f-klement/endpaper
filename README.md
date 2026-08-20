@@ -50,7 +50,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Reading status**: per-person "unread / want to read / reading / read", with ratings,
   notes and the dates you started and finished
 - **On the shelf or not**: what you own, tracked separately from what you have read
-- **Loan tracking**: record who borrowed what, set a due date, and see what is overdue
+- **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
+  The borrower does not need an account: lend to a neighbour by typing their name
 - **Multiple accounts**: the first account is admin, whichever way you sign in
 
 ### Keeping it tidy

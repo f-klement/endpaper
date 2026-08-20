@@ -44,6 +44,7 @@ import {
 } from "../../api/generated/endpoints/loans/loans";
 import { useListUsers } from "../../api/generated/endpoints/users/users";
 import { useToast } from "../../app/toast";
+import type { Borrower } from "./components/LoanPanel";
 import { useTranslation } from "../../i18n";
 import type {
   BookMatch,
@@ -273,7 +274,7 @@ export function useBookNotes(bookId: number): UseBookNotesResult {
 }
 
 export interface UseBookLoanResult {
-  lend: (toUserId: number, dueAt?: string | null) => void;
+  lend: (borrower: Borrower, dueAt?: string | null) => void;
   markReturned: (loanId: number) => void;
   isBusy: boolean;
   error: unknown;
@@ -287,11 +288,16 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
   const complete = useReturnLoan({ mutation });
 
   return {
-    lend: (toUserId, dueAt) =>
+    // Exactly one of the two borrower fields, which is what the API accepts
+    // and what the CHECK constraint behind it enforces. The union is what
+    // stops the both-or-neither request being expressible at all.
+    lend: (borrower, dueAt) =>
       create.mutate({
         data: {
           book_id: bookId,
-          loaned_to_user_id: toUserId,
+          loaned_to_user_id:
+            borrower.kind === "member" ? borrower.userId : null,
+          loaned_to_name: borrower.kind === "external" ? borrower.name : null,
           due_at: dueAt ?? null,
         },
       }),

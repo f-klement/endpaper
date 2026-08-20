@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AuthMode } from "../../../src/api/generated/model";
 import LoginPage from "../../../src/pages/LoginPage";
 import { makeUser, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
@@ -191,6 +192,69 @@ describe("LoginPage", () => {
         .click(screen.getByRole("button", { name: "Switch to registration" }));
 
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("under directory auth", () => {
+    // The directory owns the accounts, so this app's form is a place to type
+    // credentials it forwards, and nothing else.
+    beforeEach(() => {
+      api.on("/auth/config", {
+        body: { auth_mode: AuthMode.ldap, registration_enabled: false },
+      });
+    });
+
+    it("still offers a login form", async () => {
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      expect(
+        await screen.findByRole("button", { name: "Sign In" }),
+      ).toBeInTheDocument();
+    });
+
+    it("offers no registration tab", async () => {
+      // waitFor, not a findBy: the tabs render optimistically before the
+      // config request lands, so asserting straight away would pass on the
+      // pre-config frame whatever the server said.
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "Switch to registration" }),
+        ).not.toBeInTheDocument(),
+      );
+    });
+
+    it("says where the accounts come from", async () => {
+      // Otherwise a directory member with no local password is looking at a
+      // form with nothing saying which credentials it wants.
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      expect(
+        await screen.findByText(/directory/i),
+      ).toBeInTheDocument();
+    });
+
+    it("posts to the same login endpoint", async () => {
+      // The bind happens server side; the client cannot tell the difference.
+      api.on("/auth/login", {
+        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+      });
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+
+      await fillAndSubmit("kim", "password123");
+
+      await waitFor(() =>
+        expect(api.lastCall("/auth/login", "POST")).toBeDefined(),
+      );
+    });
+  });
+
+  describe("in local mode", () => {
+    it("does not mention a directory", async () => {
+      api.on("/auth/config", {
+        body: { auth_mode: AuthMode.local, registration_enabled: true },
+      });
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      await screen.findByRole("button", { name: "Sign In" });
+      expect(screen.queryByText(/directory/i)).not.toBeInTheDocument();
     });
   });
 

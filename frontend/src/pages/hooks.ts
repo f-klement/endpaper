@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   useAuthConfig,
@@ -99,4 +100,27 @@ export function useSession(): Session {
     signIn,
     signOut,
   };
+}
+
+/**
+ * Back, with somewhere to go.
+ *
+ * `navigate(-1)` is not a back button. On a deep link, a reload or a PWA cold
+ * start there is no prior entry in this router's history and the control does
+ * nothing at all: no navigation, no error, nothing on screen. React Router
+ * marks that case, `location.key` is the string `"default"` for the first
+ * entry, so the fallback is used exactly then and the browser's own history
+ * the rest of the time.
+ *
+ * Here rather than inlined at the call site because "what does back mean"
+ * is one decision, and a second page would otherwise answer it differently.
+ */
+export function useGoBack(fallback = "/"): () => void {
+  const navigate = useNavigate();
+  const { key } = useLocation();
+
+  return useCallback(() => {
+    if (key === "default") navigate(fallback);
+    else navigate(-1);
+  }, [key, navigate, fallback]);
 }

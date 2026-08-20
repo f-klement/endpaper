@@ -3,10 +3,11 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { AuthMode } from "../../src/api/generated/model";
-import { readStoredUser, useSession } from "../../src/pages/hooks";
+import { readStoredUser, useGoBack, useSession } from "../../src/pages/hooks";
 import { makeUser, resetIds } from "../factories";
 import { createTestQueryClient, mockApi, type MockApi } from "../utils";
 
@@ -193,5 +194,51 @@ describe("useSession in proxy mode", () => {
     api.on("/auth/me", { body: makeUser() });
     const { result } = renderSession();
     expect(result.current.isResolving).toBe(true);
+  });
+});
+
+describe("useGoBack", () => {
+  /**
+   * Rendered inside a real router, because the whole behaviour is a property
+   * of the router's history: `location.key` is the string "default" only for
+   * the first entry, which is exactly the case `navigate(-1)` cannot handle.
+   */
+  function renderGoBack(entries: string[]) {
+    return renderHook(() => ({ goBack: useGoBack(), location: useLocation() }), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(MemoryRouter, { initialEntries: entries }, children),
+    });
+  }
+
+  it("goes back when there is somewhere to go back to", () => {
+    const { result } = renderGoBack(["/", "/book/1"]);
+
+    act(() => result.current.goBack());
+
+    expect(result.current.location.pathname).toBe("/");
+  });
+
+  it("goes to the library on a deep link with no history", () => {
+    // A reload, a shared link or a PWA cold start at /book/1. navigate(-1)
+    // does nothing at all here: no navigation, no error, nothing on screen.
+    const { result } = renderGoBack(["/book/1"]);
+
+    act(() => result.current.goBack());
+
+    expect(result.current.location.pathname).toBe("/");
+  });
+
+  it("honours a fallback of its own", () => {
+    const { result } = renderHook(
+      () => ({ goBack: useGoBack("/loans"), location: useLocation() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(MemoryRouter, { initialEntries: ["/book/1"] }, children),
+      },
+    );
+
+    act(() => result.current.goBack());
+
+    expect(result.current.location.pathname).toBe("/loans");
   });
 });

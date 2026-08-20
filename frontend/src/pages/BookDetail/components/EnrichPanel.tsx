@@ -71,7 +71,7 @@ export default function EnrichPanel({
 
       {error != null && (
         <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
-          {errorText(error, t("common.somethingWentWrong"))}
+          {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
 

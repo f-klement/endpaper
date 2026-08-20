@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator
 
+import covers
 import isbn as isbn_utils
 from enums import BookCondition, BookFormat, BulkAction, OwnershipStatus, ReadStatus
 from google_books import split_categories
@@ -72,6 +73,25 @@ class BookCreate(BaseModel):
     # The one collector field offered at add time. Somebody scanning a book is
     # holding it, so this is the one moment they can answer without checking.
     format: BookFormat | None = None
+
+    @field_validator("cover_url")
+    @classmethod
+    def renderable_cover(cls, value: str | None) -> str | None:
+        """Refuse a cover URL a browser should not be pointed at.
+
+        This is the one schema through which a member supplies this field;
+        every other writer of it is a metadata source of ours. A 422 here
+        rather than the ORM validator's silent drop, because here there is a
+        caller to tell. See `covers.is_renderable`.
+        """
+        # The two steps rather than `covers.storable`, because this is the one
+        # layer that refuses instead of dropping: `storable` answers None for
+        # "no cover" and for "not allowed" alike, and here those are a stored
+        # null and a 422.
+        upgraded = covers.https_url(value)
+        if upgraded is not None and not covers.is_renderable(upgraded):
+            raise ValueError("A cover URL must be https or an uploaded cover")
+        return upgraded
 
     @field_validator("isbn")
     @classmethod

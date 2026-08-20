@@ -402,6 +402,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const queryClient = useQueryClient();
   const scanAdd = useScanAdd();
   const locations = useKnownLocations();
+  // For the per-row failure reason: a rejected fetch has no message worth
+  // showing, so `errorText` needs the catalogue to supply one.
+  const { t } = useTranslation();
 
   function capture(isbn: string) {
     setEntries((current) => {
@@ -473,7 +476,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
         failures.push({
           ...entry,
           state: "failed",
-          reason: errorText(error, ""),
+          reason: errorText(error, "", t),
         });
       }
     }

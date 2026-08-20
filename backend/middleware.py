@@ -11,10 +11,16 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from config import MAX_UPLOAD_BYTES
+from covers import COVER_HOSTS
 
-# Book covers come from Open Library and Google Books, and locally uploaded
-# ones are served from our own origin as data the browser must be allowed to
-# render. Everything executable is restricted to same-origin.
+# `img-src` is **derived** from `covers.COVER_HOSTS`, not written out here.
+# The two used to be separate lists and drifted: covers.py started resolving
+# German ISBNs through portal.dnb.de, this policy never learned about it, and
+# every cover on a German shelf was blocked by the browser while the stored
+# record looked correct. Adding a host to that tuple is the only edit needed.
+#
+# Locally uploaded covers come from our own origin, and `data:` is what lets an
+# inline placeholder render. Everything executable is restricted to same-origin.
 #
 # `style-src` needs 'unsafe-inline' and it is not an oversight: React applies
 # the login background through an inline `style` attribute, and inline styles
@@ -25,8 +31,7 @@ _CSP: Final = "; ".join(
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: https://covers.openlibrary.org https://books.google.com "
-        "https://*.googleusercontent.com",
+        " ".join(("img-src", "'self'", "data:", *COVER_HOSTS)),
         "connect-src 'self'",
         "font-src 'self'",
         "object-src 'none'",

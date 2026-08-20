@@ -132,6 +132,33 @@ def covers_dir() -> Iterator[Path]:
     empty()
 
 
+# ── Authentication modes ──────────────────────────────────────────────────────
+#
+# Here rather than in one test module because two of them need the same setup:
+# tests/test_auth_backends.py drives the backends directly, tests/routers/
+# test_auth.py drives the same backends through the HTTP routes. `auth_mode()`
+# reads the environment per call, so a monkeypatched variable is enough and no
+# module has to be reimported.
+
+
+@pytest.fixture
+def ldap_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_MODE", "ldap")
+    monkeypatch.setenv("LDAP_URL", "ldap://directory.invalid")
+    monkeypatch.setenv("LDAP_USER_BASE_DN", "ou=people,dc=example,dc=org")
+    monkeypatch.setenv("LDAP_ADMIN_GROUP", "cn=librarians,ou=groups,dc=example,dc=org")
+
+
+@pytest.fixture
+def proxy_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Proxy auth with no admin group configured, which is the default shape.
+
+    No `PROXY_ADMIN_GROUP`: naming one is optional, and leaving it out is what
+    the bootstrap rule in `upsert_directory_user` exists for.
+    """
+    monkeypatch.setenv("AUTH_MODE", "proxy")
+
+
 # ── Account helpers ───────────────────────────────────────────────────────────
 
 TEST_PASSWORD = "password123"

@@ -2,7 +2,8 @@ import { Link } from "react-router-dom";
 
 import type { LoanOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
-import { Button, Icon } from "../../../components";
+import { Button } from "../../../components";
+import { CoverImage } from "../../components";
 
 interface LoanRowProps {
   loan: LoanOut;
@@ -31,18 +32,11 @@ export default function LoanRow({
     >
       <div className="flex gap-3">
         <Link to={`/book/${loan.book_id}`} className="shrink-0">
-          {loan.book?.cover_url ? (
-            <img
-              src={loan.book.cover_url}
-              alt={loan.book.title}
-              className="w-12 h-16 object-cover rounded shadow-sm"
-              onError={(event) => {
-                event.currentTarget.style.display = "none";
-              }}
-            />
-          ) : (
-            <div className="w-12 h-16 bg-accent-100 rounded flex items-center justify-center text-xl"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
-          )}
+          <CoverImage
+            src={loan.book?.cover_url}
+            alt={loan.book?.title ?? ""}
+            className="w-12 h-16 object-cover rounded shadow-sm bg-accent-100"
+          />
         </Link>
 
         <div className="flex-1 min-w-0">
@@ -57,10 +51,23 @@ export default function LoanRow({
             </p>
           )}
           <p className="text-xs text-paper-500 mt-1 dark:text-paper-400">
-            {t("loans.loanedToBy", {
-              to: loan.loaned_to?.username ?? "",
-              by: loan.loaned_by?.username ?? "",
-            })}
+            {/* Two whole phrases, not one with the borrower swapped in: German
+                does not keep the English word order, and a borrower with no
+                account here is worth saying rather than leaving to look like a
+                member nobody recognises.
+
+                Branching on the name rather than on `loaned_to`, which is a
+                relationship and is only populated when the caller joined it.
+                The name is the column the database constraint governs. */}
+            {loan.loaned_to_name
+              ? t("loans.loanedToExternalBy", {
+                  name: loan.loaned_to_name,
+                  by: loan.loaned_by?.username ?? "",
+                })
+              : t("loans.loanedToBy", {
+                  to: loan.loaned_to?.username ?? "",
+                  by: loan.loaned_by?.username ?? "",
+                })}
           </p>
           {loan.is_overdue && (
             <span className="inline-block mt-1 text-xs font-medium text-bloom-700 bg-bloom-100 border border-bloom-100 px-2 py-0.5 rounded-full dark:bg-bloom-700 dark:border-bloom-700">

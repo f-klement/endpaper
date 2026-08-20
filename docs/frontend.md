@@ -26,7 +26,7 @@ or a tag, it does not belong there.
 
 ```
 src/
-├── app/                    the shell: routing, providers, sidebar
+├── app/                    the shell: routing, providers, top bar
 │   ├── App.tsx             session gate: signed out, every path is the login page
 │   ├── providers.tsx       QueryClientProvider + ErrorBoundary
 │   ├── routes.tsx          the signed-in route table
@@ -196,9 +196,16 @@ Tailwind 4, configured **in CSS**. There is no `tailwind.config.js` and no
 theme in an `@theme` block. Following a Tailwind 3 tutorial will have you creating a config
 file nothing reads.
 
-Layout is mobile-first. The sidebar is icons-only under `md` and labelled above it; the
-book grid uses `repeat(auto-fill, minmax(170px, 1fr))` and reflows by available width with
-no breakpoints at all.
+Layout is mobile-first. The app bar is fixed to the top and holds three destinations as
+icons (library, scan, loans), labelled from `sm` up, with everything else in a menu behind
+the account trigger; `NavBar` exports `BAR_HEIGHT` and `BAR_OFFSET` so `App.tsx` clears it
+by exactly its height. It replaced a left rail, which spent 56px of a phone's width on
+every screen and had nowhere to open a menu into. The book grid uses
+`repeat(auto-fill, minmax(170px, 1fr))` and reflows by available width with no breakpoints
+at all.
+
+Under `AUTH_MODE=proxy` the menu offers neither sign out nor switch account: the upstream
+owns the session, so both are inert and the app re-identifies the same person immediately.
 
 ## Errors
 

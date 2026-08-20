@@ -13,7 +13,7 @@ and `test_an_invisible_cover_is_404_not_403`. Everything else is scaffolding.
 from auth import COVER_COOKIE_NAME
 from config import COVERS_DIR
 from tests.conftest import TEST_PASSWORD
-from tests.helpers import PNG_BYTES
+from tests.helpers import PNG_BYTES, proxy_headers
 
 
 def _add_book(client, account, *, title: str, is_private: bool) -> int:
@@ -269,6 +269,38 @@ class TestTheCoverCookie:
 
         client.cookies.set(COVER_COOKIE_NAME, "not.a.token", path="/covers")
         assert client.get(url).status_code == 401
+
+
+class TestProxyMode:
+    """No route in proxy mode ever sets the cover cookie, because nothing logs
+    in. The claim that covers still work rests on the upstream setting its
+    header on the image request too, which is a claim about somebody else's
+    software, so it is proved here rather than assumed.
+    """
+
+    def test_a_cover_loads_from_the_proxy_header_alone(
+        self, client, proxy_mode, covers_dir
+    ):
+        account = {"headers": proxy_headers("kim")}
+        book_id = _add_book(client, account, title="Dune", is_private=False)
+        url = _upload_cover(client, account, book_id)
+
+        assert client.get(url, headers=proxy_headers("kim")).status_code == 200
+
+    def test_a_cover_still_needs_an_identity(self, client, proxy_mode, covers_dir):
+        account = {"headers": proxy_headers("kim")}
+        book_id = _add_book(client, account, title="Dune", is_private=False)
+        url = _upload_cover(client, account, book_id)
+
+        assert client.get(url).status_code == 401
+
+    def test_the_privacy_rule_still_applies(self, client, proxy_mode, covers_dir):
+        """`visible_to()` runs on this route whatever named the caller."""
+        owner = {"headers": proxy_headers("kim")}
+        book_id = _add_book(client, owner, title="A diary", is_private=True)
+        url = _upload_cover(client, owner, book_id)
+
+        assert client.get(url, headers=proxy_headers("sam")).status_code == 404
 
 
 class TestTheLoginBackground:

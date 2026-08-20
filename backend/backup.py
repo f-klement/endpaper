@@ -34,6 +34,7 @@ from typing import Any
 from sqlalchemy import Date, DateTime, Table, delete
 from sqlalchemy.orm import Session
 
+import covers
 import settings_store
 from config import COVERS_DIR
 from database import Base
@@ -129,6 +130,27 @@ def _parse_row(row: dict[str, Any], parsers: dict[str, type[date] | type[datetim
                 raise RestoreError(
                     f"{name!r} in the backup is not a date: {value!r}"
                 ) from error
+
+    # A restore inserts through Core, not the ORM, so `@validates` never fires
+    # and `Book._store_covers_over_https` does not run. `covers.storable` is
+    # that validator's whole rule, called directly: an earlier version of this
+    # line repeated only the scheme upgrade, so an archive could still write
+    # `javascript:` or `//host` straight past every other guard. An archive is
+    # admin-supplied, and an admin is not a reason to trust a file: it may have
+    # come from another deployment or been edited by hand.
+    #
+    # Dropped rather than refused, matching the ORM backstop: one odd cover is
+    # not a reason to fail a whole restore. Only `books` has this column, so
+    # testing for the name keeps this row parser generic.
+    cover = parsed.get("cover_url")
+    if isinstance(cover, str):
+        stored = covers.storable(cover)
+        if cover and stored is None:
+            logger.warning(
+                "Dropped a cover URL in the archive that is not renderable: %r",
+                cover[:120],
+            )
+        parsed["cover_url"] = stored
     return parsed
 
 

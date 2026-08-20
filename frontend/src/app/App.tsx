@@ -7,7 +7,7 @@ import { useTranslation } from "../i18n";
 import { ErrorPage } from "../pages/errors";
 import LoginPage from "../pages/LoginPage";
 import { useSession } from "../pages/hooks";
-import NavBar from "./components/NavBar";
+import NavBar, { BAR_OFFSET } from "./components/NavBar";
 import Providers from "./providers";
 import AppRoutes from "./routes";
 
@@ -35,7 +35,7 @@ export default function App({ queryClient }: AppProps) {
 /** Inside the router, so pages and NavBar can use routing hooks. */
 function AppShell() {
   const { t } = useTranslation();
-  const { user, signIn, signOut, isResolving, proxyUnidentified } =
+  const { user, mode, signIn, signOut, isResolving, proxyUnidentified } =
     useSession();
 
   // Under proxy auth the identity arrives from the server, so there is a
@@ -61,11 +61,13 @@ function AppShell() {
 
   return (
     <>
-      {/* Offset matches NavBar's width at each breakpoint. */}
-      <div className="ml-14 md:ml-52">
+      {/* The bar is fixed, so without this padding the first thing on every
+          page sits underneath it. Imported rather than restated: see
+          NavBar.BAR_OFFSET. */}
+      <div className={BAR_OFFSET}>
         <AppRoutes user={user} onSignIn={signIn} />
       </div>
-      <NavBar user={user} onSignOut={signOut} />
+      <NavBar user={user} mode={mode} onSignOut={signOut} />
     </>
   );
 }

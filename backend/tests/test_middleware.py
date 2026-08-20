@@ -53,6 +53,38 @@ class TestContentSecurityPolicy:
     def test_book_cover_hosts_are_allowed(self, csp):
         assert "covers.openlibrary.org" in csp["img-src"]
 
+    def test_every_host_covers_py_knows_about_is_allowed(self, csp):
+        """The policy and `covers.py` used to be two separate lists, and they
+        drifted: covers.py started resolving German ISBNs through
+        portal.dnb.de, this policy never learned about it, and every cover on a
+        German shelf was blocked with nothing anywhere saying why.
+
+        The policy is now built from `covers.COVER_HOSTS`. This is the
+        assertion that the tuple is complete."""
+        import covers
+
+        for host in covers.COVER_HOSTS:
+            assert host in csp["img-src"], host
+
+    def test_every_url_covers_py_can_build_is_permitted(self, csp):
+        """One level below the test above: not "is the tuple in the policy" but
+        "is a URL this app actually produces permitted by it".
+
+        The URLs come from `tests/test_covers.py`, which lists every builder in
+        one place, so a new builder fails there and here rather than shipping a
+        cover the browser refuses. `covers.py` is the only module allowed to
+        build one at all, which is asserted in that file too.
+        """
+        from tests.test_covers import every_buildable_url
+
+        for url in every_buildable_url():
+            origin = url.split("/", 3)
+            allowed = f"{origin[0]}//{origin[2]}"
+            assert allowed in csp["img-src"], url
+
+    def test_uploaded_covers_are_allowed_from_our_own_origin(self, csp):
+        assert "'self'" in csp["img-src"]
+
     def test_objects_are_blocked(self, csp):
         assert csp["object-src"] == "object-src 'none'"
 

@@ -150,9 +150,7 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
             "publisher": publishers[0] if publishers else None,
             "year": int(year_match.group()) if year_match else None,
             "description": description or None,
-            "cover_url": (
-                f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-            ),
+            "cover_url": covers.open_library_url(isbn),
             "subjects": subjects,
         },
     )
@@ -405,13 +403,9 @@ def _dnb_record(record: ElementTree.Element, isbn: str | None) -> dict[str, Any]
         "page_count": _pages_from_extent(extent),
         # No cover either. Open Library serves one by ISBN for a good number of
         # German books even where it has no edition record, so it is worth the
-        # guess: `default=false` makes it 404 rather than return a placeholder
-        # when there is none.
-        "cover_url": (
-            f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-            if isbn
-            else None
-        ),
+        # guess. Built by covers.py, which is the only module allowed to know
+        # an image host: see COVER_HOSTS, which the CSP is derived from.
+        "cover_url": covers.open_library_url(isbn) if isbn else None,
         # DDC headings such as "004 Informatik". The leading number is dropped
         # so it can match a tag by name.
         "subjects": [
@@ -750,14 +744,9 @@ def _k10plus_record(
         "series_name": series_name,
         "series_index": series_index,
         # No cover in a MARC record. The Open Library cover service answers by
-        # ISBN for a good number of these anyway, and `default=false` makes it
-        # 404 rather than hand back a placeholder when it has none. A record
-        # with no ISBN at all, which is most pre-1970 printings, gets none.
-        "cover_url": (
-            f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-            if isbn
-            else None
-        ),
+        # ISBN for a good number of these anyway. A record with no ISBN at all,
+        # which is most pre-1970 printings, gets none.
+        "cover_url": covers.open_library_url(isbn) if isbn else None,
         "subjects": subjects,
     }
 
@@ -976,10 +965,10 @@ async def _open_library_search(query: str, limit: int) -> list[dict[str, Any]]:
                 "page_count": doc.get("number_of_pages_median"),
                 "language": _LANGUAGES.get((doc.get("language") or [""])[0].lower()),
                 "categories": None,
+                # By Open Library's own cover id, which the search index
+                # carries and which resolves where an ISBN lookup does not.
                 "cover_url": (
-                    f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
-                    if cover_id
-                    else None
+                    covers.open_library_id_url(cover_id) if cover_id else None
                 ),
                 "isbn13": _first_isbn13(doc.get("isbn") or []),
                 "series_name": None,
@@ -1237,11 +1226,7 @@ def _bnf_record(record: ElementTree.Element) -> dict[str, Any] | None:
         "description": None,
         "language": _LANGUAGES.get((texts("language") or [""])[0].lower()),
         "page_count": _pages_from_extent(extent),
-        "cover_url": (
-            f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-            if isbn
-            else None
-        ),
+        "cover_url": covers.open_library_url(isbn) if isbn else None,
         "subjects": texts("subject"),
         "series_name": None,
         "series_index": None,
@@ -1402,11 +1387,7 @@ def _loc_record(record: ElementTree.Element) -> dict[str, Any] | None:
         "description": None,
         "language": language,
         "page_count": _pages_from_extent(extent),
-        "cover_url": (
-            f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
-            if isbn
-            else None
-        ),
+        "cover_url": covers.open_library_url(isbn) if isbn else None,
         "subjects": [
             element.text.strip()
             for element in record.findall(f"{_MODS}subject/{_MODS}topic")

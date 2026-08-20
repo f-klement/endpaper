@@ -44,6 +44,7 @@ export type IconName =
   | "library"
   | "link"
   | "list"
+  | "menu"
   | "search"
   | "settings"
   | "sparkle"
@@ -124,6 +125,9 @@ const PATHS: Record<IconName, { d: string; fill?: string }> = {
     d: "M12 8.5v5M12 17h.01M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20.2h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
   },
   chevron: { d: "M9 5.5 15.5 12 9 18.5" },
+  // Three rules. The top bar's overflow trigger, and read as "menu"
+  // everywhere, which is the only reason to prefer it to a chevron here.
+  menu: { d: "M4 7h16M4 12h16M4 17h16" },
   close: { d: "M6 6l12 12M18 6L6 18" },
   trash: {
     d: "M4.5 7h15M9.5 7V5.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2V7M6.8 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h5.6a1.5 1.5 0 0 0 1.5-1.4l.9-12M10.5 11v6M13.5 11v6",

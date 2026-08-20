@@ -69,6 +69,19 @@ point at `users` (borrower and lender), which is why the relationships declare e
 `is_overdue` is **computed per request, never stored**, since a stored flag would be wrong
 from the moment the deadline passed until something happened to write to the row.
 
+**A borrower need not be a member.** `loaned_to_user_id` is nullable, and
+`loaned_to_name` holds a free-text name (120 characters) for somebody with no account: a
+neighbour, a colleague, a book club. The whole point of recording a loan is remembering
+who has the book, and the people most likely to keep one are exactly those who will never
+have a login here. **Exactly one of the two is set**, enforced by the CHECK constraint
+`ck_loans_one_borrower` rather than by the schema alone, for the same reason the open-loan
+rule is an index: a restore and an import both write rows without going through
+`LoanCreate`. The constraint also refuses an all-whitespace name, which satisfies
+`IS NOT NULL` and identifies nobody. `LoanCreate` rejects both or neither with a 422.
+
+Lending **from** an external, a book the household has borrowed rather than lent, is
+deliberately not a loan. See [decisions.md](decisions.md).
+
 **`notes`.** Free text, attached to a book and authored by a user.
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
@@ -224,3 +237,10 @@ checks the child side once per deleted parent row, so emptying the trash was qua
 again is two rows with the same `book_id`, and only the open ones are exclusive. The rule
 lived in application code in three places and one of them was wrong: merging two records
 left both open loans open, so the merged book was out with two people at once.
+
+**Exactly one borrower** (migration `d5c31b7a09fe`). The CHECK constraint
+`ck_loans_one_borrower`: `(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL)`, plus a
+`trim()` clause so an empty or whitespace name cannot pass. That migration drops the
+partial index and recreates it around the table rewrite, because batch mode rebuilds a
+SQLite table by reflecting it and a partial index returning as a plain unique one would
+forbid ever lending a book twice.

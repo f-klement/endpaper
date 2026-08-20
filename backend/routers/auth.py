@@ -10,6 +10,7 @@ from auth import (
 from auth_backends import authenticate, local_signup_allowed
 from config import auth_mode, registration_enabled
 from dependencies import CurrentUser, DbSession
+from enums import AuthMode
 from models import User
 from ratelimit import client_address, login_key, login_limiter, register_limiter
 from schemas import AuthConfigOut, LoginRequest, Token, UserCreate, UserOut
@@ -36,15 +37,19 @@ def auth_config() -> AuthConfigOut:
 def register(
     payload: UserCreate, request: Request, response: Response, db: DbSession
 ) -> Token:
-    register_limiter.check(client_address(request))
-
+    # Both refusals come BEFORE the limiter, deliberately. Under ldap or proxy
+    # auth, and with signups closed, this route cannot create an account at
+    # all, so charging the caller for the attempt spends a real budget on a
+    # certain 403. That budget is keyed on the source address, which behind a
+    # reverse proxy is one key for everybody. The limiter now guards only the
+    # path that can actually mint an account.
     if not local_signup_allowed():
-        raise HTTPException(
-            status_code=403,
-            detail="Accounts are managed by the directory, not here.",
-        )
+        raise HTTPException(status_code=403, detail=_signup_refusal())
     if not registration_enabled():
         raise HTTPException(status_code=403, detail="Registration is disabled")
+
+    register_limiter.check(client_address(request))
+
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
 
@@ -67,6 +72,20 @@ def register(
         access_token=token,
         user=UserOut.model_validate(user),
     )
+
+
+def _signup_refusal() -> str:
+    """Why this deployment will not create an account, in words that are true.
+
+    One sentence used to answer for both directory modes, and in proxy mode it
+    named something that need not exist: the upstream may be an SSO portal, an
+    OIDC provider or a header set by the reverse proxy itself, with no
+    directory anywhere. Telling somebody to ask a directory administrator who
+    does not exist is worse than saying nothing.
+    """
+    if auth_mode() is AuthMode.PROXY:
+        return "Accounts are managed by whoever signs you in, not here."
+    return "Accounts are managed by the directory, not here."
 
 
 @router.post("/login", response_model=Token)
