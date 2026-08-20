@@ -16,6 +16,8 @@ Images are on Docker Hub as [`fklement/endpaper`](https://hub.docker.com/r/fklem
 `:latest` tracks the newest release; every release also gets an immutable `:vX.Y.Z` tag.
 Pin that one to decide for yourself when to upgrade. Currently amd64 only.
 
+What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
+
 Or build from source instead:
 
 ```bash
@@ -26,28 +28,55 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 
 ## Features
 
+### Getting books in
+
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
+- **Rapid mode**: scan a whole shelf without stopping, review the batch, then commit it
 - **Auto metadata**: title, author, publisher, page count, language and cover art, merged
   from four catalogues (the German National Library, K10plus, Open Library, Google Books)
-- **Reading status**: per-person "unread / want to read / reading / read"
-- **Loan tracking**: record who borrowed what, mark it returned
-- **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
-  tags, loans and reading history
-- **Multiple accounts**: the first to register becomes admin
-- **PWA installable**: "Add to Home Screen" on iOS and Android
-- **Tags**: type, genre and age from a curated list, plus any your household invents
-- **Search**: by title, author or ISBN, and save a filter combination as a named view
-- **Add without a barcode**: search by title across six catalogues and pick the edition,
-  including books printed before ISBNs existed. Works with no API key
-- **Five languages**: English, German, French, Spanish and Portuguese titles all resolve,
-  from the national catalogues that actually hold them
-- **Extra book details**: page count, language and categories, filled in on request
-- **On the shelf or not**: what you own, tracked separately from what you have read
+- **Covers that are actually there**: every candidate image is fetched and checked before
+  it is saved, so you get a cover rather than a broken one
+- **Add without a barcode**: search by title across the same catalogues and pick the
+  edition, including books printed before ISBNs existed. Works with no API key
+- **Five languages resolve**: English, German, French, Spanish and Portuguese titles, from
+  the national catalogues that actually hold them
 - **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
   Libib or Openreads. The columns are worked out for you and shown before anything is saved
+
+### Living with a shared shelf
+
+- **Per-book privacy**: a book can be yours alone inside a shared household catalogue.
+  Nobody else sees it, in listings, in search, in stats or by guessing a URL
+- **Reading status**: per-person "unread / want to read / reading / read", with ratings,
+  notes and the dates you started and finished
+- **On the shelf or not**: what you own, tracked separately from what you have read
+- **Loan tracking**: record who borrowed what, set a due date, and see what is overdue
+- **Multiple accounts**: the first account is admin, whichever way you sign in
+
+### Keeping it tidy
+
+- **Series gaps**: which volumes of a series you are missing, worked out for you
+- **Duplicate detection and merge**: fold two records into one, keeping the best of both
+- **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
+  tags, loans and reading history
+- **Bulk edits**: tag, re-shelve, set a status or delete a whole selection at once
 - **Backup and restore**: download the whole library, covers included, and put it back
+
+### Finding things again
+
+- **Tags**: 105 curated ones in three categories, plus any your household invents
+- **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
+- **Saved views**: keep a filter combination under a name, including a wishlist of books
+  you want but do not own
+- **Statistics**: what is on the shelf, who reads what, and what got finished when
+
+### Running it
+
+- **PWA installable**: "Add to Home Screen" on iOS and Android
 - **German and English**: switch in Settings; new visitors follow their browser
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
+- **Health endpoint**: `GET /api/healthz` for container probes. It runs a query, so it
+  fails when the database does rather than when the web server does
 
 ## Local Development
 

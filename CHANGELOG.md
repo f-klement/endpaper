@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.1
+
+Documentation only. No code change, and the image is a rebuild of the same
+source.
+
+The README's feature list had fallen behind what v0.2.0 actually shipped. It
+omitted **per-book privacy**, **series gap detection** and **duplicate merge**,
+which are three of the things this project does that most alternatives do not,
+and said nothing about rapid scanning, ratings and notes, due dates and overdue
+loans, bulk edits, saved views, statistics or the health endpoint. It also still
+said the first account to *register* becomes admin, which stopped being the
+whole story once proxy and LDAP deployments got an admin bootstrap.
+
+Rewritten and grouped, and it now links the changelog.
+
 ## v0.2.0
 
 The first release that publishes both source and an image. v0.1.0 got half way:
