@@ -96,7 +96,7 @@ export default function SearchPanel({
           <button
             type="button"
             onClick={onOpenHelp}
-            className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400"
+            className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400 dark:hover:text-accent-300"
           >
             {t("help.title")}
           </button>

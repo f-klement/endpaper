@@ -371,7 +371,7 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
           {hasSaved && saveError == null && (
             <p
               role="status"
-              className="text-sm text-green-600 text-center dark:text-green-400"
+              className="text-sm text-green-800 text-center dark:text-green-400"
             >
               {t("settings.saved")}
             </p>

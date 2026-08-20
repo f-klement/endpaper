@@ -114,7 +114,7 @@ export default function NoteList({
                               setEditingId(note.id);
                               setEditDraft(note.content);
                             }}
-                            className="text-xs text-accent-600 hover:text-accent-800"
+                            className="text-xs text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
                           >
                             {t("common.edit")}
                           </button>

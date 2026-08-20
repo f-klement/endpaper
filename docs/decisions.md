@@ -392,6 +392,227 @@ them back. A dark block that omits a token because it matches the light block ab
 therefore gets **Endpaper's** value, silently, in that one mode. The completeness is
 asserted rather than trusted.
 
+### The wallpaper's opacity is solved from a weight, not written down
+
+A layer used to be drawn at a fixed alpha per mode. That stopped being possible the moment
+the ink started following the palette, because one alpha over seven inks is seven different
+weights on the page. Measured at the shipped alphas, the mean tile weight ran **0.00984 to
+0.01252 in light (1.27x) and 0.01435 to 0.01899 in dark (1.32x)**, against an agreed budget
+band of 0.0070 to 0.0092, which is 1.31x wide. **The palette alone consumed the entire
+budget**, and the dimmer inks landed up to 30% under target on the dark page (0.0427 against
+0.061).
+
+The choice was one alpha with a stated tolerance, or an alpha solved per palette. Solved,
+and not from a table: `TARGETS` in `patterns.ts` states what one mark of each layer should
+do to the page as an OKLab lightness delta, and `wallpaperWeights` bisects for the alpha
+that gets there, against the page and ink read off the document's own tokens.
+
+What that buys, measured across the seven shipped palettes:
+
+| | one alpha | solved per palette |
+|---|---|---|
+| light, spread of the tile's weight | 1.27x | **1.052x** |
+| dark | 1.32x | **1.030x** |
+| light, in continuous colour | | 1.002x |
+| alpha the dark ground needs | 0.075 everywhere | 0.078 to 0.109 |
+
+The residual is not the palette. In continuous colour the seven agree to 1.002x, which is
+the bisection's own precision; what is left is the compositor rounding the blend to 8 bits
+per channel, and a table of hand-solved alphas would carry the same residual.
+
+Three consequences worth knowing before touching any of it.
+
+- **A table of 56 numbers was the alternative and is worse than it looks.** Seven palettes,
+  two modes, four weights, and every one of them wrong the moment a palette moves a hex.
+  Solving at runtime means an eighth palette needs nothing here at all.
+- **The alpha ceiling had to move**, from 0.15 to 0.30. That number guarded "make it
+  visible" from becoming a page that competes with a book cover, and it guarded it in the
+  wrong unit: five of the seven palettes need more than 0.15 in dark to reach the weight
+  Endpaper reaches at 0.13. The weight ceiling is `TARGETS` now, identical for every
+  palette; the alpha ceiling is a guard against an ink so close to its own page that no
+  reasonable alpha reaches it. The highest solve that ships is Solarized dark's bloom at
+  0.2082.
+- **The ink budget changed units with it.** `patterns.test.ts` budgets mean tile dL rather
+  than mean alpha, and the two cannot be compared. Under the old unit the budget was a
+  budget on the palette as much as on the pattern.
+
+The OKLab in `src/theme/oklab.ts` composites in **gamma-encoded sRGB**, which is what the
+compositor does and not the more principled of the two options. Blending in linear light
+puts a teal mark on the light page at 0.0443 where sRGB puts it at 0.0715, so a solve done
+the principled way would ship the light wallpaper at 1.61x the weight it asked for; on the
+dark page the two disagree by 2.28x, in the other direction.
+
+### A pattern is admitted by measurement, not by looking at it
+
+Two designers rejected a woven girih on the same ground: fine interlaced strapwork
+collapses into an even grey at wallpaper opacity, and the khatam was respecified coarser
+because of it. That judgement is now `frontend/tests/theme/rasterise.ts` and two assertions,
+both read off the generated tile rather than off the source.
+
+**Tint contrast.** The tile's ink, blurred, as RMS contrast against its own mean. The floor
+is 0.196, which is not chosen: it is what a field of parallel lines at exactly the 12px mark
+pitch measures through the same filter. At 4px, the grey wash, the same field measures
+0.018; at 30px, 1.140. The ten shipped patterns run 0.354 (Nonpareil) to 1.696 (Pimpernel).
+
+**The floor is a measurement and not a formula**, which matters more than it sounds. The
+blur is three passes of a width 7 box, a cascade with a standard deviation of 3.46px whose
+response at a 12px period is 0.1515. It was documented as a true Gaussian of sigma 2.25,
+chosen so that `exp(-2 pi^2 sigma^2 / p^2)` is 0.5 at 12px, which describes a filter 1.54x
+narrower than the one that runs. Nothing was wrong with the floor, because the floor came
+from putting a 12px grating through the real filter; but anyone moving the pitch floor by
+re-deriving a sigma from that formula would get the wrong filter, so the numbers are stated
+in `rasterise.ts` and the formula is not offered.
+
+A single box was the first attempt and is unusable, instructively so. A box of width `w` has
+a zero in its response at every period dividing `w`, so a 12px box annihilates a 12px
+grating: measured, it puts the pattern the rule **admits** at **0.0035** and the 4px grating
+the rule **refuses** at **0.0177**, five times higher. The ordering is inverted, and by the
+filter rather than by the patterns. Widening the box to 13 does not fix it, it moves the
+zero: 4px then reads 0.0788 and 12px 0.1349. A cascade has no zeros and the problem goes
+away.
+
+**Peak coverage.** The most inked pixel of a layer, which must reach 0.9. A pattern of
+sub-pixel hairlines can have all the structure in the world and still be invisible, because
+nowhere does it lay down a mark that reaches the weight its layer was solved for. That
+failure is drawn too thin rather than too faint, and the fix for it is stroke width rather
+than opacity.
+
+**Nothing measures a seam in a rendered tile**, and the reasoning that used to sit here is
+worth keeping as a record of how a defect got through it.
+
+It said a shape crossing an edge is seamless for free from the nine offsets, which is true,
+and then that a quantity laid out across the tile has exactly two ways of going wrong,
+`lattice`'s pitch and `flow`'s cycle count, both guarded by a throw at module load. There is
+a third, and it is the one that shipped broken: **the parity of a staggered lattice**.
+Asanoha offset every other row by half a column across seven rows, so the last row and the
+first were on the same phase and the honeycomb broke in a 60px band on every 420px tile,
+14% of the page.
+
+Two things that paragraph got wrong, beyond missing the third case. The pitch check was
+named as the guard on seamlessness and is **vacuous for Asanoha**, which derives its extent
+from its own pitch and so satisfies it by construction. And the deleted seam test was
+presented as vindicated: it could not detect a deliberately broken Asanoha, which was read
+as the measurement being hopeless rather than as that test being the wrong instrument.
+
+What is true now. The stagger parity is a third throw in `lattice`, so all three run at
+module load and a wrong constant fails every test in the file rather than one. The seam is
+asserted as a **property of the layout** rather than looked for in a picture, at
+`frontend/tests/theme/patterns.test.ts:344`, which walks the cells and requires the last
+row's phase to differ from the first's. And the vacuity is itself a test, so nobody cites
+the pitch check as a guarantee it does not give.
+
+The general lesson, since it cost a shipped defect: an invariant belongs in the constructor
+that can enforce it, and a constructor invariant is only worth what it constrains. Both
+halves have to be checked.
+
+### The plait was verified by rendering, and not on a real screen
+
+The condition on shipping the plait was that its over and under survives at true opacity on
+a real 2x display, because two designers independently predicted it would not. What was
+actually done: the tile was rasterised at 1x at the solved opacity over the light page, and
+the image inspected at two tiles square. The break at a crossing is 20px of interrupted
+2.2px outline and it reads. The tint contrast is 0.477, which is 2.43x the floor and the
+second lowest of the five decorated papers: only Nonpareil resolves less, and Nonpareil is
+a field of parallel lines.
+
+**That is a rendering, not a screen.** Nobody has looked at this in a browser on a 2x
+display, and the difference is real: subpixel rendering, the browser's own antialiasing of a
+scaled data URI, and a viewing distance are all outside what was measured. The objective
+half of the condition is met and recorded above; the subjective half is not, and is the
+first thing to check when this is next in front of somebody.
+
+### No veins on the leaves
+
+Veining the four large motifs was on the intricacy list and was built before being taken
+out. A midrib costs about fifty bytes as a closed sliver inside the leaf's own outline,
+knocked out by `fill-rule="evenodd"`. Measured on Pimpernel, it removes **4.4%** of the
+foliage's ink and moves the tile's tint contrast by **0.35%**, from 1.696 to 1.690, against
+an admission floor of 0.196. On Willow it moves it 2.0%.
+
+It is real ink that changes nothing anybody can see at the scale it is drawn at, which is
+the definition of detail that does not survive. The mechanism is left described in
+`filled()` so the next person does not have to rediscover that evenodd is what a vein needs.
+
+Three other items from the same list did not ship and are not deferrals either. **Tendrils**
+would be Willow-only decoration and the budget has no room for them on the other four.
+**More cubics per branch** is what arc-length placement was for, and the branches do not
+need refining to prove it. **Piecewise stem width** via `ribbon` was measured against the
+underfoliage plane and moves nothing the plane does not, while changing all five silhouettes
+at once.
+
+### The ink budget is measured analytically, and that is not free
+
+`coverage` in `rasterise.ts` sums lengths and areas. It therefore counts ink laid twice on
+one pixel twice, and counts no ink at all for the round cap on a stroke, and the two errors
+run in opposite directions. Against the same tiles rasterised, weighted identically:
+
+```
+lily +17.7%   acanthus +10.1%   asanoha +6.5%   willow +3.3%
+plait -1.1%   seigaiha -2.6%    nonpareil -12.7%
+```
+
+All ten sit inside 0.0070 to 0.0092 under either measure, so nothing is mis-admitted. What
+is not measure independent is the **spread**: 1.122x analytically and **1.235x** from the
+field, and the error runs systematically toward the dense foliage tiles. Wherever that
+spread is quoted it is quoted with the measure.
+
+Budgeting from the field instead is the better instrument and is deferred on purpose: it
+moves every tile's number at once and is therefore a retune, not an edit.
+
+### The underfoliage plane is on two patterns, not five
+
+Willow measured 0.00485 mean tile dL against a floor of 0.0070: the only tile under the
+band, by 31%, and under because it is the sparsest of the five rather than because it is
+drawn faint. Adding ink to its foliage would have made it denser. A third plane behind the
+foliage makes it deeper, which is the same number and a different tile.
+
+It is on Willow and Strawberry and nowhere else because the band forbids the rest. Acanthus,
+Pimpernel and Golden Lily are already inside it, so a plane there would mean taking the same
+ink out of the foliage to pay for it, which is a different pattern rather than a deeper one.
+
+### A dark hover state is stated at every call site, and the rule has no exemptions
+
+Every ramp runs the other way in the dark, so `text-accent-700 hover:text-accent-800`
+written once is legible at rest and illegible while pointed at: measured across the seven
+palettes those pairings land between **1.36 and 2.85** on a dark card, because `accent-800`
+in a dark ramp is nearly the card itself.
+
+Twelve sites were like that and all twelve were repaired, which is why
+`frontend/tests/houseRules.test.ts` states the rule with **no allowlist**. That is a claim
+rather than an omission. The alternative shape was available, and this repository does ship
+it where a rule arrives before its repair (`api/mutator.ts` in the session rule,
+`.field:disabled` in the paper rule), but a frozen list of twelve is a list of twelve things
+nobody comes back to.
+
+The rule covers `hover:text-` and not `hover:bg-` or `hover:border-`. A surface a shade off
+in the dark looks slightly wrong; text a shade off is text nobody can read, and WCAG 1.4.3
+has a number for the second and not the first.
+
+### The theming work is not in the changelog yet
+
+Three phases of it have landed (the token repair, seven palettes, ten wallpapers) and
+`CHANGELOG.md` mentions none of them. That is deliberate and worth writing down rather than
+leaving to be discovered: the entry gets written once, when the appearance picker ships,
+because until somebody can choose a palette there is nothing a reader of a changelog can do
+with the news. Whoever ships the picker writes the whole of it.
+
+### `warn`, `ok` and `loan` stay raw Tailwind, for now, minus one repair
+
+They are amber, green and orange at 29 lines across 16 files, so six of the seven palettes
+ship a success message and an overdue badge in colours belonging to none of them. Tokenising
+them is three ramps times seven palettes times two modes, which is a phase of its own and
+not this one.
+
+**One repair landed anyway, because it was a live AA failure and needed no token.**
+`text-green-600` on the card measured **2.79 (Nord) to 3.22 (Endpaper)** for text that needs
+4.5, and it is the success message on four screens. It is now `text-green-800`, measured
+**6.19 to 7.13**. `green-700` was the obvious step and does not clear: 4.29 on Nord, 4.37 on
+Catppuccin, 4.49 on Gruvbox.
+
+That measurement is also the argument for the token job. A raw hue is a bet on seven
+different card colours at once, and the only green that wins it is two steps darker than the
+one anybody would reach for.
+
 ### `:root:root` in the `prefers-contrast` block
 
 Doubled deliberately, and not a typo. The rule has to outrank `:root[data-theme="x"]`, which

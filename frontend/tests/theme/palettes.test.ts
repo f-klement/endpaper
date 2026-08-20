@@ -226,17 +226,18 @@ function pair(what: string, fg: string, bg: string, floor: number): Pair {
  * stronger claim than evenly spaced rungs and a weaker one than "every pairing
  * in the app is legible".
  *
- * It is deliberately not the second. The gap is concentrated in dark hover,
- * where every ramp runs the other way: about twenty sites write
- * `hover:text-accent-800` or `hover:text-danger-600` with no `dark:` variant,
- * and land between 1.36 and 2.85 on the dark card. They are listed as
- * outstanding in `docs/theming.md`, because repairing them is twenty call
- * sites rather than a token. The rule that would hold them is not written here
- * because its shape depends on that repair: done, it needs no exemption list;
- * not done, it needs a frozen one, which this repository does ship elsewhere
- * (`api/mutator.ts` in the session rule, `.field:disabled` in the paper rule,
- * `# visible_to exempt:` in the backend). Either version fails on the
- * twenty-first site, which is the whole value of writing it.
+ * It is deliberately not the second, and the gap it used to leave is closed
+ * elsewhere rather than here. Dark hover was the concentration of it: twelve
+ * sites wrote `hover:text-accent-800` with no `dark:` variant and landed
+ * between 1.36 and 2.85 on the dark card. All twelve are repaired, so the rule
+ * that holds them shipped with no exemption list, in
+ * `frontend/tests/houseRules.test.ts`. It is there and not here because it is
+ * a rule about call sites, and this file measures tokens.
+ *
+ * The pairs those repairs use are already below: `accent-300` and `danger-300`
+ * on the dark card. That is the arrangement to preserve. A repair that reached
+ * for a step this file does not measure would be a call site passing a rule by
+ * pointing at a token nobody checks.
  */
 function lightPairs(): Pair[] {
   const semantic = (ramp: string) => [

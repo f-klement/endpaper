@@ -312,17 +312,29 @@ controls, the scrollbar, and the paint before first render.
 
 ### The background patterns
 
-`src/theme/patterns.ts` holds tileable SVGs in the William Morris idiom, one picked at
-random per visit. They are drawn rather than shipped as images: Morris designs are public
-domain, but the scans in circulation are mostly museum photographs under their own terms,
-so "it is a Morris" is not by itself a licence. An SVG is also about a kilobyte against a
-few hundred for a repeating raster, and it takes its colour from the theme instead of
-needing a second file for dark.
+`src/theme/patterns.ts` holds ten tileable SVGs, one picked at random per visit: five
+William Morris repeats grown along curves, and five decorated papers set out on a lattice.
+They are drawn rather than shipped as images. Morris designs are public domain, but the
+scans in circulation are mostly museum photographs under their own terms, so "it is a
+Morris" is not by itself a licence; and an SVG is a few kilobytes against a few hundred for
+a repeating raster, and it takes its colour from the theme instead of needing a second file
+for dark.
 
 The choice is stored only if somebody makes one: a null wallpaper means a different one
 each time, which is the behaviour this was built around and what a new account starts at.
-Dark uses a lighter ink at a *lower* opacity, because a pattern that reads as gentle on
-white becomes a glare on near black at the same strength.
+
+Two things about the engine are worth knowing before touching it, and both are measured in
+[theming.md](theming.md):
+
+- **A layer states a weight, not an opacity.** The alpha is solved from it against the
+  palette's own ink and page, because the same alpha over seven inks is seven different
+  weights and the spread was as wide as the whole ink budget.
+- **A pattern is admitted by two measurements**, tint contrast and peak coverage, both read
+  off the generated tile by `frontend/tests/theme/rasterise.ts`. Adding a pattern that looks
+  right and measures wrong fails the suite with the number.
+
+Dark draws more strongly than light, not less, because the tile is mostly negative space: a
+pattern that reads as gentle on white disappears into near black at the same weight.
 
 ## The wishlist is a saved view
 
