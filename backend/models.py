@@ -1,7 +1,9 @@
+import logging
 from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -17,11 +19,14 @@ from sqlalchemy import (
     or_,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
 
+import covers
 from database import Base
 from enums import AuthMode, BookCondition, BookFormat, OwnershipStatus, ReadStatus, TagCategory
+
+logger = logging.getLogger("endpaper.models")
 
 # Many-to-many association table for books <-> tags
 book_tags = Table(
@@ -205,6 +210,39 @@ class Book(Base):
     tags: Mapped[list[Tag]] = relationship("Tag", secondary=book_tags)
     notes: Mapped[list[Note]] = relationship("Note", back_populates="book", cascade="all, delete-orphan")
 
+    @validates("cover_url")
+    def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:
+        """Every write of this column passes through here, which is the point.
+
+        Google Books serves `imageLinks.thumbnail` over plain http, and an http
+        image on an https page is mixed content: blocked by the browser
+        whatever the CSP says, so the book gets a cover that is correct in the
+        database and invisible in the app. Five paths write this column
+        (adding a book, uploading a cover, refreshing metadata, Google
+        enrichment, and a merge absorbing the loser's), and fixing it at one of
+        them fixes it at one of them.
+
+        **The sixth does not reach here.** `backup.restore` inserts through
+        Core rather than the ORM, and `@validates` does not fire on a Core
+        insert, so it calls `covers.storable` itself. Anything else that learns
+        to bulk-insert books has to do the same.
+
+        Both rules live in `covers.storable`, in the order they have to run.
+        See `covers.https_url` for why the upgrade is safe and
+        `covers.is_renderable` for what is refused.
+
+        A value that is neither https nor one of our own uploads is dropped
+        rather than stored. Silently, and that is the right trade here: there
+        is no caller to tell (`BookCreate` already answers one with a 422), and
+        the alternative is a column that reaches an `<img src>` holding
+        whatever an archive put in it. Logged at WARNING so it is not
+        invisible.
+        """
+        stored = covers.storable(url)
+        if url and stored is None:
+            logger.warning("Discarded a cover URL that is not renderable: %r", url[:120])
+        return stored
+
 
 class UserBook(Base):
     """One member's reading status for one book.
@@ -262,6 +300,18 @@ class Loan(Base):
     # a fourth path is added later and forgets. Partial rather than plain,
     # because a book returned and lent again is two rows with the same
     # `book_id`, and only the open ones are exclusive.
+    #
+    # The second constraint is the borrower rule: a loan names **either** a
+    # member **or** a free-text name, never both and never neither. In the
+    # database rather than only in `LoanCreate`, for the same reason as the
+    # index above: the schema guards one writer, and a restore, an import or
+    # the next endpoint added does not go through it.
+    #
+    # The trim clause is not decoration. `''` and `'   '` both satisfy
+    # `IS NOT NULL`, so without it the constraint admits a loan whose borrower
+    # is a run of spaces: a book that is out, with nobody to ask for it back.
+    # `LoanCreate` strips whitespace, and `LoanCreate` is the writer this
+    # constraint exists because you cannot rely on.
     __table_args__ = (
         Index(
             "uq_loans_one_open_per_book",
@@ -269,15 +319,26 @@ class Loan(Base):
             unique=True,
             sqlite_where=text("returned_at IS NULL"),
         ),
+        CheckConstraint(
+            "(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL) "
+            "AND (loaned_to_name IS NULL OR length(trim(loaned_to_name)) > 0)",
+            name="ck_loans_one_borrower",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     book_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("books.id"), nullable=False, index=True
     )
-    loaned_to_user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, index=True
+    # Null when the book went to somebody with no account. See loaned_to_name.
+    loaned_to_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
     )
+    # A borrower who is not a member: a neighbour, a colleague, a book club.
+    # The whole point of recording a loan is remembering who has the book, and
+    # the people most likely to keep one are exactly those who will never have
+    # an account here. Free text, capped, and never joined on.
+    loaned_to_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     loaned_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -289,7 +350,7 @@ class Loan(Base):
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     book: Mapped[Book] = relationship("Book", back_populates="loans")
-    loaned_to: Mapped[User] = relationship(
+    loaned_to: Mapped[User | None] = relationship(
         "User", foreign_keys=[loaned_to_user_id], back_populates="loans_received"
     )
     loaned_by: Mapped[User] = relationship(

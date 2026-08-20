@@ -54,6 +54,31 @@ class TestFieldMapping:
         assert fields["language"] == "en"
         assert fields["google_books_id"] == "gbid-123"
 
+    def test_a_plain_http_thumbnail_is_upgraded(self):
+        """Google really does serve these over http, and the repository's own
+        fixtures assumed https, so this was untested. An http image on an https
+        page is mixed content and never renders."""
+        volume = {
+            "volumeInfo": {
+                "imageLinks": {"thumbnail": "http://books.google.com/cover.jpg"}
+            }
+        }
+        assert (
+            _volume_to_fields(volume)["cover_url"]
+            == "https://books.google.com/cover.jpg"
+        )
+
+    def test_a_thumbnail_no_image_tag_should_load_is_dropped(self):
+        """A search result is rendered in an `<img>` long before anything is
+        stored, so the preview path answers the same question the storage path
+        does. Google will not send this; the point is that the answer does not
+        depend on which side of the database the value is on."""
+        volume = {"volumeInfo": {"imageLinks": {"thumbnail": "javascript:alert(1)"}}}
+        assert _volume_to_fields(volume)["cover_url"] is None
+
+    def test_an_https_thumbnail_is_left_alone(self):
+        assert _volume_to_fields(VOLUME)["cover_url"] == "https://books.google.com/cover.jpg"
+
     def test_joins_several_authors(self):
         volume = {"volumeInfo": {"authors": ["Frank Herbert", "Brian Herbert"]}}
         assert _volume_to_fields(volume)["author"] == "Frank Herbert, Brian Herbert"

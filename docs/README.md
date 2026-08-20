@@ -41,7 +41,7 @@ endpaper/
 ├── frontend/             React PWA
 │   ├── src/
 │   │   ├── api/          mutator, query client, generated/ (Orval output)
-│   │   ├── app/          shell: routing, providers, sidebar
+│   │   ├── app/          shell: routing, providers, top bar
 │   │   ├── components/   general dumb components only
 │   │   ├── i18n/         English and German message catalogues
 │   │   ├── lib/          pure helpers: ISBN parsing, Goodreads URLs

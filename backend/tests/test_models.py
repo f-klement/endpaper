@@ -142,6 +142,7 @@ class TestRelationships:
         db.add(loan)
         db.commit()
         assert loan.loaned_by.username == "lender"
+        assert loan.loaned_to is not None
         assert loan.loaned_to.username == "borrower"
 
     def test_a_returned_loan_records_the_return_time(self, db, book, user):
@@ -161,6 +162,117 @@ class TestRelationships:
         db.add(note)
         db.commit()
         assert note.author.username == "reader"
+
+
+class TestTheBorrowerRule:
+    """Exactly one of `loaned_to_user_id` and `loaned_to_name` is set.
+
+    In the database rather than only in `LoanCreate`, because the schema guards
+    one writer and a restore, an import or the next endpoint added does not go
+    through it. Same reasoning as the open-loan index above it.
+    """
+
+    def test_a_member_borrower_is_accepted(self, db, book, user):
+        db.add(Loan(book_id=book.id, loaned_to_user_id=user.id, loaned_by_user_id=user.id))
+        db.commit()
+        assert db.query(Loan).count() == 1
+
+    def test_a_named_borrower_is_accepted(self, db, book, user):
+        db.add(
+            Loan(book_id=book.id, loaned_to_name="the neighbour", loaned_by_user_id=user.id)
+        )
+        db.commit()
+        assert db.query(Loan).one().loaned_to is None
+
+    def test_naming_both_is_refused(self, db, book, user):
+        db.add(
+            Loan(
+                book_id=book.id,
+                loaned_to_user_id=user.id,
+                loaned_to_name="the neighbour",
+                loaned_by_user_id=user.id,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_naming_neither_is_refused(self, db, book, user):
+        db.add(Loan(book_id=book.id, loaned_by_user_id=user.id))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_whitespace_name_is_refused_by_the_database(self, db, book, user):
+        """`'   '` satisfies IS NOT NULL and identifies nobody, so the loan
+        would be a book that is out with nobody to ask for it back.
+
+        `LoanCreate` strips whitespace, and `LoanCreate` is exactly the writer
+        this constraint exists because you cannot rely on: a restore and an
+        import both write rows without it.
+        """
+        db.add(Loan(book_id=book.id, loaned_to_name="   ", loaned_by_user_id=user.id))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_an_empty_name_is_refused_by_the_database(self, db, book, user):
+        db.add(Loan(book_id=book.id, loaned_to_name="", loaned_by_user_id=user.id))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_name_with_spaces_around_it_is_still_accepted(self, db, book, user):
+        # Only all-whitespace is refused. Trimming is the schema's job.
+        db.add(Loan(book_id=book.id, loaned_to_name=" Ada ", loaned_by_user_id=user.id))
+        db.commit()
+        assert db.query(Loan).count() == 1
+
+
+class TestCoversAreStoredOverHttps:
+    """Google Books serves its thumbnails over http, which is mixed content on
+    an https page: blocked by the browser whatever the CSP says. Six paths
+    write this column, so the upgrade lives on the column itself.
+    """
+
+    def test_an_http_cover_is_upgraded_on_the_way_in(self, db):
+        db.add(Book(title="Dune", cover_url="http://books.google.com/c.jpg"))
+        db.commit()
+        assert db.query(Book).one().cover_url == "https://books.google.com/c.jpg"
+
+    def test_an_update_is_upgraded_too(self, db, book):
+        book.cover_url = "http://books.google.com/c.jpg"
+        db.commit()
+        assert book.cover_url.startswith("https://")
+
+    def test_an_uppercase_scheme_is_upgraded_too(self, db, book):
+        """A scheme is case-insensitive, and the one-shot data migration
+        matches with SQLite's LIKE, which is too. A case-sensitive test here
+        would leave the two disagreeing about the same row."""
+        book.cover_url = "HTTP://books.google.com/c.jpg"
+        db.commit()
+        assert book.cover_url == "https://books.google.com/c.jpg"
+
+    def test_a_locally_uploaded_cover_is_untouched(self, db, book):
+        book.cover_url = "/covers/1.jpg"
+        db.commit()
+        assert book.cover_url == "/covers/1.jpg"
+
+    def test_no_cover_stays_no_cover(self, db, book):
+        book.cover_url = None
+        db.commit()
+        assert book.cover_url is None
+
+    def test_a_url_no_image_tag_should_load_is_dropped(self, db, book, caplog):
+        """The backstop for writers with no schema in front of them: an
+        import, a restore. `BookCreate` answers a caller with a 422 instead."""
+        with caplog.at_level("WARNING"):
+            book.cover_url = "javascript:alert(1)"
+            db.commit()
+
+        assert book.cover_url is None
+        assert "not renderable" in caplog.text
+
+    def test_a_scheme_relative_url_is_dropped(self, db, book):
+        book.cover_url = "//evil.invalid/x.jpg"
+        db.commit()
+        assert book.cover_url is None
 
 
 class TestEveryBookQueryIsFiltered:

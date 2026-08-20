@@ -150,7 +150,7 @@ export default function LibraryImport({
 
       {error != null && (
         <p role="alert" className="text-sm text-bloom-600 dark:text-bloom-300">
-          {errorText(error, t("common.somethingWentWrong"))}
+          {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
 

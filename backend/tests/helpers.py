@@ -6,9 +6,12 @@ importlib import mode this suite uses.
 """
 
 import re
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
+
+import auth_backends
 
 # ── Image payloads ────────────────────────────────────────────────────────────
 #
@@ -124,3 +127,100 @@ def silence_catalogues(mock: Any) -> Any:
         return_value=httpx.Response(200, json={"items": []})
     )
     return mock
+
+
+# ── Fake LDAP directory ───────────────────────────────────────────────────────
+#
+# Shared by tests/test_auth_backends.py, which drives the backend directly, and
+# tests/routers/test_auth.py, which drives the same backend through the HTTP
+# routes. One fake rather than two: a second copy would be a second answer to
+# "what does this directory do", and the two would disagree eventually.
+#
+# What is worth pinning here is our own logic (the empty-password guard, filter
+# escaping, shadow accounts, admin group mapping), not ldap3's ability to speak
+# LDAP.
+
+
+class FakeEntry:
+    def __init__(self, dn: str, username: str, groups: list[str], attribute: str = "uid"):
+        self.entry_dn = dn
+        self._username = username
+        self._attribute = attribute
+        self.memberOf = SimpleNamespace(values=groups)
+        self._has_groups = bool(groups)
+
+    def __contains__(self, item: str) -> bool:
+        return item == "memberOf" and self._has_groups
+
+    def __getitem__(self, item: str) -> SimpleNamespace:
+        if item == self._attribute:
+            return SimpleNamespace(value=self._username)
+        raise KeyError(item)
+
+
+class FakeConnection:
+    """Stands in for an ldap3 Connection.
+
+    `bind_results` is consumed in order: the first bind is the service account
+    searching, the second is the member proving their password.
+    """
+
+    def __init__(self, *, bind_results: list[bool], entries: list[FakeEntry]):
+        self._bind_results = list(bind_results)
+        self.entries: list[FakeEntry] = []
+        self._available = entries
+        self.result = "fake"
+        self.searched_filter: str | None = None
+
+    def __enter__(self) -> FakeConnection:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def bind(self) -> bool:
+        return self._bind_results.pop(0) if self._bind_results else False
+
+    def search(self, search_base: str, search_filter: str, attributes: list[str]) -> None:
+        self.searched_filter = search_filter
+        self.entries = self._available
+
+
+def install_directory(monkeypatch, connections: list[FakeConnection]) -> list[FakeConnection]:
+    """Hand out the given connections, in order, to each _connect() call."""
+    handed_out: list[FakeConnection] = []
+    queue = list(connections)
+
+    def fake_connect(user: str | None = None, password: str | None = None) -> FakeConnection:
+        connection = queue.pop(0)
+        connection.bound_as = (user, password)  # type: ignore[attr-defined]
+        handed_out.append(connection)
+        return connection
+
+    monkeypatch.setattr(auth_backends, "_connect", fake_connect)
+    return handed_out
+
+
+def directory_with(monkeypatch, *, groups: list[str] | None = None, user_bind: bool = True):
+    entry = FakeEntry("uid=kim,ou=people,dc=example,dc=org", "kim", groups or [])
+    return install_directory(
+        monkeypatch,
+        [
+            FakeConnection(bind_results=[True], entries=[entry]),
+            FakeConnection(bind_results=[user_bind], entries=[]),
+        ],
+    )
+
+
+def proxy_headers(username: str, groups: str | None = None) -> dict[str, str]:
+    """The headers an upstream proxy sets to assert who the caller is.
+
+    Spelled by `config` rather than written out, so a test does not keep
+    passing against a header name the app no longer reads.
+    """
+    from config import proxy_groups_header, proxy_user_header
+
+    headers = {proxy_user_header(): username}
+    if groups is not None:
+        headers[proxy_groups_header()] = groups
+    return headers

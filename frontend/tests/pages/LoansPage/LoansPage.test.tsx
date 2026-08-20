@@ -83,6 +83,31 @@ describe("LoansPage", () => {
       expect(screen.getByText("Loaned to kim by sam")).toBeInTheDocument();
     });
 
+    it("names a borrower who has no account", async () => {
+      // A whole phrase of its own rather than the member sentence with a name
+      // dropped in: it says the borrower is not a member, which is the thing
+      // somebody reading this list needs to know.
+      api.on("/api/loans", {
+        body: makeLoanPage([
+          makeLoan({
+            id: 6,
+            book_id: 7,
+            book: makeBook({ id: 7, title: "Dune" }),
+            loaned_to: null,
+            loaned_to_user_id: null,
+            loaned_to_name: "the neighbour",
+            loaned_by: makeUser({ username: "sam" }),
+          }),
+        ]),
+      });
+      renderWithProviders(<LoansPage />);
+      await screen.findByText("Dune");
+
+      expect(
+        screen.getByText("Loaned to the neighbour (no account) by sam"),
+      ).toBeInTheDocument();
+    });
+
     it("links through to the book", async () => {
       renderWithProviders(<LoansPage />);
       await screen.findByText("Dune");

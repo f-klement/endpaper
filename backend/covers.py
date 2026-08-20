@@ -48,6 +48,109 @@ _PROBE_BYTES: Final = 512
 #: Bookland registration group for German-language publishing.
 _GERMAN_PREFIX: Final = "9783"
 
+#: Every host a cover may be served from, written as CSP source expressions.
+#:
+#: **This tuple is where the CSP's `img-src` comes from** (`middleware.py`
+#: joins it), because the two used to be written separately and drifted:
+#: `portal.dnb.de` was added here as the second source and never added to the
+#: policy, so on a German shelf the browser blocked every single cover while
+#: the stored record looked perfectly correct. Nothing in a log said why.
+#:
+#: Adding an image service means adding it here, and two tests hold that:
+#: `tests/test_middleware.py` fails if any URL this module can build has a host
+#: the policy does not permit, and `tests/test_covers.py` fails if any other
+#: backend module so much as mentions one of these hosts.
+COVER_HOSTS: Final = (
+    "https://covers.openlibrary.org",  # open_library_url()
+    "https://portal.dnb.de",  # dnb_url()
+    # Google Books thumbnails. Not built here: they arrive as `supplied`, from
+    # the volume record. Google serves them from two hosts.
+    "https://books.google.com",
+    "https://*.googleusercontent.com",
+)
+
+_INSECURE_SCHEME: Final = "http://"
+_SECURE_SCHEME: Final = "https://"
+
+#: Where this app serves the covers it stores itself. A relative path, so it
+#: carries no scheme and no host at all.
+LOCAL_COVER_PREFIX: Final = "/covers/"
+
+
+def is_renderable(url: str) -> bool:
+    """Whether an `<img src>` may safely be pointed at this.
+
+    Two shapes and deliberately nothing else: a remote cover over TLS, or a
+    file this app uploaded and serves itself.
+
+    `cover_url` is otherwise free text that ends up in an image tag, so
+    `javascript:`, `data:` and a scheme-relative `//host` all fit inside it.
+    None of the three is exploitable as the app stands (`javascript:` is inert
+    in an `img`, an SVG rendered through `img` cannot run script, and `//host`
+    is refused because `img-src` lists no bare-host wildcard), and all three
+    become exploitable the day `img-src` gains a wildcard or a cover is
+    rendered anywhere other than an `<img src>`. Refusing them now costs
+    nothing and does not depend on remembering any of that later.
+    """
+    if url[: len(_SECURE_SCHEME)].lower() == _SECURE_SCHEME:
+        return True
+    # A prefix test alone is not containment: `/covers/../api/books/export`
+    # starts with the prefix and names something else entirely. Nothing stored
+    # here reaches the filesystem (routers/covers.py rebuilds the path from the
+    # parsed int id and a letters-only extension), so this is not a traversal
+    # hole; it is the difference between the invariant this function claims and
+    # the one it enforces.
+    return url.startswith(LOCAL_COVER_PREFIX) and ".." not in url
+
+
+def storable(url: str | None) -> str | None:
+    """A cover URL a browser may be pointed at, or None.
+
+    Named for its commonest use, which is deciding what to store, but the
+    question is the same for a value on its way to a preview: `google_books`
+    calls it too, because a search result is rendered in an `<img>` long before
+    anything is written.
+
+    The two rules below in the order they have to run: upgrade the scheme
+    first, then decide whether the result is something an `<img src>` may be
+    pointed at. Checking acceptance before the upgrade would refuse every
+    `http://` cover instead of fixing it.
+
+    One function because they are one rule, and because they were three copies
+    of it. Two of the three repaired the upgrade half of a bug and left the
+    acceptance half open, which is a shape that looks closed from either end:
+    both reviewers of this change found exactly that, independently.
+
+    Returns None for "do not store this", which is also the answer for a book
+    with no cover, deliberately: a caller that wants to tell the two apart
+    compares against its own input, and `BookCreate` is the only one that does.
+    """
+    upgraded = https_url(url)
+    return upgraded if upgraded is None or is_renderable(upgraded) else None
+
+
+def https_url(url: str | None) -> str | None:
+    """A cover URL the browser will actually load.
+
+    Google Books returns `imageLinks.thumbnail` over plain **http**, and an
+    http image on an https page is mixed content: the browser blocks it
+    whatever the CSP says. The result is a stored cover that is correct, and
+    invisible, with no error anywhere.
+
+    All four hosts in `COVER_HOSTS` serve the same bytes over TLS, so the
+    upgrade is free. A locally uploaded cover is a relative `/covers/1.jpg`
+    with no scheme and is returned untouched.
+    """
+    if url is None:
+        return None
+    # Case-insensitively: a scheme is case-insensitive per RFC 3986, and the
+    # one-shot data migration matches with SQLite's LIKE, which is too. A
+    # case-sensitive test here would leave `HTTP://` stored as it arrived and
+    # make the two disagree about the same row.
+    if url[: len(_INSECURE_SCHEME)].lower() == _INSECURE_SCHEME:
+        return "https://" + url[len(_INSECURE_SCHEME) :]
+    return url
+
 
 def open_library_url(isbn: str) -> str:
     """`default=false` is load bearing.
@@ -58,6 +161,17 @@ def open_library_url(isbn: str) -> str:
     difference.
     """
     return f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
+
+
+def open_library_id_url(cover_id: int | str) -> str:
+    """A cover by Open Library's own id rather than by ISBN.
+
+    The search index hands back `cover_i` on a document, which resolves for
+    editions the cover service has no ISBN mapping for. No `default=false`
+    here: an id that exists has an image by construction, so the placeholder
+    case `open_library_url` guards against cannot arise.
+    """
+    return f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
 
 
 def dnb_url(isbn: str) -> str:

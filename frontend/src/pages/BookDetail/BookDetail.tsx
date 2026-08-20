@@ -22,6 +22,7 @@ import ShelfPanel from "./components/ShelfPanel";
 import StatusPicker from "./components/StatusPicker";
 import TagEditor from "./components/TagEditor";
 import { Icon } from "../../components";
+import { useGoBack } from "../hooks";
 import {
   useBook,
   useBookActions,
@@ -38,6 +39,9 @@ interface BookDetailProps {
 export default function BookDetail({ currentUser }: BookDetailProps) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // Not navigate(-1): on a deep link, a reload or a PWA cold start there is no
+  // prior entry and that does nothing at all. See useGoBack.
+  const goBack = useGoBack();
   const { t } = useTranslation();
   const bookId = Number(id);
 
@@ -75,7 +79,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         isRefreshing={actions.isRefreshing}
         refreshError={actions.refreshError}
         showGoodreadsLink={showGoodreadsLink}
-        onBack={() => navigate(-1)}
+        onBack={goBack}
         onUploadCover={actions.uploadCover}
         onRefreshMetadata={actions.refreshMetadata}
       />

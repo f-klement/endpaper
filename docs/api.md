@@ -456,8 +456,15 @@ likes, including one outside the covers directory.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/loans?active_only=&overdue_only=` | user | Paginated; defaults to active only |
-| POST | `/api/loans` | user | Optional `due_at`. **409** if already out, **404** for an unknown or invisible book |
+| POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out, **404** for an unknown or invisible book |
 | PUT | `/api/loans/{id}/return` | user | **400** if already returned |
+
+**The borrower is either a member or a name.** `loaned_to_user_id` names a member;
+`loaned_to_name` is free text (120 characters) for somebody with no account here. Sending
+both, neither, or a name that is only whitespace is a **422**. `LoanOut` carries both
+fields, one of them null, and `loaned_to` is populated only for a member. The rule is a
+CHECK constraint in the database as well as a schema validator, so a restore or an import
+cannot write a loan nobody can be asked about.
 
 `due_at` is optional and `is_overdue` is computed per request. `overdue_only` filters in
 SQL rather than by discarding rows after serialising them, so `total` and the paging

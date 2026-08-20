@@ -54,11 +54,76 @@ because when they wrote their own checks, fourteen of them wrote none at all.
 sign-in, or every account created before the policy is locked out. A 422 "too short" also
 leaks that the stored password is short.
 
+### `covers.py` is the only module that knows an image host
+
+`COVER_HOSTS` in `covers.py` is a tuple of hosts, and `middleware.py` builds the CSP's
+`img-src` by joining it. That looks like indirection for its own sake until you know the bug
+it comes from: the two used to be written separately, `covers.py` learned to resolve German
+ISBNs through `portal.dnb.de`, the policy never did, and **every cover on a German shelf was
+blocked by the browser** while the stored record looked perfectly correct. Nothing appeared
+in any log.
+
+Deriving one from the other is only half of it. `metadata.py` also held six hard-coded cover
+URLs, five of them `open_library_url()` copied verbatim, so a new source could have
+reintroduced the same bug through a door the CSP change did not close. Every builder now
+lives in `covers.py`, and `tests/test_covers.py` walks the AST of every backend module and
+fails on a `cover_url` assigned from a URL literal anywhere else.
+
+### A stored cover must be https, or one of ours
+
+`covers.https_url` upgrades `http://` on the way in, because Google Books serves its
+thumbnails over plain http and an http image on an https page is mixed content: the browser
+blocks it whatever the CSP says, so the book gets a cover that is correct in the database
+and invisible in the app.
+
+`covers.is_renderable` then refuses anything that is neither `https://` nor `/covers/`.
+Nothing in the app can be exploited through the values that rejects (`javascript:` is inert
+in an image tag, an SVG rendered through one cannot run script, and `//host` is refused
+because `img-src` lists no bare-host wildcard). It is refused anyway, because all three
+become live the day `img-src` gains a wildcard or a cover is rendered anywhere but an
+`<img src>`, and neither of those changes would remind anybody of this one.
+
+Both rules together are `covers.storable`, and that function exists because they were three
+copies of the same two steps. Two of the three repaired the upgrade half of a bug and left
+the acceptance half open, which is a gap that looks closed from either end: the two reviewers
+of this change found exactly that, independently, and neither found it by reading the code
+that had it. One function, three callers, three different reactions to the same answer:
+`BookCreate` refuses with a 422, the `Book.cover_url` ORM validator drops and logs (the
+backstop for the five writers with no schema in front of them), and `backup.restore` calls it
+directly because a Core insert does not fire `@validates` at all.
+
+Migration `b8e2f04c17aa` applies the same match to the rows already stored, for the reason
+the migration exists at all: nothing rewrites an old row, so nothing else would ever refuse
+one. `data:` is still listed in `img-src`, so a legacy row carrying one does not merely fail
+to load.
+
 ### The rate limiter is hand-rolled
 
 Not slowapi. The useful key is the *username being attempted*, and a middleware-style
 limiter cannot see it: its key function runs before the body is parsed. Full reasoning in
 [security.md](security.md).
+
+### Lending *to* an external is a loan; lending *from* one is not
+
+A loan can name somebody with no account (`loans.loaned_to_name`), because the people most
+likely to keep a book are exactly the ones who will never have a login here.
+
+The other direction, a book the household has borrowed **from** somebody, is deliberately
+not modelled as a loan, and the reason is that it is not the same relation. `loans` answers
+"our book is with X, chase it": the row is created by a member, the book is one this
+library already holds, and the whole point is the overdue calculation running against
+somebody we can nag. A borrowed-in book inverts every one of those. It is not our copy, the
+deadline is one imposed on us, and the useful reminder is "give this back", which is a
+different sentence, a different notification and a different half of the loans page.
+
+Most of what that direction actually needs already exists on a different axis:
+`ownership = not_owned` says the copy is not ours, `location` says where it came from, and a
+note carries the rest. That is the answer for now, and it costs nothing to have made it.
+
+Building it properly means a second relation with its own verb, not a nullable lender column
+bolted onto this one: a `loaned_to_name` that sometimes means the lender would make every
+query about loans ambiguous, and the CHECK constraint that currently says "exactly one
+borrower" could no longer say anything useful.
 
 ### Loans are ordered by `(loaned_at DESC, id DESC)`
 

@@ -31,6 +31,42 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The request never got an answer.
+ *
+ * Distinct from `ApiError`, which carries a status and a sentence the server
+ * wrote for the reader. This one has neither: `fetch` rejected, so nothing
+ * reached the origin or nothing came back. The browser's own message for that
+ * is a bare `TypeError: Failed to fetch`, which used to be printed to the
+ * reader verbatim: untranslated, not a sentence, and no use to somebody on a
+ * phone. Reported live from a mobile client behind a VPN whose MTU was
+ * black-holing large HTTP/3 responses.
+ *
+ * The cause is kept for the console. The message shown is chosen by
+ * `errorText`, which has the catalogue.
+ *
+ * Classified here rather than anywhere downstream because this is the only
+ * place that can tell a rejection from a response. Everywhere else it would
+ * be a guess from the text of a string the browser vendor chooses.
+ */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super("Network request failed", { cause });
+    this.name = "NetworkError";
+  }
+}
+
+/** Run a request, turning a rejected fetch into a `NetworkError`. */
+async function request(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    // A rejection here is transport level. An HTTP error, even a 502 from the
+    // proxy, arrives as a resolved response and is handled further down.
+    throw new NetworkError(error);
+  }
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -182,7 +218,7 @@ export const customFetch = async <T>(
   // The cost is that a genuine same-origin redirect is no longer followed
   // either. Nothing here relies on one: the generated client requests the
   // exact paths FastAPI declares, so the trailing-slash redirect never fires.
-  const response = await fetch(url, {
+  const response = await request(url, {
     ...options,
     headers,
     redirect: "manual",
@@ -234,7 +270,7 @@ export async function downloadFile(
   fallbackName = "export",
 ): Promise<void> {
   const token = getToken();
-  const response = await fetch(url, {
+  const response = await request(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     redirect: "manual",
   });

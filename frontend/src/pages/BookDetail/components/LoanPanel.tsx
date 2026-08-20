@@ -7,9 +7,22 @@ interface LoanPanelProps {
   book: BookOut;
   members: UserOut[];
   isBusy: boolean;
-  onLend: (toUserId: number, dueAt: string | null) => void;
+  onLend: (borrower: Borrower, dueAt: string | null) => void;
   onMarkReturned: (loanId: number) => void;
 }
+
+/**
+ * Who the book is going to.
+ *
+ * A union rather than two optional fields, because the API accepts exactly one
+ * of the two and rejects both with a 422. Making that a compile-time choice
+ * here means the impossible request cannot be assembled.
+ */
+export type Borrower =
+  | { kind: "member"; userId: number }
+  | { kind: "external"; name: string };
+
+type Kind = Borrower["kind"];
 
 /** Lend the book, or record its return. Used only by BookDetail. */
 export default function LoanPanel({
@@ -20,8 +33,25 @@ export default function LoanPanel({
   onMarkReturned,
 }: LoanPanelProps) {
   const { t } = useTranslation();
+  const [kind, setKind] = useState<Kind>("member");
   const [target, setTarget] = useState("");
+  const [externalName, setExternalName] = useState("");
   const [dueAt, setDueAt] = useState("");
+
+  const trimmedName = externalName.trim();
+  const canLend = kind === "member" ? Boolean(target) : Boolean(trimmedName);
+
+  function lend() {
+    onLend(
+      kind === "member"
+        ? { kind: "member", userId: Number(target) }
+        : { kind: "external", name: trimmedName },
+      // A date input gives a bare date; the API wants a timestamp. End of day
+      // rather than midnight, or a book due "today" is overdue from the moment
+      // it is lent.
+      dueAt ? `${dueAt}T23:59:59` : null,
+    );
+  }
 
   return (
     <div>
@@ -38,33 +68,70 @@ export default function LoanPanel({
           {isBusy ? t("loans.updating") : t("loans.markAsReturned")}
         </button>
       ) : (
-        <div className="flex gap-2">
-          <select
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-            aria-label={t("loans.loanToLabel")}
-            className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
-          >
-            <option value="">{t("loans.loanTo")}</option>
-            {members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.username}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() =>
-              // A date input gives a bare date; the API wants a timestamp. End
-              // of day rather than midnight, or a book due "today" is overdue
-              // from the moment it is lent.
-              onLend(Number(target), dueAt ? `${dueAt}T23:59:59` : null)
-            }
-            disabled={!target || isBusy}
-            className="px-4 py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold transition-colors"
-          >
-            {t("loans.loanButton")}
-          </button>
-        </div>
+        <>
+          {/* Two radios rather than a select with an "Other..." row: the second
+              choice needs a text field, and a select cannot grow one. */}
+          <fieldset className="mb-2">
+            <legend className="text-xs text-paper-500 mb-1 dark:text-paper-400">
+              {t("loans.borrowerKind")}
+            </legend>
+            <div className="flex gap-4">
+              {(["member", "external"] as const).map((option) => (
+                <label
+                  key={option}
+                  className="flex items-center gap-1.5 text-sm text-paper-700 cursor-pointer dark:text-paper-200"
+                >
+                  <input
+                    type="radio"
+                    name="borrower-kind"
+                    value={option}
+                    checked={kind === option}
+                    onChange={() => setKind(option)}
+                    className="w-4 h-4 text-accent-600 focus:ring-accent-400"
+                  />
+                  {option === "member"
+                    ? t("loans.borrowerMember")
+                    : t("loans.borrowerExternal")}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex gap-2">
+            {kind === "member" ? (
+              <select
+                value={target}
+                onChange={(event) => setTarget(event.target.value)}
+                aria-label={t("loans.loanToLabel")}
+                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
+              >
+                <option value="">{t("loans.loanTo")}</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.username}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={externalName}
+                maxLength={120}
+                onChange={(event) => setExternalName(event.target.value)}
+                aria-label={t("loans.externalNameLabel")}
+                placeholder={t("loans.externalNamePlaceholder")}
+                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
+              />
+            )}
+            <button
+              onClick={lend}
+              disabled={!canLend || isBusy}
+              className="px-4 py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold transition-colors"
+            >
+              {t("loans.loanButton")}
+            </button>
+          </div>
+        </>
       )}
 
       {!book.active_loan && (

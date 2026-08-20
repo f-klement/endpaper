@@ -1,5 +1,6 @@
 import type { BookMatch } from "../../../api/generated/model";
-import { Icon, Modal, Spinner } from "../../../components";
+import { Modal, Spinner } from "../../../components";
+import { CoverImage } from "../../components";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 
@@ -53,7 +54,7 @@ export default function EnrichPicker({
 
       {error != null && (
         <p role="alert" className="text-sm text-bloom-600 dark:text-bloom-300">
-          {errorText(error, t("common.somethingWentWrong"))}
+          {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
 
@@ -73,20 +74,12 @@ export default function EnrichPicker({
                 onClick={() => onChoose(match)}
                 className="w-full flex gap-3 text-left p-2.5 rounded-xl border border-paper-200 hover:border-accent-300 hover:bg-accent-50 disabled:opacity-50 transition-colors dark:border-paper-800 dark:hover:border-accent-700 dark:hover:bg-accent-500/10"
               >
-                {match.cover_url ? (
-                  <img
-                    src={match.cover_url}
-                    alt=""
-                    className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
-                    onError={(event) => {
-                      event.currentTarget.style.visibility = "hidden";
-                    }}
-                  />
-                ) : (
-                  <div className="w-10 h-14 rounded shrink-0 bg-paper-100 flex items-center justify-center dark:bg-paper-800">
-                    <Icon name="book" className="w-5 h-5" />
-                  </div>
-                )}
+                <CoverImage
+                  src={match.cover_url}
+                  alt=""
+                  iconClassName="w-5 h-5"
+                  className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-paper-900 truncate dark:text-paper-100">
                     {match.title}

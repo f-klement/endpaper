@@ -50,6 +50,10 @@ def loan_summary(loan: Loan) -> LoanOut:
         id=loan.id,
         book_id=loan.book_id,
         loaned_to_user_id=loan.loaned_to_user_id,
+        # Set instead of loaned_to_user_id when the book went to somebody with
+        # no account. Carried here too, or the badge on a book lent to a
+        # neighbour says "Loaned to" and then nothing.
+        loaned_to_name=loan.loaned_to_name,
         loaned_by_user_id=loan.loaned_by_user_id,
         loaned_at=loan.loaned_at,
         returned_at=loan.returned_at,

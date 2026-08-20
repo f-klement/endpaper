@@ -5,6 +5,7 @@ import type { BookOut } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
+import { CoverImage } from "../../components";
 import { Icon } from "../../../components";
 
 interface BookHeaderProps {
@@ -40,18 +41,15 @@ export default function BookHeader({
   return (
     <>
       <div className="relative">
-        {book.cover_url ? (
-          <img
-            src={book.cover_url}
-            alt={book.title}
-            className="w-full h-56 object-cover object-top"
-            onError={(event) => {
-              event.currentTarget.style.display = "none";
-            }}
-          />
-        ) : (
-          <div className="w-full h-56 bg-gradient-to-br from-accent-100 to-accent-200 flex items-center justify-center text-6xl"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
-        )}
+        {/* Never absent, whatever happens to the image. The back button below
+            is positioned against this box, and when a failed cover removed
+            itself from the flow the box collapsed to nothing and the button
+            landed on the title. */}
+        <CoverImage
+          src={book.cover_url}
+          alt={book.title}
+          className="w-full h-56 object-cover object-top bg-gradient-to-br from-accent-100 to-accent-200"
+        />
 
         <button
           onClick={onBack}
@@ -165,7 +163,7 @@ export default function BookHeader({
             </button>
             {refreshError != null && (
               <p className="text-xs text-bloom-500 mt-1 dark:text-bloom-300">
-                {errorText(refreshError, t("common.somethingWentWrong"))}
+                {errorText(refreshError, t("common.somethingWentWrong"), t)}
               </p>
             )}
           </div>

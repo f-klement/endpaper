@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  NetworkError,
   clearSession,
   customFetch,
   downloadFile,
@@ -160,6 +161,52 @@ describe("errors", () => {
       ),
     );
     await expect(customFetch("/api/books")).rejects.toThrow("Bad Gateway");
+  });
+});
+
+describe("a request that never got an answer", () => {
+  /** A rejected fetch: no status, no body, nothing reached the origin. */
+  function unreachable() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
+    );
+  }
+
+  it("is a NetworkError rather than the browser's TypeError", async () => {
+    // Classified here because this is the only place that can tell a
+    // rejection from a response. Downstream it would be a guess from the text
+    // of a string the browser vendor chooses.
+    unreachable();
+    await expect(customFetch("/api/books")).rejects.toBeInstanceOf(NetworkError);
+  });
+
+  it("keeps the original for the console", async () => {
+    unreachable();
+    const error = await customFetch("/api/books").catch((e: unknown) => e);
+    expect((error as NetworkError).cause).toBeInstanceOf(TypeError);
+  });
+
+  it("is not an ApiError, which carries a status and a server message", async () => {
+    unreachable();
+    const error = await customFetch("/api/books").catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
+  it("does not end the session", async () => {
+    // Nothing was said about this session. Signing somebody out because their
+    // train went into a tunnel would be worse than the failure.
+    setSession("abc123", makeUser());
+    unreachable();
+    await customFetch("/api/books").catch(() => undefined);
+    expect(getToken()).toBe("abc123");
+  });
+
+  it("covers downloads too", async () => {
+    unreachable();
+    await expect(downloadFile("/api/books/export")).rejects.toBeInstanceOf(
+      NetworkError,
+    );
   });
 });
 

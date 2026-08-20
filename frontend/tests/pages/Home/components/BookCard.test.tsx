@@ -1,6 +1,6 @@
 /** Tests for src/pages/Home/components/BookCard.tsx. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderLocalised } from "../../../utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,15 +75,17 @@ describe("BookCard", () => {
       );
     });
 
-    it("hides an image that fails to load", () => {
+    it("shows the placeholder when an image fails to load", () => {
       // Open Library cover URLs 404 often; a broken-image icon reads as a bug
-      // in our app rather than a gap in their catalogue.
+      // in our app rather than a gap in their catalogue. The placeholder is
+      // the same size as the cover, so the grid does not reflow around it.
       renderCard(
         makeBook({ title: "Dune", cover_url: "https://example.com/gone.jpg" }),
       );
-      const image = screen.getByRole("img", { name: "Dune" });
-      image.dispatchEvent(new Event("error", { bubbles: true }));
-      expect(image).toHaveStyle({ display: "none" });
+
+      fireEvent.error(screen.getByRole("img", { name: "Dune" }));
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
     });
   });
 

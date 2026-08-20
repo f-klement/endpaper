@@ -17,6 +17,7 @@ from typing import Any, Final
 
 import httpx
 
+import covers
 from isbn import parse as parse_isbn
 
 logger = logging.getLogger("endpaper.google_books")
@@ -80,7 +81,13 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
         # publisher supplied, not the curated Tag vocabulary the household picks
         # from, and mixing the two would muddle both.
         "categories": join_categories(categories),
-        "cover_url": (info.get("imageLinks") or {}).get("thumbnail"),
+        # Google serves these over plain **http**, which is mixed content on an
+        # https page: blocked by the browser, whatever the CSP says. Cleaned
+        # here rather than only on the way into the database, because a search
+        # result is rendered in the picker long before anything is stored, and
+        # the question "may a browser be pointed at this?" has the same answer
+        # either way.
+        "cover_url": covers.storable((info.get("imageLinks") or {}).get("thumbnail")),
         "isbn13": isbn13,
     }
 

@@ -54,6 +54,21 @@ class TestLoanSummary:
 
         assert loan_summary(loan).book is None
 
+    def test_it_carries_an_external_borrower_name(self, db, admin, two_books):
+        """Without this the badge on a book lent to a neighbour reads "Loaned
+        to" and then nothing."""
+        loan = Loan(
+            book_id=two_books[0].id,
+            loaned_to_name="the neighbour",
+            loaned_by_user_id=admin["user"]["id"],
+        )
+        db.add(loan)
+        db.commit()
+
+        summary = loan_summary(loan)
+        assert summary.loaned_to_name == "the neighbour"
+        assert summary.loaned_to is None
+
 
 class TestBooksToOut:
     def test_an_empty_page_costs_no_queries(self, db, admin):

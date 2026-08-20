@@ -1,6 +1,6 @@
 import type { BookOut, DuplicateGroup } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
-import { Icon } from "../../../components";
+import { CoverImage } from "../../components";
 
 interface DuplicateCardProps {
   group: DuplicateGroup;
@@ -36,18 +36,11 @@ export default function DuplicateCard({
             key={book.id}
             className="flex items-center gap-3 border border-paper-100 rounded-xl p-2 dark:border-paper-800"
           >
-            {book.cover_url ? (
-              <img
-                src={book.cover_url}
-                alt=""
-                className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
-                onError={(event) => {
-                  event.currentTarget.style.visibility = "hidden";
-                }}
-              />
-            ) : (
-              <div className="w-10 h-14 rounded shrink-0 bg-paper-100 flex items-center justify-center dark:bg-paper-800"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
-            )}
+            <CoverImage
+              src={book.cover_url}
+              alt=""
+              className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
+            />
 
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-paper-900 truncate dark:text-paper-100">

@@ -132,8 +132,10 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    borrower = db.get(User, payload.loaned_to_user_id)
-    if borrower is None:
+    # Only a member has to exist. An external borrower is a name, checked by
+    # `LoanCreate` (exactly one of the two is set) and by the CHECK constraint
+    # behind it.
+    if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     already_out = (
@@ -147,6 +149,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     loan = Loan(
         book_id=payload.book_id,
         loaned_to_user_id=payload.loaned_to_user_id,
+        loaned_to_name=payload.loaned_to_name,
         loaned_by_user_id=current_user.id,
         due_at=payload.due_at,
     )

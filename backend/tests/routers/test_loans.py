@@ -361,3 +361,125 @@ class TestOneOpenLoanPerBook:
         again = client.post("/api/loans", json=payload, headers=admin["headers"])
 
         assert again.status_code == 201
+
+
+class TestLendingToSomeoneWithoutAnAccount:
+    """The people most likely to keep a book are the ones who will never have
+    an account here. `loaned_to_name` is a free-text borrower; exactly one of
+    it and `loaned_to_user_id` is set, in the schema and in the database.
+    """
+
+    def test_a_name_is_accepted_instead_of_a_member(self, client, admin, book):
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201, res.text
+        assert res.json()["loaned_to_name"] == "the neighbour"
+
+    def test_the_member_fields_are_empty_for_an_external(self, client, admin, book):
+        body = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        ).json()
+        assert body["loaned_to"] is None
+        assert body["loaned_to_user_id"] is None
+
+    def test_naming_both_is_422(self, client, admin, member, book):
+        res = client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": member["user"]["id"],
+                "loaned_to_name": "the neighbour",
+            },
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_naming_neither_is_422(self, client, admin, book):
+        res = client.post(
+            "/api/loans", json={"book_id": book["id"]}, headers=admin["headers"]
+        )
+        assert res.status_code == 422
+
+    def test_a_whitespace_name_is_422(self, client, admin, book):
+        """It satisfies IS NOT NULL and identifies nobody."""
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "   "},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_a_name_is_trimmed(self, client, admin, book):
+        body = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "  Ada  "},
+            headers=admin["headers"],
+        ).json()
+        assert body["loaned_to_name"] == "Ada"
+
+    def test_an_overlong_name_is_422(self, client, admin, book):
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "x" * 121},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_it_still_counts_as_the_book_being_out(self, client, admin, book):
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        )
+        fetched = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert fetched["active_loan"]["loaned_to_name"] == "the neighbour"
+
+    def test_lending_it_again_is_still_409(self, client, admin, member, book):
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        )
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 409
+
+    def test_it_can_be_returned(self, client, admin, book):
+        loan_id = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        ).json()["id"]
+
+        res = client.put(f"/api/loans/{loan_id}/return", headers=admin["headers"])
+        assert res.status_code == 200
+        assert res.json()["returned_at"] is not None
+
+    def test_it_appears_in_the_loans_list(self, client, admin, book):
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        )
+        rows = items(client.get("/api/loans", headers=admin["headers"]))
+        assert [row["loaned_to_name"] for row in rows] == ["the neighbour"]
+
+    def test_an_external_loan_of_an_invisible_book_stays_hidden(
+        self, client, admin, member, make_book
+    ):
+        """The borrower being external changes nothing about the privacy rule."""
+        private = make_book(admin["headers"], title="A diary", is_private=True)
+        client.post(
+            "/api/loans",
+            json={"book_id": private["id"], "loaned_to_name": "the neighbour"},
+            headers=admin["headers"],
+        )
+        assert items(client.get("/api/loans", headers=member["headers"])) == []

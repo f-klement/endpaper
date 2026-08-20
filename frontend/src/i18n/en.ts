@@ -18,7 +18,10 @@ export const en = {
   "nav.loans": "Loans",
   "nav.stats": "Stats",
   "nav.settings": "Settings",
-  "nav.account": "Account",
+  "nav.menu": "Menu",
+  // The trigger names the signed-in member, so the top bar says who you are
+  // without opening anything.
+  "nav.menuFor": "Menu for {name}",
   "nav.switchAccount": "Switch Account",
   "nav.exportLibrary": "Export Library",
   "nav.logout": "Logout",
@@ -37,6 +40,8 @@ export const en = {
   "common.tryAgain": "Try again",
   "common.loading": "Loading...",
   "common.somethingWentWrong": "Something went wrong.",
+  "common.cannotReachServer":
+    "The server could not be reached. Check your connection and try again.",
   "common.selectAll": "Select all",
   "common.clearSelection": "Clear selection",
   "common.selectedCount": "{count} selected",
@@ -185,6 +190,9 @@ export const en = {
   "loans.noneActive": "No active loans",
   "loans.allAccountedFor": "All books are accounted for",
   "loans.loanedToBy": "Loaned to {to} by {by}",
+  // Whole phrases, not "Loaned to" plus a name: German does not keep the
+  // English word order, and the borrower here is a name rather than a member.
+  "loans.loanedToExternalBy": "Loaned to {name} (no account) by {by}",
   "loans.returnedOn": "Returned {date}",
   "loans.markReturned": "Mark Returned",
   "loans.updating": "Updating...",
@@ -194,6 +202,12 @@ export const en = {
   "loans.loanButton": "Loan",
   "loans.markAsReturned": "Mark as Returned",
   "loans.badge": "Loaned to {name}",
+  "loans.badgeExternal": "Loaned to {name}, who has no account",
+  "loans.borrowerMember": "A member",
+  "loans.borrowerExternal": "Someone else",
+  "loans.borrowerKind": "Who is borrowing it",
+  "loans.externalNameLabel": "Borrower's name",
+  "loans.externalNamePlaceholder": "Who has it",
   "loans.couldNotLoad": "Could not load the loans.",
 
   // ── Notes ───────────────────────────────────────────────────────────────
