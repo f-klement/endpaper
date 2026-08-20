@@ -32,7 +32,7 @@ export default function ReadingPanel({ book, onRate }: ReadingPanelProps) {
       <StarRating value={book.my_rating} onChange={onRate} />
 
       {(book.my_started_at || book.my_finished_at) && (
-        <p className="text-xs text-paper-500 dark:text-paper-400">
+        <p className="text-xs text-paper-600 dark:text-paper-400">
           {[
             book.my_started_at &&
               t("reading.started", { date: formatDate(book.my_started_at) }),

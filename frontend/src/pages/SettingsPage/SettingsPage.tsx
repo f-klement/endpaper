@@ -81,7 +81,7 @@ export default function SettingsPage() {
                 locale === language.value
                   ? "bg-accent-50 border-accent-300 text-accent-800 "
                 + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                  : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
             >
@@ -89,7 +89,7 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
-        <p className="text-xs text-paper-500 dark:text-paper-400">
+        <p className="text-xs text-paper-600 dark:text-paper-400">
           {t("settings.languageHint")}
         </p>
       </SettingsSection>
@@ -105,14 +105,14 @@ export default function SettingsPage() {
               className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                 preference === option.value
                   ? "bg-accent-50 border-accent-300 text-accent-800 dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                  : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
             >
               {t(option.label)}
             </button>
           ))}
         </div>
-        <p className="text-xs text-paper-500 dark:text-paper-400">
+        <p className="text-xs text-paper-600 dark:text-paper-400">
           {preference === "system" ? t("theme.systemHint") : t("theme.hint")}
         </p>
       </SettingsSection>
@@ -141,7 +141,7 @@ export default function SettingsPage() {
       {/* A non-admin gets the language switch and nothing else. That is not an
           error worth showing an error page for, so it is stated plainly. */}
       {isForbidden && (
-        <p className="text-sm text-paper-500 text-center dark:text-paper-400">
+        <p className="text-sm text-paper-600 text-center dark:text-paper-400">
           {t("settings.adminOnly")}
         </p>
       )}
@@ -186,7 +186,7 @@ export default function SettingsPage() {
                   // Managed outside the app, so there is nothing here to edit
                   // and nothing to unmask.
                   disabled={fromEnv}
-                  className="w-full px-3 py-2 pr-10 rounded-xl border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
+                  className="w-full px-3 py-2 pr-10 rounded-xl border border-paper-200 text-sm disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
                 />
                 {!fromEnv && (
                   <button
@@ -194,13 +194,13 @@ export default function SettingsPage() {
                     onClick={() => setShowKey((shown) => !shown)}
                     aria-label={showKey ? t("field.hide") : t("field.show")}
                     aria-pressed={showKey}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-400 hover:text-paper-600 text-sm leading-none dark:text-paper-500 dark:hover:text-paper-300"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
                   >
                     <span aria-hidden="true"><Icon name={showKey ? "eyeOff" : "eye"} className="w-4 h-4" /></span>
                   </button>
                 )}
               </div>
-              <p className="text-xs text-paper-500 dark:text-paper-400">
+              <p className="text-xs text-paper-600 dark:text-paper-400">
                 {settings.has_google_books_api_key
                   ? t("settings.apiKeySet", {
                       preview: settings.google_books_api_key_preview,
@@ -222,7 +222,7 @@ export default function SettingsPage() {
                       update({ google_books_api_key: apiKey.trim() });
                       setApiKey("");
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-accent-600 text-white text-xs font-medium hover:bg-accent-700 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
                   >
                     {isSaving ? t("common.saving") : t("common.save")}
                   </button>
@@ -233,14 +233,14 @@ export default function SettingsPage() {
                       // An empty string clears it; `undefined` would mean
                       // "leave alone", which is the opposite.
                       onClick={() => update({ google_books_api_key: "" })}
-                      className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-bloom-600 hover:bg-bloom-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-bloom-300"
+                      className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
                     >
                       {t("settings.apiKeyClear")}
                     </button>
                   )}
                 </div>
               )}
-              <p className="text-xs text-paper-500 leading-relaxed pt-1 dark:text-paper-400">
+              <p className="text-xs text-paper-600 leading-relaxed pt-1 dark:text-paper-400">
                 {t("settings.apiKeyHint")}
               </p>
             </div>
@@ -278,7 +278,7 @@ export default function SettingsPage() {
                     settings.default_locale === language.value
                       ? "bg-accent-50 border-accent-300 text-accent-800 "
                 + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                      : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                      : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
                   }`}
                 >

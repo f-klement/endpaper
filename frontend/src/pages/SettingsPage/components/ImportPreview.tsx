@@ -65,7 +65,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
           const column = columnFor(preview.mapping, keys);
           return column ? (
             <div key={label} className="contents">
-              <dt className="text-paper-500 dark:text-paper-400">{t(label)}</dt>
+              <dt className="text-paper-600 dark:text-paper-400">{t(label)}</dt>
               <dd className="truncate font-medium text-paper-700 dark:text-paper-200">
                 {column}
               </dd>
@@ -75,7 +75,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
       </dl>
 
       {unmatched.length > 0 && (
-        <p className="mt-2 text-xs text-paper-500 dark:text-paper-400">
+        <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
           {t("import.notFound", {
             fields: unmatched.map(({ label }) => t(label)).join(", "),
           })}
@@ -90,7 +90,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
             <li key={index} className="truncate text-paper-600 dark:text-paper-300">
               {row.title}
               {row.author && (
-                <span className="text-paper-400 dark:text-paper-500">
+                <span className="text-paper-600 dark:text-paper-400">
                   {" "}
                   {t("book.by", { author: row.author })}
                 </span>
@@ -104,7 +104,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
                 </span>
               )}
               {row.isbn && (
-                <span className="ml-1 text-paper-400 dark:text-paper-500">
+                <span className="ml-1 text-paper-600 dark:text-paper-400">
                   {row.isbn}
                 </span>
               )}
@@ -114,7 +114,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
       )}
 
       {preview.skipped > 0 && (
-        <p className="mt-2 text-xs text-paper-500 dark:text-paper-400">
+        <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
           {t("import.skipped", { count: preview.skipped })}
         </p>
       )}

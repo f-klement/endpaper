@@ -53,14 +53,14 @@ export default function BookHeader({
 
         <button
           onClick={onBack}
-          className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-full p-2 shadow-sm text-paper-700 dark:text-paper-200"
+          className="absolute top-4 left-4 bg-paper-0/90 backdrop-blur-sm rounded-full p-2 shadow-sm text-paper-700 dark:text-paper-200"
         >
           ← {t("common.back")}
         </button>
 
         <button
           onClick={() => coverInput.current?.click()}
-          className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-xs font-medium text-paper-700 hover:bg-white transition-colors dark:text-paper-200"
+          className="absolute bottom-3 right-3 bg-paper-0/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-xs font-medium text-paper-700 hover:bg-paper-0 transition-colors dark:text-paper-200"
         >
           {t("book.uploadCover")}
         </button>
@@ -113,29 +113,29 @@ export default function BookHeader({
           </Link>
         )}
         {book.author && (
-          <p className="text-paper-500 text-sm mt-1 dark:text-paper-400">
+          <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
             {t("book.by", { author: book.author })}
           </p>
         )}
 
         <div className="flex flex-wrap gap-2 mt-2">
           {book.publisher && (
-            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
               {book.publisher}
             </span>
           )}
           {book.year && (
-            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
               {book.year}
             </span>
           )}
           {book.page_count != null && (
-            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
               {t("book.pages", { count: book.page_count })}
             </span>
           )}
           {book.language && (
-            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded uppercase dark:text-paper-500 dark:bg-paper-800">
+            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded uppercase dark:text-paper-400 dark:bg-paper-800">
               {book.language}
             </span>
           )}
@@ -145,7 +145,7 @@ export default function BookHeader({
             </span>
           )}
           {book.isbn && (
-            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+            <span className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
               {t("book.isbn", { isbn: book.isbn })}
             </span>
           )}
@@ -162,7 +162,7 @@ export default function BookHeader({
               {isRefreshing ? t("book.refreshing") : t("book.refreshMetadata")}
             </button>
             {refreshError != null && (
-              <p className="text-xs text-bloom-500 mt-1 dark:text-bloom-300">
+              <p className="text-xs text-danger-500 mt-1 dark:text-danger-300">
                 {errorText(refreshError, t("common.somethingWentWrong"), t)}
               </p>
             )}

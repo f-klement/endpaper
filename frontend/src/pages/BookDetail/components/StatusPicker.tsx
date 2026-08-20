@@ -39,8 +39,8 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
             aria-pressed={current === option.value}
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
               current === option.value
-                ? "bg-accent-600 border-accent-600 text-white"
-                : "border-paper-200 text-paper-600 hover:border-accent-300 bg-white "
+                ? "bg-accent-fill border-accent-fill text-on-accent"
+                : "border-paper-200 text-paper-600 hover:border-accent-300 bg-paper-0 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 "
                 + "dark:hover:border-accent-700"
             }`}

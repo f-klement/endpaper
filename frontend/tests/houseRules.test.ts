@@ -45,6 +45,69 @@ describe("the generated client stays behind hooks.ts", () => {
   });
 });
 
+describe("paper-400 and paper-500 are not text in light mode", () => {
+  it("appears nowhere in the source", () => {
+    // Measured against the card they sit on: 2.35:1 and 3.83:1, where AA wants
+    // 4.5. Both pass in dark, on a dark card, which is why nobody noticed: a
+    // light surface admits fewer legible grey tiers than a dark one, and the
+    // app was treating the ramp as symmetric. Muted text is `paper-600` in
+    // light and `paper-400` in dark.
+    //
+    // Retiring the two as text is also what lets three upstream palettes ship
+    // verbatim later: as decoration the step has to clear 3.0, not 4.5.
+    //
+    // `disabled:` is the exemption, and the only one. WCAG 1.4.3 does not apply
+    // to an inactive control, and a disabled field that reads as strongly as a
+    // live one is worse than a faint one.
+    //
+    // `index.css` is not covered. The suite runs with `css: false`, so a raw
+    // import of it is an empty string, and reading it off disk would mean
+    // `node:fs` and `@types/node` for one assertion. It holds exactly one of
+    // these tokens, on `.field:disabled`, and it is exempt.
+    const offenders = entries().flatMap(([path, source]) =>
+      [...source.matchAll(/[\w:./[\]-]*text-paper-[45]00/g)]
+        .map((match) => match[0])
+        .filter((token) => !token.includes("dark:") && !token.includes("disabled:"))
+        .map((token) => `${path}: ${token}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("no control draws its own focus ring", () => {
+  it("appears nowhere in the source", () => {
+    // There is one ring, in `index.css`, and a control that brings its own is a
+    // control that gets missed the next time that one moves. Twenty-one of them
+    // did: `focus:ring-accent-400` measures 2.24:1 against the page where WCAG
+    // 1.4.11 wants 3:1, and sixteen killed the browser default with
+    // `focus:outline-none` first, so the text fields had the weakest focus
+    // indicator in the app and nothing underneath it.
+    //
+    // `focus-visible:` as well as `focus:`, and arbitrary values, because the
+    // shared rule *is* `:focus-visible`: the next person repairing a control
+    // reaches for that spelling first, and for `ring-[3px]` second. Two shapes
+    // are deliberately out of scope, both of which stop looking like a focus
+    // ring at all: `focus:[box-shadow:...]`, which is a raw property rather than
+    // a ring utility, and a bare `outline-none`, which removes the outline in
+    // every state rather than on focus and belongs to a rule about outlines.
+    //
+    // `peer-focus-visible:` is exempt and is the settings toggle: its input is
+    // `sr-only`, so the shared ring lands on something with no size and the
+    // visible track has to draw its own.
+    const offenders = entries().flatMap(([path, source]) =>
+      [...source.matchAll(
+        /[\w:./[\]-]*focus(-visible)?:(outline-none|ring-[\w./#%[\]-]+)/g,
+      )]
+        .map((match) => match[0])
+        .filter((token) => !token.includes("peer-focus-visible:"))
+        .map((token) => `${path}: ${token}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("no dash is used as punctuation", () => {
   it("appears nowhere in the source", () => {
     // House style. The message catalogues have their own test; this covers

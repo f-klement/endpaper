@@ -64,7 +64,7 @@ export default function SearchPanel({
   return (
     <div className="mt-6 pt-5 border-t border-paper-200 dark:border-paper-700">
       <div className="flex items-center justify-center gap-2 mb-3">
-        <p className="text-sm text-paper-500 dark:text-paper-400">
+        <p className="text-sm text-paper-600 dark:text-paper-400">
           {t("search.orSearchByTitle")}
         </p>
         <HelpButton label={t("help.aboutSearch")} onClick={onOpenHelp} />
@@ -91,7 +91,7 @@ export default function SearchPanel({
       {/* Not a disabled state: search works. This says what a key adds, so an
           admin knows the option exists without anyone else being blocked. */}
       {!isConfigured && (
-        <p className="text-xs text-paper-500 mt-2 dark:text-paper-400">
+        <p className="text-xs text-paper-600 mt-2 dark:text-paper-400">
           {t("search.withoutKey")}{" "}
           <button
             type="button"
@@ -104,13 +104,13 @@ export default function SearchPanel({
       )}
 
       {error != null && (
-        <p role="alert" className="text-sm text-bloom-600 mt-2 dark:text-bloom-300">
+        <p role="alert" className="text-sm text-danger-600 mt-2 dark:text-danger-300">
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
 
       {isEmpty && (
-        <p className="text-sm text-paper-500 text-center mt-4 dark:text-paper-400">
+        <p className="text-sm text-paper-600 text-center mt-4 dark:text-paper-400">
           {t("search.noResults")}
         </p>
       )}
@@ -140,11 +140,11 @@ export default function SearchPanel({
                       {match.title}
                     </span>
                     {match.subtitle && (
-                      <span className="block text-xs text-paper-500 truncate dark:text-paper-400">
+                      <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
                         {match.subtitle}
                       </span>
                     )}
-                    <span className="block text-xs text-paper-400 truncate mt-0.5 dark:text-paper-500">
+                    <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
                       {summarise(match)}
                     </span>
                   </span>
@@ -152,7 +152,7 @@ export default function SearchPanel({
               </li>
             ))}
           </ul>
-          <p className="text-xs text-paper-400 text-center mt-3 dark:text-paper-500">
+          <p className="text-xs text-paper-600 text-center mt-3 dark:text-paper-400">
             {t("search.pickHint")}
           </p>
         </>

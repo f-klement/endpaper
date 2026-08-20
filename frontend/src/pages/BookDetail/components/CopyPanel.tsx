@@ -113,7 +113,7 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
       <summary className="cursor-pointer select-none text-sm font-medium text-paper-700 dark:text-paper-200">
         {t("copy.title")}
       </summary>
-      <p className="text-xs text-paper-400 mt-1 mb-3 dark:text-paper-500">
+      <p className="text-xs text-paper-600 mt-1 mb-3 dark:text-paper-400">
         {t("copy.hint")}
       </p>
 
@@ -212,7 +212,7 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
         </div>
 
         {priceError && (
-          <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
+          <p role="alert" className="text-xs text-danger-600 dark:text-danger-300">
             {t("copy.priceInvalid")}
           </p>
         )}

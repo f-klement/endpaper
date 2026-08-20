@@ -26,7 +26,7 @@ export default function LoanRow({
         isReturned
           ? "opacity-60"
           : loan.is_overdue
-            ? "border-bloom-300 dark:border-bloom-700"
+            ? "border-danger-300 dark:border-danger-700"
             : "border-amber-200 dark:border-amber-900/70"
       }`}
     >
@@ -46,11 +46,11 @@ export default function LoanRow({
             </h3>
           </Link>
           {loan.book?.author && (
-            <p className="text-xs text-paper-400 truncate dark:text-paper-500">
+            <p className="text-xs text-paper-600 truncate dark:text-paper-400">
               {loan.book.author}
             </p>
           )}
-          <p className="text-xs text-paper-500 mt-1 dark:text-paper-400">
+          <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
             {/* Two whole phrases, not one with the borrower swapped in: German
                 does not keep the English word order, and a borrower with no
                 account here is worth saying rather than leaving to look like a
@@ -70,7 +70,7 @@ export default function LoanRow({
                 })}
           </p>
           {loan.is_overdue && (
-            <span className="inline-block mt-1 text-xs font-medium text-bloom-700 bg-bloom-100 border border-bloom-100 px-2 py-0.5 rounded-full dark:bg-bloom-700 dark:border-bloom-700">
+            <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700">
               {loan.due_at
                 ? t("loans.overdueSince", {
                     date: new Date(loan.due_at).toLocaleDateString(locale),
@@ -79,13 +79,13 @@ export default function LoanRow({
             </span>
           )}
           {!loan.is_overdue && loan.due_at && !loan.returned_at && (
-            <p className="text-xs text-paper-500 mt-1 dark:text-paper-400">
+            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t("loans.dueOn", {
                 date: new Date(loan.due_at).toLocaleDateString(locale),
               })}
             </p>
           )}
-          <p className="text-xs text-paper-400 dark:text-paper-500">
+          <p className="text-xs text-paper-600 dark:text-paper-400">
             {new Date(loan.loaned_at).toLocaleDateString(locale)}
             {loan.returned_at && (
               <span className="ml-2 text-green-600 dark:text-green-400">

@@ -95,7 +95,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               type="checkbox"
               checked={book.is_private}
               onChange={(event) => actions.setPrivacy(event.target.checked)}
-              className="w-4 h-4 rounded border-paper-300 text-accent-600 focus:ring-accent-400"
+              className="w-4 h-4 rounded border-paper-300 text-accent-600"
             />
             <span className="text-sm text-paper-600 dark:text-paper-300">
               {t("book.privateToggle")}
@@ -103,7 +103,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           </label>
         ) : (
           book.is_private && (
-            <span className="inline-flex items-center gap-1 text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+            <span className="inline-flex items-center gap-1 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
               <Icon name="lock" className="w-3.5 h-3.5" /> {t("book.privateBadge")}
             </span>
           )
@@ -201,7 +201,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               {book.categories.map((category) => (
                 <span
                   key={category}
-                  className="text-xs text-paper-500 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"
+                  className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"
                 >
                   {category}
                 </span>
@@ -232,7 +232,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             irreversible verb lives in the trash and does ask. */}
         <button
           onClick={actions.remove}
-          className="w-full py-2.5 border border-bloom-300 text-bloom-500 hover:bg-bloom-100 rounded-lg text-sm font-medium transition-colors mt-2 dark:border-bloom-700 dark:text-bloom-300"
+          className="w-full py-2.5 border border-danger-300 text-danger-500 hover:bg-danger-100 rounded-lg text-sm font-medium transition-colors mt-2 dark:border-danger-700 dark:text-danger-300"
         >
           {t("book.remove")}
         </button>

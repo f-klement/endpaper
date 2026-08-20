@@ -30,7 +30,7 @@ export default function ErrorLayout({
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="card w-full max-w-sm p-8 text-center">
-        <span className="mx-auto mb-4 grid place-items-center w-12 h-12 rounded-full bg-paper-200/60 text-paper-500 dark:bg-paper-800 dark:text-paper-400">
+        <span className="mx-auto mb-4 grid place-items-center w-12 h-12 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
           <Icon name={icon} className="w-6 h-6" />
         </span>
         <p className="text-xs font-semibold tracking-widest uppercase text-accent-600 mb-2">
@@ -39,12 +39,12 @@ export default function ErrorLayout({
         <h1 className="text-xl font-semibold text-paper-900 mb-2 dark:text-paper-100">
           {title}
         </h1>
-        <p className="text-sm text-paper-500 dark:text-paper-400">{message}</p>
+        <p className="text-sm text-paper-600 dark:text-paper-400">{message}</p>
         <div className="mt-6">
           {action ?? (
             <Link
               to="/"
-              className="inline-flex items-center justify-center h-10 px-4 rounded-lg text-sm font-medium bg-accent-600 text-white shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-700 dark:bg-accent-500 dark:text-paper-950 dark:hover:bg-accent-400"
+              className="inline-flex items-center justify-center h-10 px-4 rounded-lg text-sm font-medium bg-accent-fill text-on-accent shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-fill-hover"
             >
               {t("error.backToLibrary")}
             </Link>

@@ -62,7 +62,7 @@ export default function LocationField({
         </datalist>
       )}
       {hint && (
-        <p className="text-xs text-paper-400 mt-1 dark:text-paper-500">
+        <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
           {hint}
         </p>
       )}

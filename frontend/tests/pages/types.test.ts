@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { TagCategory } from "../../src/api/generated/model";
 import {
-  TAG_BAR_CLASSES,
   TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
   TAG_CHIP_CLASSES,
+  TAG_CHIP_SELECTED,
   TAG_PILL_CLASSES,
   groupTagsByCategory,
 } from "../../src/pages/types";
@@ -42,19 +42,39 @@ describe("style tables", () => {
   it.each([
     ["labels", TAG_CATEGORY_LABELS],
     ["pill classes", TAG_PILL_CLASSES],
-    ["bar classes", TAG_BAR_CLASSES],
     ["chip classes", TAG_CHIP_CLASSES],
   ])("%s cover every category", (_name, table) => {
     for (const category of Object.values(TagCategory)) {
-      expect(table[category]).toBeDefined();
+      expect(table[category]).toBeTruthy();
     }
   });
 
-  it("chip classes carry both a resting and a selected style", () => {
-    for (const category of Object.values(TagCategory)) {
-      expect(TAG_CHIP_CLASSES[category].base).toBeTruthy();
-      expect(TAG_CHIP_CLASSES[category].active).toBeTruthy();
-    }
+  it("carries no hue of its own but the accent", () => {
+    // Type, genre and age used to be a blue, a purple and a green, which was
+    // the one place in this app where a colour was chosen at random. All four
+    // selected chips failed AA on top of that, the green at 2.28:1. Custom
+    // keeps the accent, because a tag the household invented reading as theirs
+    // is a distinction with a reason.
+    //
+    // The four named here are the four that were deleted, and this asserts it
+    // of these tables only. `amber` and `orange` are still untokenised on the
+    // reading badge, the loan badge and the ownership chip: they are a separate
+    // family with a separate fix, and naming them in a rule that covers three
+    // constants would read as a house rule the tree does not keep.
+    const written = [
+      ...Object.values(TAG_PILL_CLASSES),
+      ...Object.values(TAG_CHIP_CLASSES),
+      TAG_CHIP_SELECTED,
+    ].join(" ");
+
+    expect(written).not.toMatch(/\b(blue|purple|green|indigo)-/);
+  });
+
+  it("selects with the accent fill and its paired foreground", () => {
+    // `text-white` on the fill is a bet that loses in nine themes of twelve.
+    expect(TAG_CHIP_SELECTED).toContain("bg-accent-fill");
+    expect(TAG_CHIP_SELECTED).toContain("text-on-accent");
+    expect(TAG_CHIP_SELECTED).not.toContain("text-white");
   });
 });
 

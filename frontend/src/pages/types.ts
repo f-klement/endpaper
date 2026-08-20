@@ -38,46 +38,54 @@ export const TAG_CATEGORY_LABELS: Record<TagCategory, MessageKey> = {
   [TagCategory.custom]: "tags.custom",
 };
 
-/** Pill colours per category, used wherever a tag is rendered. */
+/** Type, genre and age. One value, written once. */
+const CURATED_PILL = "bg-paper-100 text-paper-700";
+
+/**
+ * Pill colours per category, used wherever a tag is rendered.
+ *
+ * The curated three are neutral on purpose. They used to carry a blue, a purple
+ * and a green, which were the one place in this app where a colour was chosen at
+ * random: there is no mnemonic that makes genre purple, so the hue had to be
+ * looked up, which is slower than reading the word already printed on the pill.
+ * The three cost fifteen shades per mode to theme and encoded nothing.
+ *
+ * Custom keeps the accent, so a tag the household invented still reads as theirs
+ * rather than as a fourth colour picked at random.
+ *
+ * Still a four-key table holding two values, rather than a default and one
+ * exception: a category added to the backend enum has to be a compile error
+ * here, not an unstyled pill nobody notices.
+ */
 export const TAG_PILL_CLASSES: Record<TagCategory, string> = {
-  [TagCategory.type]: "bg-blue-100 text-blue-700",
-  [TagCategory.genre]: "bg-purple-100 text-purple-700",
-  [TagCategory.age]: "bg-green-100 text-green-700",
-  // The accent, so a tag the household invented reads as theirs rather than as
-  // a fourth colour picked at random.
+  [TagCategory.type]: CURATED_PILL,
+  [TagCategory.genre]: CURATED_PILL,
+  [TagCategory.age]: CURATED_PILL,
   [TagCategory.custom]: "bg-accent-100 text-accent-800",
 };
 
-/** Selectable tag chips: resting and selected. */
-export const TAG_CHIP_CLASSES: Record<
-  TagCategory,
-  { base: string; active: string }
-> = {
-  [TagCategory.type]: {
-    base: "border-blue-200 text-blue-700 bg-white",
-    active: "bg-blue-500 border-blue-500 text-white",
-  },
-  [TagCategory.genre]: {
-    base: "border-purple-200 text-purple-700 bg-white",
-    active: "bg-purple-500 border-purple-500 text-white",
-  },
-  [TagCategory.age]: {
-    base: "border-green-200 text-green-700 bg-white",
-    active: "bg-green-500 border-green-500 text-white",
-  },
-  [TagCategory.custom]: {
-    base: "border-accent-200 text-accent-700 bg-white",
-    active: "bg-accent-500 border-accent-500 text-white",
-  },
+/** The same three, at chip weight. */
+const CURATED_CHIP = "border-paper-200 text-paper-600 bg-paper-0";
+
+/** Resting style for a selectable tag chip. */
+export const TAG_CHIP_CLASSES: Record<TagCategory, string> = {
+  [TagCategory.type]: CURATED_CHIP,
+  [TagCategory.genre]: CURATED_CHIP,
+  [TagCategory.age]: CURATED_CHIP,
+  [TagCategory.custom]: "border-accent-200 text-accent-700 bg-paper-0",
 };
 
-/** Bar colours in the statistics breakdown. */
-export const TAG_BAR_CLASSES: Record<TagCategory, string> = {
-  [TagCategory.type]: "bg-blue-400",
-  [TagCategory.genre]: "bg-purple-400",
-  [TagCategory.age]: "bg-green-400",
-  [TagCategory.custom]: "bg-accent-400",
-};
+/**
+ * Selected, for every category.
+ *
+ * One string rather than four, because selection is the same state whatever the
+ * tag is about. It takes the accent fill and its paired foreground: the four
+ * this replaced were `bg-*-500 text-white`, and all four failed AA, the accent
+ * one at 3.22:1 and the green at 2.28:1. `accent-500` is the focus ring's step,
+ * not a fill step, and the chip was using it as one.
+ */
+export const TAG_CHIP_SELECTED =
+  "bg-accent-fill border-accent-fill text-on-accent";
 
 /** Group a flat tag list into its categories, in display order. */
 export function groupTagsByCategory(

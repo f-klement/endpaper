@@ -50,7 +50,7 @@ export default function TagEditor({
 
       <div className="flex flex-wrap gap-1.5 mb-2">
         {bookTags.length === 0 && !showPicker && (
-          <p className="text-xs text-paper-400 italic dark:text-paper-500">
+          <p className="text-xs text-paper-600 italic dark:text-paper-400">
             {t("book.noTags")}
           </p>
         )}

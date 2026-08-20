@@ -40,7 +40,7 @@ export default function DuplicatesPage() {
         </>
       ) : (
         <>
-          <p className="text-sm text-paper-500 leading-relaxed dark:text-paper-400">
+          <p className="text-sm text-paper-600 leading-relaxed dark:text-paper-400">
             {t("duplicates.explain")}
           </p>
           {duplicates.mergeError != null && (

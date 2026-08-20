@@ -49,7 +49,7 @@ export default function SelectionBar({
   const [showMore, setShowMore] = useState(false);
 
   return (
-    <div className="sticky bottom-0 z-40 -mx-4 px-4 py-3 bg-white/95 backdrop-blur-sm border-t border-paper-200 dark:bg-paper-900/95 dark:border-paper-700">
+    <div className="sticky bottom-0 z-40 -mx-4 px-4 py-3 bg-paper-0/95 backdrop-blur-sm border-t border-paper-200 dark:bg-paper-900/95 dark:border-paper-700">
       <div className="max-w-6xl mx-auto space-y-2">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-medium text-paper-700 dark:text-paper-200">
@@ -67,14 +67,14 @@ export default function SelectionBar({
               type="button"
               onClick={onClear}
               disabled={selectedCount === 0}
-              className="text-paper-500 hover:underline disabled:opacity-40 dark:text-paper-400"
+              className="text-paper-600 hover:underline disabled:opacity-40 dark:text-paper-400"
             >
               {t("common.clearSelection")}
             </button>
             <button
               type="button"
               onClick={onDone}
-              className="text-paper-500 hover:underline dark:text-paper-400"
+              className="text-paper-600 hover:underline dark:text-paper-400"
             >
               {t("common.done")}
             </button>
@@ -86,7 +86,7 @@ export default function SelectionBar({
             type="button"
             disabled={selectedCount === 0 || isApplying}
             onClick={() => onApply(OwnershipStatus.owned)}
-            className="flex-1 py-2.5 rounded-xl bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 disabled:opacity-40 transition-colors"
+            className="flex-1 py-2.5 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
           >
             {isApplying ? t("common.saving") : t("ownership.confirmSelected")}
           </button>
@@ -105,7 +105,7 @@ export default function SelectionBar({
             type="button"
             onClick={() => setShowMore((open) => !open)}
             aria-expanded={showMore}
-            className="inline-flex items-center gap-1.5 text-xs text-paper-500 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-100"
+            className="inline-flex items-center gap-1.5 text-xs text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-100"
           >
             {t("bulk.more")}
             <Icon
@@ -130,7 +130,7 @@ export default function SelectionBar({
                     event.target.value = "";
                   }
                 }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-white disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("bulk.setStatus")}</option>
                 {Object.values(ReadStatus).map((value) => (
@@ -150,7 +150,7 @@ export default function SelectionBar({
                     event.target.value = "";
                   }
                 }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-white disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("bulk.addTag")}</option>
                 {tags.map((tag) => (
@@ -185,7 +185,7 @@ export default function SelectionBar({
                     onRun(BulkAction.delete);
                   }
                 }}
-                className="flex-1 py-1.5 rounded-lg border border-bloom-300 text-xs font-medium text-bloom-600 hover:bg-bloom-100 disabled:opacity-40 dark:border-bloom-700 dark:text-bloom-300"
+                className="flex-1 py-1.5 rounded-lg border border-danger-300 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 dark:border-danger-700 dark:text-danger-300"
               >
                 {t("bulk.delete")}
               </button>
@@ -194,13 +194,13 @@ export default function SelectionBar({
         )}
 
         {error != null && (
-          <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
+          <p role="alert" className="text-xs text-danger-600 dark:text-danger-300">
             {errorText(error, t("common.somethingWentWrong"), t)}
           </p>
         )}
 
         {result && (
-          <p role="status" className="text-xs text-paper-500 dark:text-paper-400">
+          <p role="status" className="text-xs text-paper-600 dark:text-paper-400">
             {t("ownership.bulkResult", {
               updated: result.updated,
               unchanged: result.unchanged,

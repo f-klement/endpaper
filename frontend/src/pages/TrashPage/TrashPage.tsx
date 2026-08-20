@@ -55,7 +55,7 @@ export default function TrashPage() {
         />
       ) : (
         <>
-          <p className="mb-4 text-sm text-paper-500 dark:text-paper-400">
+          <p className="mb-4 text-sm text-paper-600 dark:text-paper-400">
             {t("trash.explain")}
           </p>
           <ul className="space-y-2">

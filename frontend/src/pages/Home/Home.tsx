@@ -55,7 +55,7 @@ export default function Home() {
               machinery for one call site. */}
           <Link
             to="/scan"
-            className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-medium bg-accent-600 text-white shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-700 hover:shadow-[var(--shadow-lift)] dark:bg-accent-500 dark:text-paper-950 dark:hover:bg-accent-400"
+            className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-medium bg-accent-fill text-on-accent shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-fill-hover hover:shadow-[var(--shadow-lift)]"
           >
             {t("library.scanButton")}
           </Link>

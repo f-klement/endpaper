@@ -21,7 +21,7 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-accent-50 to-white"
+      className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-accent-50 to-paper-0"
       style={
         background.url
           ? {
@@ -37,13 +37,13 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
           {/* A mark rather than a 60px emoji. This is the first screen anyone
               sees, so it is the one that decides whether the app looks made or
               assembled. */}
-          <span className="mx-auto mb-4 grid place-items-center w-14 h-14 rounded-2xl bg-accent-600 text-white shadow-[var(--shadow-lift)] dark:bg-accent-500 dark:text-paper-950">
+          <span className="mx-auto mb-4 grid place-items-center w-14 h-14 rounded-2xl bg-accent-fill text-on-accent shadow-[var(--shadow-lift)]">
             <Icon name="library" className="w-7 h-7" />
           </span>
           <h1 className="text-2xl font-semibold text-paper-900 dark:text-paper-100">
             {t("login.appName")}
           </h1>
-          <p className="text-paper-500 text-sm mt-1 dark:text-paper-400">
+          <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
             {t("login.tagline")}
           </p>
         </div>
@@ -58,13 +58,13 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
         />
 
         {form.mode === "register" && (
-          <p className="text-center text-xs text-paper-400 mt-4 dark:text-paper-500">
+          <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
             {t("login.firstAccountAdmin")}
           </p>
         )}
 
         {form.isDirectoryLogin && (
-          <p className="text-center text-xs text-paper-400 mt-4 dark:text-paper-500">
+          <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
             {t("login.directoryHint")}
           </p>
         )}

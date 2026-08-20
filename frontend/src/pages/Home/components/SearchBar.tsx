@@ -55,7 +55,7 @@ export default function SearchBar({ onSearch, placeholder }: SearchBarProps) {
 
   return (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-paper-400 dark:text-paper-500">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-paper-600 dark:text-paper-400">
         <Icon name="search" className="w-4 h-4" />
       </span>
       <input

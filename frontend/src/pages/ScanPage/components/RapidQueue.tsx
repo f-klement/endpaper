@@ -45,7 +45,7 @@ export default function RapidQueue({
   if (entries.length === 0) {
     if (banner) return banner;
     return (
-      <p className="text-sm text-paper-400 text-center mt-4 dark:text-paper-500">
+      <p className="text-sm text-paper-600 text-center mt-4 dark:text-paper-400">
         {t("rapid.nothingScanned")}
       </p>
     );
@@ -66,7 +66,7 @@ export default function RapidQueue({
           >
             <span className="min-w-0 flex-1 truncate">
               {entry.state === "looking-up" && (
-                <span className="text-paper-400 dark:text-paper-500">
+                <span className="text-paper-600 dark:text-paper-400">
                   {t("rapid.lookingUp")}
                 </span>
               )}
@@ -84,10 +84,10 @@ export default function RapidQueue({
                   be added" is unrecoverable: this says which six and why, and
                   they stay in the queue so they can be retried or dropped. */}
               {entry.state === "failed" && (
-                <span className="text-bloom-600 dark:text-bloom-300">
+                <span className="text-danger-600 dark:text-danger-300">
                   {entry.draft?.title || entry.isbn}
                   {entry.reason && (
-                    <span className="text-paper-500 dark:text-paper-400">
+                    <span className="text-paper-600 dark:text-paper-400">
                       {" "}
                       {entry.reason}
                     </span>
@@ -99,7 +99,7 @@ export default function RapidQueue({
               type="button"
               onClick={() => onRemove(entry.isbn)}
               aria-label={t("rapid.removeFromQueue", { isbn: entry.isbn })}
-              className="shrink-0 text-paper-400 hover:text-bloom-500 dark:text-paper-500"
+              className="shrink-0 text-paper-600 hover:text-danger-500 dark:text-paper-400"
             >
               ×
             </button>
@@ -120,7 +120,7 @@ export default function RapidQueue({
           type="button"
           onClick={onAddAll}
           disabled={isAdding}
-          className="flex-1 py-2.5 rounded-xl bg-accent-600 text-white text-sm font-semibold hover:bg-accent-700 disabled:opacity-50"
+          className="flex-1 py-2.5 rounded-xl bg-accent-fill text-on-accent text-sm font-semibold hover:bg-accent-fill-hover disabled:opacity-50"
         >
           {isAdding ? t("rapid.adding") : t("rapid.addAll")}
         </button>

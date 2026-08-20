@@ -49,7 +49,7 @@ export default function ErrorState({
   return (
     <div
       role="alert"
-      className="text-sm text-bloom-600 bg-bloom-100 border border-bloom-100 rounded-lg px-3 py-2 flex items-center justify-between gap-3 dark:text-bloom-300 dark:bg-bloom-700 dark:border-bloom-700"
+      className="text-sm text-danger-600 bg-danger-100 border border-danger-100 rounded-lg px-3 py-2 flex items-center justify-between gap-3 dark:text-danger-300 dark:bg-danger-700 dark:border-danger-700"
     >
       <span>
         {errorText(error, fallback ?? t("common.somethingWentWrong"), t)}
@@ -57,7 +57,7 @@ export default function ErrorState({
       {onRetry && (
         <button
           onClick={onRetry}
-          className="shrink-0 text-xs font-medium text-bloom-700 underline hover:no-underline"
+          className="shrink-0 text-xs font-medium text-danger-700 underline hover:no-underline"
         >
           {t("common.tryAgain")}
         </button>
