@@ -27,6 +27,7 @@ export const de: Messages = {
   "nav.switchAccount": "Konto wechseln",
   "nav.exportLibrary": "Bibliothek exportieren",
   "nav.logout": "Abmelden",
+  "nav.returnToMyAccount": "Zurück zu meinem Konto",
 
   // ── Allgemein ───────────────────────────────────────────────────────────
   "common.cancel": "Abbrechen",
@@ -309,6 +310,23 @@ export const de: Messages = {
   "settings.apiKeyHelp": "Wie bekomme ich einen Schlüssel?",
   "settings.apiKeyHint":
     "Lege einen in der Google Cloud Console an und aktiviere dafür die Books API. Der Schlüssel wird nach dem Speichern nicht mehr angezeigt.",
+
+  "settings.testAccounts": "Testkonten",
+  "settings.testAccountsHint":
+    "Konten mit einem Passwort, das du festlegst, um die Bibliothek so zu sehen, wie ein gewöhnliches Mitglied sie sieht. Sie sind nie Administratoren und werden auf der Anmeldeseite nicht angeboten.",
+  "settings.testAccountsReturnProxy":
+    "Zum Zurückkehren im Menü den Eintrag Zurück zu meinem Konto wählen.",
+  "settings.testAccountsReturnToken":
+    "Zum Zurückkehren melde dich wieder mit deinem eigenen Konto an.",
+  "settings.testAccountsEmpty": "Noch keine Testkonten.",
+  "settings.testAccountsCreate": "Testkonto anlegen",
+  "settings.testAccountsCreateFailed": "Das Konto konnte nicht angelegt werden.",
+  "settings.testAccountsPasswordPlaceholder": "Passwort, mindestens 8 Zeichen",
+  "settings.testAccountsSwitch": "Wechseln",
+  "settings.testAccountsSwitchTo": "Zu {name} wechseln",
+  "settings.testAccountsSwitchFailed":
+    "Zu diesem Konto konnte nicht gewechselt werden.",
+  "settings.testAccountsPasswordFor": "Passwort für {name}",
 
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Goodreads Links anzeigen",

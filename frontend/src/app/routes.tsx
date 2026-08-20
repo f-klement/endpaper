@@ -1,6 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 
-import type { UserOut } from "../api/generated/model";
+import type { AuthMode, UserOut } from "../api/generated/model";
 import BookDetail from "../pages/BookDetail";
 import DuplicatesPage from "../pages/DuplicatesPage";
 import { NotFoundPage } from "../pages/errors";
@@ -15,6 +15,9 @@ import TrashPage from "../pages/TrashPage";
 
 interface AppRoutesProps {
   user: UserOut;
+  /** Settings says what returning from a switched session costs in this mode. */
+  mode: AuthMode;
+  /** Also how a switch lands: it is a sign-in on somebody else's account. */
   onSignIn: (user: UserOut, token: string) => void;
 }
 
@@ -24,7 +27,7 @@ interface AppRoutesProps {
  * Every import here comes from a page's `index.ts`, never from a file inside
  * one. That barrel is the page's public surface.
  */
-export default function AppRoutes({ user, onSignIn }: AppRoutesProps) {
+export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
@@ -34,7 +37,10 @@ export default function AppRoutes({ user, onSignIn }: AppRoutesProps) {
       <Route path="/series" element={<SeriesPage />} />
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
-      <Route path="/settings" element={<SettingsPage />} />
+      <Route
+        path="/settings"
+        element={<SettingsPage mode={mode} onSignIn={onSignIn} />}
+      />
       <Route path="/trash" element={<TrashPage />} />
       {/* Reachable while signed in so "Switch Account" can show the form
           without ending the current session first. */}

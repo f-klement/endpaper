@@ -43,10 +43,15 @@ describe("AppearanceSync", () => {
     });
     renderWithProviders(<Probe />);
 
-    await waitFor(() =>
-      expect(screen.getByTestId("palette")).toHaveTextContent("gruvbox"),
-    );
-    expect(document.documentElement.dataset.theme).toBe("gruvbox");
+    // Both inside the wait, and that is not tidiness. The testid is rendered
+    // state; `data-theme` is written by a passive effect in ThemeProvider, so
+    // it lands a commit later and is not observable in the tick the render
+    // settles. Asserted outside, this file failed roughly one full-suite run
+    // in three and passed 10/10 in isolation.
+    await waitFor(() => {
+      expect(screen.getByTestId("palette")).toHaveTextContent("gruvbox");
+      expect(document.documentElement.dataset.theme).toBe("gruvbox");
+    });
   });
 
   it("caches it, so the next boot paints it before the server answers", async () => {
@@ -91,6 +96,23 @@ describe("AppearanceSync", () => {
       });
     });
   });
+
+  // ── Three tests that fail open ─────────────────────────────────────────────
+  //
+  // This one, "does not push this device's cache over a stored choice" and
+  // "leaves the look alone when the request fails" all wait for a barrier and
+  // then assert an **absence**: that no PUT was made. A regression does not
+  // show up as a flake, it shows up as a silent pass, which is the worse of
+  // the two failure modes and the reason this is written down.
+  //
+  // Nor is the barrier reliably downstream of the push. The PUT rides react
+  // query's async path, so a regression can land a tick after the assertion
+  // has already read `lastCall`, whatever the barrier waited for.
+  //
+  // Left as they are rather than repaired here: they were written before this
+  // round and none of them is what this round changed. Anyone tightening them
+  // wants a positive assertion (the exact call that *should* have happened) or
+  // a flushed macrotask before the absence is read.
 
   it("does not push the value it was just given", async () => {
     // The two directions would otherwise chase each other: adopting the

@@ -25,6 +25,9 @@ export const en = {
   "nav.switchAccount": "Switch Account",
   "nav.exportLibrary": "Export Library",
   "nav.logout": "Logout",
+  // Not "Logout". Under proxy auth nothing here signs anybody out: it drops
+  // the test account session, and the upstream names the admin again.
+  "nav.returnToMyAccount": "Return to my account",
 
   // ── Common ──────────────────────────────────────────────────────────────
   "common.cancel": "Cancel",
@@ -303,6 +306,22 @@ export const en = {
   "settings.apiKeyHelp": "How do I get a key?",
   "settings.apiKeyHint":
     "Create one in the Google Cloud console and enable the Books API for it. The key is never shown again after saving.",
+
+  "settings.testAccounts": "Test accounts",
+  "settings.testAccountsHint":
+    "Accounts with a password you set, for seeing the library the way an ordinary member sees it. They are never admins, and they are not offered at the login screen.",
+  "settings.testAccountsReturnProxy":
+    "To come back, choose Return to my account in the menu.",
+  "settings.testAccountsReturnToken":
+    "To come back, sign in again with your own account.",
+  "settings.testAccountsEmpty": "No test accounts yet.",
+  "settings.testAccountsCreate": "Create test account",
+  "settings.testAccountsCreateFailed": "Could not create that account.",
+  "settings.testAccountsPasswordPlaceholder": "Password, at least 8 characters",
+  "settings.testAccountsSwitch": "Switch",
+  "settings.testAccountsSwitchTo": "Switch to {name}",
+  "settings.testAccountsSwitchFailed": "Could not switch to that account.",
+  "settings.testAccountsPasswordFor": "Password for {name}",
 
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Show Goodreads lookup links",

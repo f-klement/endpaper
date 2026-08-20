@@ -36,8 +36,15 @@ export default function App({ queryClient }: AppProps) {
 /** Inside the router, so pages and NavBar can use routing hooks. */
 function AppShell() {
   const { t } = useTranslation();
-  const { user, mode, signIn, signOut, isResolving, proxyUnidentified } =
-    useSession();
+  const {
+    user,
+    mode,
+    signIn,
+    signOut,
+    isResolving,
+    proxyUnidentified,
+    isSwitched,
+  } = useSession();
 
   // Under proxy auth the identity arrives from the server, so there is a
   // moment before we know who this is. Rendering the login form during it
@@ -69,9 +76,14 @@ function AppShell() {
           page sits underneath it. Imported rather than restated: see
           NavBar.BAR_OFFSET. */}
       <div className={BAR_OFFSET}>
-        <AppRoutes user={user} onSignIn={signIn} />
+        <AppRoutes user={user} mode={mode} onSignIn={signIn} />
       </div>
-      <NavBar user={user} mode={mode} onSignOut={signOut} />
+      <NavBar
+        user={user}
+        mode={mode}
+        isSwitched={isSwitched}
+        onSignOut={signOut}
+      />
     </>
   );
 }

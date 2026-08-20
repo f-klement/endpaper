@@ -6,11 +6,21 @@ behaviour under test belongs to the schema.
 
 import ast
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from models import Book, Loan, Note, Tag, User, UserBook
+from models import (
+    Book,
+    Loan,
+    Note,
+    Tag,
+    User,
+    UserBook,
+    is_switch_target,
+    switch_targets,
+)
 
 
 @pytest.fixture
@@ -42,6 +52,110 @@ class TestUser:
 
     def test_created_at_is_populated_by_the_database(self, db, user):
         assert user.created_at is not None
+
+    def test_is_test_account_defaults_to_false(self, db, user):
+        """Nothing becomes switchable by being created the ordinary way."""
+        assert user.is_test_account is False
+
+
+class TestIsSwitchTarget:
+    """What an admin may exchange a password for a session on.
+
+    The predicate the whole feature turns on. A directory-backed account must
+    never satisfy it in any mode: an admin who could mint a session for an LDAP
+    or proxy member would be able to read that member's private books.
+    """
+
+    @staticmethod
+    def _stored(db, **fields) -> User:
+        """A committed row, because `auth_source` is a column default: on an
+        object that has never been inserted it is still None, and the
+        predicate would be answering about a row that does not exist."""
+        account = User(**fields)
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+        return account
+
+    def test_an_admin_created_test_account_is_one(self, db):
+        account = self._stored(
+            db, username="tester", password_hash="x", is_test_account=True
+        )
+        assert is_switch_target(account) is True
+
+    def test_nobody_is_not(self):
+        assert is_switch_target(None) is False
+
+    def test_an_ordinary_local_account_is_not(self, db, user):
+        """It belongs to a real person, and this app is not asked to hold the
+        opinion that an admin knows their password."""
+        assert is_switch_target(user) is False
+
+    def test_a_directory_account_is_not_even_when_flagged(self, db):
+        """The flag alone does not decide it. A row that carries the flag and
+        a directory source is not a shape this app writes, so if one exists it
+        was hand-edited, and the answer is still no."""
+        account = self._stored(
+            db,
+            username="tester",
+            password_hash="x",
+            is_test_account=True,
+            auth_source="ldap",
+        )
+        assert is_switch_target(account) is False
+
+    def test_a_test_account_with_no_password_is_not(self, db):
+        """There would be nothing to check, which is the whole guarantee."""
+        account = self._stored(
+            db, username="tester", password_hash=None, is_test_account=True
+        )
+        assert is_switch_target(account) is False
+
+    def test_an_admin_is_not_even_when_flagged(self, db):
+        """Nothing writes this row today. If anything ever does, a token that
+        overrides the proxy's own header would be an admin session that never
+        passes the portal again, for as long as the token lives."""
+        account = self._stored(
+            db,
+            username="tester",
+            password_hash="x",
+            is_test_account=True,
+            is_admin=True,
+        )
+        assert is_switch_target(account) is False
+
+    def test_the_query_predicate_selects_the_same_rows(self, db):
+        """Two spellings of one rule, in two languages, which is a thing that
+        drifts. Neither can be dropped, so this is what keeps them equal."""
+        # Annotated because the values are of mixed type, which mypy otherwise
+        # widens to `object` and then refuses to unpack.
+        rows: list[dict[str, Any]] = [
+            {"username": "target", "password_hash": "x", "is_test_account": True},
+            {"username": "member", "password_hash": "x"},
+            {"username": "no-hash", "password_hash": None, "is_test_account": True},
+            {"username": "empty-hash", "password_hash": "", "is_test_account": True},
+            {
+                "username": "directory",
+                "password_hash": "x",
+                "is_test_account": True,
+                "auth_source": "ldap",
+            },
+            {
+                "username": "flagged-admin",
+                "password_hash": "x",
+                "is_test_account": True,
+                "is_admin": True,
+            },
+        ]
+        for fields in rows:
+            self._stored(db, **fields)
+
+        by_query = {user.username for user in db.query(User).filter(switch_targets())}
+        in_python = {
+            user.username for user in db.query(User) if is_switch_target(user)
+        }
+
+        assert by_query == in_python == {"target"}
 
 
 class TestBook:

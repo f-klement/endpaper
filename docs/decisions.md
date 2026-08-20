@@ -97,6 +97,45 @@ the migration exists at all: nothing rewrites an old row, so nothing else would 
 one. `data:` is still listed in `img-src`, so a legacy row carrying one does not merely fail
 to load.
 
+### A test account is a column, not "auth_source is local"
+
+An admin can create a local account with a password to see the library the way an
+ordinary member sees it, and can exchange that password for a session on it. Two things
+decide whether an account is one of those, and both hang off `users.is_test_account`
+rather than off `auth_source`.
+
+**What may be switched into.** `models.is_switch_target` is the rule, in one function,
+applied where a switch is granted and again where a token is allowed to override a proxy
+header. A directory-backed account is never a target in any mode: an admin who could mint
+a session for an LDAP or proxy member could read that member's private books, and per-book
+privacy is the single promise the data model makes.
+
+A local account from before a deployment moved to a directory is also `auth_source =
+local`, belongs to a real person, and must not be reachable this way. Under `ldap` and
+`proxy` a local password is not an authentication path at all (`/auth/login` refuses), and
+a switch that accepted any local row would quietly revive it. Hence the column: it says
+"an admin made this for testing", which is the thing being asked about.
+
+**What a directory identity may adopt.** `upsert_directory_user` matches on **username**,
+so a directory identity named like a test account would inherit its row: `auth_source`
+flips, and the test account's books, loans and notes become that member's. That is the
+collision this feature would have introduced, and never adopting is the rule.
+
+What to do instead is the part with no free answer. Reserving a prefix for test accounts
+was considered and is not one: a naming convention has nothing enforcing it, and it does
+not close the collision either, since nothing stops a directory identity being named with
+the prefix. Whatever the names look like, the backstop is still needed.
+
+Refusing the directory sign-in reads as the stricter choice and is the one that hurts: the real member is locked out of their
+own library (under proxy, every request 401s), and this app has no endpoint that renames
+or deletes an account, so the remedy is a hand-edited database row. So the test account is
+renamed aside, `alice` becoming `alice-2`, at WARNING and naming both. It keeps its id,
+its data and its flag, so a session already switched into it keeps working and it is still
+a switch target under the new name. The disposable half of the collision is the half that
+moves.
+
+A test account is never an admin, and nothing in this app grants that flag afterwards.
+
 ### The rate limiter is hand-rolled
 
 Not slowapi. The useful key is the *username being attempted*, and a middleware-style
@@ -275,6 +314,11 @@ Treating a 401 from `/auth/login` as an expired session also cleared the stored 
 replaced "Incorrect username or password" with "Your session has expired": wrong, and
 nonsense for someone who was never signed in.
 
+`/auth/switch` is on that list too, and is the sharpest of the three because its caller is
+already signed in: an admin who mistypes a test account's password would be signed out of
+their own session and sent to the login screen, having changed nothing. Measured on the
+first run of the settings test, not predicted.
+
 ### The multipart path does not set `Content-Type`
 
 The browser must set it itself to include the multipart boundary. Adding it by hand
@@ -378,16 +422,52 @@ An inline blocking `<script>` would remove the reconciliation entirely and is no
 `middleware.py` sets `script-src 'self'` with no nonce, so it would need a per-build hash
 and the security middleware would have to be generated from the frontend bundle.
 
-### `useSession` clears the whole query cache on sign in as well as sign out
+### `useSession` clears the query cache on a change of account id, not per call site
 
-Two lines that look like belt and braces and are neither. The client outlives an identity
-change, and "Switch account" is a router link rather than a navigation, so signing in as
-somebody else with the previous member's cache still warm is a normal thing to do. The
-cached listings are member-scoped by `visible_to()`, so they carry private books. See
-[security.md](security.md).
+The client outlives an identity change, the cached listings are member-scoped by
+`visible_to()`, so they carry private books, and none of the ways the identity changes
+reloads the page. See [security.md](security.md).
 
-Clearing on `signIn` and not only on `signOut` is the half that is easy to drop: signing
-out is not the only way the person at the keyboard changes.
+This used to be a `queryClient.clear()` in `signIn` and another in `signOut`, which was
+two of the four ways it changes. "Switch account" is a router link rather than a
+navigation; switching into a test account is a button in Settings; and under proxy auth
+the identity can change **with nothing happening in this app at all**, which is the case
+no call site could ever have covered. So the clear is an effect keyed on `user?.id`, and a
+path added later gets it without knowing it exists.
+
+Two details that are not caution and cannot be simplified away:
+
+- **Only a change between two known accounts.** `null` is both "nobody" and "not known
+  yet", and the identity is itself two cached queries, so clearing produces a null.
+  Treating that as a change clears again, which produces another null: an app that
+  refetches for as long as it is open. Reproduced by the proxy test with a stale
+  `localStorage` entry.
+- **`signOut` still clears for itself**, because it is the one known-account-becomes-nobody
+  that matters and it is deliberate, so it can say so where the effect cannot tell.
+
+`tests/houseRules.test.ts` no longer counts clears against session writes. That question
+was the right one while three call sites each had to remember; against one effect it asks
+for a redundant call per writer. It now asserts that nothing outside `pages/hooks.ts` and
+`api/mutator.ts` writes the session at all, which is what keeps every identity change in
+front of the effect watching it.
+
+### Under proxy auth a token beats the header, but only a switch token
+
+`AUTH_MODE=proxy` used to ignore tokens entirely. It cannot any more: an admin switching
+into a test account needs a session that wins over the header until it is discarded.
+
+Accepting any valid token there would also revive tokens minted before a deployment moved
+to proxy auth, and those name real members. So `auth._switch_session` accepts one only
+when the account it names is still a switch target, which is narrow by construction rather
+than by a claim somebody has to remember to set, and narrows further the moment the flag
+comes off the row. An expired or forged token falls back to the header rather than
+failing: the header is the identity the deployment already authenticated, and failing
+closed would strand whoever holds a stale token behind an error page with no control on
+screen to clear it.
+
+The cover cookie follows the same rule on the cover route alone, because an `<img>` sends
+no Authorization header and a switched session would otherwise show the test account's
+library with a hole where every cover only it can see should be.
 
 ### Tailwind 4 has no config file
 

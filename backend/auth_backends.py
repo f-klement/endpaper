@@ -51,6 +51,58 @@ LDAP_TIMEOUT_SECONDS = 5
 # ── Shadow accounts ───────────────────────────────────────────────────────────
 
 
+def _free_username(db: Session, base: str) -> str:
+    """`base` with the lowest numeric suffix nobody is using.
+
+    Terminates: every candidate it rejects is a distinct row that already
+    exists, and there are finitely many of those. Truncated to fit
+    `users.username`, which is `String(50)`, so a maximum-length name does not
+    come back too long to store.
+    """
+    suffix = 2
+    while True:
+        candidate = f"{base[: 49 - len(str(suffix))]}-{suffix}"
+        if db.query(User).filter(User.username == candidate).first() is None:
+            return candidate
+        suffix += 1
+
+
+def _move_test_account_aside(db: Session, user: User, source: AuthMode) -> None:
+    """Free a test account's username for the directory identity of that name.
+
+    `upsert_directory_user` matches on **username**, so without this a
+    directory identity named like an admin-created test account adopts its row:
+    `auth_source` flips, and the test account's books, loans and notes become
+    that member's. Never adopting is the rule; the question is what to do
+    instead, and none of the answers is free.
+
+    Renaming, rather than refusing the sign-in. Refusing reads as the stricter
+    choice and is the one that hurts: under proxy auth every request the real
+    member makes would 401, this app has no endpoint that renames or deletes an
+    account, so the remedy is a hand-edited database row. The test account is
+    the disposable half of the collision, so it is the half that moves. It
+    keeps its id, its data and its flag, so a session already switched into it
+    keeps working and it is still a switch target under its new name.
+
+    Loud, because a username changing without anybody asking is exactly the
+    kind of thing that has to be findable afterwards.
+
+    The rename is flushed on its own, before the caller inserts the new row.
+    Both in one flush puts them in a single statement batch where the insert
+    can land before the update and trip the unique index on `username`.
+    """
+    taken = user.username
+    user.username = _free_username(db, taken)
+    logger.warning(
+        "Renamed the test account %r to %r: a %s identity of that name signed in, "
+        "and a test account is never adopted by a directory",
+        taken,
+        user.username,
+        source.value,
+    )
+    db.flush()
+
+
 def upsert_directory_user(
     db: Session, username: str, *, is_admin: bool, source: AuthMode
 ) -> User:
@@ -77,8 +129,25 @@ def upsert_directory_user(
     carried no group. Demotion still works: it needs the admin group to be
     configured, so it is a directory decision rather than an accident of
     configuration.
+
+    **A test account is never adopted.** The match is on username, so an
+    admin-created test account named like a directory identity would otherwise
+    hand over its books, loans and notes to whoever signs in with that name.
+    It is renamed aside instead: see `_move_test_account_aside`.
     """
     user = db.query(User).filter(User.username == username).first()
+
+    # Never adopt a test account. See `_move_test_account_aside`.
+    #
+    # The flag alone, deliberately, and NOT `is_switch_target`: this asks "did
+    # an admin make this row", which is the question that decides whether its
+    # books may change hands, and the answer must stay yes for a flagged row
+    # that has stopped being switchable (a cleared hash, an edited
+    # `auth_source`). Narrowing this to the switchable ones would quietly
+    # re-open adoption for exactly the rows nobody is watching.
+    if user is not None and user.is_test_account:
+        _move_test_account_aside(db, user, source)
+        user = None
 
     if user is None and db.query(User).count() == 0:
         # Same rule registration uses, for the same reason.

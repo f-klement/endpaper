@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Locale, type SettingsUpdate } from "../../api/generated/model";
+import {
+  AuthMode,
+  Locale,
+  type SettingsUpdate,
+  type UserOut,
+} from "../../api/generated/model";
 import { ErrorState, HelpButton, Spinner } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { useTheme, type ThemePreference } from "../../theme";
@@ -9,8 +14,15 @@ import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BackupSection from "./components/BackupSection";
 import LibraryImport from "./components/LibraryImport";
 import SettingsSection from "./components/SettingsSection";
+import TestAccounts from "./components/TestAccounts";
 import ToggleField from "./components/ToggleField";
-import { useBackup, useLibraryImport, useSettings } from "./hooks";
+import {
+  useBackup,
+  useLibraryImport,
+  useSettings,
+  useSwitchToTestAccount,
+  useTestAccounts,
+} from "./hooks";
 import { Icon } from "../../components";
 import { Page, PageHeader } from "../components";
 
@@ -27,7 +39,17 @@ const LANGUAGES = [
   { value: Locale.de, label: "settings.language.de" },
 ] as const;
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+  /** Which sentence the test accounts section uses to say how to get back. */
+  mode: AuthMode;
+  /**
+   * A switch lands here: it is a sign-in on another account, so it goes
+   * through the same handler the login form uses.
+   */
+  onSignIn: (user: UserOut, token: string) => void;
+}
+
+export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
   const { t, locale, setLocale } = useTranslation();
   const { appearance, setAppearance, wallpaperOff } = useTheme();
   const navigate = useNavigate();
@@ -43,6 +65,13 @@ export default function SettingsPage() {
   } = useSettings();
   const libraryImport = useLibraryImport();
   const backup = useBackup();
+  // `settings` answering at all is what says this account is an admin: the
+  // endpoint is admin only and a 403 is reported as `isForbidden`. Asking for
+  // the test accounts on that same condition keeps every member off a route
+  // that would only refuse them.
+  const isAdmin = settings !== undefined;
+  const testAccounts = useTestAccounts(isAdmin);
+  const switching = useSwitchToTestAccount(onSignIn);
 
   // The API key is the one field the server never sends back, so it cannot be
   // a controlled mirror of `settings`. It is a write-only box: empty means
@@ -295,6 +324,25 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
+          </SettingsSection>
+
+          {/* Admin only, and inside this block for that reason. Under a
+              directory this is the only way an admin can see what an ordinary
+              member sees: registration is refused and nobody's directory
+              password is ours to type. */}
+          <SettingsSection title={t("settings.testAccounts")} icon="user">
+            <TestAccounts
+              accounts={testAccounts.accounts}
+              isLoading={testAccounts.isLoading}
+              error={testAccounts.error}
+              onCreate={testAccounts.create}
+              isCreating={testAccounts.isCreating}
+              createError={testAccounts.createError}
+              onSwitch={switching.switchTo}
+              isSwitching={switching.isSwitching}
+              switchError={switching.switchError}
+              mode={mode}
+            />
           </SettingsSection>
 
           <BackupSection

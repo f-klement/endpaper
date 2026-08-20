@@ -1,12 +1,12 @@
 /** Tests for src/pages/hooks.ts: the cross-page session hook. */
 
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AuthMode } from "../../src/api/generated/model";
+import { AuthMode, type UserOut } from "../../src/api/generated/model";
 import { readStoredUser, useGoBack, useSession } from "../../src/pages/hooks";
 import { makeUser, resetIds } from "../factories";
 import { createTestQueryClient, mockApi, type MockApi } from "../utils";
@@ -20,6 +20,15 @@ beforeEach(() => {
 
 function renderSession() {
   const client = createTestQueryClient();
+  // `gcTime: Infinity`, against the shared helper's 0, and it is what makes
+  // the cache assertions in this file mean anything. Every one of them is a
+  // `setQueryData` on a key with no observer, which at `gcTime: 0` is
+  // collected on the next tick: `await waitFor(... toBeUndefined())` then
+  // measures garbage collection and passes with the clearing effect deleted.
+  // Measured, not suspected: four tests here passed without it.
+  client.setDefaultOptions({
+    queries: { retry: false, staleTime: 0, gcTime: Infinity },
+  });
   return {
     ...renderHook(() => useSession(), {
       wrapper: ({ children }: { children: ReactNode }) =>
@@ -144,18 +153,34 @@ describe("useSession in local mode", () => {
     expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
   });
 
-  it("drops the cache when signing in", async () => {
+  it("drops the cache when somebody else signs in over the top", async () => {
     // Signing out is not the only way the identity changes: "Switch account"
     // is a router link to /login, deliberately reachable while signed in, so
     // the next sign-in happens with the previous member's cache still warm.
     const { result, client } = renderSession();
     await waitFor(() => expect(result.current.isResolving).toBe(false));
+    act(() => result.current.signIn(makeUser({ username: "kim" }), "t1"));
     client.setQueryData(BOOKS_KEY, BOOKS);
+
+    act(() => result.current.signIn(makeUser({ username: "sam" }), "t2"));
+
+    await waitFor(() => expect(client.getQueryData(BOOKS_KEY)).toBeUndefined());
+  });
+
+  it("keeps a cache the same member left behind", async () => {
+    // Not thrift: it is that "nobody" and "not known yet" are the same value,
+    // and the identity is itself cached, so clearing on every null is an app
+    // that refetches for as long as it is open. Only a change between two
+    // known accounts is an identity change.
+    const kim = makeUser({ username: "kim" });
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+    act(() => result.current.signIn(kim, "t1"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+
+    act(() => result.current.signIn(kim, "t2"));
+
     expect(client.getQueryData(BOOKS_KEY)).toEqual(BOOKS);
-
-    act(() => result.current.signIn(makeUser({ username: "someone else" }), "t"));
-
-    expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
   });
 
   it("never asks the server who the caller is", async () => {
@@ -190,6 +215,9 @@ describe("useSession in ldap mode", () => {
 
 describe("useSession in proxy mode", () => {
   beforeEach(() => serverMode(AuthMode.proxy, false));
+
+  /** Who /auth/me answers with once a held reply is released. */
+  let heldAnswer: UserOut = makeUser({ username: "kim" });
 
   it("reads the identity from the server rather than storage", async () => {
     // There is no token in this mode: an upstream authenticated the request
@@ -232,6 +260,254 @@ describe("useSession in proxy mode", () => {
     api.on("/auth/me", { body: makeUser() });
     const { result } = renderSession();
     expect(result.current.isResolving).toBe(true);
+  });
+
+  it("settles on one identity rather than asking again forever", async () => {
+    // The stale entry above is a **different person** from the one the
+    // upstream names, so treating "not known yet" as an identity change made
+    // the app clear the cache, refetch the identity, and clear it again. The
+    // config request is the one to count: clearing the cache drops it too.
+    localStorage.setItem("user", JSON.stringify(makeUser({ username: "stale" })));
+    api.on("/auth/me", { body: makeUser({ username: "kim" }) });
+
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+    const settled = api.calls.filter((call) => call.url.includes("/auth/config")).length;
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+
+    expect(settled).toBe(1);
+    expect(
+      api.calls.filter((call) => call.url.includes("/auth/config")).length,
+    ).toBe(1);
+    // And nothing is offered a way back: there is a stored account, but the
+    // server is not honouring any token for it.
+    expect(result.current.isSwitched).toBe(false);
+  });
+
+  it("drops the cache when the identity changes with nothing happening here", async () => {
+    // The upstream owns the session in this mode, so the person at the
+    // keyboard can change without a single click in this app: no signIn, no
+    // signOut, and the whole cache still belonging to whoever was here.
+    api.on("/auth/me", { body: makeUser({ username: "kim" }) });
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+
+    api.on("/auth/me", { body: makeUser({ username: "sam" }) });
+    await act(async () => {
+      await client.refetchQueries();
+    });
+
+    await waitFor(() => expect(result.current.user?.username).toBe("sam"));
+    expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
+  });
+
+  /**
+   * Put the identity back to not knowing, and hold it there.
+   *
+   * `reset`, not `invalidate`: an invalidation keeps the previous answer on
+   * screen while it refetches, which is the opposite of the state under test.
+   * The reply is held open because otherwise the whole thing settles inside
+   * one `act`, React never renders the gap, and a test written against it
+   * passes whatever the effect does. Measured: without the hold, both tests
+   * below passed with the guard they exist for deleted.
+   */
+  async function forgetTheIdentity(client: QueryClient, release: Promise<void>) {
+    api.on("/auth/me", async () => {
+      await release;
+      return { body: heldAnswer };
+    });
+    await act(async () => {
+      void client.resetQueries({
+        predicate: (query) => JSON.stringify(query.queryKey).includes("/auth/me"),
+      });
+    });
+  }
+
+  it("remembers who was here across a moment of not knowing", async () => {
+    // The identity is itself a cached query, so it can go away and come back
+    // as somebody else while member-scoped data sits in the cache untouched.
+    // The effect keys on the last account actually **known**, not the last
+    // value seen: if a null in between overwrote that memory, the change from
+    // kim to sam would look like a first sign-in and clear nothing.
+    api.on("/auth/me", { body: makeUser({ id: 1, username: "kim" }) });
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+    const clears = vi.spyOn(client, "clear");
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    heldAnswer = makeUser({ id: 2, username: "sam" });
+    await forgetTheIdentity(client, held);
+
+    // The gap itself: nobody is known, and nothing has been thrown away.
+    await waitFor(() => expect(result.current.user).toBeNull());
+    expect(clears).not.toHaveBeenCalled();
+    expect(client.getQueryData(BOOKS_KEY)).toEqual(BOOKS);
+
+    await act(async () => {
+      release();
+      await held;
+    });
+
+    await waitFor(() => expect(result.current.user?.username).toBe("sam"));
+    expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
+    // Once. Clearing on the way to null as well would drop the identity
+    // queries too, so every moment of not knowing would refetch the thing that
+    // produced it.
+    expect(clears).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat a moment of not knowing as somebody leaving", async () => {
+    // The same person, whose identity query happened to be refetched from
+    // nothing. Clearing on the way to null would drop their whole shelf, and
+    // the identity queries with it, for an answer that came back identical.
+    api.on("/auth/me", { body: makeUser({ id: 1, username: "kim" }) });
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+    const clears = vi.spyOn(client, "clear");
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    heldAnswer = makeUser({ id: 1, username: "kim" });
+    await forgetTheIdentity(client, held);
+    await waitFor(() => expect(result.current.user).toBeNull());
+
+    await act(async () => {
+      release();
+      await held;
+    });
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+
+    expect(clears).not.toHaveBeenCalled();
+    expect(client.getQueryData(BOOKS_KEY)).toEqual(BOOKS);
+  });
+
+  it("reports no switch when the identity is simply the proxy's", async () => {
+    api.on("/auth/me", { body: makeUser({ username: "kim" }) });
+    const { result } = renderSession();
+
+    await waitFor(() => expect(result.current.user?.username).toBe("kim"));
+    expect(result.current.isSwitched).toBe(false);
+  });
+});
+
+describe("useSession switched into a test account under proxy", () => {
+  /**
+   * The precedence this mode did not have before: the proxy header is the
+   * default identity, a switch token overrides it, and clearing the token
+   * restores it. The server decides all three; what is asserted here is that
+   * this hook asks it again at each of those moments, because its answer
+   * depends on a token it does not send until now.
+   */
+  beforeEach(() => serverMode(AuthMode.proxy, false));
+
+  // Fixed ids, because the account the server names and the account stored
+  // beside the token are the same row, and `isSwitched` compares them. A fresh
+  // id per call would make every one of these tests a different pair of people.
+  const admin = () => makeUser({ id: 1, username: "boss", is_admin: true });
+  const tester = () => makeUser({ id: 2, username: "tester" });
+
+  it("takes the switched identity from the server, not from the token", async () => {
+    api.on("/auth/me", { body: admin() });
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("boss"));
+
+    api.on("/auth/me", { body: tester() });
+    act(() => result.current.signIn(tester(), "switch-token"));
+
+    await waitFor(() => expect(result.current.user?.username).toBe("tester"));
+    expect(localStorage.getItem("token")).toBe("switch-token");
+  });
+
+  it("drops the previous member's cache on the way in", async () => {
+    api.on("/auth/me", { body: admin() });
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("boss"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+
+    api.on("/auth/me", { body: tester() });
+    act(() => result.current.signIn(tester(), "switch-token"));
+
+    await waitFor(() => expect(client.getQueryData(BOOKS_KEY)).toBeUndefined());
+  });
+
+  it("offers the way back, and only while switched", async () => {
+    api.on("/auth/me", { body: admin() });
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("boss"));
+    expect(result.current.isSwitched).toBe(false);
+
+    api.on("/auth/me", { body: tester() });
+    act(() => result.current.signIn(tester(), "switch-token"));
+
+    await waitFor(() => expect(result.current.isSwitched).toBe(true));
+  });
+
+  it("reports no switch once the server stops honouring the token", async () => {
+    // Expiry, or the flag coming off the row: either way the server falls back
+    // to the header, and the app is the admin again with a dead token still in
+    // localStorage. Offering "Return to my account" then is an offer to
+    // somebody who already is themselves.
+    api.on("/auth/me", { body: admin() });
+    localStorage.setItem("token", "expired-switch-token");
+    localStorage.setItem("user", JSON.stringify(tester()));
+
+    const { result } = renderSession();
+
+    await waitFor(() => expect(result.current.user?.username).toBe("boss"));
+    expect(result.current.isSwitched).toBe(false);
+  });
+
+  it("returns to the proxy identity when the token goes", async () => {
+    api.on("/auth/me", { body: tester() });
+    localStorage.setItem("token", "switch-token");
+    localStorage.setItem("user", JSON.stringify(tester()));
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("tester"));
+
+    api.on("/auth/me", { body: admin() });
+    act(() => result.current.signOut());
+
+    await waitFor(() => expect(result.current.user?.username).toBe("boss"));
+    expect(result.current.isSwitched).toBe(false);
+    expect(localStorage.getItem("token")).toBeNull();
+  });
+
+  it("tells the server to drop the cover cookie on the way back", async () => {
+    // The switch set one, scoped to /covers and naming the test account. It is
+    // the server's and outlives the tab, so returning has to clear it.
+    api.on("/auth/me", { body: tester() });
+    localStorage.setItem("token", "switch-token");
+    localStorage.setItem("user", JSON.stringify(tester()));
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("tester"));
+
+    api.on("/auth/me", { body: admin() });
+    act(() => result.current.signOut());
+
+    await waitFor(() =>
+      expect(api.lastCall("/auth/logout", "POST")).toBeDefined(),
+    );
+  });
+
+  it("drops the test account's cache on the way back", async () => {
+    // This one pins `signOut`'s own clear rather than the identity effect:
+    // under proxy the way back **is** signOut, and it clears before the server
+    // has said who the caller is now.
+    api.on("/auth/me", { body: tester() });
+    localStorage.setItem("token", "switch-token");
+    localStorage.setItem("user", JSON.stringify(tester()));
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.user?.username).toBe("tester"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+
+    api.on("/auth/me", { body: admin() });
+    act(() => result.current.signOut());
+
+    await waitFor(() => expect(client.getQueryData(BOOKS_KEY)).toBeUndefined());
   });
 });
 

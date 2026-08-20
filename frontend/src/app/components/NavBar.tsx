@@ -62,6 +62,15 @@ interface NavBarProps {
    * session, so the menu offers neither sign out nor switch account.
    */
   mode: AuthMode;
+  /**
+   * A switch into a test account, which this menu is the way out of.
+   *
+   * Only ever true under proxy, and that is exactly where it is needed: a test
+   * account is not an admin, so the Settings section that started the switch
+   * is not there to end it, and the menu offers nothing else in that mode. An
+   * admin would be stuck as somebody else with no control on screen.
+   */
+  isSwitched: boolean;
   onSignOut: () => void;
 }
 
@@ -78,7 +87,12 @@ const ITEM_CLASS =
  *
  * App chrome rather than a page, so it lives with App rather than in `pages/`.
  */
-export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
+export default function NavBar({
+  user,
+  mode,
+  isSwitched,
+  onSignOut,
+}: NavBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -266,6 +280,23 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
                   {t("nav.logout")}
                 </button>
               </>
+            )}
+
+            {/* Same handler as sign out, and a different sentence, because in
+                this mode that is what it does: drop the switch token and the
+                cover cookie with it, and the upstream names the admin again on
+                the next request. Nothing here signs anybody out of anything. */}
+            {!ownsTheSession && isSwitched && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onSignOut();
+                }}
+                className={ITEM_CLASS}
+              >
+                {t("nav.returnToMyAccount")}
+              </button>
             )}
           </div>
         )}

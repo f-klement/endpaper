@@ -352,6 +352,23 @@ describe("401 handling", () => {
       ).rejects.toThrow("Registration is disabled");
     });
 
+    it("keeps the admin signed in when a switch password is wrong", async () => {
+      // The sharpest of the three: the caller is signed in, so treating this
+      // 401 as an expired session signs an admin out of their own account for
+      // mistyping a test account's password, having changed nothing.
+      setSession("still-valid", makeUser());
+      mockApi().on("/auth/switch", {
+        status: 401,
+        body: { detail: "Incorrect password for that account" },
+      });
+
+      await expect(
+        customFetch("/auth/switch", { method: "POST" }),
+      ).rejects.toThrow("Incorrect password for that account");
+
+      expect(getToken()).toBe("still-valid");
+    });
+
     it("still ends the session on a 401 from any other endpoint", async () => {
       setSession("expired", makeUser());
       mockApi().on("/api/books", { status: 401, body: {} });

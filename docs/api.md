@@ -45,6 +45,7 @@ cannot swap between pages.
 | GET | `/auth/config` | public | `{registration_enabled}`; read before anyone has a token |
 | POST | `/auth/register` | public | 201 with a token. **403** if disabled, **400** if taken, **429** if rate-limited |
 | POST | `/auth/login` | public | 200 with a token, **401** otherwise, **429** if rate-limited |
+| POST | `/auth/switch` | **admin** | 200 with a token for a test account. **404** if the name is not one, **401** on a wrong password, **429** if rate-limited |
 | GET | `/auth/me` | user | The current account |
 | POST | `/auth/logout` | public | 204. Clears the cover cookie; the token is the client's to discard |
 
@@ -61,6 +62,21 @@ read per request.
 Login accepts passwords shorter than the registration minimum on purpose, and reports the
 same message for an unknown username as for a wrong password. Both are explained in
 [security.md](security.md).
+
+`/auth/switch` exchanges a password an admin supplies for a session on an **admin-created
+test account**, which is the only way to see the library as an ordinary member sees it
+under `ldap` or `proxy`, where `/auth/login` cannot reach a local password. It takes the
+same body as `/auth/login` and returns the same `Token`, cover cookie included.
+
+Two refusals are the whole of it, and the server owns both whatever the client sends. The
+target must be a test account: a directory-backed account is **never** one, in any mode,
+because an admin able to mint a session for a directory member could read that member's
+private books. And the password is required and checked. Unlike `/auth/login` the two
+refusals differ (404 and 401), because the caller is an admin who can already list every
+account, so there is nothing left to enumerate.
+
+Under `proxy`, the token this returns overrides the identity in the proxy's header until it
+is discarded, and only a token naming a test account does. See [security.md](security.md).
 
 ### Books
 
@@ -498,6 +514,8 @@ be reached through a book the caller happens to have access to.
 | PUT | `/api/settings` | **admin** | Partial update; absent fields are left alone |
 | GET | `/api/stats` | user | Totals, per-member, per-tag, per-month |
 | GET | `/api/users` | user | The member list |
+| GET | `/api/users/test-accounts` | **admin** | The accounts an admin may switch into |
+| POST | `/api/users/test-accounts` | **admin** | 201. **400** if the name is taken, **422** under the 8 character floor |
 | GET | `/api/users/me/appearance` | user | The caller's own palette, mode and wallpaper |
 | PUT | `/api/users/me/appearance` | user | Replaces all three |
 
@@ -526,6 +544,16 @@ the list, but it does bound the shape: `^[a-z0-9-]{1,30}$`, and `mode` is one of
 client that does not have a stored palette shows its default instead, and overwrites the
 stored value with that default the next time the member changes anything, because the write
 is a whole record.
+
+`/api/users/test-accounts` is a local account with a password an admin sets, for seeing the
+library the way an ordinary member sees it. It works in **every** auth mode, which is the
+point: `POST /auth/register` is 403 under `ldap` and `proxy`. The body is `UserCreate`, so
+registration's password policy applies unchanged, and the account is never an admin.
+
+The GET returns only test accounts, so the client cannot offer a directory member as a
+switch target. That is presentation: `POST /auth/switch` refuses one regardless. Test
+accounts do appear in `/api/users` like any other account, because the loan picker is a
+list of everybody who could hold a book.
 
 Every `/api/stats` aggregation applies the privacy predicate independently.
 

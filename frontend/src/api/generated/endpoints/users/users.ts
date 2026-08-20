@@ -25,6 +25,7 @@ import type {
   AppearanceOut,
   AppearanceUpdate,
   HTTPValidationError,
+  UserCreate,
   UserOut,
 } from "../../model";
 
@@ -439,4 +440,265 @@ export const useSetMyAppearance = <
   TContext
 > => {
   return useMutation(getSetMyAppearanceMutationOptions(options), queryClient);
+};
+export const getListTestAccountsUrl = () => {
+  return `/api/users/test-accounts`;
+};
+
+/**
+ * The accounts an admin may switch into, and no others.
+ *
+ * `switch_targets()`, not the flag alone, so that sentence is true of every
+ * row returned. The two differ only for a row nothing here writes (a flagged
+ * account whose `auth_source` was edited to a directory, or whose hash was
+ * cleared), and on that row the flag alone would put a Switch button in front
+ * of an admin that `/auth/switch` then answers 404 to, with nothing the UI
+ * could usefully say.
+ *
+ * Filtering is presentation either way: `/auth/switch` refuses a bad target
+ * whatever the client sends. Admin only because who exists for testing is
+ * nobody else's business, and because every account on this list is one
+ * somebody holds the password to.
+ * @summary List Test Accounts
+ */
+export const listTestAccounts = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UserOut[]> => {
+  return customFetch<UserOut[]>(getListTestAccountsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTestAccountsQueryKey = () => {
+  return [`/api/users/test-accounts`] as const;
+};
+
+export const getListTestAccountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTestAccounts>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listTestAccounts>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListTestAccountsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listTestAccounts>>
+  > = ({ signal }) => listTestAccounts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTestAccounts>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListTestAccountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTestAccounts>>
+>;
+export type ListTestAccountsQueryError = unknown;
+
+export function useListTestAccounts<
+  TData = Awaited<ReturnType<typeof listTestAccounts>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listTestAccounts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTestAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listTestAccounts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTestAccounts<
+  TData = Awaited<ReturnType<typeof listTestAccounts>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listTestAccounts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTestAccounts>>,
+          TError,
+          Awaited<ReturnType<typeof listTestAccounts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTestAccounts<
+  TData = Awaited<ReturnType<typeof listTestAccounts>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listTestAccounts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Test Accounts
+ */
+
+export function useListTestAccounts<
+  TData = Awaited<ReturnType<typeof listTestAccounts>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listTestAccounts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListTestAccountsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateTestAccountUrl = () => {
+  return `/api/users/test-accounts`;
+};
+
+/**
+ * Create a local account with a password, in any auth mode.
+ *
+ * `UserCreate`, so the registration policy applies unchanged: the 8 character
+ * floor and the 72 byte bcrypt ceiling the schema already documents.
+ *
+ * Never an admin. A test account exists to see the library as an ordinary
+ * member sees it, and an admin can already see the admin view. Nothing else
+ * in this app grants the flag either, so there is no path that turns one into
+ * an admin later.
+ * @summary Create Test Account
+ */
+export const createTestAccount = async (
+  userCreate: UserCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UserOut> => {
+  return customFetch<UserOut>(getCreateTestAccountUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(userCreate),
+  });
+};
+
+export const getCreateTestAccountMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createTestAccount>>,
+    TError,
+    { data: UserCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createTestAccount>>,
+  TError,
+  { data: UserCreate },
+  TContext
+> => {
+  const mutationKey = ["createTestAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createTestAccount>>,
+    { data: UserCreate }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createTestAccount(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateTestAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createTestAccount>>
+>;
+export type CreateTestAccountMutationBody = UserCreate;
+export type CreateTestAccountMutationError = HTTPValidationError;
+
+/**
+ * @summary Create Test Account
+ */
+export const useCreateTestAccount = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createTestAccount>>,
+      TError,
+      { data: UserCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createTestAccount>>,
+  TError,
+  { data: UserCreate },
+  TContext
+> => {
+  return useMutation(getCreateTestAccountMutationOptions(options), queryClient);
 };

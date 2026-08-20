@@ -489,3 +489,128 @@ class TestSwitchingToADirectoryDoesNotDemote:
         )
 
         assert user.is_admin is False
+
+
+# ── Test accounts are never adopted ───────────────────────────────────────────
+
+
+class TestATestAccountIsNeverAdopted:
+    """The collision this feature would otherwise have introduced.
+
+    `upsert_directory_user` matches on **username**, so a directory identity
+    named like an admin-created test account would adopt its row: `auth_source`
+    flips, and the test account's books, loans and notes become that member's.
+    The test account is renamed aside instead. See `docs/decisions.md`.
+    """
+
+    @pytest.fixture(autouse=True)
+    def proxy_mode(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+
+    @pytest.fixture
+    def alice(self, db) -> User:
+        """A test account, and an admin so the row is never the first one."""
+        db.add(User(username="admin", password_hash=hash_password("password123"), is_admin=True))
+        account = User(
+            username="alice",
+            password_hash=hash_password("password123"),
+            is_test_account=True,
+        )
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+        return account
+
+    def test_the_directory_identity_gets_a_row_of_its_own(self, db, alice):
+        user = auth_backends.upsert_directory_user(
+            db, "alice", is_admin=False, source=AuthMode.PROXY
+        )
+
+        assert user.id != alice.id
+        assert user.username == "alice"
+        assert user.auth_source == AuthMode.PROXY.value
+        assert user.password_hash is None
+
+    def test_the_test_account_is_renamed_rather_than_flipped(self, db, alice):
+        auth_backends.upsert_directory_user(
+            db, "alice", is_admin=False, source=AuthMode.PROXY
+        )
+
+        db.refresh(alice)
+        assert alice.username == "alice-2"
+        assert alice.is_test_account is True
+        assert alice.auth_source == AuthMode.LOCAL.value
+        assert alice.password_hash is not None
+
+    def test_it_keeps_the_books_it_had(self, db, alice):
+        from models import Book
+
+        db.add(Book(title="Only alice can see this", is_private=True, added_by_user_id=alice.id))
+        db.commit()
+
+        adopted = auth_backends.upsert_directory_user(
+            db, "alice", is_admin=False, source=AuthMode.PROXY
+        )
+
+        book = db.query(Book).filter(Book.title == "Only alice can see this").one()
+        assert book.added_by_user_id == alice.id
+        assert book.added_by_user_id != adopted.id
+
+    def test_the_next_free_suffix_is_used(self, db, alice):
+        db.add(User(username="alice-2", password_hash=hash_password("password123")))
+        db.commit()
+
+        auth_backends.upsert_directory_user(
+            db, "alice", is_admin=False, source=AuthMode.PROXY
+        )
+
+        db.refresh(alice)
+        assert alice.username == "alice-3"
+
+    def test_the_new_name_still_fits_the_column(self, db):
+        """`users.username` is String(50), and SQLite would not complain."""
+        db.add(User(username="admin", password_hash=hash_password("password123"), is_admin=True))
+        long_name = "a" * 50
+        db.add(
+            User(
+                username=long_name,
+                password_hash=hash_password("password123"),
+                is_test_account=True,
+            )
+        )
+        db.commit()
+
+        auth_backends.upsert_directory_user(
+            db, long_name, is_admin=False, source=AuthMode.PROXY
+        )
+
+        renamed = db.query(User).filter(User.is_test_account.is_(True)).one()
+        assert len(renamed.username) <= 50
+        assert renamed.username.endswith("-2")
+
+    def test_the_rename_is_logged_loudly(self, db, alice, caplog):
+        """A username changing without anybody asking has to be findable."""
+        with caplog.at_level(logging.WARNING):
+            auth_backends.upsert_directory_user(
+                db, "alice", is_admin=False, source=AuthMode.PROXY
+            )
+
+        renames = [r for r in caplog.records if "Renamed the test account" in r.message]
+        assert renames and renames[0].levelno == logging.WARNING
+        assert "'alice-2'" in renames[0].getMessage()
+
+    def test_an_ordinary_local_account_is_still_adopted(self, db):
+        """The other half of the rule: a local account from before the switch
+        to a directory keeps its row, its books and its history."""
+        db.add(User(username="admin", password_hash=hash_password("password123"), is_admin=True))
+        existing = User(username="kim", password_hash=hash_password("password123"))
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        adopted = auth_backends.upsert_directory_user(
+            db, "kim", is_admin=False, source=AuthMode.PROXY
+        )
+
+        assert adopted.id == existing.id
+        assert adopted.auth_source == AuthMode.PROXY.value

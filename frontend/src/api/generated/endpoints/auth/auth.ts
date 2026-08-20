@@ -571,3 +571,113 @@ export const useRegister = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getRegisterMutationOptions(options), queryClient);
 };
+export const getSwitchAccountUrl = () => {
+  return `/auth/switch`;
+};
+
+/**
+ * Exchange a password an admin supplies for a session on a test account.
+ *
+ * A login performed on another account's behalf, not impersonation, and the
+ * difference is the password: it is required and checked the ordinary way.
+ * The admin knows it because the admin set it. Drop that check and this
+ * becomes a button that reads anybody's library.
+ *
+ * `LoginRequest`, not a schema of its own, because this **is** a login and
+ * the same two reasons apply: the registration length floor must not lock out
+ * a password set before it, and a 422 saying "too short" is a different
+ * answer from a 401 saying "wrong".
+ *
+ * The two refusals differ here, unlike at `/auth/login`, and can. That route
+ * answers one message for both cases so nobody can enumerate accounts; this
+ * one is called by an admin who may already list every account. So a name
+ * that is not a test account is a **404**, which is true of it as far as this
+ * route is concerned, and a wrong password is a **401**.
+ *
+ * Rate limited on the same counter as `/auth/login`, keyed the same way. The
+ * caller holds an admin token, so this is not the first line of defence; it
+ * is that a password check reachable over HTTP is a password check worth
+ * bounding, and this one hands back a session on a different account.
+ * @summary Switch Account
+ */
+export const switchAccount = async (
+  loginRequest: LoginRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<Token> => {
+  return customFetch<Token>(getSwitchAccountUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(loginRequest),
+  });
+};
+
+export const getSwitchAccountMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof switchAccount>>,
+    TError,
+    { data: LoginRequest },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof switchAccount>>,
+  TError,
+  { data: LoginRequest },
+  TContext
+> => {
+  const mutationKey = ["switchAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof switchAccount>>,
+    { data: LoginRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return switchAccount(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SwitchAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof switchAccount>>
+>;
+export type SwitchAccountMutationBody = LoginRequest;
+export type SwitchAccountMutationError = HTTPValidationError;
+
+/**
+ * @summary Switch Account
+ */
+export const useSwitchAccount = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof switchAccount>>,
+      TError,
+      { data: LoginRequest },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof switchAccount>>,
+  TError,
+  { data: LoginRequest },
+  TContext
+> => {
+  return useMutation(getSwitchAccountMutationOptions(options), queryClient);
+};

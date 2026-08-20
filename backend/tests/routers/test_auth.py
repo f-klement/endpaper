@@ -46,6 +46,16 @@ class TestRegister:
     def test_missing_field_is_422(self, client):
         assert client.post("/auth/register", json={"username": "only"}).status_code == 422
 
+    def test_a_password_under_the_floor_is_422(self, client):
+        """8 characters, and the floor is `UserCreate`'s so it applies to every
+        route that creates an account, not only this one."""
+        res = client.post("/auth/register", json={"username": "first", "password": "pw12345"})
+        assert res.status_code == 422
+
+    def test_a_password_at_the_floor_is_accepted(self, client):
+        res = client.post("/auth/register", json={"username": "first", "password": "pw123456"})
+        assert res.status_code == 201
+
 
 class TestRegistrationDisabled:
     @pytest.fixture(autouse=True)
@@ -97,6 +107,51 @@ class TestLogin:
     def test_username_comparison_is_case_sensitive(self, client, admin):
         res = client.post("/auth/login", json={"username": "ADMIN", "password": "password123"})
         assert res.status_code == 401
+
+    def test_it_sets_the_cover_cookie(self, client, admin):
+        """An <img> cannot send the Authorization header, so without this every
+        cover on the page 401s under local auth."""
+        res = client.post("/auth/login", json={"username": "admin", "password": "password123"})
+        assert COVER_COOKIE_NAME in res.cookies
+
+    def test_the_cover_cookie_is_scoped_to_the_cover_route(self, client, admin):
+        """Path, HttpOnly and SameSite are what keep a second copy of an
+        identity from being a CSRF hole. The scope claim inside it is tested in
+        tests/test_auth.py; this is the browser's half."""
+        res = client.post("/auth/login", json={"username": "admin", "password": "password123"})
+
+        header = res.headers["set-cookie"]
+        assert "Path=/covers" in header
+        assert "HttpOnly" in header
+        assert "SameSite=lax" in header.replace("Samesite", "SameSite")
+
+    def test_getting_it_right_clears_the_count(self, client, admin):
+        """Otherwise somebody who mistypes their password nine times and then
+        gets it right is rationed for the rest of the window."""
+        for _ in range(9):
+            client.post("/auth/login", json={"username": "admin", "password": "wrong"})
+
+        assert (
+            client.post(
+                "/auth/login", json={"username": "admin", "password": "password123"}
+            ).status_code
+            == 200
+        )
+        for _ in range(9):
+            assert (
+                client.post(
+                    "/auth/login", json={"username": "admin", "password": "wrong"}
+                ).status_code
+                == 401
+            )
+
+    def test_guesses_are_bounded(self, client, admin):
+        for _ in range(10):
+            client.post("/auth/login", json={"username": "admin", "password": "wrong"})
+
+        res = client.post("/auth/login", json={"username": "admin", "password": "wrong"})
+        assert res.status_code == 429
+        assert "Retry-After" in res.headers
 
 
 class TestAuthConfig:
@@ -272,8 +327,313 @@ class TestProxyMode:
         assert db.query(User).count() == 0
 
     def test_no_route_sets_the_cover_cookie(self, client):
-        """Nothing here logs in, so nothing mints one. Covers work anyway,
-        because the proxy sets its header on the image request too. Proved in
-        tests/routers/test_covers.py rather than assumed."""
+        """Nothing here logs in, so nothing mints one, `/auth/switch` aside.
+        Covers work anyway, because the proxy sets its header on the image
+        request too. Proved in tests/routers/test_covers.py rather than
+        assumed."""
         res = client.get("/auth/me", headers=proxy_headers("kim"))
         assert COVER_COOKIE_NAME not in res.cookies
+
+
+# ── Switching to a test account ───────────────────────────────────────────────
+#
+# The one route that hands a session on one account to somebody holding
+# another's. What is worth pinning is the refusals: a directory-backed account
+# is never a target in any mode, and a session is never issued without the
+# password.
+
+
+@pytest.fixture
+def test_account(client, admin) -> dict:
+    """An admin-created test account, made the way the UI makes one."""
+    res = client.post(
+        "/api/users/test-accounts",
+        json={"username": "tester", "password": "pw12345678"},
+        headers=admin["headers"],
+    )
+    assert res.status_code == 201, res.text
+    return dict(res.json(), password="pw12345678")
+
+
+class TestSwitchAccount:
+    def test_the_right_password_returns_a_token_for_the_target(
+        self, client, admin, test_account
+    ):
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["user"]["username"] == "tester"
+        assert res.json()["user"]["is_admin"] is False
+
+    def test_the_token_acts_as_the_target(self, client, admin, test_account):
+        token = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        ).json()["access_token"]
+
+        res = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert res.json()["username"] == "tester"
+
+    def test_it_sets_the_cover_cookie(self, client, admin, test_account):
+        """Exactly like a login: without it the switched session has no covers."""
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+        assert COVER_COOKIE_NAME in res.cookies
+
+    def test_a_wrong_password_is_401(self, client, admin, test_account):
+        """The password is the difference between this and impersonation."""
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "wrong"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 401
+
+    def test_an_unknown_name_is_404(self, client, admin):
+        res = client.post(
+            "/auth/switch",
+            json={"username": "ghost", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 404
+
+    def test_an_ordinary_member_is_not_a_target(self, client, admin, member):
+        """Even with the right password, and even though this is local mode
+        where the admin could type it into the login form instead. The rule is
+        the account, not the mode."""
+        res = client.post(
+            "/auth/switch",
+            json={"username": "member", "password": "password123"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 404
+
+    def test_the_admin_own_account_is_not_a_target(self, client, admin):
+        res = client.post(
+            "/auth/switch",
+            json={"username": "admin", "password": "password123"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 404
+
+    def test_a_non_admin_is_403(self, client, admin, member, test_account):
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=member["headers"],
+        )
+        assert res.status_code == 403
+
+    def test_it_needs_a_session(self, client, admin, test_account):
+        res = client.post(
+            "/auth/switch", json={"username": "tester", "password": "pw12345678"}
+        )
+        assert res.status_code == 401
+
+    def test_guesses_are_bounded(self, client, admin, test_account):
+        """The caller is an admin, so this is not the first line of defence. It
+        is that a password check reachable over HTTP is one worth bounding."""
+        for _ in range(10):
+            client.post(
+                "/auth/switch",
+                json={"username": "tester", "password": "wrong"},
+                headers=admin["headers"],
+            )
+
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "wrong"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 429
+
+    def test_getting_it_right_clears_the_count(self, client, admin, test_account):
+        for _ in range(9):
+            client.post(
+                "/auth/switch",
+                json={"username": "tester", "password": "wrong"},
+                headers=admin["headers"],
+            )
+
+        assert (
+            client.post(
+                "/auth/switch",
+                json={"username": "tester", "password": "pw12345678"},
+                headers=admin["headers"],
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/auth/switch",
+                json={"username": "tester", "password": "wrong"},
+                headers=admin["headers"],
+            ).status_code
+            == 401
+        )
+
+    def test_a_switched_session_cannot_switch_again(self, client, admin, test_account):
+        """The session is the test account's, and a test account is never an
+        admin. Without this an admin's one switch is a session that can reach
+        every other test account without the password to any of them."""
+        token = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        ).json()["access_token"]
+
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 403
+
+    def test_a_switched_session_cannot_create_a_test_account(
+        self, client, admin, test_account, db
+    ):
+        token = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        ).json()["access_token"]
+
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "another", "password": "pw12345678"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert res.status_code == 403
+        assert db.query(User).filter(User.username == "another").first() is None
+
+    def test_it_is_logged_with_both_names(self, client, admin, test_account, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            client.post(
+                "/auth/switch",
+                json={"username": "tester", "password": "pw12345678"},
+                headers=admin["headers"],
+            )
+
+        switches = [r for r in caplog.records if "switched into" in r.message]
+        assert switches and switches[0].levelno == logging.WARNING
+        assert "'admin'" in switches[0].getMessage()
+        assert "'tester'" in switches[0].getMessage()
+
+
+class TestSwitchInLdapMode:
+    @pytest.fixture(autouse=True)
+    def mode(self, ldap_mode):
+        return ldap_mode
+
+    def test_an_admin_can_switch_into_a_test_account(self, client, admin, test_account):
+        """The reason the feature exists: `/auth/login` cannot reach a local
+        password in this mode, so this is the only way to see the library as an
+        ordinary member sees it."""
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 200
+
+    def test_a_directory_account_is_never_a_target(self, client, admin, db, monkeypatch):
+        """Even after a successful bind has created the shadow row, and even if
+        an admin somehow knows the password. An admin able to mint a session
+        for a directory member could read that member's private books."""
+        directory_with(monkeypatch)
+        client.post("/auth/login", json={"username": "kim", "password": "password123"})
+        assert db.query(User).filter(User.username == "kim").one().auth_source == "ldap"
+
+        res = client.post(
+            "/auth/switch",
+            json={"username": "kim", "password": "password123"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 404
+
+
+class TestSwitchInProxyMode:
+    """Where the precedence between a header and a token has to be explicit."""
+
+    @pytest.fixture(autouse=True)
+    def mode(self, proxy_mode):
+        return proxy_mode
+
+    @pytest.fixture
+    def boss(self, client) -> dict:
+        """The first header identity, which is how an admin exists here."""
+        client.get("/auth/me", headers=proxy_headers("boss"))
+        return proxy_headers("boss")
+
+    @pytest.fixture
+    def switched(self, client, boss) -> str:
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=boss,
+        )
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=boss,
+        )
+        assert res.status_code == 200, res.text
+        return str(res.json()["access_token"])
+
+    def test_the_switch_token_beats_the_proxy_header(self, client, boss, switched):
+        res = client.get(
+            "/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"}
+        )
+        assert res.json()["username"] == "tester"
+
+    def test_dropping_the_token_restores_the_proxy_identity(self, client, boss, switched):
+        """This is the whole of "switch back" in this mode: the upstream names
+        the admin again on the very next request."""
+        assert client.get("/auth/me", headers=boss).json()["username"] == "boss"
+
+    def test_a_directory_account_is_never_a_target(self, client, boss, db):
+        client.get("/auth/me", headers=proxy_headers("kim"))
+
+        res = client.post(
+            "/auth/switch",
+            json={"username": "kim", "password": "pw12345678"},
+            headers=boss,
+        )
+        assert res.status_code == 404
+
+    def test_an_ordinary_token_still_does_not_beat_the_header(self, client, boss, admin):
+        """The narrow acceptance is the point. A token minted before a
+        deployment moved to proxy auth names a real member, and reviving it
+        would be a way around the proxy."""
+        res = client.get("/auth/me", headers={**boss, **admin["headers"]})
+        assert res.json()["username"] == "boss"
+
+    def test_a_switch_token_stops_working_when_the_flag_comes_off(
+        self, client, boss, switched, db
+    ):
+        """`is_switch_target` is re-read per request rather than frozen into
+        the token, so the row is what decides."""
+        account = db.query(User).filter(User.username == "tester").one()
+        account.is_test_account = False
+        db.commit()
+
+        res = client.get(
+            "/auth/me", headers={**boss, "Authorization": f"Bearer {switched}"}
+        )
+        assert res.json()["username"] == "boss"
+
+    def test_a_switch_token_alone_still_works_without_a_header(self, client, boss, switched):
+        """The token is a session in its own right, not a modifier on a header."""
+        res = client.get("/auth/me", headers={"Authorization": f"Bearer {switched}"})
+        assert res.json()["username"] == "tester"

@@ -22,11 +22,16 @@ beforeEach(() => {
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 });
 
-function renderNav(mode: AuthMode = AuthMode.local, onSignOut = vi.fn()) {
+function renderNav(
+  mode: AuthMode = AuthMode.local,
+  onSignOut = vi.fn(),
+  isSwitched = false,
+) {
   renderWithProviders(
     <NavBar
       user={makeUser({ username: "kim" })}
       mode={mode}
+      isSwitched={isSwitched}
       onSignOut={onSignOut}
     />,
   );
@@ -243,6 +248,46 @@ describe("the account entries", () => {
     it("still says who is signed in", async () => {
       renderNav(AuthMode.proxy);
       expect(screen.getByRole("button", { name: /kim/ })).toBeInTheDocument();
+    });
+
+    it("offers no way back when there is nothing to come back from", async () => {
+      renderNav(AuthMode.proxy);
+      const { menu } = await openMenu();
+      expect(
+        menu.queryByRole("menuitem", { name: "Return to my account" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("switched into a test account", () => {
+    it("offers the way back", async () => {
+      // A test account is not an admin, so the Settings section that started
+      // the switch is not there to end it, and this mode offers nothing else.
+      // Without this the admin is somebody else with no control on screen.
+      renderNav(AuthMode.proxy, vi.fn(), true);
+      const { menu } = await openMenu();
+      expect(
+        menu.getByRole("menuitem", { name: "Return to my account" }),
+      ).toBeVisible();
+    });
+
+    it("hands the session back when it is chosen", async () => {
+      const onSignOut = renderNav(AuthMode.proxy, vi.fn(), true);
+      const { user, menu } = await openMenu();
+
+      await user.click(menu.getByRole("menuitem", { name: "Return to my account" }));
+
+      expect(onSignOut).toHaveBeenCalled();
+    });
+
+    it("does not call it a logout", async () => {
+      // Nothing here signs anybody out: it drops the switch token, and the
+      // upstream names the admin again on the next request.
+      renderNav(AuthMode.proxy, vi.fn(), true);
+      const { menu } = await openMenu();
+      expect(
+        menu.queryByRole("menuitem", { name: "Logout" }),
+      ).not.toBeInTheDocument();
     });
   });
 });
