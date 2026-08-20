@@ -265,6 +265,17 @@ describe("LocaleProvider and useTranslation", () => {
 // ── The catalogues themselves ────────────────────────────────────────────────
 
 describe("catalogues", () => {
+  it("decide on their own which locales are selectable", () => {
+    // isSupported used to list the two locales by hand, so adding a third
+    // meant editing it too. Forgetting that fails quietly: the language is
+    // translated and still never selected, because both the stored choice and
+    // the browser's language are read through it.
+    for (const locale of Object.values(Locale)) {
+      localStorage.setItem("locale", locale);
+      expect(readStoredLocale()).toBe(locale);
+    }
+  });
+
   it("cover exactly the same keys", () => {
     // Enforced by the type system too, but this states the rule in the suite
     // rather than leaving it to a build step nobody watches.

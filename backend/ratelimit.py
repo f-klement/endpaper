@@ -1,8 +1,12 @@
-"""Rate limiting for the credential endpoints.
+"""Rate limiting for the credential endpoints, bulk import and metadata lookups.
 
-Only /auth/login and /auth/register are limited. Everything else needs a valid
-token, so the thing worth bounding is the number of guesses someone can make at
-getting one, unbounded until now.
+/auth/login and /auth/register are limited because the thing worth bounding is
+the number of guesses someone can make at a token. The library import is
+limited for a different reason: it is authenticated, but one call parses a whole
+file and writes thousands of rows inside a single transaction, so a member
+firing them back to back holds the one SQLite writer against the household. The
+metadata routes are limited for a third reason again: the cost of a call lands
+on somebody else's server.
 
 **Why this is hand-rolled rather than slowapi.** The useful key for a login
 limit is the *username being attempted*, and a middleware-style limiter cannot
@@ -39,6 +43,20 @@ class RateLimit:
 # account, against a keyspace that dwarfs it.
 LOGIN_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
 REGISTER_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
+
+# An import parses a whole file and writes thousands of rows inside one
+# transaction, which holds the single SQLite writer for its duration. Nobody
+# migrates a library twice in a minute; somebody firing them back to back would
+# wedge the database for everyone else.
+IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
+
+# Every metadata call fans out to as many as four public catalogues, none of
+# which the household runs or pays for. One member holding the scan page open
+# with a script behind it would spend somebody else's quota and put this
+# deployment's address in front of their rate limiter, which is a way to lose
+# metadata for everyone. Sixty a minute is far above scanning a shelf by hand
+# and far below what would be noticed upstream.
+METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 
 
 class SlidingWindowLimiter:
@@ -86,6 +104,8 @@ class SlidingWindowLimiter:
 
 login_limiter = SlidingWindowLimiter(LOGIN_LIMIT)
 register_limiter = SlidingWindowLimiter(REGISTER_LIMIT)
+import_limiter = SlidingWindowLimiter(IMPORT_LIMIT)
+metadata_limiter = SlidingWindowLimiter(METADATA_LIMIT)
 
 
 def client_address(request: Request) -> str:

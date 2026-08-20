@@ -6,19 +6,19 @@
  * changes this file and nothing else on the page.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   useBulkAction,
-  useBulkSetOwnership,
   useListBooks,
   useListLocations,
   useListBooksInfinite,
   useListTags,
 } from "../../api/generated/endpoints/books/books";
 import {
+  BookFormat,
   BulkAction,
   OwnershipStatus,
   ReadStatus,
@@ -29,6 +29,14 @@ import {
   type TagOut,
 } from "../../api/generated/model";
 import { BookSort } from "../../api/generated/model";
+import {
+  deleteSearch,
+  readSavedSearches,
+  saveSearch,
+  type SavedSearch,
+} from "../../lib/savedSearches";
+import { useToast } from "../../app/toast";
+import { useTranslation } from "../../i18n";
 import { DEFAULT_FILTERS, type BookFilters } from "./types";
 
 /** Rows per request. Enough to fill a wide grid without over-fetching. */
@@ -43,6 +51,7 @@ function toParams(filters: BookFilters): ListBooksParams {
     ...(filters.ownership ? { ownership: filters.ownership } : {}),
     ...(filters.series ? { series: filters.series } : {}),
     ...(filters.location ? { location: filters.location } : {}),
+    ...(filters.format ? { format: filters.format } : {}),
     ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
     sort: filters.sort,
     page_size: PAGE_SIZE,
@@ -56,8 +65,14 @@ export interface UseLibraryResult {
   setOwnership: (ownership: BookFilters["ownership"]) => void;
   setSeries: (series: BookFilters["series"]) => void;
   setLocation: (location: BookFilters["location"]) => void;
+  setFormat: (format: BookFilters["format"]) => void;
   /** Replace the whole filter set, for a saved view such as the wishlist. */
   setFilters: (filters: BookFilters) => void;
+
+  /** Filter combinations somebody named and kept. Browser-local. */
+  savedSearches: SavedSearch<BookFilters>[];
+  saveCurrentSearch: (name: string) => void;
+  deleteSavedSearch: (id: string) => void;
   locations: LocationOut[];
   setSort: (sort: BookFilters["sort"]) => void;
   toggleTag: (tagId: number) => void;
@@ -68,6 +83,8 @@ export interface UseLibraryResult {
   tags: TagOut[];
 
   isLoading: boolean;
+  /** Results are on screen but a newer query is still running. */
+  isStale: boolean;
   error: unknown;
   refetch: () => void;
 
@@ -85,6 +102,12 @@ function isStatus(value: string | null): value is ReadStatus {
 function isSort(value: string | null): value is BookSort {
   return (
     value !== null && (Object.values(BookSort) as string[]).includes(value)
+  );
+}
+
+function isFormat(value: string | null): value is BookFormat {
+  return (
+    value !== null && (Object.values(BookFormat) as string[]).includes(value)
   );
 }
 
@@ -111,16 +134,34 @@ export function useLibrary(): UseLibraryResult {
       ...(isOwnership(ownership) ? { ownership } : {}),
       ...(isStatus(status) ? { status } : {}),
       ...(isSort(sort) ? { sort } : {}),
+      ...(isFormat(searchParams.get("format"))
+        ? { format: searchParams.get("format") as BookFormat }
+        : {}),
       series: searchParams.get("series"),
       location: searchParams.get("location"),
     };
   });
+
+  // Read once on mount. Nothing else in the tab writes them, so re-reading
+  // storage on every render would be work for no news.
+  const [savedSearches, setSavedSearches] = useState(() =>
+    readSavedSearches<BookFilters>(),
+  );
 
   const params = toParams(filters);
 
   const books = useListBooksInfinite(params, {
     query: {
       initialPageParam: 1,
+      // Keep the current results on screen while a new query runs.
+      //
+      // Without this, changing the search term produces a query key with no
+      // cached data, so `isPending` flips true and `data` is undefined for the
+      // length of the request. The grid emptied and redrew its skeletons
+      // between every debounce window, which reads as a grid of books flashing
+      // up for a moment with nothing in it. The results themselves were never
+      // the problem; the gap between them was.
+      placeholderData: keepPreviousData,
       // Stop asking once the pages so far account for every matching row.
       // Returning undefined is what tells React Query there is no next page.
       getNextPageParam: (lastPage, allPages) => {
@@ -154,7 +195,12 @@ export function useLibrary(): UseLibraryResult {
     setSeries: (series) => setFilters((current) => ({ ...current, series })),
     setLocation: (location) =>
       setFilters((current) => ({ ...current, location })),
+    setFormat: (format) => setFilters((current) => ({ ...current, format })),
     setFilters: (next) => setFilters(next),
+
+    savedSearches,
+    saveCurrentSearch: (name) => setSavedSearches(saveSearch(name, filters)),
+    deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
     setSort: (sort) => setFilters((current) => ({ ...current, sort })),
     toggleTag: (tagId) =>
@@ -170,7 +216,10 @@ export function useLibrary(): UseLibraryResult {
     total,
     tags: tags.data ?? [],
 
+    // True only when there is genuinely nothing to draw. With previous results
+    // held, a re-search is no longer a loading state, it is a stale one.
     isLoading: books.isPending,
+    isStale: books.isFetching && !books.isFetchingNextPage && !books.isPending,
     error: books.error,
     refetch: () => void books.refetch(),
 
@@ -210,35 +259,47 @@ export interface UseBookSelectionResult {
  */
 export function useBookSelection(): UseBookSelectionResult {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const { t } = useTranslation();
   const [isSelecting, setIsSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const general = useBulkAction({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (result, variables) => {
         setSelected(new Set());
         void queryClient.invalidateQueries();
+
+        // Only the delete verb raises one, and it offers the trash rather than
+        // an undo. Undoing a bulk delete means restoring each book in turn,
+        // and a toast that quietly fires three hundred requests is not an
+        // undo, it is a second bulk operation wearing its coat.
+        if (variables.data.action === BulkAction.delete && result.updated > 0) {
+          toast.show({
+            message: t("trash.movedCount", { count: result.updated }),
+            action: { label: t("trash.open"), onClick: () => navigate("/trash") },
+          });
+        }
       },
     },
   });
 
-  const bulk = useBulkSetOwnership({
-    mutation: {
-      onSuccess: () => {
-        setSelected(new Set());
-        // Every list and every book detail can now be showing a stale
-        // ownership value, and the count behind the banner has moved too.
-        void queryClient.invalidateQueries();
-      },
+  const run = useCallback(
+    (action: BulkAction, value?: string | number) => {
+      if (selected.size === 0) return;
+      general.mutate({
+        data: { book_ids: [...selected], action, value: value ?? null },
+      });
     },
-  });
+    [general, selected],
+  );
 
   const stop = useCallback(() => {
     setIsSelecting(false);
     setSelected(new Set());
-    bulk.reset();
     general.reset();
-  }, [bulk, general]);
+  }, [general]);
 
   return {
     isSelecting,
@@ -257,25 +318,15 @@ export function useBookSelection(): UseBookSelectionResult {
     selectAll: (bookIds) => setSelected(new Set(bookIds)),
     clear: () => setSelected(new Set()),
 
-    apply: (ownership) => {
-      if (selected.size === 0) return;
-      bulk.mutate({ data: { book_ids: [...selected], ownership } });
-    },
-    run: (action, value) => {
-      if (selected.size === 0) return;
-      general.mutate({
-        data: { book_ids: [...selected], action, value: value ?? null },
-      });
-    },
-    // Either mutation can be the one in flight, and the bar shows one result
-    // area, so both are folded together here rather than in the component.
-    isApplying: bulk.isPending || general.isPending,
-    result: (bulk.data ?? general.data ?? null) as BulkResult | null,
-    error: bulk.error ?? general.error,
-    dismissResult: () => {
-      bulk.reset();
-      general.reset();
-    },
+    // Ownership used to go to a second endpoint with an identical body and an
+    // identical result. It is the same verb as the rest now.
+    apply: (ownership) =>
+      run(BulkAction.set_ownership, ownership),
+    run,
+    isApplying: general.isPending,
+    result: (general.data ?? null) as BulkResult | null,
+    error: general.error,
+    dismissResult: () => general.reset(),
   };
 }
 

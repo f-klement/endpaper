@@ -30,7 +30,7 @@ export default function OwnershipPicker({
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-gray-900 mb-2 dark:text-gray-100">
+      <h2 className="text-sm font-semibold text-paper-900 mb-2 dark:text-paper-100">
         {t("ownership.label")}
       </h2>
       <div
@@ -47,15 +47,17 @@ export default function OwnershipPicker({
             aria-pressed={value === option.value}
             className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-colors disabled:opacity-50 ${
               value === option.value
-                ? "bg-sky-50 border-sky-300 text-sky-700"
-                : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                ? "bg-accent-50 border-accent-300 text-accent-800 "
+                + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
             }`}
           >
             {t(option.label)}
           </button>
         ))}
       </div>
-      <p className="text-xs text-gray-500 mt-1.5 dark:text-gray-400">
+      <p className="text-xs text-paper-500 mt-1.5 dark:text-paper-400">
         {t("ownership.explain")}
       </p>
     </div>

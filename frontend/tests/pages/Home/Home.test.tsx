@@ -100,7 +100,12 @@ describe("Home", () => {
       screen.queryByRole("button", { name: "Fantasy" }),
     ).not.toBeInTheDocument();
 
-    await userEvent.setup().click(screen.getByRole("button", { name: /Tags/ }));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Tags/ }));
+
+    // Two steps now: the panel, then the category. The curated vocabulary is
+    // 105 tags, so the categories inside the panel start closed too.
+    await user.click(await screen.findByRole("button", { name: /Genre/ }));
 
     expect(
       await screen.findByRole("button", { name: "Fantasy" }),
@@ -155,6 +160,39 @@ describe("Home", () => {
     await waitFor(() => expect(screen.getByText("Book 2")).toBeInTheDocument());
     // The first page is still on screen: appended, not replaced.
     expect(screen.getByText("Book 1")).toBeInTheDocument();
+  });
+});
+
+describe("Home as the wishlist", () => {
+  // The wishlist is a saved view rather than a page, and it used to look like
+  // one: headed "Library", and telling a reader whose wishlist was empty to go
+  // and scan a barcode, which is the opposite of what an empty wishlist means.
+  const WISHLIST = "/?status=want_to_read&ownership=not_owned";
+
+  it("is headed as the wishlist, not the library", async () => {
+    api.on(/\/api\/books\?/, { body: makeBookPage([makeBook()]) });
+    renderWithProviders(<Home />, { route: WISHLIST });
+
+    expect(await screen.findByText("Wishlist")).toBeInTheDocument();
+  });
+
+  it("says nothing is missing rather than nothing is here", async () => {
+    api.on(/\/api\/books\?/, { body: makeBookPage([]) });
+    renderWithProviders(<Home />, { route: WISHLIST });
+
+    expect(await screen.findByText("Nothing on the wishlist")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Scan a barcode to add your first book"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("stays the wishlist when a search is typed into it", async () => {
+    // Only the two fields that define the view are compared, so narrowing it
+    // does not throw you back to the library.
+    api.on(/\/api\/books\?/, { body: makeBookPage([makeBook()]) });
+    renderWithProviders(<Home />, { route: `${WISHLIST}&query=dune` });
+
+    expect(await screen.findByText("Wishlist")).toBeInTheDocument();
   });
 });
 
@@ -213,7 +251,7 @@ describe("Home selection mode", () => {
   });
 
   it("marks the selection as being on the shelf", async () => {
-    api.on("/api/books/bulk/ownership", {
+    api.on("/api/books/bulk", {
       body: { updated: 2, unchanged: 0, skipped: 0 },
     });
     renderWithProviders(<Home />);
@@ -227,8 +265,9 @@ describe("Home selection mode", () => {
     );
 
     await waitFor(() =>
-      expect(api.lastCall("/bulk/ownership", "POST")?.body).toMatchObject({
-        ownership: "owned",
+      expect(api.lastCall("/books/bulk", "POST")?.body).toMatchObject({
+        action: "set_ownership",
+        value: "owned",
       }),
     );
   });

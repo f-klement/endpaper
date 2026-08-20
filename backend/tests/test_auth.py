@@ -6,6 +6,7 @@ import bcrypt
 import jwt
 import pytest
 
+import settings_store
 from auth import (
     ALGORITHM,
     BCRYPT_MAX_BYTES,
@@ -67,14 +68,20 @@ class TestPasswordHashing:
 
 
 class TestAccessToken:
-    def test_token_carries_user_id_and_username(self):
-        token = create_access_token(42, "alice")
+    def test_token_carries_user_id_and_username(self, db):
+        token = create_access_token(db, 42, "alice")
         payload = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
         assert payload["sub"] == "42"
         assert payload["username"] == "alice"
 
-    def test_token_has_a_future_expiry(self):
-        token = create_access_token(1, "alice")
+    def test_token_carries_the_epoch_it_was_issued_under(self, db):
+        """What a restore invalidates. See settings_store.bump_token_epoch."""
+        token = create_access_token(db, 42, "alice")
+        payload = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
+        assert payload["epoch"] == settings_store.token_epoch(db)
+
+    def test_token_has_a_future_expiry(self, db):
+        token = create_access_token(db, 1, "alice")
         payload = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
         assert datetime.fromtimestamp(payload["exp"], tz=UTC) > datetime.now(UTC)
 

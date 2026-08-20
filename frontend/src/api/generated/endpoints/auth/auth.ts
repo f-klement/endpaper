@@ -276,6 +276,96 @@ export const useLogin = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getLoginMutationOptions(options), queryClient);
 };
+export const getLogoutUrl = () => {
+  return `/auth/logout`;
+};
+
+/**
+ * Drop the cover cookie.
+ *
+ * The access token lives in the browser and signing out discards it there,
+ * but the cookie is ours and would otherwise sit in the browser until it
+ * expired: on a shared machine, the next person's first page load would still
+ * fetch covers as the person who left.
+ *
+ * No authentication required, and none wanted. This only deletes something
+ * the caller already holds, and demanding a valid token would mean an expired
+ * session could never clear its own cookie.
+ * @summary Logout
+ */
+export const logout = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getLogoutUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getLogoutMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof logout>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof logout>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["logout"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof logout>>,
+    void
+  > = () => {
+    return logout(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type LogoutMutationResult = NonNullable<
+  Awaited<ReturnType<typeof logout>>
+>;
+
+export type LogoutMutationError = unknown;
+
+/**
+ * @summary Logout
+ */
+export const useLogout = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof logout>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof logout>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getLogoutMutationOptions(options), queryClient);
+};
 export const getMeUrl = () => {
   return `/auth/me`;
 };

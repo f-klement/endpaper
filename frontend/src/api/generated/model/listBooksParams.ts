@@ -5,6 +5,7 @@
  * Catalogue, lend and track a household's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { BookFormat } from "./bookFormat.ts";
 import type { BookSort } from "./bookSort.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
@@ -17,6 +18,7 @@ export type ListBooksParams = {
    */
   tags?: string | null;
   ownership?: OwnershipStatus | null;
+  format?: BookFormat | null;
   series?: string | null;
   location?: string | null;
   /**

@@ -22,14 +22,14 @@ export default function ErrorPage({ error, onReset }: ErrorPageProps) {
   const { t } = useTranslation();
   return (
     <ErrorLayout
-      glyph="💥"
+      icon="alert"
       code={t("error.500.code")}
       title={t("error.500.title")}
       message={
         <>
           {t("error.500.message")}
           {import.meta.env.DEV && error instanceof Error && (
-            <span className="mt-3 block text-left text-xs font-mono text-red-500 break-words dark:text-red-400">
+            <span className="mt-3 block text-left text-xs font-mono text-bloom-500 break-words dark:text-bloom-300">
               {error.message}
             </span>
           )}
@@ -38,7 +38,7 @@ export default function ErrorPage({ error, onReset }: ErrorPageProps) {
       action={
         <button
           onClick={onReset ?? (() => window.location.reload())}
-          className="inline-block px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="inline-block px-5 py-2.5 bg-accent-600 hover:bg-accent-700 text-white text-sm font-semibold rounded-lg transition-colors"
         >
           {t("error.reload")}
         </button>

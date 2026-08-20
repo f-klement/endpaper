@@ -17,33 +17,33 @@ from schemas.book import (
     BookDetailsUpdate,
     BookEnrichmentOut,
     BookLookup,
+    BookMatch,
     BookOut,
     BookRatingUpdate,
     BookStatusUpdate,
-    BulkOwnershipResult,
-    BulkOwnershipUpdate,
     BulkRequest,
     BulkResult,
     DuplicateGroup,
-    GoogleBooksMatch,
     LocationOut,
     MergeRequest,
     OwnershipUpdate,
     PrivacyUpdate,
+    PurgeResult,
     SeriesOut,
 )
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
-from schemas.imports import GoodreadsImportOut
+from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.loan import LoanCreate, LoanOut
 from schemas.note import NoteCreate, NoteOut
 from schemas.settings import (
     FeatureFlagsOut,
     LoginImageOut,
+    RestoreResult,
     SettingsOut,
     SettingsUpdate,
 )
 from schemas.stats import MonthStat, PerUserStat, StatsOut, TagStat
-from schemas.tag import TagOut
+from schemas.tag import TagCreate, TagOut
 from schemas.user import AuthConfigOut, LoginRequest, Token, UserCreate, UserOut
 
 # Resolve the BookOut <-> LoanOut forward references now that both are imported.
@@ -61,13 +61,13 @@ __all__ = [
     "BookOut",
     "BookRatingUpdate",
     "BookStatusUpdate",
-    "BulkOwnershipResult",
-    "BulkOwnershipUpdate",
     "BulkRequest",
     "BulkResult",
     "DuplicateGroup",
-    "GoodreadsImportOut",
-    "GoogleBooksMatch",
+    "ImportResultOut",
+    "ImportPreviewOut",
+    "ImportPreviewRow",
+    "BookMatch",
     "LoanCreate",
     "LocationOut",
     "MergeRequest",
@@ -76,6 +76,7 @@ __all__ = [
     "LoanOut",
     "FeatureFlagsOut",
     "LoginImageOut",
+    "RestoreResult",
     "SettingsOut",
     "SettingsUpdate",
     "MonthStat",
@@ -85,7 +86,9 @@ __all__ = [
     "Page",
     "PerUserStat",
     "PrivacyUpdate",
+    "PurgeResult",
     "StatsOut",
+    "TagCreate",
     "TagOut",
     "TagStat",
     "Token",

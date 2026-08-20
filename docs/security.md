@@ -101,8 +101,21 @@ value directly. The 400 raised when the key is missing does not echo it either.
 
 ## Rate limiting
 
-Only `/auth/login` and `/auth/register` are limited. Everything else needs a valid token,
-so the thing worth bounding is guesses at getting one. It was unbounded before.
+Four things are limited, for three different reasons:
+
+| Route | Limit | Keyed on | Why |
+|---|---|---|---|
+| `/auth/login` | 10 / min | username + address | Bounds guesses at a token |
+| `/auth/register` | 5 / hour | address | Bounds account creation |
+| `/api/imports/*` | 3 / min | username | One call writes thousands of rows in one transaction, holding the single SQLite writer against the household |
+| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this household neither runs nor pays for |
+
+The last is the one that is not about this deployment: spending somebody else's quota is a
+way to get this deployment's address rate-limited upstream, which loses metadata for
+everyone. Sixty a minute is far above scanning a shelf by hand.
+
+Everything else needs a valid token, so the thing worth bounding is guesses at getting
+one. All of it was unbounded before.
 
 `backend/ratelimit.py` is hand-rolled rather than slowapi, and the reason is load-bearing:
 **the useful key for a login limit is the username being attempted**, and a
@@ -176,13 +189,46 @@ For a `readOnlyRootFilesystem` deployment, `/tmp` must stay writable: FastAPI sp
 uploaded cover into a `SpooledTemporaryFile` that rolls over to disk. Nothing else needs a
 writable path outside `DATA_DIR`.
 
+## The one cookie
+
+An `<img src>` cannot carry an `Authorization` header, so under `AUTH_MODE=local` every
+cover request would arrive anonymous and 401. `endpaper_cover` is what fixes that, and four
+properties keep it from being a hole rather than a fix:
+
+| Property | What it buys |
+|---|---|
+| `scope: covers` in the token | It is **not** the access token. Every route but the cover route refuses it, so a copy that escapes cannot be replayed against the API |
+| `Path=/covers` | The browser never sends it to a route that changes anything |
+| `HttpOnly` | Script cannot read it |
+| `SameSite=Lax` | Another site embedding `/covers/1.jpg` gets a 401, not a picture |
+
+The scope is the one that does not depend on the browser behaving. Path and SameSite
+constrain what the browser sends; the scope constrains what the value is worth to anyone
+who has it by other means.
+
+`POST /auth/logout` deletes it. Without that it outlived the session, and on a shared
+machine the next person's first page load fetched covers as whoever left.
+
+## Sessions and restore
+
+A restore replaces the users table wholesale, so the id a live token names may afterwards
+belong to somebody else: the token for user 3 comes back as a different person, with their
+books and, if that row is an admin, their powers. Nothing in the token notices, because the
+id is still an id and the signature is still ours.
+
+Every token therefore carries an epoch, and a restore rerolls it, ending every pre-restore
+session. The epoch is a random value rather than a counter because the settings table is
+itself part of the backup: a counter would be restored to an older number, and tokens
+stamped with that number would start verifying again.
+
 ## Known limits
 
 Worth knowing before exposing this beyond a private network:
 
-- **No CSRF protection**, and none needed as built: the token lives in `localStorage` and
-  is attached explicitly, so it is not sent automatically with a cross-site request. Moving
-  the token to a cookie would change that and require CSRF tokens.
+- **No CSRF protection**, and none needed as built: the access token lives in
+  `localStorage` and is attached explicitly, so it is not sent automatically with a
+  cross-site request. Moving *it* to a cookie would change that and require CSRF tokens.
+  There is one cookie, and it is not that token. See below.
 - **No account lockout or password reset.** A forgotten password needs a hand-edited
   database row.
 - **No audit log.** Deleting a book leaves no trace of who did it, and on a shared shelf

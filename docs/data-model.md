@@ -40,12 +40,21 @@ stored as one delimited string because SQLite has no array type, and served as a
 category names contain commas ("Fiction, general"). `google_books.join_categories` and
 `split_categories` are the only two places that know this.
 
-**`tags`.** About 30 rows seeded at startup from `PREDEFINED_TAGS` in `main.py`, in three
-categories: `type`, `genre`, `age`. Users pick from this list; they cannot invent tags.
-Seeding is by name, so a tag deleted by hand comes back on the next restart.
+**`tags`.** 105 rows seeded at startup from `PREDEFINED_TAGS` in `main.py`, in three
+categories: `type` (10), `genre` (88) and `age` (7), plus a fourth category, `custom`, for
+tags a household invents for itself. Seeding is by name, so a predefined tag deleted by
+hand comes back on the next restart, and renaming one means a migration rather than an
+edit to the list: `seed_tags()` would otherwise leave the old row and insert a second
+beside it.
+
+The list is long on purpose. A curated vocabulary that does not contain the genre somebody
+wants is a vocabulary they work around, so the picker groups by category and starts each
+group collapsed rather than trimming the list to what fits on a screen.
 
 **`book_tags`.** Many-to-many. Both foreign keys are `ON DELETE CASCADE`, so removing a
-book drops its tag links without touching the tags themselves.
+book drops its tag links without touching the tags themselves. That cascade did nothing
+until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
+`ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
 **`user_books`.** Per-person read status, rating and reading dates (`unread` / `reading` / `read`). This is the table
 that makes "read" a property of *a person and a book*, not of a book. A row only appears
@@ -140,7 +149,10 @@ account that added it, and to nobody else.*
 This is enforced by one shared predicate, `visible_to(user_id)` in `models.py`:
 
 ```python
-or_(Book.is_private.is_(False), Book.added_by_user_id == user_id)
+and_(
+    Book.deleted_at.is_(None),
+    or_(Book.is_private.is_(False), Book.added_by_user_id == user_id),
+)
 ```
 
 **Every query that returns or counts books must apply it.** It is used by the list,
@@ -148,13 +160,28 @@ search, export and all four statistics aggregations. Forgetting it in a new endp
 leaks other people's private books and nothing else in the stack will catch it. That is why
 it is a named function rather than a condition retyped at each call site.
 
-Two details worth keeping:
+**The trashed check rides along here on purpose.** Deleting a book stamps `deleted_at`
+rather than dropping the row, so an accidental delete can be undone. Hiding a trashed book
+needs exactly the same universal reach that privacy does, and every book query already
+calls this function, which is why soft deletion did not have to be chased through twenty
+call sites. A second rule that every query must remember would be the one eventually
+forgotten. The trash view opts out with `in_trash_for(user_id)`, a separate function rather
+than a flag on this one: a predicate that means "on the shelf" or "in the trash" depending
+on an argument is one a caller can get backwards, and getting it backwards shows every
+deleted book in the library.
+
+Three details worth keeping:
 
 - `.is_(False)` rather than `not Book.is_private`. The latter evaluates the Column
   object's Python truthiness and collapses to a constant, silently matching every row. It
   looks more idiomatic and is completely wrong.
 - Fetching another user's private book returns **404, not 403**. A 403 would confirm that
   a book with that id exists, which is exactly what privacy is meant to withhold.
+- The ISBN uniqueness check in `_create_book` deliberately does **not** apply it. The
+  constraint is table-wide, so a clash with somebody else's private book is still a clash.
+  That also makes it the one query that sees trashed rows, which is why re-adding a book
+  the caller trashed purges that row rather than reporting a conflict about a book nobody
+  can see.
 
 Privacy can be changed by the book's owner or by an admin. Admins can also delete anyone's
 note. There is no other privilege difference, and admin does not bypass the visibility
@@ -170,3 +197,30 @@ columns:
 
 Both depend on *who is asking*, so the same book row serialises differently for different
 accounts. Do not cache `BookOut` across users.
+
+## Connection settings
+
+Three `PRAGMA`s are applied to every SQLite connection in `database.py`. Every one of them
+is off, or too short, by default.
+
+| Pragma | Why |
+|---|---|
+| `foreign_keys=ON` | Off by default, which makes every `ForeignKey` and the `ON DELETE CASCADE` on `book_tags` decorative. Migration `d4a91f3c72e8` had to delete association rows by hand for exactly this reason |
+| `journal_mode=WAL` | Without it any write blocks every read for its duration, and this app has writes that are not short: an import, a restore, emptying the trash |
+| `busy_timeout=5000` | Turns the remaining contention into a wait rather than an immediate "database is locked" |
+
+## Indexes
+
+Beyond the primary keys and the unique constraints, two sets are worth knowing about.
+
+**Foreign keys** (migration `a17c5b2e94d0`). Not one foreign key column carried an index,
+so the notes of one book, one member's shelf and everything under a tag were each a full
+scan. Enforcing foreign keys is what made this urgent rather than merely wasteful: SQLite
+checks the child side once per deleted parent row, so emptying the trash was quadratic.
+`loans.loaned_by_user_id` is deliberately left alone, since nothing queries by it.
+
+**One open loan per book** (migration `f2b8d6a03c17`). A partial unique index on
+`loans(book_id) WHERE returned_at IS NULL`. Partial because a book lent, returned and lent
+again is two rows with the same `book_id`, and only the open ones are exclusive. The rule
+lived in application code in three places and one of them was wrong: merging two records
+left both open loans open, so the merged book was out with two people at once.

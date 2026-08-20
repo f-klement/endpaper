@@ -1,4 +1,5 @@
 import { useTranslation } from "../i18n";
+import Icon from "./Icon";
 
 const STARS = [1, 2, 3, 4, 5] as const;
 
@@ -25,21 +26,27 @@ export default function StarRating({
   const { t } = useTranslation();
   const current = value ?? 0;
   const readOnly = onChange === undefined;
-  const starClass = size === "sm" ? "text-sm" : "text-2xl";
+  // A drawn star takes a width, not a font size. `text-sm`/`text-2xl` sized
+  // the emoji this replaced and would leave every star the same size here.
+  const starSize = size === "sm" ? "w-3.5 h-3.5" : "w-6 h-6";
 
   if (readOnly) {
     return (
       <span
-        className={`${starClass} tracking-tight`}
+        className="inline-flex items-center gap-0.5"
         aria-label={t("rating.label")}
       >
         {STARS.map((star) => (
-          <span
+          <Icon
             key={star}
-            className={star <= current ? "text-amber-400" : "text-gray-200"}
-          >
-            ★
-          </span>
+            name="star"
+            filled={star <= current}
+            className={`${starSize} ${
+              star <= current
+                ? "text-amber-400"
+                : "text-paper-300 dark:text-paper-700"
+            }`}
+          />
         ))}
       </span>
     );
@@ -62,20 +69,22 @@ export default function StarRating({
           // back from a rating except through a separate control, and a
           // mis-tapped star would be permanent.
           onClick={() => onChange(star === current ? null : star)}
-          className={`${starClass} leading-none transition-colors ${
+          className={`leading-none rounded transition-colors ${
             star <= current
               ? "text-amber-400 hover:text-amber-500"
-              : "text-gray-300 hover:text-amber-300"
+              : "text-paper-300 hover:text-amber-300 dark:text-paper-700"
           }`}
         >
-          ★
+          {/* Outlined until it is earned, filled once it is. An unfilled star
+              that is merely a paler solid reads as a rating you already gave. */}
+          <Icon name="star" filled={star <= current} className={starSize} />
         </button>
       ))}
       {current > 0 && (
         <button
           type="button"
           onClick={() => onChange(null)}
-          className="ml-2 text-xs text-gray-400 hover:text-gray-600 underline dark:text-gray-500 dark:hover:text-gray-300"
+          className="ml-2 text-xs text-paper-400 hover:text-paper-600 underline dark:text-paper-500 dark:hover:text-paper-300"
         >
           {t("rating.clear")}
         </button>

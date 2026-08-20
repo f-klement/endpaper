@@ -41,7 +41,7 @@ export default function GoogleBooksHelp({
             href="https://console.cloud.google.com/projectcreate"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sky-600 hover:text-sky-700 underline dark:text-sky-400"
+            className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400"
           >
             {t("help.googleBooks.step1")}
           </a>
@@ -51,7 +51,7 @@ export default function GoogleBooksHelp({
             href="https://console.cloud.google.com/apis/library/books.googleapis.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sky-600 hover:text-sky-700 underline dark:text-sky-400"
+            className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400"
           >
             {t("help.googleBooks.step2")}
           </a>
@@ -61,7 +61,7 @@ export default function GoogleBooksHelp({
             href="https://console.cloud.google.com/apis/credentials"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sky-600 hover:text-sky-700 underline dark:text-sky-400"
+            className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400"
           >
             {t("help.googleBooks.step3")}
           </a>
@@ -69,10 +69,10 @@ export default function GoogleBooksHelp({
         <li>{t("help.googleBooks.step4")}</li>
       </ol>
 
-      <p className="text-xs text-gray-500 dark:text-gray-400">
+      <p className="text-xs text-paper-500 dark:text-paper-400">
         {t("help.googleBooks.cost")}
       </p>
-      <p className="text-xs text-gray-500 dark:text-gray-400">
+      <p className="text-xs text-paper-500 dark:text-paper-400">
         {t("help.googleBooks.restrict")}
       </p>
 
@@ -81,12 +81,12 @@ export default function GoogleBooksHelp({
       <Link
         to="/settings"
         onClick={onClose}
-        className="inline-block mt-1 px-4 py-2 rounded-xl bg-sky-500 text-white text-sm font-medium hover:bg-sky-600 transition-colors"
+        className="inline-block mt-1 px-4 py-2 rounded-xl bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 transition-colors"
       >
         {t("help.googleBooks.toSettings")}
       </Link>
 
-      <p className="text-xs text-gray-500 dark:text-gray-400">
+      <p className="text-xs text-paper-500 dark:text-paper-400">
         {t("help.googleBooks.adminOnly")}
       </p>
     </Modal>

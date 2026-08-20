@@ -51,12 +51,12 @@ export default function NoteList({
 
   return (
     <div>
-      <p className="text-sm font-semibold text-gray-700 mb-3 dark:text-gray-200">
+      <p className="text-sm font-semibold text-paper-700 mb-3 dark:text-paper-200">
         {t("notes.title")}
       </p>
 
       {notes.length === 0 && (
-        <p className="text-sm text-gray-400 italic mb-3 dark:text-gray-500">
+        <p className="text-sm text-paper-400 italic mb-3 dark:text-paper-500">
           {t("notes.none")}
         </p>
       )}
@@ -70,7 +70,7 @@ export default function NoteList({
           return (
             <div
               key={note.id}
-              className="bg-gray-50 rounded-xl p-3 border border-gray-100 dark:bg-gray-900 dark:border-gray-800"
+              className="bg-paper-50 rounded-xl p-3 border border-paper-100 dark:bg-paper-900 dark:border-paper-800"
             >
               {editingId === note.id ? (
                 <div>
@@ -79,18 +79,18 @@ export default function NoteList({
                     onChange={(event) => setEditDraft(event.target.value)}
                     rows={3}
                     aria-label={t("notes.editLabel")}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 resize-none dark:border-gray-700"
+                    className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 resize-none dark:border-paper-700"
                   />
                   <div className="flex gap-2 mt-2">
                     <button
                       onClick={() => saveEdit(note.id)}
-                      className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded-lg text-xs font-medium"
+                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 text-white rounded-lg text-xs font-medium"
                     >
                       {t("common.save")}
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
-                      className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                      className="px-3 py-1.5 border border-paper-200 text-paper-600 rounded-lg text-xs font-medium hover:bg-paper-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
                     >
                       {t("common.cancel")}
                     </button>
@@ -98,11 +98,11 @@ export default function NoteList({
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-gray-700 leading-relaxed dark:text-gray-200">
+                  <p className="text-sm text-paper-700 leading-relaxed dark:text-paper-200">
                     {note.content}
                   </p>
                   <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                    <span className="text-xs text-paper-400 dark:text-paper-500">
                       {note.author?.username} ·{" "}
                       {formatDate(note.created_at, locale)}
                     </span>
@@ -114,14 +114,14 @@ export default function NoteList({
                               setEditingId(note.id);
                               setEditDraft(note.content);
                             }}
-                            className="text-xs text-sky-500 hover:text-sky-700"
+                            className="text-xs text-accent-600 hover:text-accent-800"
                           >
                             {t("common.edit")}
                           </button>
                         )}
                         <button
                           onClick={() => onRemove(note.id)}
-                          className="text-xs text-red-400 hover:text-red-600"
+                          className="text-xs text-bloom-300 hover:text-bloom-600"
                         >
                           {t("common.delete")}
                         </button>
@@ -142,12 +142,12 @@ export default function NoteList({
           rows={2}
           placeholder={t("notes.placeholder")}
           aria-label={t("notes.addLabel")}
-          className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 resize-none dark:border-gray-700"
+          className="flex-1 px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 resize-none dark:border-paper-700"
         />
         <button
           type="submit"
           disabled={isAdding || !draft.trim()}
-          className="px-4 py-2 bg-sky-500 hover:bg-sky-600 disabled:bg-sky-300 text-white rounded-lg text-sm font-semibold self-end transition-colors"
+          className="px-4 py-2 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold self-end transition-colors"
         >
           {t("common.add")}
         </button>

@@ -2,15 +2,20 @@ import type { BookEnrichmentOut } from "../../../api/generated/model";
 import { HelpButton } from "../../../components";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation, type MessageKey } from "../../../i18n";
+import { Icon } from "../../../components";
 
 interface EnrichPanelProps {
-  /** False when no API key is stored: the button is shown but inert. */
+  /**
+   * Whether Google Books is configured. Not required: the button works
+   * without it, so this only decides the note about what a key would add.
+   */
   isConfigured: boolean;
   onOpenHelp: () => void;
   isWorking: boolean;
   result: BookEnrichmentOut | null;
   error: unknown;
-  onEnrich: () => void;
+  /** Opens the picker. Writes nothing on its own. */
+  onBrowse: () => void;
   onDismiss: () => void;
 }
 
@@ -24,8 +29,12 @@ function fieldLabel(field: string, t: (key: MessageKey) => string): string {
 /**
  * The "find more details" control and whatever the last run reported.
  *
+ * The button opens a picker rather than writing: choosing the edition
+ * automatically got the wrong printing often enough to matter. See
+ * EnrichPicker.
+ *
  * Reports `updated_fields` rather than a bare success, because the common
- * outcome is that Google Books has the volume and nothing to add. Saying
+ * outcome is that the chosen edition has nothing this book lacks. Saying
  * "done" there would be indistinguishable from a broken button.
  */
 export default function EnrichPanel({
@@ -34,7 +43,7 @@ export default function EnrichPanel({
   isWorking,
   result,
   error,
-  onEnrich,
+  onBrowse,
   onDismiss,
 }: EnrichPanelProps) {
   const { t } = useTranslation();
@@ -44,25 +53,24 @@ export default function EnrichPanel({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={onEnrich}
-          disabled={!isConfigured || isWorking}
-          className="flex-1 py-2.5 rounded-xl border border-sky-200 bg-sky-50 text-sm font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300"
+          onClick={onBrowse}
+          disabled={isWorking}
+          className="flex-1 py-2.5 rounded-xl border border-accent-200 bg-accent-50 text-sm font-medium text-accent-800 hover:bg-accent-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:border-accent-900 dark:bg-accent-950 dark:text-accent-300"
         >
           {isWorking ? t("enrich.working") : t("enrich.button")}
         </button>
         <HelpButton label={t("help.aboutEnrich")} onClick={onOpenHelp} />
       </div>
 
-      {/* Shown rather than hiding the button: a control that is visibly off and
-          explains itself beats a feature nobody knows exists. */}
+      {/* Not a disabled state: the button works. This says what a key adds. */}
       {!isConfigured && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-paper-500 dark:text-paper-400">
           {t("help.disabledEnrich")}
         </p>
       )}
 
       {error != null && (
-        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
           {errorText(error, t("common.somethingWentWrong"))}
         </p>
       )}
@@ -70,7 +78,7 @@ export default function EnrichPanel({
       {result && (
         <div
           role="status"
-          className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start justify-between gap-3 dark:text-gray-300 dark:bg-gray-900 dark:border-gray-700"
+          className="text-xs text-paper-600 bg-paper-50 border border-paper-200 rounded-lg px-3 py-2 flex items-start justify-between gap-3 dark:text-paper-300 dark:bg-paper-900 dark:border-paper-700"
         >
           <span>
             {!result.found
@@ -87,9 +95,9 @@ export default function EnrichPanel({
             type="button"
             onClick={onDismiss}
             aria-label={t("common.close")}
-            className="shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            className="shrink-0 text-paper-400 hover:text-paper-600 dark:text-paper-500 dark:hover:text-paper-300"
           >
-            ✕
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
       )}

@@ -231,21 +231,19 @@ describe("SettingsPage", () => {
       );
     });
 
-    it("explains why there is no account to connect", async () => {
-      // Goodreads has issued no API keys since 2020, so a CSV export is the
-      // only route in. Saying so is better than an option that never works.
+    it("names the services a library can come from", async () => {
+      // The import stopped being Goodreads-only. Somebody arriving from
+      // LibraryThing or StoryGraph needs to see that this is for them too.
       renderWithProviders(<SettingsPage />);
       expect(
-        await screen.findByText(/retired its API in 2020/),
+        await screen.findByText(/Goodreads, LibraryThing, StoryGraph/),
       ).toBeInTheDocument();
     });
 
-    it("warns that imported books arrive unconfirmed", async () => {
+    it("says the columns are shown before anything is saved", async () => {
       renderWithProviders(<SettingsPage />);
       expect(
-        await screen.findByText(
-          /an export says what you read, not what is on your shelf/,
-        ),
+        await screen.findByText(/shown before anything is saved/),
       ).toBeInTheDocument();
     });
   });

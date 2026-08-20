@@ -1,7 +1,8 @@
 import { useState } from "react";
 
 import { getExportBooksUrl } from "../api/generated/endpoints/books/books";
-import type { ExportFormat } from "../api/generated/model";
+import { useGetFeatureFlags } from "../api/generated/endpoints/settings/settings";
+import type { ExportFormat, FeatureFlagsOut } from "../api/generated/model";
 import { downloadFile } from "../api/mutator";
 
 export interface UseExportLibraryResult {
@@ -31,4 +32,19 @@ export function useExportLibrary(): UseExportLibraryResult {
         .finally(() => setIsExporting(false));
     },
   };
+}
+
+/**
+ * The server's feature flags, for the shell.
+ *
+ * Here rather than inline in `providers.tsx` so that the rule holds without an
+ * exception: only a `hooks.ts` imports from `api/generated/endpoints`. One
+ * exception is one more than a test can enforce, and the indirection is the
+ * whole reason a regeneration does not ripple through the components.
+ *
+ * `retry: false` because the shell renders regardless: a failure here means
+ * falling back to the browser's language, not an error screen.
+ */
+export function useFeatureFlags(): FeatureFlagsOut | undefined {
+  return useGetFeatureFlags({ query: { retry: false, staleTime: 60_000 } }).data;
 }

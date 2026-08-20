@@ -3,7 +3,9 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
+from models import Loan
 from tests.helpers import items
 
 
@@ -244,3 +246,118 @@ class TestDueDates:
         )
 
         assert res.json()["total"] == 0
+
+
+class TestTheNestedBook:
+    """`LoanOut.book` is a `BookOut`, and it was built without its context.
+
+    A bare `model_validate` filled the two fields that are computed per
+    request, `my_status` and `active_loan`, with their defaults, so every book
+    on the loans page reported itself unread and not lent out, on a page whose
+    entire subject is books that are lent out.
+    """
+
+    def test_the_reader_s_own_status_is_reported(
+        self, client, admin, member, make_book
+    ):
+        book = make_book(admin["headers"], title="Dune")
+        client.put(
+            f"/api/books/{book['id']}/status",
+            json={"status": "read"},
+            headers=admin["headers"],
+        )
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+
+        [loan] = client.get("/api/loans", headers=admin["headers"]).json()["items"]
+
+        assert loan["book"]["my_status"] == "read"
+
+    def test_the_book_knows_it_is_lent_out(self, client, admin, member, make_book):
+        book = make_book(admin["headers"])
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+
+        [loan] = client.get("/api/loans", headers=admin["headers"]).json()["items"]
+
+        assert loan["book"]["active_loan"] is not None
+
+    def test_a_page_of_loans_costs_a_bounded_number_of_queries(
+        self, client, admin, member, make_book
+    ):
+        """It was 53 statements for 25 loans: the N+1 the docs say was fixed."""
+        from sqlalchemy import event
+
+        from database import engine
+
+        for index in range(10):
+            book = make_book(admin["headers"], title=f"Book {index}")
+            client.post(
+                "/api/loans",
+                json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+                headers=admin["headers"],
+            )
+
+        statements: list[str] = []
+
+        def record(conn, cursor, statement, *rest):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            client.get("/api/loans", headers=admin["headers"])
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+        selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
+        # Constant in the number of loans, not linear: the count, the page, the
+        # tag load, the two per-request book queries, and the caller's account.
+        # Nine rather than eight since serialisation.books_to_out repopulates
+        # the tag collection for the whole page, which replaced one lazy load
+        # per book with one query for all of them.
+        assert len(selects) <= 9, f"{len(selects)} selects for 10 loans"
+
+
+class TestOneOpenLoanPerBook:
+    """The application enforces this in three places. The database enforces it
+    once, so a fourth place cannot get it wrong."""
+
+    def test_the_database_refuses_a_second_open_loan(self, client, admin, member, make_book, db):
+        book = make_book(admin["headers"])
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201, res.text
+
+        db.add(
+            Loan(
+                book_id=book["id"],
+                loaned_to_user_id=admin["user"]["id"],
+                loaned_by_user_id=admin["user"]["id"],
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_returned_loan_does_not_block_the_next_one(
+        self, client, admin, member, make_book
+    ):
+        """Partial, not plain: a book lent, returned and lent again is two rows
+        with the same book_id, and that is the normal case."""
+        book = make_book(admin["headers"])
+        payload = {"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]}
+        loan = client.post("/api/loans", json=payload, headers=admin["headers"]).json()
+        client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
+
+        again = client.post("/api/loans", json=payload, headers=admin["headers"])
+
+        assert again.status_code == 201

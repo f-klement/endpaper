@@ -1,0 +1,234 @@
+import { useEffect, useState, type FormEvent } from "react";
+
+import {
+  BookCondition,
+  BookFormat,
+  type BookDetailsUpdate,
+  type BookOut,
+} from "../../../api/generated/model";
+import { Button } from "../../../components";
+import { useTranslation, type MessageKey } from "../../../i18n";
+import { formatMinor, parseMinor } from "../../../lib/money";
+
+interface CopyPanelProps {
+  book: BookOut;
+  isSaving: boolean;
+  onSave: (fields: BookDetailsUpdate) => void;
+}
+
+const FORMATS: { value: BookFormat; label: MessageKey }[] = [
+  { value: BookFormat.hardcover, label: "copy.format.hardcover" },
+  { value: BookFormat.paperback, label: "copy.format.paperback" },
+  { value: BookFormat.ebook, label: "copy.format.ebook" },
+  { value: BookFormat.audiobook, label: "copy.format.audiobook" },
+  { value: BookFormat.other, label: "copy.format.other" },
+];
+
+const CONDITIONS: { value: BookCondition; label: MessageKey }[] = [
+  { value: BookCondition.new, label: "copy.condition.new" },
+  { value: BookCondition.good, label: "copy.condition.good" },
+  { value: BookCondition.fair, label: "copy.condition.fair" },
+  { value: BookCondition.poor, label: "copy.condition.poor" },
+  { value: BookCondition.ex_library, label: "copy.condition.ex_library" },
+];
+
+/**
+ * Facts about the object on the shelf, rather than about the work.
+ *
+ * Behind a disclosure on purpose. Nothing here is ever filled in by a lookup
+ * and most books will never have any of it, so putting six more inputs in
+ * front of everybody to serve the few who care would make the ordinary page
+ * worse. Goodreads is criticised in review after review for having nowhere to
+ * record condition; this is that, plus what the copy cost.
+ */
+export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
+  const { t } = useTranslation();
+  const [format, setFormat] = useState<string>(book.format ?? "");
+  const [condition, setCondition] = useState<string>(book.condition ?? "");
+  const [price, setPrice] = useState(formatMinor(book.purchase_price_minor));
+  const [currency, setCurrency] = useState(book.purchase_currency ?? "");
+  const [purchasedAt, setPurchasedAt] = useState(book.purchased_at ?? "");
+  const [source, setSource] = useState(book.purchase_source ?? "");
+  const [priceError, setPriceError] = useState(false);
+
+  // Re-seed when the book changes underneath, the same reason ShelfPanel does.
+  useEffect(() => {
+    setFormat(book.format ?? "");
+    setCondition(book.condition ?? "");
+    setPrice(formatMinor(book.purchase_price_minor));
+    setCurrency(book.purchase_currency ?? "");
+    setPurchasedAt(book.purchased_at ?? "");
+    setSource(book.purchase_source ?? "");
+    setPriceError(false);
+  }, [
+    book.format,
+    book.condition,
+    book.purchase_price_minor,
+    book.purchase_currency,
+    book.purchased_at,
+    book.purchase_source,
+  ]);
+
+  const dirty =
+    format !== (book.format ?? "") ||
+    condition !== (book.condition ?? "") ||
+    price !== formatMinor(book.purchase_price_minor) ||
+    currency !== (book.purchase_currency ?? "") ||
+    purchasedAt !== (book.purchased_at ?? "") ||
+    source !== (book.purchase_source ?? "");
+
+  /** Anything already recorded, so the panel opens on a book that has some. */
+  const hasDetails = Boolean(
+    book.format ??
+      book.condition ??
+      book.purchase_price_minor ??
+      book.purchased_at ??
+      book.purchase_source,
+  );
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const minor = parseMinor(price);
+    if (minor === undefined) {
+      // Refused rather than stored as zero, which is what a silently dropped
+      // typo would become.
+      setPriceError(true);
+      return;
+    }
+    setPriceError(false);
+    onSave({
+      // Empty means "clear". The API distinguishes absent from null and an
+      // empty string would be neither.
+      format: (format || null) as BookFormat | null,
+      condition: (condition || null) as BookCondition | null,
+      purchase_price_minor: minor,
+      purchase_currency: currency.trim().toUpperCase() || null,
+      purchased_at: purchasedAt || null,
+      purchase_source: source.trim() || null,
+    });
+  }
+
+  return (
+    <details open={hasDetails} className="mt-4">
+      <summary className="cursor-pointer select-none text-sm font-medium text-paper-700 dark:text-paper-200">
+        {t("copy.title")}
+      </summary>
+      <p className="text-xs text-paper-400 mt-1 mb-3 dark:text-paper-500">
+        {t("copy.hint")}
+      </p>
+
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.format")}
+            </span>
+            <select
+              value={format}
+              onChange={(event) => setFormat(event.target.value)}
+              className="field"
+            >
+              <option value="">{t("copy.format.unset")}</option>
+              {FORMATS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {t(option.label)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.condition")}
+            </span>
+            <select
+              value={condition}
+              onChange={(event) => setCondition(event.target.value)}
+              className="field"
+            >
+              <option value="">{t("copy.condition.unset")}</option>
+              {CONDITIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {t(option.label)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.price")}
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={price}
+              onChange={(event) => setPrice(event.target.value)}
+              placeholder="12.99"
+              aria-invalid={priceError}
+              className="field"
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.currency")}
+            </span>
+            <input
+              type="text"
+              value={currency}
+              maxLength={3}
+              onChange={(event) => setCurrency(event.target.value)}
+              placeholder="EUR"
+              className="field uppercase"
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.purchasedAt")}
+            </span>
+            <input
+              type="date"
+              value={purchasedAt}
+              onChange={(event) => setPurchasedAt(event.target.value)}
+              className="field"
+            />
+          </label>
+
+          <label className="block text-sm">
+            <span className="block font-medium text-paper-700 mb-1 dark:text-paper-200">
+              {t("copy.purchaseSource")}
+            </span>
+            <input
+              type="text"
+              value={source}
+              maxLength={120}
+              onChange={(event) => setSource(event.target.value)}
+              placeholder={t("copy.purchaseSourcePlaceholder")}
+              className="field"
+            />
+          </label>
+        </div>
+
+        {priceError && (
+          <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
+            {t("copy.priceInvalid")}
+          </p>
+        )}
+
+        {/* Named rather than a bare "Save": three panels on this page each
+            have one, and "Save" alone says nothing about which. */}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!dirty}
+          isLoading={isSaving}
+          aria-label={t("copy.save")}
+        >
+          {t("common.save")}
+        </Button>
+      </form>
+    </details>
+  );
+}

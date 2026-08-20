@@ -5,11 +5,13 @@ pinning here is our own logic (the empty-password guard, filter escaping,
 shadow accounts, admin group mapping), not ldap3's ability to speak LDAP.
 """
 
+import logging
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from fastapi import Request
+from sqlalchemy import event
 
 import auth_backends
 from auth import hash_password
@@ -230,22 +232,38 @@ class TestAuthenticateLdap:
         assert auth_backends.authenticate_ldap(db, "kim", "correct-horse") is None
 
 
+@pytest.fixture
+def not_first(db):
+    """Somebody already exists, so the account under test is not the first.
+
+    The first account in a library is an admin whatever the directory says,
+    because proxy and LDAP mode refuse registration and a deployment whose
+    group header is not configured would otherwise have no administrator and
+    no way to get one. These tests are about group membership, which only
+    decides anything from the second account onwards.
+    """
+    db.add(User(username="somebody-else", password_hash=None, is_admin=False))
+    db.commit()
+
+
 class TestLdapAdminGroup:
-    def test_membership_grants_admin(self, db, ldap_mode, monkeypatch):
+    def test_membership_grants_admin(self, db, ldap_mode, monkeypatch, not_first):
         directory_with(monkeypatch, groups=["cn=librarians,ou=groups,dc=example,dc=org"])
 
         user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
         assert user is not None and user.is_admin is True
 
-    def test_absence_does_not(self, db, ldap_mode, monkeypatch):
+    def test_absence_does_not(self, db, ldap_mode, monkeypatch, not_first):
         directory_with(monkeypatch, groups=["cn=readers,ou=groups,dc=example,dc=org"])
 
         user = auth_backends.authenticate_ldap(db, "kim", "correct-horse")
 
         assert user is not None and user.is_admin is False
 
-    def test_admin_is_re_evaluated_on_every_sign_in(self, db, ldap_mode, monkeypatch):
+    def test_admin_is_re_evaluated_on_every_sign_in(
+        self, db, ldap_mode, monkeypatch, not_first
+    ):
         """Removing someone from the admin group in the directory has to take
         effect, rather than being frozen at whatever it was on first login."""
         directory_with(monkeypatch, groups=["cn=librarians,ou=groups,dc=example,dc=org"])
@@ -301,7 +319,7 @@ class TestProxyHeaders:
 
         assert user is not None and user.is_admin is True
 
-    def test_other_groups_do_not(self, db):
+    def test_other_groups_do_not(self, db, not_first):
         user = auth_backends.user_from_proxy_headers(
             db, request_with({"Remote-User": "kim", "Remote-Groups": "readers"})
         )
@@ -353,3 +371,202 @@ class TestDispatch:
     ):
         monkeypatch.setenv("AUTH_MODE", mode)
         assert auth_backends.local_signup_allowed() is expected
+
+
+class TestProxyIdentityIsBounded:
+    """A header cannot be authenticated from here. It can be bounded.
+
+    On 2026-08-18 a pod inside the cluster sent `Remote-User: intruder`
+    straight to the Service and left a permanent admin account behind. The
+    NetworkPolicy in front of the Service is what stops that reaching the app
+    at all; these are what stop a header that does arrive becoming a row
+    nobody can explain.
+    """
+
+    @pytest.fixture(autouse=True)
+    def proxy_mode(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+
+    @pytest.mark.parametrize(
+        "username",
+        [
+            "x" * 51,
+            "x" * 4000,
+            "has space",
+            "-leading-dash",
+            "semi;colon",
+            "sql'injection",
+            "new\nline",
+            "../traversal",
+            "<script>",
+            "",
+        ],
+    )
+    def test_a_name_that_is_not_a_username_is_refused(self, db, username):
+        request = request_with({"Remote-User": username})
+
+        assert auth_backends.user_from_proxy_headers(db, request) is None
+        assert db.query(User).count() == 0
+
+    @pytest.mark.parametrize(
+        "username", ["rose", "local_admin", "a.b-c_d", "user@example.com", "x" * 50]
+    )
+    def test_an_ordinary_name_still_works(self, db, username):
+        request = request_with({"Remote-User": username})
+
+        user = auth_backends.user_from_proxy_headers(db, request)
+
+        assert user is not None
+        assert user.username == username
+
+    def test_a_refusal_is_logged_loudly_with_the_peer(self, db, caplog):
+        """The only trace the incident left was an INFO line nobody watched."""
+        with caplog.at_level(logging.WARNING):
+            auth_backends.user_from_proxy_headers(
+                db, request_with({"Remote-User": "bad name"})
+            )
+
+        assert any(
+            "Refused a proxy identity" in record.message for record in caplog.records
+        )
+
+    def test_creating_an_account_is_logged_at_warning(self, db, caplog):
+        with caplog.at_level(logging.WARNING):
+            auth_backends.upsert_directory_user(
+                db, "newcomer", is_admin=True, source=AuthMode.PROXY
+            )
+
+        created = [r for r in caplog.records if "Created account" in r.message]
+        assert created and created[0].levelno == logging.WARNING
+
+    def test_an_unchanged_identity_writes_nothing(self, db):
+        """Every request reaches this in proxy mode.
+
+        An unconditional commit was a write per request against the one SQLite
+        writer, and an audit trail that could never say when anything actually
+        changed.
+        """
+        auth_backends.upsert_directory_user(
+            db, "rose", is_admin=False, source=AuthMode.PROXY
+        )
+
+        writes: list[str] = []
+
+        def record(conn, cursor, statement, *rest):
+            writes.append(statement)
+
+        event.listen(db.get_bind(), "before_cursor_execute", record)
+        try:
+            auth_backends.upsert_directory_user(
+                db, "rose", is_admin=False, source=AuthMode.PROXY
+            )
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", record)
+
+        assert not any(
+            statement.lstrip().upper().startswith("UPDATE") for statement in writes
+        )
+
+    def test_a_change_of_admin_rights_is_logged(self, db, caplog, monkeypatch):
+        monkeypatch.setenv("PROXY_ADMIN_GROUP", "librarians")
+        db.add(User(username="somebody-else", password_hash=None, is_admin=False))
+        db.commit()
+        auth_backends.upsert_directory_user(
+            db, "rose", is_admin=False, source=AuthMode.PROXY
+        )
+
+        with caplog.at_level(logging.WARNING):
+            auth_backends.upsert_directory_user(
+                db, "rose", is_admin=True, source=AuthMode.PROXY
+            )
+
+        assert any("Admin rights for" in record.message for record in caplog.records)
+
+
+class TestAdminBootstrap:
+    """A library nobody can administer is the failure mode this prevents.
+
+    Proxy and LDAP mode refuse registration, and `is_admin` comes only from
+    the configured group. A stranger deploying this image with
+    `AUTH_MODE=proxy` and no groups header would otherwise get a catalogue
+    with no settings, no metadata key, no backup and no way to grant
+    themselves any of it, recoverable only by editing the database by hand.
+    """
+
+    @pytest.fixture(autouse=True)
+    def proxy_mode(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+
+    def test_the_first_account_is_an_admin_whatever_the_directory_says(self, db):
+        user = auth_backends.upsert_directory_user(
+            db, "founder", is_admin=False, source=AuthMode.PROXY
+        )
+        assert user.is_admin is True
+
+    def test_the_second_account_is_not(self, db):
+        auth_backends.upsert_directory_user(
+            db, "founder", is_admin=False, source=AuthMode.PROXY
+        )
+        second = auth_backends.upsert_directory_user(
+            db, "later", is_admin=False, source=AuthMode.PROXY
+        )
+        assert second.is_admin is False
+
+    def test_a_configured_group_still_grants_admin(self, db, monkeypatch):
+        monkeypatch.setenv("PROXY_ADMIN_GROUP", "librarians")
+        auth_backends.upsert_directory_user(
+            db, "founder", is_admin=False, source=AuthMode.PROXY
+        )
+        second = auth_backends.upsert_directory_user(
+            db, "later", is_admin=True, source=AuthMode.PROXY
+        )
+        assert second.is_admin is True
+
+
+class TestSwitchingToADirectoryDoesNotDemote:
+    """Turning proxy or LDAP auth on stripped the existing admin, silently.
+
+    `is_admin` is re-applied on every request, and a header carrying no group
+    means False, so the local admin lost their rights on their first page
+    load with no message and no way back.
+    """
+
+    def test_an_existing_admin_keeps_their_rights(self, db, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+        monkeypatch.delenv("PROXY_ADMIN_GROUP", raising=False)
+        db.add(User(username="owner", password_hash="x", is_admin=True))
+        db.add(User(username="other", password_hash="x", is_admin=False))
+        db.commit()
+
+        user = auth_backends.upsert_directory_user(
+            db, "owner", is_admin=False, source=AuthMode.PROXY
+        )
+
+        assert user.is_admin is True
+
+    def test_a_configured_group_can_still_demote(self, db, monkeypatch):
+        """Demotion is a directory decision, not an accident of configuration."""
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+        monkeypatch.setenv("PROXY_ADMIN_GROUP", "librarians")
+        db.add(User(username="owner", password_hash="x", is_admin=True))
+        db.add(User(username="other", password_hash="x", is_admin=False))
+        db.commit()
+
+        user = auth_backends.upsert_directory_user(
+            db, "owner", is_admin=False, source=AuthMode.PROXY
+        )
+
+        assert user.is_admin is False
+
+    def test_a_non_admin_is_not_promoted_by_the_same_rule(self, db, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "proxy")
+        monkeypatch.delenv("PROXY_ADMIN_GROUP", raising=False)
+        db.add(User(username="owner", password_hash="x", is_admin=True))
+        db.add(User(username="other", password_hash="x", is_admin=False))
+        db.commit()
+
+        user = auth_backends.upsert_directory_user(
+            db, "other", is_admin=False, source=AuthMode.PROXY
+        )
+
+        assert user.is_admin is False

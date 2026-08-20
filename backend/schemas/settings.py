@@ -59,3 +59,17 @@ class SettingsUpdate(BaseModel):
     google_books_api_key: str | None = Field(default=None, max_length=200)
     goodreads_lookup_enabled: bool | None = None
     default_locale: Locale | None = None
+
+
+class RestoreResult(BaseModel):
+    """What a restore actually put back.
+
+    Counted per table rather than reported as "done", so a backup that was
+    missing its covers or its loans says so instead of looking successful.
+    """
+
+    books: int = Field(ge=0)
+    users: int = Field(ge=0)
+    notes: int = Field(ge=0)
+    loans: int = Field(ge=0)
+    covers: int = Field(ge=0)

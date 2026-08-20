@@ -9,7 +9,8 @@ write the checks.
 
 The rules, in one place:
 
-    read   visible to the caller: the book is public, or the caller added it.
+    read   visible to the caller: the book is on the shelf, and it is public
+           or the caller added it.
     write  visible, and either public (a shared shelf: any member may curate
            it) or the caller's own private book.
     owner  visible, and the caller added it, or is an admin. Reserved for
@@ -25,9 +26,9 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from auth import get_current_user
+from auth import get_current_user, get_current_user_for_cover
 from database import get_db
-from models import Book, User, visible_to
+from models import Book, User, in_trash_for, visible_to
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 # Absent and forbidden are reported identically on purpose: a 403 would confirm
@@ -49,6 +50,56 @@ def book_for_read(
         db.query(Book)
         .options(joinedload(Book.added_by), selectinload(Book.tags))
         .filter(Book.id == book_id, visible_to(current_user.id))
+        .first()
+    )
+    if book is None:
+        raise _NOT_FOUND
+    return book
+
+
+def book_for_cover(
+    book_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user_for_cover)],
+) -> Book:
+    """The same read rule as `book_for_read`, resolved for the cover route.
+
+    Identical logic, different identity source: an `<img>` tag cannot send an
+    `Authorization` header, so the cover route additionally accepts a
+    path-scoped cookie. See `auth.COVER_COOKIE_NAME` for why that is safe here
+    and would not be on any other route.
+
+    No eager loading: this one serialises nothing, it decides whether to open a
+    file.
+    """
+    book = (
+        db.query(Book)
+        .filter(Book.id == book_id, visible_to(current_user.id))
+        .first()
+    )
+    if book is None:
+        raise _NOT_FOUND
+    return book
+
+
+def book_in_trash(
+    book_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Book:
+    """A **trashed** book the caller may see, for restoring or purging it.
+
+    A separate dependency rather than a flag on `book_for_read`, because the
+    two are opposites: `visible_to` now excludes trashed rows, so the ordinary
+    dependency answers 404 for exactly the books this one is for.
+
+    The same 404-not-403 rule applies, for the same reason. Somebody else's
+    private book stays invisible in the trash too.
+    """
+    book = (
+        db.query(Book)
+        .options(joinedload(Book.added_by), selectinload(Book.tags))
+        .filter(Book.id == book_id, in_trash_for(current_user.id))
         .first()
     )
     if book is None:
@@ -110,6 +161,8 @@ class PageParams:
 
 
 BookForRead = Annotated[Book, Depends(book_for_read)]
+BookInTrash = Annotated[Book, Depends(book_in_trash)]
+BookForCover = Annotated[Book, Depends(book_for_cover)]
 BookForWrite = Annotated[Book, Depends(book_for_write)]
 BookForOwner = Annotated[Book, Depends(book_for_owner)]
 Paging = Annotated[PageParams, Depends()]

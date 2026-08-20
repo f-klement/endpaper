@@ -11,6 +11,7 @@ import ScanPage from "../pages/ScanPage";
 import SeriesPage from "../pages/SeriesPage";
 import SettingsPage from "../pages/SettingsPage";
 import StatsPage from "../pages/StatsPage";
+import TrashPage from "../pages/TrashPage";
 
 interface AppRoutesProps {
   user: UserOut;
@@ -34,6 +35,7 @@ export default function AppRoutes({ user, onSignIn }: AppRoutesProps) {
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/trash" element={<TrashPage />} />
       {/* Reachable while signed in so "Switch Account" can show the form
           without ending the current session first. */}
       <Route path="/login" element={<LoginPage onSignIn={onSignIn} />} />

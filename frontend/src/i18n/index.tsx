@@ -45,7 +45,11 @@ interface LocaleContextValue {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 function isSupported(value: string | null | undefined): value is Locale {
-  return value === Locale.en || value === Locale.de;
+  // Derived from the catalogues rather than listed. Adding a third language
+  // used to mean editing this line too, and forgetting it fails quietly: the
+  // language would be translated and still never selected, because both the
+  // stored choice and the browser's own language are read through here.
+  return value != null && value in CATALOGUES;
 }
 
 export function readStoredLocale(): Locale | null {

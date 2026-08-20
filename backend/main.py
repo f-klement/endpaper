@@ -6,62 +6,164 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 from starlette.routing import BaseRoute
 
 from config import (
-    COVERS_DIR,
     cors_origins,
     ensure_data_dirs,
     validate_auth_config,
     validate_secret_key,
 )
 from database import engine
+from dependencies import DbSession
 from enums import TagCategory
 from errors import register_error_handlers
-from middleware import SecurityHeadersMiddleware
+from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import Tag
-from routers import auth, books, imports, loans, settings, stats, users
+from routers import (
+    auth,
+    backup,
+    books,
+    covers,
+    imports,
+    loans,
+    settings,
+    stats,
+    users,
+)
 from schema import upgrade_to_head
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("endpaper")
 
 PREDEFINED_TAGS: list[tuple[str, TagCategory]] = [
-    # Fiction type
+    # The vocabulary a household gets before it has typed anything, which is
+    # the whole reason for having a curated list at all (Jelu and Openreads
+    # make every tag free-form and start empty).
+    #
+    # **Additive only.** `seed_tags()` matches on name and skips what exists,
+    # so a tag can be added here freely and it appears at the next restart.
+    # Renaming or recategorising one needs a migration, because seeding alone
+    # would leave the old row in place and insert a second beside it. That has
+    # already happened once: see 95b6a61d6668.
+    #
+    # Long on purpose. A picker of thirty tags is a list; a picker of a hundred
+    # and thirty is a vocabulary, and it is why the categories collapse in the
+    # UI rather than all being on screen at once.
+
+    # ── Type: what kind of thing it is ──────────────────────────────────────
     ("Fiction", TagCategory.TYPE),
     ("Non-Fiction", TagCategory.TYPE),
-    # Genre
+    ("Reference", TagCategory.TYPE),
+    ("Textbook", TagCategory.TYPE),
+    ("Anthology", TagCategory.TYPE),
+    ("Comics", TagCategory.TYPE),
+    ("Manga", TagCategory.TYPE),
+    ("Play", TagCategory.TYPE),
+    ("Essays", TagCategory.TYPE),
+    ("Picture Book", TagCategory.TYPE),
+
+    # ── Genre: fiction ──────────────────────────────────────────────────────
     ("Adventure", TagCategory.GENRE),
-    ("Art", TagCategory.GENRE),
-    ("Biography", TagCategory.GENRE),
-    ("Business", TagCategory.GENRE),
-    ("Cooking", TagCategory.GENRE),
+    ("Classic", TagCategory.GENRE),
+    ("Contemporary Fiction", TagCategory.GENRE),
+    ("Crime", TagCategory.GENRE),
+    ("Detective", TagCategory.GENRE),
+    ("Dystopian", TagCategory.GENRE),
+    ("Epic Fantasy", TagCategory.GENRE),
+    ("Fairy Tales", TagCategory.GENRE),
     ("Fantasy", TagCategory.GENRE),
+    ("Folklore", TagCategory.GENRE),
+    ("Gothic", TagCategory.GENRE),
     ("Graphic Novel", TagCategory.GENRE),
     ("Historical Fiction", TagCategory.GENRE),
-    ("History", TagCategory.GENRE),
     ("Horror", TagCategory.GENRE),
+    ("Humour", TagCategory.GENRE),
     ("Literary Fiction", TagCategory.GENRE),
-    ("Memoir", TagCategory.GENRE),
+    ("Magical Realism", TagCategory.GENRE),
     ("Mystery", TagCategory.GENRE),
-    ("Philosophy", TagCategory.GENRE),
+    ("Mythology", TagCategory.GENRE),
+    ("Noir", TagCategory.GENRE),
+    ("Paranormal", TagCategory.GENRE),
     ("Poetry", TagCategory.GENRE),
+    ("Post-Apocalyptic", TagCategory.GENRE),
+    ("Romance", TagCategory.GENRE),
+    ("Satire", TagCategory.GENRE),
+    ("Science Fiction", TagCategory.GENRE),
+    ("Short Stories", TagCategory.GENRE),
+    ("Space Opera", TagCategory.GENRE),
+    ("Speculative Fiction", TagCategory.GENRE),
+    ("Spy Fiction", TagCategory.GENRE),
+    ("Steampunk", TagCategory.GENRE),
+    ("Suspense", TagCategory.GENRE),
+    ("Thriller", TagCategory.GENRE),
+    ("Urban Fantasy", TagCategory.GENRE),
+    ("War", TagCategory.GENRE),
+    ("Western", TagCategory.GENRE),
+
+    # ── Genre: non-fiction ──────────────────────────────────────────────────
+    ("Anthropology", TagCategory.GENRE),
+    ("Archaeology", TagCategory.GENRE),
+    ("Architecture", TagCategory.GENRE),
+    ("Art", TagCategory.GENRE),
+    ("Astronomy", TagCategory.GENRE),
+    ("Autobiography", TagCategory.GENRE),
+    ("Biography", TagCategory.GENRE),
+    ("Biology", TagCategory.GENRE),
+    ("Business", TagCategory.GENRE),
+    ("Chemistry", TagCategory.GENRE),
+    ("Computing", TagCategory.GENRE),
+    ("Cooking", TagCategory.GENRE),
+    ("Design", TagCategory.GENRE),
+    ("Diaries and Letters", TagCategory.GENRE),
+    ("Economics", TagCategory.GENRE),
+    ("Education", TagCategory.GENRE),
+    ("Environment", TagCategory.GENRE),
+    ("Ethics", TagCategory.GENRE),
+    ("Feminism", TagCategory.GENRE),
+    ("Film and TV", TagCategory.GENRE),
+    ("Finance", TagCategory.GENRE),
+    ("Gardening", TagCategory.GENRE),
+    ("Geography", TagCategory.GENRE),
+    ("Health and Fitness", TagCategory.GENRE),
+    ("History", TagCategory.GENRE),
+    ("Journalism", TagCategory.GENRE),
+    ("Language", TagCategory.GENRE),
+    ("Law", TagCategory.GENRE),
+    ("Linguistics", TagCategory.GENRE),
+    ("Mathematics", TagCategory.GENRE),
+    ("Medicine", TagCategory.GENRE),
+    ("Memoir", TagCategory.GENRE),
+    ("Music", TagCategory.GENRE),
+    ("Nature", TagCategory.GENRE),
+    ("Parenting", TagCategory.GENRE),
+    ("Philosophy", TagCategory.GENRE),
+    ("Photography", TagCategory.GENRE),
+    ("Physics", TagCategory.GENRE),
+    ("Politics", TagCategory.GENRE),
+    ("Popular Science", TagCategory.GENRE),
     ("Psychology", TagCategory.GENRE),
     ("Religion", TagCategory.GENRE),
-    ("Romance", TagCategory.GENRE),
     ("Science", TagCategory.GENRE),
-    ("Science Fiction", TagCategory.GENRE),
     ("Self-Help", TagCategory.GENRE),
-    ("Short Stories", TagCategory.GENRE),
+    ("Sociology", TagCategory.GENRE),
+    ("Sports", TagCategory.GENRE),
     ("Technology", TagCategory.GENRE),
-    ("Thriller", TagCategory.GENRE),
+    ("Theatre", TagCategory.GENRE),
     ("Travel", TagCategory.GENRE),
     ("True Crime", TagCategory.GENRE),
-    # Age demographic
+    ("Urbanism", TagCategory.GENRE),
+    ("Wine and Drink", TagCategory.GENRE),
+
+    # ── Age: who it is for ──────────────────────────────────────────────────
+    ("Baby and Toddler (0-3)", TagCategory.AGE),
     ("Children (0-8)", TagCategory.AGE),
+    ("Early Reader (5-8)", TagCategory.AGE),
     ("Middle Grade (8-12)", TagCategory.AGE),
     ("Young Adult (13-18)", TagCategory.AGE),
+    ("New Adult (18-25)", TagCategory.AGE),
     ("Adult", TagCategory.AGE),
 ]
 
@@ -73,12 +175,17 @@ PREDEFINED_TAGS: list[tuple[str, TagCategory]] = [
 
 def seed_tags() -> None:
     """Insert any predefined tag that is missing. Idempotent, so a restart
-    never duplicates and a tag deleted by hand comes back."""
+    never duplicates and a tag deleted by hand comes back.
+
+    Only these carry `is_predefined`. A tag the household invented is left
+    alone here, which is the whole reason the flag exists: without it a
+    restart would either delete their tags or adopt them.
+    """
     with DBSession(engine) as db:
         existing = {name for (name,) in db.query(Tag.name).all()}
         for name, category in PREDEFINED_TAGS:
             if name not in existing:
-                db.add(Tag(name=name, category=category))
+                db.add(Tag(name=name, category=category, is_predefined=True))
         db.commit()
 
 
@@ -119,6 +226,10 @@ app = FastAPI(
     generate_unique_id_function=custom_operation_id,
 )
 
+# Added first, so it sits innermost: the refusal still happens before anything
+# reads the body, and it picks up the security and CORS headers of the layers
+# around it rather than answering bare.
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Same-origin by default: FastAPI serves the API and the compiled frontend
@@ -137,6 +248,7 @@ if _origins:
 register_error_handlers(app)
 
 app.include_router(auth.router)
+app.include_router(backup.router)
 app.include_router(books.router)
 app.include_router(imports.router)
 app.include_router(loans.router)
@@ -195,6 +307,26 @@ def assert_unique_operation_ids() -> None:
 assert_unique_operation_ids()
 
 
+# ── Health ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/healthz", tags=["system"])
+def healthz(db: DbSession) -> dict[str, str]:
+    """Whether this container can actually serve.
+
+    The Kubernetes probes used to request `/`, which the SPA mount answers from
+    disk: a pod whose database had gone (an unmounted volume, a corrupt file)
+    stayed Ready and kept taking traffic, because index.html was still readable.
+    Touching the database is the whole point, so this is a query rather than a
+    constant.
+
+    Unauthenticated, deliberately: a probe holds no token, and the only thing
+    disclosed is that the service is up, which anyone can tell by connecting.
+    """
+    db.execute(text("SELECT 1"))
+    return {"status": "ok"}
+
+
 # ── Fallbacks ─────────────────────────────────────────────────────────────────
 #
 # Registered after the real routers and before the SPA mount, so they catch
@@ -221,9 +353,13 @@ async def api_not_found(rest: str) -> None:
 
 app.include_router(_fallback)
 
-# Uploaded covers. Mounted before the SPA catch-all, which would otherwise
+# Uploaded covers. A router rather than a StaticFiles mount, and that is a
+# security fix rather than a refactor: a mount has no dependencies, so nothing
+# authenticated or authorized that path, and cover filenames are the book id.
+# Any member could read another member's private book cover by counting. See
+# routers/covers.py. Registered before the SPA catch-all, which would otherwise
 # swallow these paths.
-app.mount("/covers", StaticFiles(directory=str(COVERS_DIR)), name="covers")
+app.include_router(covers.router)
 
 # The compiled PWA. `html=True` makes it a catch-all returning index.html for
 # unmatched paths, which is what lets client-side routes survive a refresh.

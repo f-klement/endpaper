@@ -4,6 +4,9 @@ These exercise the ORM directly rather than through the API, because the
 behaviour under test belongs to the schema.
 """
 
+import ast
+from pathlib import Path
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -158,3 +161,88 @@ class TestRelationships:
         db.add(note)
         db.commit()
         assert note.author.username == "reader"
+
+
+class TestEveryBookQueryIsFiltered:
+    """House rule: every query returning or counting books applies
+    `visible_to()`, or `in_trash_for()` for the trash views.
+
+    Nothing else catches a breach. A missing filter returns other members'
+    private books with a 200 and no error anywhere, and it is an easy thing to
+    leave out: `list_tags` counted books without it for a while, and the tags
+    endpoint therefore disclosed which tags existed only on somebody's private
+    books.
+
+    A statement may opt out with a `# visible_to exempt:` comment giving the
+    reason. There is one, and it is about the UNIQUE constraint on ISBN.
+    """
+
+    EXEMPTION = "visible_to exempt:"
+    PREDICATES = ("visible_to(", "in_trash_for(")
+
+    def _leaf_statements(self, tree):
+        """Statements that contain no other statement.
+
+        The unit to check is the whole chained expression, since the filter is
+        several calls along from `query(Book)`. Checking a `for` or an `if`
+        would swallow its entire body and pass on a predicate used elsewhere
+        inside it.
+        """
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.stmt):
+                continue
+            if any(isinstance(child, ast.stmt) for child in ast.iter_child_nodes(node)):
+                continue
+            yield node
+
+    def _queries_books(self, node) -> bool:
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "query"):
+                continue
+            if any(isinstance(a, ast.Name) and a.id == "Book" for a in call.args):
+                return True
+        return False
+
+    def test_no_unfiltered_book_query_reaches_the_database(self):
+        backend = Path(__file__).resolve().parent.parent
+        offenders: list[str] = []
+
+        for path in backend.rglob("*.py"):
+            relative = path.relative_to(backend)
+            if relative.parts[0] in {"tests", "migrations", ".venv"}:
+                continue
+            source = path.read_text()
+            lines = source.splitlines()
+
+            for node in self._leaf_statements(ast.parse(source)):
+                if not self._queries_books(node):
+                    continue
+                # The statement, plus the comment block immediately above it,
+                # which is where an exemption sits. Walked upward rather than a
+                # fixed number of lines, so the reason can be as long as it
+                # needs to be.
+                start = node.lineno - 1
+                while start > 0 and lines[start - 1].lstrip().startswith("#"):
+                    start -= 1
+                window = "\n".join(lines[start : node.end_lineno])
+                if self.EXEMPTION in window:
+                    continue
+                if any(predicate in window for predicate in self.PREDICATES):
+                    continue
+                offenders.append(f"{relative}:{node.lineno}")
+
+        assert offenders == [], (
+            "These statements query Book without visible_to() or in_trash_for(): "
+            + ", ".join(offenders)
+        )
+
+    def test_the_guard_would_notice_an_unfiltered_query(self, tmp_path):
+        """A guard that cannot fail is not a guard. This pins that the shape it
+        looks for is the shape the code actually uses."""
+        offending = "books = db.query(Book).filter(Book.title == 'Dune').all()"
+        node = next(self._leaf_statements(ast.parse(offending)))
+        assert self._queries_books(node)
+        assert not any(predicate in offending for predicate in self.PREDICATES)

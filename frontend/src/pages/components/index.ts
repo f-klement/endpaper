@@ -6,4 +6,6 @@
  * pages → here; general and domain-free → `src/components/`.
  */
 
+export { default as LocationField } from "./LocationField";
+export { Page, PageHeader, PageCount } from "./Page";
 export { default as TagPicker } from "./TagPicker";

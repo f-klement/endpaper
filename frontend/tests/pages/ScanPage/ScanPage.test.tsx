@@ -20,8 +20,19 @@ vi.mock("react-router-dom", async () => {
 });
 
 vi.mock("../../../src/pages/ScanPage/components/BarcodeScanner", () => ({
-  default: ({ onDetected }: { onDetected: (isbn: string) => void }) => (
-    <button onClick={() => onDetected("9780441013593")}>simulate scan</button>
+  default: ({
+    onDetected,
+    onRejected,
+  }: {
+    onDetected: (isbn: string) => void;
+    onRejected?: (code: string) => void;
+  }) => (
+    <>
+      <button onClick={() => onDetected("9780441013593")}>simulate scan</button>
+      <button onClick={() => onRejected?.("4001234567890")}>
+        simulate non-book
+      </button>
+    </>
   ),
 }));
 
@@ -50,8 +61,15 @@ beforeEach(() => {
   api.on("/api/books/tags", { body: [] });
 });
 
+/**
+ * Open the camera, then emit a barcode from the stubbed scanner.
+ *
+ * The camera is behind an explicit button now: the page used to open it on
+ * arrival and hold it until the tab was left.
+ */
 async function scan() {
   const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Start scanning" }));
   await user.click(screen.getByRole("button", { name: "simulate scan" }));
   return user;
 }
@@ -60,6 +78,92 @@ describe("ScanPage", () => {
   it("offers manual ISBN entry alongside the camera", () => {
     renderWithProviders(<ScanPage />);
     expect(screen.getByLabelText("ISBN")).toBeInTheDocument();
+  });
+
+  describe("the camera is opened on request", () => {
+    // It used to start the moment this tab was rendered and run until the tab
+    // was left, so opening the Scan tab lit the phone's camera indicator and
+    // held it there through everything that followed.
+
+    it("does not open the camera on arrival", () => {
+      renderWithProviders(<ScanPage />);
+      expect(
+        screen.queryByRole("button", { name: "simulate scan" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("says the camera is off rather than showing a black rectangle", () => {
+      renderWithProviders(<ScanPage />);
+      expect(screen.getByText("The camera is off")).toBeInTheDocument();
+    });
+
+    it("opens it when asked", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.click(screen.getByRole("button", { name: "Start scanning" }));
+
+      expect(
+        screen.getByRole("button", { name: "simulate scan" }),
+      ).toBeInTheDocument();
+    });
+
+    it("closes it again when asked", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.click(screen.getByRole("button", { name: "Start scanning" }));
+      await user.click(screen.getByRole("button", { name: "Stop scanning" }));
+
+      expect(
+        screen.queryByRole("button", { name: "simulate scan" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("closes it once a barcode has been read", async () => {
+      // The next step is confirming a draft. Holding the stream open behind
+      // that form keeps the indicator lit for as long as somebody takes to
+      // check a title.
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage />);
+
+      await scan();
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "simulate scan" }),
+        ).not.toBeInTheDocument(),
+      );
+    });
+  });
+
+  describe("a barcode that is not a book", () => {
+    it("says what it read instead of going quiet", async () => {
+      // Silence here reads as a broken scanner, when what happened is that the
+      // price code beside the ISBN was read.
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.click(screen.getByRole("button", { name: "Start scanning" }));
+      await user.click(
+        screen.getByRole("button", { name: "simulate non-book" }),
+      );
+
+      expect(screen.getByRole("status")).toHaveTextContent("4001234567890");
+    });
+
+    it("clears the notice when scanning starts again", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage />);
+
+      await user.click(screen.getByRole("button", { name: "Start scanning" }));
+      await user.click(
+        screen.getByRole("button", { name: "simulate non-book" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Stop scanning" }));
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
   });
 
   describe("lookup", () => {
@@ -219,6 +323,8 @@ describe("ScanPage", () => {
       renderWithProviders(<ScanPage />);
 
       const user = await scan();
+      // The tag categories start closed: the curated vocabulary is 105 tags.
+      await user.click(await screen.findByRole("button", { name: /Genre/ }));
       await user.click(await screen.findByRole("button", { name: "Fantasy" }));
       await user.click(screen.getByRole("button", { name: "Add to Library" }));
 
@@ -241,6 +347,8 @@ describe("ScanPage", () => {
       renderWithProviders(<ScanPage />);
 
       const user = await scan();
+      // The tag categories start closed: the curated vocabulary is 105 tags.
+      await user.click(await screen.findByRole("button", { name: /Genre/ }));
       await user.click(await screen.findByRole("button", { name: "Fantasy" }));
       await user.click(screen.getByRole("button", { name: "Add to Library" }));
 
@@ -263,6 +371,55 @@ describe("ScanPage", () => {
         "Book with this ISBN already in catalog",
       );
       expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("offers to open the copy already on the shelf", async () => {
+      // The second pass through a bookcase is mostly books already in the
+      // library, so a bare sentence here is a dead end on a common path: the
+      // reader is holding the book with nothing to press.
+      api.on("/api/books/scan", {
+        status: 409,
+        body: {
+          detail: {
+            message: "Book with this ISBN already in catalog",
+            book_id: 42,
+          },
+        },
+      });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add to Library" }),
+      );
+
+      expect(
+        await screen.findByRole("link", {
+          name: "Open the copy already in the library",
+        }),
+      ).toHaveAttribute("href", "/book/42");
+    });
+
+    it("offers no link when the server named no book", async () => {
+      // It withholds the id when the holder is another member's private book,
+      // because returning it would confirm they own it.
+      api.on("/api/books/scan", {
+        status: 409,
+        body: { detail: "Book with this ISBN already in catalog" },
+      });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add to Library" }),
+      );
+
+      await screen.findByRole("alert");
+      expect(
+        screen.queryByRole("link", {
+          name: "Open the copy already in the library",
+        }),
+      ).not.toBeInTheDocument();
     });
 
     it("refuses to add an untitled manual entry", async () => {

@@ -25,7 +25,7 @@ export default function LoanPanel({
 
   return (
     <div>
-      <p className="text-sm font-semibold text-gray-700 mb-2 dark:text-gray-200">
+      <p className="text-sm font-semibold text-paper-700 mb-2 dark:text-paper-200">
         {t("loans.management")}
       </p>
 
@@ -43,7 +43,7 @@ export default function LoanPanel({
             value={target}
             onChange={(event) => setTarget(event.target.value)}
             aria-label={t("loans.loanToLabel")}
-            className="flex-1 px-3 py-2.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 bg-white dark:border-gray-700 dark:bg-gray-900"
+            className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
           >
             <option value="">{t("loans.loanTo")}</option>
             {members.map((member) => (
@@ -60,7 +60,7 @@ export default function LoanPanel({
               onLend(Number(target), dueAt ? `${dueAt}T23:59:59` : null)
             }
             disabled={!target || isBusy}
-            className="px-4 py-2.5 bg-sky-500 hover:bg-sky-600 disabled:bg-sky-300 text-white rounded-lg text-sm font-semibold transition-colors"
+            className="px-4 py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold transition-colors"
           >
             {t("loans.loanButton")}
           </button>
@@ -71,7 +71,7 @@ export default function LoanPanel({
         <div className="mt-2">
           <label
             htmlFor="loan-due"
-            className="block text-xs text-gray-500 mb-1 dark:text-gray-400"
+            className="block text-xs text-paper-500 mb-1 dark:text-paper-400"
           >
             {t("loans.dueDate")}
           </label>
@@ -80,7 +80,7 @@ export default function LoanPanel({
             type="date"
             value={dueAt}
             onChange={(event) => setDueAt(event.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 dark:border-gray-700"
+            className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
           />
         </div>
       )}

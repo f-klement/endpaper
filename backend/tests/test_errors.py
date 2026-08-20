@@ -178,3 +178,32 @@ class TestNonApiPaths:
         saw these, so every mistyped URL returned a bare JSON 404 no matter
         who asked."""
         assert b"Endpaper" in client.get("/nope", headers=HTML).content
+
+
+class TestValidatorRejections:
+    """A validator that raises `ValueError` must still produce a 422.
+
+    Pydantic puts the **exception object** into the error entry's `ctx`, and
+    `JSONResponse` cannot serialise that. Without the encode in the handler,
+    a merely invalid request renders a TypeError and the caller gets a 500.
+    """
+
+    def test_a_rejected_tag_name_is_422_not_500(self, client, admin):
+        res = client.post(
+            "/api/books/tags", json={"name": "   "}, headers=admin["headers"]
+        )
+        assert res.status_code == 422
+
+    def test_a_rejected_isbn_is_422_not_500(self, client, admin):
+        res = client.post(
+            "/api/books",
+            json={"title": "Dune", "isbn": "1234567890123"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_the_body_is_readable_json(self, client, admin):
+        res = client.post(
+            "/api/books/tags", json={"name": "   "}, headers=admin["headers"]
+        )
+        assert isinstance(res.json()["detail"], list)

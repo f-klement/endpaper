@@ -1,10 +1,13 @@
 """Tests for the Google Books surfaces on backend/routers/books.py.
 
-Three endpoints share one gate (`_require_google_books`) and one upstream:
+Two endpoints share one gate (`_require_google_books`) and one upstream:
 
-  GET  /api/books/google/search        free text, before a book exists
-  POST /api/books/{id}/enrich          fill this book's gaps
+  POST /api/books/{id}/enrich              fill this book's gaps
   GET  /api/books/{id}/enrich/candidates   other editions of this book
+
+Free-text search used to be a third and is not any more: it answers without a
+key now, so it has neither this gate nor this upstream on its own. Its tests
+are in `test_books_search.py`.
 
 Every outbound call is intercepted with respx, so the suite never touches the
 network and never needs a real API key.
@@ -15,8 +18,7 @@ import pytest
 import respx
 
 from enums import SettingKey
-
-GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes"
+from tests.helpers import GOOGLE_BOOKS, silence_catalogues
 
 
 def volume(
@@ -59,222 +61,16 @@ def google_enabled(client, admin):
 
 @pytest.fixture
 def google_search():
-    """Google answers a search with one volume."""
+    """Google answers with one volume; every other catalogue holds nothing.
+
+    Enrichment reaches all six sources now, so the rest have to be silenced
+    for a test to prove that Google's answer is the one that landed.
+    """
     with respx.mock(assert_all_called=False) as mock:
         mock.get(GOOGLE_BOOKS).mock(
             return_value=httpx.Response(200, json={"items": [volume()]})
         )
-        yield mock
-
-
-class TestSearchGate:
-    """The feature is off by default, and the messages say who can fix it."""
-
-    def test_requires_authentication(self, client):
-        assert client.get("/api/books/google/search", params={"q": "dune"}).status_code == 401
-
-    def test_refused_while_the_feature_is_off(self, client, admin):
-        res = client.get(
-            "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-        )
-
-        assert res.status_code == 400
-        assert "switched off" in res.json()["detail"]
-
-    def test_refused_when_enabled_without_a_key(self, client, admin):
-        client.put(
-            "/api/settings", json={"google_books_enabled": True}, headers=admin["headers"]
-        )
-
-        res = client.get(
-            "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-        )
-
-        assert res.status_code == 400
-        assert "API key" in res.json()["detail"]
-
-    def test_the_key_is_never_echoed_back(self, client, admin, google_enabled):
-        """A 400 explaining the setup must not leak the secret it is about."""
-        client.put(
-            "/api/settings", json={"google_books_enabled": False}, headers=admin["headers"]
-        )
-
-        res = client.get(
-            "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-        )
-
-        assert "test-key" not in res.text
-
-    def test_a_member_may_search(self, client, member, google_enabled, google_search):
-        """Configuring it is admin-only; using it is not."""
-        res = client.get(
-            "/api/books/google/search", params={"q": "dune"}, headers=member["headers"]
-        )
-
-        assert res.status_code == 200
-
-
-class TestSearchResults:
-    def test_maps_the_volume_fields(self, client, admin, google_enabled, google_search):
-        [match] = client.get(
-            "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-        ).json()
-
-        assert match["title"] == "Dune"
-        assert match["subtitle"] == "A Novel"
-        assert match["author"] == "Frank Herbert"
-        assert match["publisher"] == "Chilton"
-        assert match["year"] == 1965
-        assert match["page_count"] == 412
-        assert match["language"] == "en"
-        assert match["isbn13"] == "9780441013593"
-        assert match["google_books_id"] == "abc123"
-
-    def test_no_results_is_an_empty_list_not_a_404(
-        self, client, admin, google_enabled
-    ):
-        # Nothing is wrong with a search that matches nothing, and the client
-        # renders "no results" rather than an error.
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(200, json={}))
-
-            res = client.get(
-                "/api/books/google/search", params={"q": "zzzz"}, headers=admin["headers"]
-            )
-
-        assert res.status_code == 200
-        assert res.json() == []
-
-    def test_writes_nothing(self, client, admin, google_enabled, google_search):
-        """Search is a lookup. A book appears only when someone confirms one."""
-        before = client.get("/api/books", headers=admin["headers"]).json()["total"]
-
-        client.get("/api/books/google/search", params={"q": "dune"}, headers=admin["headers"])
-
-        after = client.get("/api/books", headers=admin["headers"]).json()["total"]
-        assert after == before
-
-    def test_suggests_tags_from_the_categories(self, client, admin, google_enabled):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(categories=["Fiction", "Fantasy"])]}
-                )
-            )
-
-            [match] = client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            ).json()
-
-        tags = client.get("/api/books/tags", headers=admin["headers"]).json()
-        names = {tag["id"]: tag["name"] for tag in tags}
-        assert {names[tag_id] for tag_id in match["suggested_tag_ids"]} >= {"Fiction", "Fantasy"}
-
-    def test_a_category_containing_a_comma_survives(self, client, admin, google_enabled):
-        """The separator is a semicolon precisely because of names like this.
-
-        Google really does return "Fiction, general". Joining on a comma would
-        make it impossible to split the list back apart.
-        """
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(categories=["Fiction, general", "Fantasy"])]}
-                )
-            )
-
-            [match] = client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            ).json()
-
-        assert match["categories"] == "Fiction, general; Fantasy"
-
-    def test_honours_the_limit(self, client, admin, google_enabled):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(
-                return_value=httpx.Response(
-                    200, json={"items": [volume(volume_id=str(n)) for n in range(10)]}
-                )
-            )
-
-            res = client.get(
-                "/api/books/google/search",
-                params={"q": "dune", "limit": 3},
-                headers=admin["headers"],
-            )
-
-        assert len(res.json()) == 3
-
-
-class TestSearchValidation:
-    @pytest.mark.parametrize("query", ["", "a"])
-    def test_a_query_that_is_too_short_is_rejected(
-        self, client, admin, google_enabled, query
-    ):
-        # Guarded before the upstream call: a one-character search would spend
-        # a request on a result nobody wants.
-        res = client.get(
-            "/api/books/google/search", params={"q": query}, headers=admin["headers"]
-        )
-
-        assert res.status_code == 422
-
-    def test_a_missing_query_is_rejected(self, client, admin, google_enabled):
-        assert (
-            client.get("/api/books/google/search", headers=admin["headers"]).status_code == 422
-        )
-
-    @pytest.mark.parametrize("limit", [0, 21])
-    def test_a_limit_outside_the_range_is_rejected(
-        self, client, admin, google_enabled, limit
-    ):
-        res = client.get(
-            "/api/books/google/search",
-            params={"q": "dune", "limit": limit},
-            headers=admin["headers"],
-        )
-
-        assert res.status_code == 422
-
-
-class TestUpstreamFailures:
-    def test_a_rejected_key_becomes_a_502_naming_the_cause(
-        self, client, admin, google_enabled
-    ):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(403))
-
-            res = client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            )
-
-        assert res.status_code == 502
-        assert "API key" in res.json()["detail"]
-
-    def test_rate_limiting_is_reported_as_such(self, client, admin, google_enabled):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(429))
-
-            res = client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            )
-
-        assert res.status_code == 502
-        assert "rate limiting" in res.json()["detail"]
-
-    def test_an_upstream_outage_does_not_surface_as_a_500(
-        self, client, admin, google_enabled
-    ):
-        # 502, not 500: the fault is Google's, and a 500 would send whoever is
-        # on call looking at the wrong service.
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(GOOGLE_BOOKS).mock(return_value=httpx.Response(503))
-
-            res = client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            )
-
-        assert res.status_code == 502
+        yield silence_catalogues(mock)
 
 
 class TestEnrichBook:
@@ -371,6 +167,7 @@ class TestCategoriesSerialisation:
                     200, json={"items": [volume(categories=["Fiction", "Fantasy"])]}
                 )
             )
+            silence_catalogues(mock)
             book = make_book(admin["headers"])
             client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
@@ -387,6 +184,7 @@ class TestCategoriesSerialisation:
                     200, json={"items": [volume(categories=["Fiction, general"])]}
                 )
             )
+            silence_catalogues(mock)
             book = make_book(admin["headers"])
             client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
@@ -405,15 +203,17 @@ class TestCategoriesSerialisation:
 
 
 class TestKeyHandling:
-    def test_the_stored_key_is_sent_to_google(self, client, admin, google_enabled):
+    def test_the_stored_key_is_sent_to_google(
+        self, client, admin, make_book, google_enabled
+    ):
+        book = make_book(admin["headers"])
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(GOOGLE_BOOKS).mock(
                 return_value=httpx.Response(200, json={"items": []})
             )
+            silence_catalogues(mock)
 
-            client.get(
-                "/api/books/google/search", params={"q": "dune"}, headers=admin["headers"]
-            )
+            client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
 
         assert route.calls.last.request.url.params["key"] == "test-key"
 
@@ -428,3 +228,111 @@ class TestKeyHandling:
         assert (
             settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "test-key"
         )
+
+
+class TestApplyingAChosenEdition:
+    """Nothing is written until somebody says which printing it is."""
+
+    def choice(self, **overrides) -> dict:
+        base = {
+            "source": "open_library",
+            "google_books_id": "abc123",
+            "title": "Dune",
+            "subtitle": "A Novel",
+            "author": "Frank Herbert",
+            "publisher": "Chilton",
+            "year": 1965,
+            "description": "Desert planet politics.",
+            "page_count": 412,
+            "language": "en",
+            "categories": None,
+            "cover_url": "https://example.test/cover.jpg",
+            "isbn13": "9780441013593",
+            "series_name": None,
+            "series_index": None,
+            "suggested_tag_ids": [],
+        }
+        return {**base, **overrides}
+
+    def test_fills_the_gaps_from_the_chosen_edition(self, client, admin, make_book):
+        book = make_book(admin["headers"])
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json=self.choice(),
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["book"]["page_count"] == 412
+        assert set(res.json()["updated_fields"]) >= {"page_count", "publisher"}
+
+    def test_writes_nothing_upstream(self, client, admin, make_book):
+        """No catalogue is called: the caller already has the record."""
+        book = make_book(admin["headers"])
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            client.post(
+                f"/api/books/{book['id']}/enrich/apply",
+                json=self.choice(),
+                headers=admin["headers"],
+            )
+            assert not any(route.called for route in mock.routes)
+
+    def test_does_not_overrule_a_typed_value(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune", author="Somebody Else")
+
+        client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json=self.choice(),
+            headers=admin["headers"],
+        )
+
+        res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert res.json()["author"] == "Somebody Else"
+
+    def test_overwrite_replaces_a_stored_value(self, client, admin, make_book):
+        book = make_book(admin["headers"], author="Somebody Else")
+
+        client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            params={"overwrite": True},
+            json=self.choice(),
+            headers=admin["headers"],
+        )
+
+        res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert res.json()["author"] == "Frank Herbert"
+
+    def test_never_takes_the_isbn(self, client, admin, make_book):
+        """It is unique, and a chosen printing's ISBN is not this copy's."""
+        book = make_book(admin["headers"], isbn=None)
+
+        client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json=self.choice(),
+            headers=admin["headers"],
+        )
+
+        res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert res.json()["isbn"] is None
+
+    def test_another_members_private_book_is_not_found(
+        self, client, admin, member, make_book
+    ):
+        private = make_book(member["headers"], is_private=True)
+
+        res = client.post(
+            f"/api/books/{private['id']}/enrich/apply",
+            json=self.choice(),
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 404
+
+    def test_requires_authentication(self, client, admin, make_book):
+        book = make_book(admin["headers"])
+        res = client.post(
+            f"/api/books/{book['id']}/enrich/apply", json=self.choice()
+        )
+        assert res.status_code == 401

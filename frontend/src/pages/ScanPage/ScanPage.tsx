@@ -1,25 +1,35 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ErrorState, Spinner } from "../../components";
+import { Button, ErrorState, Icon, Spinner } from "../../components";
+import { LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
-import GoogleSearchPanel from "./components/GoogleSearchPanel";
+import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import LookupResult from "./components/LookupResult";
 import RapidQueue from "./components/RapidQueue";
-import { useGoogleSearch, useRapidIntake, useScanFlow } from "./hooks";
+import { useBookSearch, useRapidIntake, useScanFlow } from "./hooks";
 
 export default function ScanPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`));
-  const search = useGoogleSearch();
+  const search = useBookSearch();
   const rapid = useRapidIntake();
   const [showSearchHelp, setShowSearchHelp] = useState(false);
   const [manualIsbn, setManualIsbn] = useState("");
   const [manualError, setManualError] = useState<MessageKey | null>(null);
+
+  // The camera is opened on request, never on arrival.
+  //
+  // It used to start the moment this tab was opened and run until the tab was
+  // left, so walking past the Scan tab lit the phone's camera indicator and
+  // held it there. Opening a camera is not something a page should do because
+  // somebody looked at it.
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [rejectedCode, setRejectedCode] = useState<string | null>(null);
 
   // The scanner and the search box are both ways of choosing *which* book.
   // Once a draft exists that question is answered, so both step aside.
@@ -47,32 +57,63 @@ export default function ScanPage() {
     scan.reset();
     setManualIsbn("");
     setManualError(null);
+    setRejectedCode(null);
     search.clear();
+  }
+
+  function handleDetected(isbn: string) {
+    // Close the camera on a hit. The next step is confirming a draft, and
+    // leaving the stream running behind that form keeps the indicator lit for
+    // as long as somebody takes to check a title.
+    setIsCameraOn(false);
+    setRejectedCode(null);
+    scan.lookup(isbn);
   }
 
   return (
     <div className="max-w-lg mx-auto px-4 pt-5">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          📷 {t("scan.title")}
+        <h1 className="text-xl font-semibold text-paper-900 dark:text-paper-100">
+          {t("scan.title")}
         </h1>
         {scan.draft === null && (
-          <button
-            type="button"
-            onClick={rapid.isActive ? rapid.stop : rapid.start}
-            className="text-sm font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400"
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setIsCameraOn(false);
+              setRejectedCode(null);
+              if (rapid.isActive) rapid.stop();
+              else rapid.start();
+            }}
           >
             {rapid.isActive ? t("rapid.stop") : t("rapid.start")}
-          </button>
+          </Button>
         )}
       </div>
 
       {rapid.isActive && (
         <>
-          <BarcodeScanner active onDetected={rapid.capture} />
-          <p className="text-xs text-gray-500 mt-3 leading-relaxed dark:text-gray-400">
+          {/* Rapid mode has its own start and stop in the header, so the
+              camera follows that switch rather than needing a second one. */}
+          <BarcodeScanner
+            active
+            onDetected={rapid.capture}
+            onRejected={setRejectedCode}
+          />
+          <p className="text-xs text-paper-500 mt-3 leading-relaxed dark:text-paper-400">
             {t("rapid.explain")}
           </p>
+          {/* Above the queue rather than inside it, so the shelf can be named
+              before the first barcode instead of remembered afterwards. */}
+          <div className="mt-4">
+            <LocationField
+              value={rapid.location}
+              onChange={rapid.setLocation}
+              locations={rapid.locations}
+              label={t("location.batchLabel")}
+            />
+          </div>
           <RapidQueue
             entries={rapid.entries}
             isAdding={rapid.isAdding}
@@ -86,8 +127,53 @@ export default function ScanPage() {
 
       {showEntry && (
         <>
-          <BarcodeScanner active onDetected={scan.lookup} />
-          <p className="text-center text-sm text-gray-500 mt-3 mb-4 dark:text-gray-400">
+          {isCameraOn ? (
+            <BarcodeScanner
+              active
+              onDetected={handleDetected}
+              onRejected={setRejectedCode}
+            />
+          ) : (
+            <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
+              <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-500 dark:bg-paper-800 dark:text-paper-400">
+                <Icon name="camera" className="w-5 h-5" />
+              </span>
+              <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
+                {t("scan.cameraIdle")}
+              </p>
+              <p className="text-xs text-paper-400 text-center px-8 dark:text-paper-500">
+                {t("scan.cameraIdleHint")}
+              </p>
+            </div>
+          )}
+
+          <Button
+            variant={isCameraOn ? "secondary" : "primary"}
+            fullWidth
+            className="mt-3"
+            icon={isCameraOn ? null : <Icon name="camera" className="w-4 h-4" />}
+            onClick={() => {
+              setRejectedCode(null);
+              setIsCameraOn((on) => !on);
+            }}
+          >
+            {isCameraOn ? t("scan.stopScanning") : t("scan.startScanning")}
+          </Button>
+
+          {/* A barcode that decoded but is not a book. Saying so is the whole
+              point: silence here reads as a scanner that does not work, when
+              what actually happened is that the price code was read instead of
+              the ISBN. */}
+          {rejectedCode && (
+            <p
+              role="status"
+              className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40"
+            >
+              {t("scan.notABook", { code: rejectedCode })}
+            </p>
+          )}
+
+          <p className="text-center text-sm text-paper-500 mt-4 mb-4 dark:text-paper-400">
             {t("scan.orEnterManually")}
           </p>
           <form onSubmit={handleManualLookup} className="flex gap-2">
@@ -97,14 +183,9 @@ export default function ScanPage() {
               onChange={(event) => setManualIsbn(event.target.value)}
               placeholder="9780743273565"
               aria-label={t("scan.isbnLabel")}
-              className="flex-1 px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-400 text-sm dark:border-gray-700"
+              className="field flex-1"
             />
-            <button
-              type="submit"
-              className="px-4 py-2.5 bg-sky-500 text-white rounded-lg text-sm font-medium hover:bg-sky-600 transition-colors"
-            >
-              {t("scan.lookUp")}
-            </button>
+            <Button type="submit">{t("scan.lookUp")}</Button>
           </form>
           {manualError && (
             <div className="mt-2">
@@ -112,29 +193,29 @@ export default function ScanPage() {
             </div>
           )}
 
-          {/* The third way in, for a book with no barcode or a damaged one.
-              Only when an admin has configured Google Books. */}
-          {search.isEnabled && (
-            <GoogleSearchPanel
-              isConfigured={search.isConfigured}
-              onOpenHelp={() => setShowSearchHelp(true)}
-              query={search.query}
-              matches={search.matches}
-              isSearching={search.isSearching}
-              isEmpty={search.isEmpty}
-              error={search.error}
-              onQueryChange={search.setQuery}
-              onSubmit={search.submit}
-              onChoose={scan.chooseMatch}
-            />
-          )}
+          {/* The third way in, for a book with no barcode, a damaged one, or
+              one printed before ISBNs existed. Always available: it no longer
+              needs an API key, and hiding it from a household without one left
+              them unable to add such a book at all. */}
+          <SearchPanel
+            isConfigured={search.isConfigured}
+            onOpenHelp={() => setShowSearchHelp(true)}
+            query={search.query}
+            matches={search.matches}
+            isSearching={search.isSearching}
+            isEmpty={search.isEmpty}
+            error={search.error}
+            onQueryChange={search.setQuery}
+            onSubmit={search.submit}
+            onChoose={scan.chooseMatch}
+          />
         </>
       )}
 
       {scan.isLookingUp && (
         <div className="text-center py-12">
           <Spinner label={t("scan.lookingUp")} />
-          <p className="text-gray-500 text-sm mt-3 dark:text-gray-400">
+          <p className="text-paper-500 text-sm mt-3 dark:text-paper-400">
             {t("scan.lookingUp")}
           </p>
         </div>
@@ -154,12 +235,19 @@ export default function ScanPage() {
           selectedTagIds={scan.selectedTagIds}
           coverFile={scan.coverFile}
           isPrivate={scan.isPrivate}
+          location={scan.location}
+          locations={scan.locations}
+          format={scan.format}
           isAdding={scan.isAdding}
           error={scan.error}
           onDraftChange={scan.setDraft}
           onToggleTag={scan.toggleTag}
           onCoverChange={scan.setCoverFile}
           onPrivateChange={scan.setIsPrivate}
+          onLocationChange={scan.setLocation}
+          onCreateTag={scan.createTag}
+          isCreatingTag={scan.isCreatingTag}
+          onFormatChange={scan.setFormat}
           onConfirm={scan.confirm}
           onCancel={handleCancel}
         />

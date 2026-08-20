@@ -10,9 +10,12 @@ what is checked here. The extension is derived from the content, not from the
 name the caller sent.
 """
 
+import os
+from pathlib import Path
+
 from fastapi import HTTPException, UploadFile, status
 
-from config import MAX_UPLOAD_BYTES
+from config import ALLOWED_IMAGE_EXTENSIONS, MAX_UPLOAD_BYTES
 
 # Leading bytes that identify each format we accept.
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -59,3 +62,36 @@ async def read_image_upload(file: UploadFile) -> tuple[bytes, str]:
             detail="File must be a JPEG, PNG or WebP image",
         )
     return data, extension
+
+
+def replace_image(directory: Path, base: str, extension: str, data: bytes) -> Path:
+    """Write `data` as `base.extension`, replacing any other format of `base`.
+
+    Both callers used to unlink the existing file first and then write the new
+    one. A failure in between (a full disk is the realistic one) left the book
+    with no cover at all and a `cover_url` pointing at what had just been
+    deleted, which is a worse outcome than the upload simply failing.
+
+    So the new file is written beside its destination and moved into place with
+    `os.replace`, which is atomic within a filesystem: either the old image is
+    still there or the new one is, never neither. The leftovers in other
+    formats are removed only once that has succeeded, because two formats of
+    the same base both existing means which one is served depends on lookup
+    order.
+    """
+    destination = directory / f"{base}.{extension}"
+    # A leading dot and the pid so a concurrent upload of the same book cannot
+    # land on the same temporary name, and so a leftover is recognisable.
+    temporary = directory / f".{base}.{os.getpid()}.tmp"
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, destination)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+
+    for other in ALLOWED_IMAGE_EXTENSIONS:
+        stale = directory / f"{base}.{other}"
+        if stale != destination:
+            stale.unlink(missing_ok=True)
+    return destination

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { useTranslation } from "../i18n";
+import Icon from "./Icon";
 
 interface ModalProps {
   title: string;
@@ -44,13 +45,13 @@ export default function Modal({ title, onClose, children }: ModalProps) {
         // content sits in a child. Clicking outside the content closes.
         if (event.target === ref.current) onClose();
       }}
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-gray-200 p-0 backdrop:bg-black/40 dark:border-gray-700"
+      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-paper-200 p-0 backdrop:bg-black/40 dark:border-paper-700"
     >
       <div className="p-5">
         <div className="flex items-start justify-between gap-4 mb-3">
           <h2
             id="modal-title"
-            className="text-base font-semibold text-gray-900 dark:text-gray-100"
+            className="text-base font-semibold text-paper-900 dark:text-paper-100"
           >
             {title}
           </h2>
@@ -58,13 +59,13 @@ export default function Modal({ title, onClose, children }: ModalProps) {
             type="button"
             onClick={onClose}
             aria-label={t("common.close")}
-            className="shrink-0 text-gray-400 hover:text-gray-700 text-lg leading-none dark:text-gray-500 dark:hover:text-gray-200"
+            className="shrink-0 text-paper-400 hover:text-paper-700 text-lg leading-none dark:text-paper-500 dark:hover:text-paper-200"
           >
-            ✕
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="text-sm text-gray-600 leading-relaxed space-y-3 dark:text-gray-300">
+        <div className="text-sm text-paper-600 leading-relaxed space-y-3 dark:text-paper-300">
           {children}
         </div>
       </div>

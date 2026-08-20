@@ -9,27 +9,51 @@ import { useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
+import { errorText } from "../../components/ErrorState";
+
 import {
   getLookupIsbnQueryKey,
   lookupIsbn,
+  getListTagsQueryKey,
   useAddBookTag,
+  useCreateTag,
+  useListLocations,
   useListTags,
   useLookupIsbn,
   useScanAdd,
-  useSearchGoogleBooks,
+  useSearchBooks,
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
 import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
-import type { GoogleBooksMatch, TagOut } from "../../api/generated/model";
+import { BookFormat } from "../../api/generated/model";
+import type { BookMatch, LocationOut, TagOut } from "../../api/generated/model";
+import { useTranslation } from "../../i18n";
+import {
+  normaliseLocation,
+  readLastLocation,
+  rememberLastLocation,
+} from "../../lib/lastLocation";
 import {
   blankDraft,
-  draftFromGoogleMatch,
+  draftFromMatch,
   draftFromLookup,
   type BookDraft,
 } from "./types";
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
 const MIN_QUERY_LENGTH = 2;
+
+/**
+ * The shelves already in use, for the location suggestions.
+ *
+ * Cached for five minutes: the set of shelves in a household changes about
+ * once a month, and re-fetching it per scanned book would be a request per
+ * barcode for a list that has not moved.
+ */
+function useKnownLocations(): LocationOut[] {
+  const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
+  return locations.data ?? [];
+}
 
 export interface UseScanFlowResult {
   isbn: string | null;
@@ -41,15 +65,37 @@ export interface UseScanFlowResult {
   isLookingUp: boolean;
 
   /** Prefill the confirm step from a chosen search result. */
-  chooseMatch: (match: GoogleBooksMatch) => void;
+  chooseMatch: (match: BookMatch) => void;
 
   selectedTagIds: number[];
   toggleTag: (tagId: number) => void;
+  /**
+   * Invent a tag and select it for this book. Nothing is attached yet: the
+   * book does not exist until confirm, so the new tag joins `selectedTagIds`
+   * and is applied with the rest.
+   */
+  createTag: (name: string) => void;
+  isCreatingTag: boolean;
 
   coverFile: File | null;
   setCoverFile: (file: File | null) => void;
   isPrivate: boolean;
   setIsPrivate: (isPrivate: boolean) => void;
+  /**
+   * Where this copy goes. Carried over from the last book added rather than
+   * cleared, because a shelf is catalogued in one sitting.
+   */
+  location: string;
+  setLocation: (location: string) => void;
+  /** Shelves already in use, for the suggestions. */
+  locations: LocationOut[];
+  /**
+   * Hardback or paperback. Offered here because the person scanning is
+   * holding the book, which is the one moment they can answer without going
+   * to look.
+   */
+  format: BookFormat | "";
+  setFormat: (format: BookFormat | "") => void;
 
   confirm: () => void;
   isAdding: boolean;
@@ -65,10 +111,13 @@ export function useScanFlow(
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [location, setLocation] = useState(readLastLocation);
+  const [format, setFormat] = useState<BookFormat | "">("");
   const [addError, setAddError] = useState<unknown>(null);
 
   const queryClient = useQueryClient();
   const tags = useListTags();
+  const locations = useKnownLocations();
 
   // Only runs once an ISBN has been scanned or typed.
   const lookupQuery = useLookupIsbn(
@@ -100,13 +149,28 @@ export function useScanFlow(
   const uploadCover = useUploadCover();
   const addTag = useAddBookTag();
 
+  const createTag = useCreateTag({
+    mutation: {
+      onSuccess: (tag) => {
+        setSelectedTagIds((current) =>
+          current.includes(tag.id) ? current : [...current, tag.id],
+        );
+        void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
+      },
+    },
+  });
+
   function reset() {
     setIsbn(null);
     setDraft(null);
     setSelectedTagIds([]);
     setCoverFile(null);
     setIsPrivate(false);
+    setFormat("");
     setAddError(null);
+    // `location` is deliberately not reset. It is the one field that is the
+    // same for the next book far more often than not, and clearing it here
+    // would undo the carry-over on every cancel.
   }
 
   async function confirm() {
@@ -120,10 +184,21 @@ export function useScanFlow(
       ...fields
     } = draft;
 
+    const shelf = normaliseLocation(location);
+
     try {
       const book = await scanAdd.mutateAsync({
-        data: { ...fields, is_private: isPrivate },
+        data: {
+          ...fields,
+          is_private: isPrivate,
+          location: shelf || null,
+          format: format || null,
+        },
       });
+
+      // Only after the write succeeded. Remembering a shelf for a book that
+      // was rejected as a duplicate would carry a value nothing was filed at.
+      rememberLastLocation(shelf);
 
       // The book exists by now. A failed cover or tag is not worth discarding
       // it and making the member scan again, so these are best-effort.
@@ -145,8 +220,8 @@ export function useScanFlow(
     }
   }
 
-  function chooseMatch(match: GoogleBooksMatch) {
-    const next = draftFromGoogleMatch(match);
+  function chooseMatch(match: BookMatch) {
+    const next = draftFromMatch(match);
     setAddError(null);
     // Setting the ISBN would restart the lookup query and overwrite the draft
     // with whatever Open Library says. The record is already chosen, so the
@@ -172,6 +247,8 @@ export function useScanFlow(
     isLookingUp: isbn !== null && draft === null,
 
     selectedTagIds,
+    createTag: (name) => createTag.mutate({ data: { name } }),
+    isCreatingTag: createTag.isPending,
     toggleTag: (tagId) =>
       setSelectedTagIds((current) =>
         current.includes(tagId)
@@ -183,6 +260,11 @@ export function useScanFlow(
     setCoverFile,
     isPrivate,
     setIsPrivate,
+    location,
+    setLocation,
+    locations,
+    format,
+    setFormat,
 
     confirm: () => void confirm(),
     isAdding: scanAdd.isPending,
@@ -191,17 +273,18 @@ export function useScanFlow(
   };
 }
 
-export interface UseGoogleSearchResult {
-  /** Whether to show the search box at all. Follows the admin's toggle. */
-  isEnabled: boolean;
-  /** Whether it will actually work: the toggle is on AND a key is stored. */
+export interface UseBookSearchResult {
+  /**
+   * Whether Google Books is configured. Search works either way: this only
+   * decides whether the panel mentions what a key would add.
+   */
   isConfigured: boolean;
   query: string;
   setQuery: (query: string) => void;
   /** Runs only once submitted: nobody wants a request per keystroke here. */
   submit: () => void;
   clear: () => void;
-  matches: GoogleBooksMatch[];
+  matches: BookMatch[];
   isSearching: boolean;
   /** True once a search has run and come back with nothing. */
   isEmpty: boolean;
@@ -211,18 +294,24 @@ export interface UseGoogleSearchResult {
 /**
  * Finding a book by title when there is no barcode to scan.
  *
- * The query is submitted explicitly rather than debounced. Each search is a
- * billed call against somebody's Google Books quota, and typing "the hobbit"
- * would spend ten of them to answer one question.
+ * The query is submitted explicitly rather than debounced. A search may spend
+ * a call against somebody's Google Books quota when one is configured, and
+ * typing "the hobbit" would spend ten of them to answer one question. It is
+ * also two public catalogues being asked on every keystroke, which is not a
+ * polite thing to do to either of them.
  */
-export function useGoogleSearch(): UseGoogleSearchResult {
+export function useBookSearch(): UseBookSearchResult {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
+  const { locale } = useTranslation();
 
   const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
 
-  const search = useSearchGoogleBooks(
-    { q: submitted, limit: 10 },
+  const search = useSearchBooks(
+    // The reader's own language breaks ties towards the printing they are
+    // most likely to be holding. It never outranks a title match, so an
+    // English title searched from a German interface still comes back first.
+    { q: submitted, limit: 10, lang: locale },
     {
       query: {
         enabled: submitted.length >= MIN_QUERY_LENGTH,
@@ -235,7 +324,6 @@ export function useGoogleSearch(): UseGoogleSearchResult {
   );
 
   return {
-    isEnabled: flags.data?.google_books_enabled ?? false,
     isConfigured: flags.data?.google_books_ready ?? false,
     query,
     setQuery,
@@ -254,11 +342,13 @@ export function useGoogleSearch(): UseGoogleSearchResult {
   };
 }
 
-/** One book caught by the rapid scanner, and how its lookup went. */
+/** One book caught by the rapid scanner, and how it has gone so far. */
 export interface ScannedEntry {
   isbn: string;
-  state: "looking-up" | "found" | "not-found";
+  state: "looking-up" | "found" | "not-found" | "failed";
   draft: BookDraft | null;
+  /** Why it could not be added, once the batch has run. */
+  reason?: string;
 }
 
 export interface UseRapidIntakeResult {
@@ -266,6 +356,17 @@ export interface UseRapidIntakeResult {
   start: () => void;
   stop: () => void;
   entries: ScannedEntry[];
+  /**
+   * The shelf every book in this run is filed on.
+   *
+   * One value for the batch rather than one per book, because that is what a
+   * rapid run physically is: somebody standing in front of one bookcase. It
+   * is the single highest-value field here and the one most likely never to
+   * be filled in if it has to be typed three hundred times afterwards.
+   */
+  location: string;
+  setLocation: (location: string) => void;
+  locations: LocationOut[];
   /** Feed a scanned barcode in. Repeats are ignored rather than queued twice. */
   capture: (isbn: string) => void;
   remove: (isbn: string) => void;
@@ -292,6 +393,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const [isActive, setIsActive] = useState(false);
   const [entries, setEntries] = useState<ScannedEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
+  const [location, setLocation] = useState(readLastLocation);
   const [result, setResult] = useState<{
     added: number;
     failed: number;
@@ -299,6 +401,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
 
   const queryClient = useQueryClient();
   const scanAdd = useScanAdd();
+  const locations = useKnownLocations();
 
   function capture(isbn: string) {
     setEntries((current) => {
@@ -344,8 +447,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
     if (ready.length === 0) return;
 
     setIsAdding(true);
+    const shelf = normaliseLocation(location);
     let added = 0;
-    let failed = 0;
+    const failures: ScannedEntry[] = [];
 
     for (const entry of ready) {
       const draft = entry.draft!;
@@ -358,17 +462,29 @@ export function useRapidIntake(): UseRapidIntakeResult {
         // Sequential rather than Promise.all: a 300-book batch would otherwise
         // open 300 concurrent requests against one SQLite writer, and a
         // duplicate ISBN 409 needs to be attributed to a specific book.
-        await scanAdd.mutateAsync({ data: { ...fields, is_private: false } });
+        await scanAdd.mutateAsync({
+          data: { ...fields, is_private: false, location: shelf || null },
+        });
         added += 1;
-      } catch {
-        failed += 1;
+      } catch (error) {
+        // Kept, with its reason, rather than counted. "6 could not be added"
+        // after scanning a shelf of thirty is unrecoverable: nothing says
+        // which six, and the queue that knew has just been cleared.
+        failures.push({
+          ...entry,
+          state: "failed",
+          reason: errorText(error, ""),
+        });
       }
     }
 
+    if (added > 0) rememberLastLocation(shelf);
     void queryClient.invalidateQueries();
-    setEntries([]);
+    // Only the ones that landed leave the queue. What is left is exactly what
+    // still needs a decision.
+    setEntries(failures);
     setIsAdding(false);
-    setResult({ added, failed });
+    setResult({ added, failed: failures.length });
   }
 
   return {
@@ -379,6 +495,9 @@ export function useRapidIntake(): UseRapidIntakeResult {
     },
     stop: () => setIsActive(false),
     entries,
+    location,
+    setLocation,
+    locations,
     capture,
     remove: (isbn) =>
       setEntries((current) => current.filter((entry) => entry.isbn !== isbn)),

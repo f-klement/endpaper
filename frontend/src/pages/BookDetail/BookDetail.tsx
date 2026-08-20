@@ -16,9 +16,12 @@ import LoanBadge from "./components/LoanBadge";
 import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
+import CopyPanel from "./components/CopyPanel";
+import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
 import StatusPicker from "./components/StatusPicker";
 import TagEditor from "./components/TagEditor";
+import { Icon } from "../../components";
 import {
   useBook,
   useBookActions,
@@ -88,16 +91,16 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               type="checkbox"
               checked={book.is_private}
               onChange={(event) => actions.setPrivacy(event.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-sky-500 focus:ring-sky-400"
+              className="w-4 h-4 rounded border-paper-300 text-accent-600 focus:ring-accent-400"
             />
-            <span className="text-sm text-gray-600 dark:text-gray-300">
+            <span className="text-sm text-paper-600 dark:text-paper-300">
               {t("book.privateToggle")}
             </span>
           </label>
         ) : (
           book.is_private && (
-            <span className="inline-flex items-center gap-1 text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-500 dark:bg-gray-800">
-              🔒 {t("book.privateBadge")}
+            <span className="inline-flex items-center gap-1 text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
+              <Icon name="lock" className="w-3.5 h-3.5" /> {t("book.privateBadge")}
             </span>
           )
         )}
@@ -107,6 +110,9 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           allTags={tags}
           onAdd={actions.addTag}
           onRemove={actions.removeTag}
+          onCreate={actions.createTag}
+          isCreating={actions.isCreatingTag}
+          onDelete={actions.deleteTag}
         />
 
         {book.active_loan && <LoanBadge loan={book.active_loan} />}
@@ -130,6 +136,12 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           onSave={actions.updateDetails}
         />
 
+        <CopyPanel
+          book={book}
+          isSaving={actions.isSavingDetails}
+          onSave={actions.updateDetails}
+        />
+
         <LoanPanel
           book={book}
           members={otherMembers}
@@ -138,8 +150,9 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           onMarkReturned={loan.markReturned}
         />
 
-        {/* Only when an admin has switched the lookup on and configured a key.
-            A button that always failed would be worse than no button. */}
+        {/* Always offered. It used to need an API key and hid itself without
+            one, which left a household unable to fill in exactly the books
+            the national catalogues cover best. */}
         {enrichment.isEnabled && (
           <EnrichPanel
             isConfigured={enrichment.isConfigured}
@@ -147,17 +160,29 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             isWorking={enrichment.isWorking}
             result={enrichment.result}
             error={enrichment.error}
-            onEnrich={enrichment.enrich}
+            onBrowse={enrichment.browse}
             onDismiss={enrichment.dismiss}
+          />
+        )}
+
+        {enrichment.isPickerOpen && (
+          <EnrichPicker
+            candidates={enrichment.candidates}
+            isSearching={enrichment.isSearching}
+            isWorking={enrichment.isWorking}
+            isConfigured={enrichment.isConfigured}
+            error={enrichment.error}
+            onChoose={enrichment.choose}
+            onClose={enrichment.close}
           />
         )}
 
         {book.description && (
           <div>
-            <p className="text-sm font-semibold text-gray-700 mb-1 dark:text-gray-200">
+            <p className="text-sm font-semibold text-paper-700 mb-1 dark:text-paper-200">
               {t("book.description")}
             </p>
-            <p className="text-sm text-gray-600 leading-relaxed dark:text-gray-300">
+            <p className="text-sm text-paper-600 leading-relaxed dark:text-paper-300">
               {book.description}
             </p>
           </div>
@@ -165,14 +190,14 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
 
         {book.categories && book.categories.length > 0 && (
           <div>
-            <p className="text-sm font-semibold text-gray-700 mb-1.5 dark:text-gray-200">
+            <p className="text-sm font-semibold text-paper-700 mb-1.5 dark:text-paper-200">
               {t("book.categories")}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {book.categories.map((category) => (
                 <span
                   key={category}
-                  className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-400 dark:bg-gray-800"
+                  className="text-xs text-paper-500 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"
                 >
                   {category}
                 </span>
@@ -197,12 +222,13 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           />
         )}
 
+        {/* No confirmation dialog. The delete is reversible and raises a
+            toast offering exactly that, so a modal here would be friction in
+            front of an action that can be taken back in one tap. The
+            irreversible verb lives in the trash and does ask. */}
         <button
-          onClick={() => {
-            if (confirm(t("book.removeConfirm", { title: book.title })))
-              actions.remove();
-          }}
-          className="w-full py-2.5 border border-red-200 text-red-500 hover:bg-red-50 rounded-lg text-sm font-medium transition-colors mt-2 dark:border-red-900 dark:text-red-400"
+          onClick={actions.remove}
+          className="w-full py-2.5 border border-bloom-300 text-bloom-500 hover:bg-bloom-100 rounded-lg text-sm font-medium transition-colors mt-2 dark:border-bloom-700 dark:text-bloom-300"
         >
           {t("book.remove")}
         </button>

@@ -8,21 +8,27 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
   getGetBookQueryKey,
   getGetNotesQueryKey,
   useAddBookTag,
   useAddNote,
+  useApplyEnrichment,
   useDeleteBook,
   useDeleteNote,
   useEditNote,
-  useEnrichBook,
+  useEnrichmentCandidates,
   useGetBook,
   useGetNotes,
   useListLocations,
   useListTags,
+  useCreateTag,
+  useDeleteTag,
+  getListTagsQueryKey,
   useRefreshMetadata,
+  useRestoreBook,
   useRemoveBookTag,
   useSetOwnership,
   useSetPrivacy,
@@ -37,7 +43,10 @@ import {
   useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import { useListUsers } from "../../api/generated/endpoints/users/users";
+import { useToast } from "../../app/toast";
+import { useTranslation } from "../../i18n";
 import type {
+  BookMatch,
   BookDetailsUpdate,
   LocationOut,
   BookEnrichmentOut,
@@ -96,6 +105,11 @@ export interface UseBookActionsResult {
   setStatus: (status: ReadStatus) => void;
   setPrivacy: (isPrivate: boolean) => void;
   addTag: (tagId: number) => void;
+  /** Invent a tag and put it on this book in one step. */
+  createTag: (name: string) => void;
+  isCreatingTag: boolean;
+  /** Delete a household tag everywhere, after confirming. */
+  deleteTag: (tag: TagOut) => void;
   removeTag: (tagId: number) => void;
   uploadCover: (file: File) => void;
   refreshMetadata: () => void;
@@ -103,6 +117,7 @@ export interface UseBookActionsResult {
   setRating: (rating: number | null) => void;
   updateDetails: (fields: BookDetailsUpdate) => void;
   isSavingDetails: boolean;
+  /** Move the book to the trash. Reversible from the toast this raises. */
   remove: () => void;
 
   isRefreshing: boolean;
@@ -116,20 +131,65 @@ export function useBookActions(
 ): UseBookActionsResult {
   const invalidate = useInvalidateBook(bookId);
   const mutation = { onSuccess: invalidate };
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { t } = useTranslation();
 
   const status = useUpdateStatus({ mutation });
   const privacy = useSetPrivacy({ mutation });
   const addTag = useAddBookTag({ mutation });
+
+  const deleteTag = useDeleteTag({
+    mutation: {
+      onSuccess: () => {
+        // It came off every book in the household, not only this one.
+        void queryClient.invalidateQueries();
+      },
+    },
+  });
+
+  const createTag = useCreateTag({
+    mutation: {
+      onSuccess: (tag) => {
+        // Straight onto the book. Somebody typing a tag name while looking at
+        // a book means "this book is that", not "add a word to the list".
+        addTag.mutate({ bookId, tagId: tag.id });
+        // The tag list is its own cache entry, and the new tag has to appear
+        // in the picker as well as on the book.
+        void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
+      },
+    },
+  });
   const removeTag = useRemoveBookTag({ mutation });
   const cover = useUploadCover({ mutation });
   const refresh = useRefreshMetadata({ mutation });
   const ownership = useSetOwnership({ mutation });
   const rating = useSetRating({ mutation });
   const details = useUpdateBookDetails({ mutation });
+  const restore = useRestoreBook({
+    mutation: {
+      onSuccess: () => {
+        // A restored book is back in every listing, every count and every
+        // statistic, so the whole cache is dropped rather than patched.
+        void queryClient.invalidateQueries();
+      },
+    },
+  });
+
   const remove = useDeleteBook({
     mutation: {
       onSuccess: () => {
         invalidate();
+        // The offer to undo is the point. A delete is one tap away from every
+        // book and this used to be the only thing in the app that repeating
+        // could not reverse.
+        toast.show({
+          message: t("book.movedToTrash"),
+          action: {
+            label: t("common.undo"),
+            onClick: () => restore.mutate({ bookId }),
+          },
+        });
         onDeleted();
       },
     },
@@ -140,6 +200,15 @@ export function useBookActions(
     setPrivacy: (isPrivate) =>
       privacy.mutate({ bookId, data: { is_private: isPrivate } }),
     addTag: (tagId) => addTag.mutate({ bookId, tagId }),
+    createTag: (name) => createTag.mutate({ data: { name } }),
+    isCreatingTag: createTag.isPending,
+    deleteTag: (tag) => {
+      // Household-wide and not undoable, unlike deleting a book. The count is
+      // in the message because "delete this tag" and "take this off 214 books"
+      // are different decisions.
+      if (confirm(t("tags.deleteConfirm", { name: tag.name, count: tag.book_count ?? 0 })))
+        deleteTag.mutate({ tagId: tag.id });
+    },
     removeTag: (tagId) => removeTag.mutate({ bookId, tagId }),
     uploadCover: (file) => cover.mutate({ bookId, data: { file } }),
     refreshMetadata: () => refresh.mutate({ bookId }),
@@ -233,12 +302,22 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
 }
 
 export interface UseBookEnrichmentResult {
-  /** Whether to render the button at all. Follows the admin's toggle. */
+  /** Whether to render the button at all. Always: no API key is needed. */
   isEnabled: boolean;
-  /** Whether pressing it will work: the toggle is on AND a key is stored. */
+  /** Whether Google Books is configured, for the note about what it adds. */
   isConfigured: boolean;
-  enrich: () => void;
+
+  /** Open the picker and look for editions. Writes nothing. */
+  browse: () => void;
+  close: () => void;
+  isPickerOpen: boolean;
+  candidates: BookMatch[];
+  isSearching: boolean;
+
+  /** Take the details from one chosen edition. This is what writes. */
+  choose: (match: BookMatch) => void;
   isWorking: boolean;
+
   /** The last run's outcome, or null before the first run. */
   result: BookEnrichmentOut | null;
   error: unknown;
@@ -246,29 +325,68 @@ export interface UseBookEnrichmentResult {
 }
 
 /**
- * Filling in missing details from Google Books.
+ * Filling in missing details from a catalogue.
+ *
+ * Two steps rather than one, and the split is the point. The old button went
+ * straight to whatever the first search result happened to be, and a search
+ * will happily return the wrong printing of the right book: a paperback and
+ * its hardback are different page counts and different covers. So the button
+ * now opens a picker, and nothing is written until somebody has looked at the
+ * candidates and said which one it is.
  *
  * Kept apart from `useBookActions` because it is the only action whose result
- * the page has to report back: enrichment routinely finds the volume and has
- * nothing new to add, and a button that silently does nothing in that case
- * looks broken. `updated_fields` is what the page shows.
+ * the page has to report back: enrichment routinely finds the edition and has
+ * nothing new to add, and a button that silently does nothing looks broken.
  */
 export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
   const invalidate = useInvalidateBook(bookId);
   const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
-  const enrich = useEnrichBook({ mutation: { onSuccess: invalidate } });
+  const candidates = useEnrichmentCandidates(bookId, {
+    query: {
+      // Only once the picker is open. Fetching on mount would put six
+      // catalogue requests behind every book anybody looks at.
+      enabled: isPickerOpen,
+      retry: false,
+      staleTime: 5 * 60_000,
+    },
+  });
+
+  const apply = useApplyEnrichment({
+    mutation: {
+      onSuccess: () => {
+        invalidate();
+        setIsPickerOpen(false);
+      },
+    },
+  });
 
   return {
-    isEnabled: flags.data?.google_books_enabled ?? false,
+    // No key is required any more: Open Library and the national catalogues
+    // answer without one. The flag now only decides the note about what a key
+    // would add.
+    isEnabled: true,
     isConfigured: flags.data?.google_books_ready ?? false,
-    // Never with `overwrite`: the button fills gaps. A typed-in publisher is
-    // a deliberate correction and outranks anything upstream says.
-    enrich: () => enrich.mutate({ bookId, params: { overwrite: false } }),
-    isWorking: enrich.isPending,
-    result: enrich.data ?? null,
-    error: enrich.error,
-    dismiss: () => enrich.reset(),
+
+    browse: () => {
+      apply.reset();
+      setIsPickerOpen(true);
+    },
+    close: () => setIsPickerOpen(false),
+    isPickerOpen,
+    candidates: candidates.data ?? [],
+    isSearching: candidates.isFetching,
+
+    // Never with `overwrite`: the picker fills gaps. A typed-in publisher is a
+    // deliberate correction and outranks anything a catalogue says.
+    choose: (match) =>
+      apply.mutate({ bookId, data: match, params: { overwrite: false } }),
+    isWorking: apply.isPending,
+
+    result: apply.data ?? null,
+    error: apply.error ?? candidates.error,
+    dismiss: () => apply.reset(),
   };
 }
 

@@ -62,7 +62,7 @@ function AppShell() {
   return (
     <>
       {/* Offset matches NavBar's width at each breakpoint. */}
-      <div className="ml-14 md:ml-48">
+      <div className="ml-14 md:ml-52">
         <AppRoutes user={user} onSignIn={signIn} />
       </div>
       <NavBar user={user} onSignOut={signOut} />

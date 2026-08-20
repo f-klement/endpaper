@@ -27,20 +27,25 @@ export default function RapidQueue({
 }: RapidQueueProps) {
   const { t } = useTranslation();
 
-  if (result) {
-    return (
-      <p
-        role="status"
-        className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-xl px-3 py-2 mt-4 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
-      >
-        {t("rapid.added", { count: result.added, failed: result.failed })}
-      </p>
-    );
-  }
+  // The banner sits above whatever is left rather than replacing it. Anything
+  // still in the queue after a run is a book that did not go in.
+  const banner = result ? (
+    <p
+      role="status"
+      className={`text-sm rounded-xl px-3 py-2 mt-4 border ${
+        result.failed > 0
+          ? "text-amber-800 bg-amber-50 border-amber-100 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900"
+          : "text-green-700 bg-green-50 border-green-100 dark:text-green-300 dark:bg-green-950 dark:border-green-900"
+      }`}
+    >
+      {t("rapid.added", { count: result.added, failed: result.failed })}
+    </p>
+  ) : null;
 
   if (entries.length === 0) {
+    if (banner) return banner;
     return (
-      <p className="text-sm text-gray-400 text-center mt-4 dark:text-gray-500">
+      <p className="text-sm text-paper-400 text-center mt-4 dark:text-paper-500">
         {t("rapid.nothingScanned")}
       </p>
     );
@@ -48,7 +53,8 @@ export default function RapidQueue({
 
   return (
     <div className="mt-4 space-y-3">
-      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+      {banner}
+      <p className="text-sm font-medium text-paper-700 dark:text-paper-200">
         {t("rapid.queued", { count: entries.length })}
       </p>
 
@@ -56,16 +62,16 @@ export default function RapidQueue({
         {entries.map((entry) => (
           <li
             key={entry.isbn}
-            className="flex items-center gap-2 text-sm border border-gray-100 rounded-lg px-2.5 py-1.5 dark:border-gray-800"
+            className="flex items-center gap-2 text-sm border border-paper-100 rounded-lg px-2.5 py-1.5 dark:border-paper-800"
           >
             <span className="min-w-0 flex-1 truncate">
               {entry.state === "looking-up" && (
-                <span className="text-gray-400 dark:text-gray-500">
+                <span className="text-paper-400 dark:text-paper-500">
                   {t("rapid.lookingUp")}
                 </span>
               )}
               {entry.state === "found" && (
-                <span className="text-gray-800 dark:text-gray-100">
+                <span className="text-paper-800 dark:text-paper-100">
                   {entry.draft?.title}
                 </span>
               )}
@@ -74,12 +80,26 @@ export default function RapidQueue({
                   {t("rapid.notFound", { isbn: entry.isbn })}
                 </span>
               )}
+              {/* Named, not counted. After a shelf of thirty, "six could not
+                  be added" is unrecoverable: this says which six and why, and
+                  they stay in the queue so they can be retried or dropped. */}
+              {entry.state === "failed" && (
+                <span className="text-bloom-600 dark:text-bloom-300">
+                  {entry.draft?.title || entry.isbn}
+                  {entry.reason && (
+                    <span className="text-paper-500 dark:text-paper-400">
+                      {" "}
+                      {entry.reason}
+                    </span>
+                  )}
+                </span>
+              )}
             </span>
             <button
               type="button"
               onClick={() => onRemove(entry.isbn)}
-              aria-label={t("common.delete")}
-              className="shrink-0 text-gray-400 hover:text-red-500 dark:text-gray-500"
+              aria-label={t("rapid.removeFromQueue", { isbn: entry.isbn })}
+              className="shrink-0 text-paper-400 hover:text-bloom-500 dark:text-paper-500"
             >
               ×
             </button>
@@ -92,7 +112,7 @@ export default function RapidQueue({
           type="button"
           onClick={onDiscard}
           disabled={isAdding}
-          className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="px-4 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
         >
           {t("rapid.discard")}
         </button>
@@ -100,7 +120,7 @@ export default function RapidQueue({
           type="button"
           onClick={onAddAll}
           disabled={isAdding}
-          className="flex-1 py-2.5 rounded-xl bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600 disabled:opacity-50"
+          className="flex-1 py-2.5 rounded-xl bg-accent-600 text-white text-sm font-semibold hover:bg-accent-700 disabled:opacity-50"
         >
           {isAdding ? t("rapid.adding") : t("rapid.addAll")}
         </button>

@@ -34,9 +34,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
+import metadata  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
-from ratelimit import login_limiter, register_limiter  # noqa: E402
+from ratelimit import (  # noqa: E402
+    import_limiter,
+    login_limiter,
+    metadata_limiter,
+    register_limiter,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -55,14 +61,31 @@ def clean_database() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def reset_rate_limits() -> None:
-    """Clear the login/registration counters between tests.
+    """Clear every rate-limit counter between tests.
 
     They are process-global and deliberately survive requests, so without this
-    a test that logs in repeatedly would start tripping the limiter partway
-    through the suite, and which test failed would depend on ordering.
+    a test that logs in or imports repeatedly would start tripping the limiter
+    partway through the suite, and which test failed would depend on ordering.
+
+    Every limiter belongs here. The import one was added later and its absence
+    turned twelve unrelated import tests red, all of them passing on their own.
     """
     login_limiter.reset()
     register_limiter.reset()
+    import_limiter.reset()
+    metadata_limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def clear_metadata_cache() -> None:
+    """Forget every cached ISBN lookup between tests.
+
+    `metadata` caches by ISBN in the process, so without this the first test to
+    look up an ISBN answers for every later one that uses the same number, and
+    a mocked source that is supposed to be consulted is never called at all.
+    Three lookup tests failed exactly that way when the cache was added.
+    """
+    metadata.clear_cache()
 
 
 # Image payloads and page-unwrapping helpers live in tests/helpers.py, which
@@ -86,11 +109,27 @@ def db() -> Iterator[object]:
 
 
 @pytest.fixture
-def covers_dir() -> Path:
+def covers_dir() -> Iterator[Path]:
+    """An empty covers directory, emptied again afterwards.
+
+    Emptying matters because `clean_database` drops and recreates the tables,
+    so book ids restart at 1 in every test, while cover files are named by book
+    id and used to survive. One test's upload was then visible to the next as
+    the cover of an unrelated book. Harmless while nothing read covers back,
+    and immediately wrong once a route served them.
+    """
     from config import COVERS_DIR
 
+    def empty() -> None:
+        if COVERS_DIR.is_dir():
+            for entry in COVERS_DIR.iterdir():
+                if entry.is_file():
+                    entry.unlink()
+
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
-    return COVERS_DIR
+    empty()
+    yield COVERS_DIR
+    empty()
 
 
 # ── Account helpers ───────────────────────────────────────────────────────────
@@ -126,7 +165,7 @@ def _make_account(password_hash: str, username: str, *, is_admin: bool) -> dict:
         session.add(user)
         session.commit()
         session.refresh(user)
-        token = create_access_token(user.id, user.username)
+        token = create_access_token(session, user.id, user.username)
         payload: dict[str, Any] = {
             "user": {"id": user.id, "username": user.username, "is_admin": user.is_admin},
             "access_token": token,

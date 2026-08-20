@@ -17,7 +17,11 @@
 
 import { useCallback, useState } from "react";
 
-import { useAuthConfig, useMe } from "../api/generated/endpoints/auth/auth";
+import {
+  useAuthConfig,
+  useLogout,
+  useMe,
+} from "../api/generated/endpoints/auth/auth";
 import { AuthMode, type UserOut } from "../api/generated/model";
 import { clearSession, setSession } from "../api/mutator";
 
@@ -70,14 +74,22 @@ export function useSession(): Session {
     setStoredUser(account);
   }, []);
 
-  // The token is a stateless JWT, so there is no server-side session to end.
+  const logout = useLogout();
+
+  // The token is a stateless JWT, so there is nothing server-side to expire,
+  // but the cover cookie is the server's and outlives the tab: on a shared
+  // machine the next person's first page load would still fetch covers as
+  // whoever left. `mutate`, not `mutateAsync`, and the local state is cleared
+  // regardless: a failed request must not leave somebody apparently signed in.
+  //
   // Under proxy there is nothing to sign out of here at all: signing out is
   // the upstream's business, and clearing local state would only make the app
   // flicker before the proxy identified the same person again.
   const signOut = useCallback(() => {
+    logout.mutate();
     clearSession();
     setStoredUser(null);
-  }, []);
+  }, [logout]);
 
   return {
     mode,

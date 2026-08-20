@@ -1,4 +1,4 @@
-import type { BookLookup, GoogleBooksMatch } from "../../api/generated/model";
+import type { BookLookup, BookMatch } from "../../api/generated/model";
 
 /**
  * What the confirm step is editing.
@@ -29,7 +29,7 @@ export function blankDraft(isbn: string): BookDraft {
  * book found by title genuinely may not have one, and the server treats a
  * blank ISBN as absent rather than invalid.
  */
-export function draftFromGoogleMatch(match: GoogleBooksMatch): BookDraft {
+export function draftFromMatch(match: BookMatch): BookDraft {
   return {
     isbn: match.isbn13 ?? "",
     title: match.title ?? "",
@@ -39,6 +39,12 @@ export function draftFromGoogleMatch(match: GoogleBooksMatch): BookDraft {
     year: match.year,
     description: match.description,
     cover_url: match.cover_url,
+    // Both sources carry these and the confirm step persists them, so dropping
+    // them here would throw away a record already paid for.
+    language: match.language,
+    page_count: match.page_count,
+    series_name: match.series_name,
+    series_index: match.series_index,
     suggested_tag_ids: match.suggested_tag_ids ?? [],
   };
 }

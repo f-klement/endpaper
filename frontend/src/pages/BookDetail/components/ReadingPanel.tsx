@@ -26,13 +26,13 @@ export default function ReadingPanel({ book, onRate }: ReadingPanelProps) {
 
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+      <h2 className="text-sm font-semibold text-paper-900 dark:text-paper-100">
         {t("rating.label")}
       </h2>
       <StarRating value={book.my_rating} onChange={onRate} />
 
       {(book.my_started_at || book.my_finished_at) && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-paper-500 dark:text-paper-400">
           {[
             book.my_started_at &&
               t("reading.started", { date: formatDate(book.my_started_at) }),

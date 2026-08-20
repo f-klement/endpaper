@@ -5,6 +5,7 @@ import type { BookOut } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
+import { Icon } from "../../../components";
 
 interface BookHeaderProps {
   book: BookOut;
@@ -49,21 +50,19 @@ export default function BookHeader({
             }}
           />
         ) : (
-          <div className="w-full h-56 bg-gradient-to-br from-sky-100 to-sky-200 flex items-center justify-center text-6xl">
-            📖
-          </div>
+          <div className="w-full h-56 bg-gradient-to-br from-accent-100 to-accent-200 flex items-center justify-center text-6xl"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
         )}
 
         <button
           onClick={onBack}
-          className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-full p-2 shadow-sm text-gray-700 dark:text-gray-200"
+          className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-full p-2 shadow-sm text-paper-700 dark:text-paper-200"
         >
           ← {t("common.back")}
         </button>
 
         <button
           onClick={() => coverInput.current?.click()}
-          className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-xs font-medium text-gray-700 hover:bg-white transition-colors dark:text-gray-200"
+          className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-xs font-medium text-paper-700 hover:bg-white transition-colors dark:text-paper-200"
         >
           {t("book.uploadCover")}
         </button>
@@ -93,19 +92,19 @@ export default function BookHeader({
               aria-label={t("goodreads.lookup")}
               className="shrink-0 mt-1 text-lg leading-none opacity-60 hover:opacity-100 transition-opacity"
             >
-              🔗
+              <Icon name="link" className="w-3.5 h-3.5" />
             </a>
           )}
         </div>
         {book.subtitle && (
-          <p className="text-gray-600 mt-0.5 dark:text-gray-300">
+          <p className="text-paper-600 mt-0.5 dark:text-paper-300">
             {book.subtitle}
           </p>
         )}
         {book.series_name && (
           <Link
             to={`/?series=${encodeURIComponent(book.series_name)}&sort=series`}
-            className="inline-block text-sm text-sky-600 hover:text-sky-700 mt-1 dark:text-sky-400"
+            className="inline-block text-sm text-accent-700 hover:text-accent-800 mt-1 dark:text-accent-400"
           >
             {book.series_index != null
               ? t("series.partOf", {
@@ -116,29 +115,29 @@ export default function BookHeader({
           </Link>
         )}
         {book.author && (
-          <p className="text-gray-500 text-sm mt-1 dark:text-gray-400">
+          <p className="text-paper-500 text-sm mt-1 dark:text-paper-400">
             {t("book.by", { author: book.author })}
           </p>
         )}
 
         <div className="flex flex-wrap gap-2 mt-2">
           {book.publisher && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-500 dark:bg-gray-800">
+            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
               {book.publisher}
             </span>
           )}
           {book.year && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-500 dark:bg-gray-800">
+            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
               {book.year}
             </span>
           )}
           {book.page_count != null && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-500 dark:bg-gray-800">
+            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
               {t("book.pages", { count: book.page_count })}
             </span>
           )}
           {book.language && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded uppercase dark:text-gray-500 dark:bg-gray-800">
+            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded uppercase dark:text-paper-500 dark:bg-paper-800">
               {book.language}
             </span>
           )}
@@ -148,7 +147,7 @@ export default function BookHeader({
             </span>
           )}
           {book.isbn && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded dark:text-gray-500 dark:bg-gray-800">
+            <span className="text-xs text-paper-400 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-500 dark:bg-paper-800">
               {t("book.isbn", { isbn: book.isbn })}
             </span>
           )}
@@ -160,12 +159,12 @@ export default function BookHeader({
             <button
               onClick={onRefreshMetadata}
               disabled={isRefreshing}
-              className="text-xs text-sky-500 hover:text-sky-700 disabled:text-sky-300 transition-colors"
+              className="text-xs text-accent-600 hover:text-accent-800 disabled:text-accent-300 transition-colors"
             >
               {isRefreshing ? t("book.refreshing") : t("book.refreshMetadata")}
             </button>
             {refreshError != null && (
-              <p className="text-xs text-red-500 mt-1 dark:text-red-400">
+              <p className="text-xs text-bloom-500 mt-1 dark:text-bloom-300">
                 {errorText(refreshError, t("common.somethingWentWrong"))}
               </p>
             )}

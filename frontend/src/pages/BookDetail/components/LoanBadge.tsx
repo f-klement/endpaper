@@ -1,5 +1,6 @@
 import type { LoanOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
+import { Icon } from "../../../components";
 
 interface LoanBadgeProps {
   loan: LoanOut | null | undefined;
@@ -11,7 +12,7 @@ export default function LoanBadge({ loan }: LoanBadgeProps) {
   if (!loan) return null;
   return (
     <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-700 text-xs font-medium px-2.5 py-1 rounded-full dark:bg-orange-950 dark:text-orange-300">
-      🤝 {t("loans.badge", { name: loan.loaned_to?.username ?? "" })}
+      <Icon name="handshake" className="w-3.5 h-3.5" /> {t("loans.badge", { name: loan.loaned_to?.username ?? "" })}
     </span>
   );
 }

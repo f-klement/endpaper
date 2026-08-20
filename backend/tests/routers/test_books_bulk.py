@@ -122,6 +122,15 @@ class TestOwnershipAndLocation:
         detail = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
         assert detail["ownership"] == "not_owned"
 
+    def test_a_book_already_in_that_ownership_is_unchanged(self, client, admin, make_book):
+        """Otherwise re-running a confirmation reports work it did not do, and
+        confirming an imported shelf is exactly a re-run."""
+        book = make_book(admin["headers"])
+
+        res = bulk(client, admin["headers"], [book["id"]], "set_ownership", "owned")
+
+        assert res.json() == {"updated": 0, "unchanged": 1, "skipped": 0}
+
     def test_an_unknown_ownership_is_a_422(self, client, admin, make_book):
         book = make_book(admin["headers"])
         res = bulk(client, admin["headers"], [book["id"]], "set_ownership", "borrowed")

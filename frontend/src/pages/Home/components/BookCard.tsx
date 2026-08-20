@@ -7,15 +7,20 @@ import {
 } from "../../../api/generated/model";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { TAG_PILL_CLASSES } from "../../types";
+import { Icon } from "../../../components";
 
 // Exhaustive by type: adding a status to the backend enum makes this a
 // compile error until it is given a presentation here, which is how the
 // `want_to_read` status was caught rather than rendering as a blank pill.
 const STATUS_STYLES: Record<ReadStatus, string> = {
-  [ReadStatus.unread]: "bg-gray-100 text-gray-600",
-  [ReadStatus.want_to_read]: "bg-sky-100 text-sky-700",
-  [ReadStatus.reading]: "bg-yellow-100 text-yellow-700",
-  [ReadStatus.read]: "bg-green-100 text-green-700",
+  [ReadStatus.unread]:
+    "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
+  [ReadStatus.want_to_read]:
+    "bg-bloom-100 text-bloom-700 dark:bg-bloom-700/25 dark:text-bloom-300",
+  [ReadStatus.reading]:
+    "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  [ReadStatus.read]:
+    "bg-accent-100 text-accent-800 dark:bg-accent-500/15 dark:text-accent-200",
 };
 
 const STATUS_LABELS: Record<ReadStatus, MessageKey> = {
@@ -49,13 +54,17 @@ export default function BookCard({
 
   const card = (
     <div
-      className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-shadow ${
+      className={`card overflow-hidden ${
         isSelected
-          ? "border-sky-400 ring-2 ring-sky-300"
-          : "border-gray-100 hover:shadow-md"
+          ? "border-accent-500 ring-2 ring-accent-400/50"
+          // Only lifts when it is a link. A card that rises under the cursor
+          // while selecting suggests it will navigate, and it will not.
+          : isSelecting
+            ? ""
+            : "card-interactive"
       }`}
     >
-      <div className="aspect-[2/3] bg-gray-100 relative overflow-hidden dark:bg-gray-800">
+      <div className="aspect-[2/3] bg-paper-100 relative overflow-hidden dark:bg-paper-800">
         {book.cover_url ? (
           <img
             src={book.cover_url}
@@ -69,9 +78,7 @@ export default function BookCard({
             }}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-sky-100 to-sky-200">
-            📖
-          </div>
+          <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-accent-100 to-accent-200"><Icon name="book" className="w-1/3 h-1/3 opacity-40" /></div>
         )}
 
         {isSelecting && (
@@ -79,11 +86,11 @@ export default function BookCard({
             aria-hidden="true"
             className={`absolute top-1.5 left-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
               isSelected
-                ? "bg-sky-500 border-sky-500 text-white"
-                : "bg-white/90 border-gray-300 text-transparent"
+                ? "bg-accent-600 border-accent-600 text-white"
+                : "bg-white/90 border-paper-300 text-transparent"
             }`}
           >
-            ✓
+            <Icon name="check" className="w-3.5 h-3.5" strokeWidth={2.5} />
           </div>
         )}
 
@@ -106,7 +113,7 @@ export default function BookCard({
           {book.title}
         </h3>
         {book.author && (
-          <p className="text-xs text-gray-500 truncate dark:text-gray-400">
+          <p className="text-xs text-paper-500 truncate dark:text-paper-400">
             {book.author}
           </p>
         )}

@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**568 tests · 92% statements, 88% functions, 78% branches.**
+**749 tests · 92% statements, 88% functions, 78% branches.**
 
 ```bash
 bun run test                 # the suite
@@ -46,17 +46,22 @@ readers as a side effect.
 | `api/mutator.test.ts`                 |    28 | Token attachment, 401 handling, error flattening, downloads |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
 | `app/*`                               |    17 | The session gate, the sidebar, the library export           |
-| `components/*.test.tsx`               |    22 | The general dumb components, incl. the star rating          |
+| `components/*.test.tsx`               |    28 | The general dumb components, incl. the star rating and the toast |
 | `i18n/index.test.tsx`                 |    33 | Language detection, interpolation, catalogue parity         |
 | `lib/isbn.test.ts`                    |    31 | Check digits, ISBN-10 to ISBN-13, normalisation             |
 | `lib/goodreads.test.ts`               |     7 | Search URLs, mirroring the backend's own tests              |
+| `lib/lastLocation.test.ts`            |    10 | Shelf carry-over, clearing, storage refusing to work        |
+| `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
+| `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
 | `pages/hooks.test.ts`                 |    13 | Session state, auth modes, corrupt-storage tolerance        |
 | `pages/types.test.ts`                 |    11 | Tag grouping and the style tables                           |
 | `pages/components/TagPicker.test.tsx` |     6 | The picker shared by three pages                            |
+| `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
+| `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
 | `pages/Home/*`                        |   119 | Filters, ownership, pagination, selection, the bulk verbs   |
 | `pages/BookDetail/*`                  |    73 | Status, ratings, series, shelf, loans, notes, enrichment    |
-| `pages/ScanPage/*`                    |    87 | Scan, typed ISBN, Google Books search, prefill, rapid mode  |
-| `pages/SettingsPage/*`                |    33 | Feature toggles, the API key, the Goodreads import          |
+| `pages/ScanPage/*`                    |   116 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
+| `pages/SettingsPage/*`                |    42 | Feature toggles, the API key, the Goodreads import, backup and restore |
 | `pages/LoginPage/LoginPage.test.tsx`  |    19 | Sign-in, registration, the background uploader              |
 | `pages/LoansPage/LoansPage.test.tsx`  |    18 | Listing, returning, due dates and the overdue view          |
 | `pages/StatsPage/*`                   |    14 | Every section, and the all-zero case                        |

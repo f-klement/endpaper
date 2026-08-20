@@ -7,7 +7,15 @@
  */
 
 /**
- * The three groups tags are presented in throughout the UI.
+ * The groups tags are presented in throughout the UI.
+ *
+ * The first three are the curated vocabulary, seeded at boot and the same in
+ * every deployment. CUSTOM is everything a household invents for itself.
+ *
+ * Keeping them apart, rather than making every tag free-form as Jelu and
+ * Openreads do, is deliberate: the curated list is what makes the tag picker
+ * useful on the first day, before anybody has typed anything. What was wrong
+ * was having no way past it.
  */
 export type TagCategory = (typeof TagCategory)[keyof typeof TagCategory];
 
@@ -15,4 +23,5 @@ export const TagCategory = {
   type: "type",
   genre: "genre",
   age: "age",
+  custom: "custom",
 } as const;

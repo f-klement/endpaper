@@ -11,7 +11,7 @@ export default function Spinner({ label, className = "" }: SpinnerProps) {
       <div
         role="status"
         aria-label={label}
-        className={`w-8 h-8 border-4 border-sky-200 border-t-sky-500 rounded-full animate-spin ${className}`}
+        className={`w-8 h-8 rounded-full animate-spin border-[3px] border-accent-500/25 border-t-accent-600 dark:border-accent-400/25 dark:border-t-accent-300 ${className}`}
       />
     </div>
   );

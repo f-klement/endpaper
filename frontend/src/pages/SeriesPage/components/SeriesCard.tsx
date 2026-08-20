@@ -15,12 +15,12 @@ export default function SeriesCard({ series }: SeriesCardProps) {
   return (
     <Link
       to={`/?series=${encodeURIComponent(series.name)}&sort=series`}
-      className="block bg-white border border-gray-200 rounded-2xl p-4 hover:border-sky-300 transition-colors dark:bg-gray-900 dark:border-gray-700"
+      className="block bg-white border border-paper-200 rounded-2xl p-4 hover:border-accent-300 transition-colors dark:bg-paper-900 dark:border-paper-700"
     >
-      <h2 className="font-semibold text-gray-900 dark:text-gray-100">
+      <h2 className="font-semibold text-paper-900 dark:text-paper-100">
         {series.name}
       </h2>
-      <p className="text-xs text-gray-500 mt-0.5 dark:text-gray-400">
+      <p className="text-xs text-paper-500 mt-0.5 dark:text-paper-400">
         {t("series.bookCount", { count: series.book_count })}
       </p>
 

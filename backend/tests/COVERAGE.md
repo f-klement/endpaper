@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**834 tests · 96% line coverage** (2104 statements, 89 missed).
+**1115 tests · 95% line coverage** (2978 statements, 162 missed).
 
 ```bash
 uv run pytest                                    # the suite
@@ -12,9 +12,16 @@ The tree mirrors `backend/`: the tests for `routers/books.py` are at
 `tests/routers/test_books.py`. Support files that mirror nothing (`conftest.py`,
 `helpers.py`) sit at the root of the tree.
 
-Nothing here touches the network or a real database. Outbound calls to Open Library and
-Google Books are intercepted with `respx`; the database is a throwaway SQLite file that is
-dropped and recreated between tests.
+Nothing here touches the network or a real database. Outbound calls to all six metadata
+catalogues (Open Library, K10plus, the DNB, the BnF, the Library of Congress, Google Books)
+are intercepted with `respx` through `tests.helpers.silence_catalogues`; the database is a
+throwaway SQLite file that is dropped and recreated between tests.
+
+**`silence_catalogues` is called last, and that is load bearing.** respx resolves routes in
+registration order and the first match wins, and a route whose pattern is *equal* to an
+existing one replaces it rather than being appended. Registering the same
+`url__startswith` pattern twice therefore silently discarded the test's own response, which
+is why the helper uses regexes.
 
 ---
 
@@ -25,9 +32,11 @@ dropped and recreated between tests.
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
 | `test_config.py` | 41 | Settings resolution, the startup secret guard, upload limits |
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
+| `test_backup.py` | 34 | **The whole library out and back.** Round trip, refusing a bad archive, and zip path traversal |
+| `test_metadata.py` | 82 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
 | `test_errors.py` | 35 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 28 | Local, LDAP and proxy identity sources |
-| `test_goodreads.py` | 27 | Reading a CSV export, including the spreadsheet-formula trap |
+| `test_csv_import.py` | 54 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
 | `test_schemas.py` | 25 | Request/response contracts and their validation rules |
 | `test_google_books.py` | 24 | Volume mapping, the gap-filling merge, upstream failures |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
@@ -45,9 +54,12 @@ dropped and recreated between tests.
 | `routers/test_books_reading.py` | 22 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
-| `routers/test_books_google.py` | 32 | Search, enrichment, candidates, and the feature gate |
+| `routers/test_books_google.py` | 20 | Enrichment, the chosen-edition apply, candidates, the feature gate |
+| `routers/test_books_search.py` | 31 | **Free-text search.** That it works with no API key, that all six catalogues answer, and how they merge |
+| `routers/test_books_trash.py` | 40 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
 | `routers/test_settings.py` | 30 | Feature flags, the masked API key, admin-only writes |
-| `routers/test_imports.py` | 21 | The Goodreads import, and that new books arrive unconfirmed |
+| `routers/test_imports.py` | 43 | The import, the private-ISBN branch, the tag caps, the rate limit |
+| `routers/test_books_tags.py` | 21 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
 | `routers/test_auth.py` | 21 | Registration, login, `/auth/me`, the registration switch |
 | `routers/test_loans.py` | 19 | Lending, returning, history |
 | `routers/test_stats.py` | 18 | Every aggregation, and that each respects privacy |
@@ -122,9 +134,12 @@ in test complexity than they return:
 
 Two things are **not** covered by choice:
 
-- **Real network calls.** The metadata sources are stubbed. A change in Open Library's
-  response shape will not be caught here; it would need a contract test against the live
-  service, which would then fail whenever they have an outage.
+- **Real network calls.** All four metadata sources are stubbed. A change in one of their
+  response shapes will not be caught here; it would need a contract test against the live
+  service, which would then fail whenever they have an outage. The fixtures are trimmed
+  copies of real responses, including the awkward parts (a qualified 020, an ISBN-10 in a
+  record found by ISBN-13, a title statement holding another book's title), because those
+  are what the parsers exist for.
 - **A real directory.** `ldap3`'s connection is stubbed, so the LDAP tests pin our filter
   construction, bind sequence and guards, not any particular server's behaviour. Verifying
   against a real OpenLDAP would be an integration test with a container, and a different

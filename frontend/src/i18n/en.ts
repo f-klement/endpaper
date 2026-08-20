@@ -32,6 +32,7 @@ export const en = {
   "common.done": "Done",
   "common.add": "Add",
   "common.close": "Close",
+  "common.undo": "Undo",
   "common.back": "Back",
   "common.tryAgain": "Try again",
   "common.loading": "Loading...",
@@ -100,8 +101,8 @@ export const en = {
   "book.description": "Description",
   "book.categories": "Categories",
   "book.notFound": "Book not found.",
-  "book.remove": "Remove from Catalog",
-  "book.removeConfirm": 'Remove "{title}" from the catalog?',
+  "book.remove": "Move to Trash",
+  "book.movedToTrash": "Moved to the trash.",
   "book.noTags": "No tags yet",
   "book.addTag": "+ Add",
   "book.removeTag": "Remove {tag}",
@@ -112,6 +113,9 @@ export const en = {
   "enrich.updated": "Added: {fields}.",
   "enrich.nothingNew":
     "Nothing new found. The details here are already complete.",
+  "enrich.pickTitle": "Which edition is this?",
+  "enrich.pickHint":
+    "Pick the printing you are holding. Only empty fields are filled in, so nothing you typed is replaced.",
   "enrich.notFound": "Google Books does not have a record for this book.",
   "enrich.disabled":
     "Google Books lookup is switched off. An admin can enable it in Settings.",
@@ -128,25 +132,17 @@ export const en = {
 
   // ── Goodreads ───────────────────────────────────────────────────────────
   "goodreads.lookup": "Look up on Goodreads",
-  "goodreads.import": "Import from Goodreads",
-  "goodreads.importExplain":
-    "Goodreads retired its API in 2020, so there is no way to connect an account. Export your library from Goodreads (My Books, then Import/Export) and upload the file here.",
-  "goodreads.chooseFile": "Choose export file",
-  "goodreads.importing": "Importing...",
-  "goodreads.createMissing": "Also add books that are not in the library yet",
-  "goodreads.createMissingHint":
-    "New books are marked as not confirmed, because an export says what you read, not what is on your shelf.",
-  "goodreads.result":
-    "{rowsRead} entries read. {matched} matched, {created} added, {statusesUpdated} statuses updated.",
-  "goodreads.skipped":
-    "{count} entries were on a shelf that does not map to a status.",
-  "goodreads.unmatched": "Not found in your library:",
-  "goodreads.confirmPrompt":
-    "The books just added are not confirmed as being on your shelf. Review them now?",
 
   // ── Scan ────────────────────────────────────────────────────────────────
   "scan.title": "Scan Barcode",
   "scan.pointAtBarcode": "Point at barcode",
+  "scan.torch": "Camera light",
+  "scan.startScanning": "Start scanning",
+  "scan.stopScanning": "Stop scanning",
+  "scan.cameraIdle": "The camera is off",
+  "scan.cameraIdleHint": "Nothing is recorded and the camera stays closed until you start it.",
+  "scan.notABook": "Read {code}, which is not a book barcode. Look for the one above the ISBN.",
+  "scan.tryAgain": "Try again",
   "scan.cameraUnavailable": "Camera unavailable",
   "scan.orEnterManually": "Or enter ISBN manually:",
   "scan.isbnLabel": "ISBN",
@@ -161,6 +157,7 @@ export const en = {
   "scan.authorField": "Author",
   "scan.authorPlaceholder": "Author name",
   "scan.couldNotAdd": "Could not add the book.",
+  "scan.openTheOneWeHave": "Open the copy already in the library",
   "scan.addCover": "Add cover photo (optional)",
   "scan.replaceCover": "Replace cover photo (optional)",
   "scan.privateBook": "Private (only visible to me)",
@@ -171,14 +168,14 @@ export const en = {
   // ── Search (Google Books, before a book exists) ─────────────────────────
   "search.orSearchByTitle": "Or search by title:",
   "search.placeholder": "Title, author, or both",
-  "search.label": "Search Google Books",
+  "search.label": "Search by title or author",
   "search.button": "Search",
   "search.searching": "Searching...",
   "search.noResults": "No matches. Try fewer words, or add the book by hand.",
   "search.pickHint":
     "Pick one to fill in the details. Nothing is saved until you confirm.",
-  "search.disabled":
-    "Search is switched off. An admin can enable it in Settings.",
+  "search.withoutKey":
+    "Searching Open Library. A Google Books key adds descriptions and genres.",
 
   // ── Loans ───────────────────────────────────────────────────────────────
   "loans.title": "Loans",
@@ -213,6 +210,10 @@ export const en = {
   "stats.byType": "By Type",
   "stats.byGenre": "By Genre",
   "stats.byAge": "By Age",
+  "stats.byCustomTag": "By Household Tags",
+  "stats.finishedByMonth": "Finished, by Month",
+  "stats.finishedTotal": "books finished",
+  "stats.averageRating": "average of {count} ratings",
   "stats.overTime": "Books Added Over Time",
   "stats.couldNotLoad": "Could not load your stats.",
   "stats.loading": "Loading stats",
@@ -221,6 +222,17 @@ export const en = {
   "tags.type": "Type",
   "tags.genre": "Genre",
   "tags.age": "Age",
+  "tags.custom": "Household tags",
+  "tags.count": "{count}",
+  "tags.countWithChosen": "{chosen} of {count}",
+  "tags.newLabel": "New tag",
+  "tags.newPlaceholder": "Holiday reads",
+  "tags.add": "Add a tag",
+  "tags.create": "Create",
+  "tags.delete": "Delete {name}",
+  "tags.deleteConfirm":
+    'Delete the tag "{name}"? It comes off {count} books, for everybody, and cannot be undone.',
+  "tags.builtInHint": "Built-in tags cannot be deleted.",
 
   // ── Login ───────────────────────────────────────────────────────────────
   "login.appName": "Endpaper",
@@ -313,6 +325,9 @@ export const en = {
   "location.unset": "Not recorded",
   "location.filterAll": "Anywhere",
   "location.hint": "Free text. Whatever you would say out loud.",
+  "location.carriedOver":
+    "Kept for the next book, so a whole shelf is typed once.",
+  "location.batchLabel": "Shelf for everything in this run",
 
   // ── Duplicates ──────────────────────────────────────────────────────────
   "duplicates.title": "Possible duplicates",
@@ -355,7 +370,8 @@ export const en = {
   "rapid.addAll": "Add all",
   "rapid.adding": "Adding...",
   "rapid.discard": "Discard",
-  "rapid.added": "{count} added, {failed} could not be added.",
+  "rapid.added": "{count} added. {failed} still below, with the reason.",
+  "rapid.removeFromQueue": "Remove {isbn} from the queue",
   "rapid.nothingScanned": "Nothing scanned yet",
 
   // ── Loan due dates ──────────────────────────────────────────────────────
@@ -368,6 +384,106 @@ export const en = {
   "loans.overdueBanner": "{count} loans are overdue.",
   "loans.chaseThem": "Show them",
 
+  // ── The copy itself ─────────────────────────────────────────────────────
+  "copy.title": "This copy",
+  "copy.hint": "What you own, rather than what the book is.",
+  "copy.format": "Format",
+  "copy.format.unset": "Not recorded",
+  "copy.format.hardcover": "Hardcover",
+  "copy.format.paperback": "Paperback",
+  "copy.format.ebook": "Ebook",
+  "copy.format.audiobook": "Audiobook",
+  "copy.format.other": "Other",
+  "copy.condition": "Condition",
+  "copy.condition.unset": "Not recorded",
+  "copy.condition.new": "As new",
+  "copy.condition.good": "Good",
+  "copy.condition.fair": "Fair",
+  "copy.condition.poor": "Poor",
+  "copy.condition.ex_library": "Ex-library",
+  "copy.price": "Price paid",
+  "copy.priceInvalid": "Write a price like 12.99, or leave it empty.",
+  "copy.currency": "Currency",
+  "copy.purchasedAt": "Bought on",
+  "copy.purchaseSource": "Bought from",
+  "copy.save": "Save copy details",
+  "copy.purchaseSourcePlaceholder": "The Oxfam on the high street",
+  "format.filterAll": "Any format",
+
+  // ── Importing a library ─────────────────────────────────────────────────
+  "import.title": "Bring a library across",
+  "import.explain":
+    "A CSV or TSV export from Goodreads, LibraryThing, StoryGraph, Libib or anything else with a title column. The columns are worked out for you and shown before anything is saved.",
+  "import.chooseFile": "Choose a file",
+  "import.reading": "Reading the file...",
+  "import.importing": "Importing...",
+  "import.confirm": "Import {count} books",
+  "import.previewTitle": "{count} rows read. Columns found:",
+  "import.notFound": "Not found in this file: {fields}",
+  "import.fieldTitle": "Title",
+  "import.fieldAuthor": "Author",
+  "import.fieldIsbn": "ISBN",
+  "import.fieldStatus": "Reading status",
+  "import.fieldRating": "Rating",
+  "import.fieldDateRead": "Date read",
+  "import.fieldPublisher": "Publisher",
+  "import.fieldYear": "Year",
+  "import.fieldPages": "Pages",
+  "import.fieldFormat": "Format",
+  "import.fieldTags": "Tags",
+  "import.createMissing": "Add books that are not in the catalogue yet",
+  "import.createMissingHint":
+    "They arrive marked as not confirmed: an export says what somebody read, not what is on the shelf.",
+  "import.applyTags": "Bring the tags across too",
+  "import.applyTagsHint":
+    "This file has {count} different tags. They are created here for everybody, under Your tags, and can only be removed one at a time.",
+  "import.result":
+    "{rowsRead} rows read, {matched} matched, {created} added, {statusesUpdated} statuses updated.",
+  "import.skipped": "{count} rows had no title and were skipped.",
+  "import.unmatched": "Not found in the catalogue:",
+
+  // ── Backup ──────────────────────────────────────────────────────────────
+  "backup.title": "Backup",
+  "backup.explain":
+    "A full copy of the library: every book, account, note, loan, reading status and cover image. The CSV export is not this. It carries one row per book and drops the rest.",
+  "backup.download": "Download a backup",
+  "backup.downloadFailed": "The backup could not be made.",
+  "backup.restoreTitle": "Restore from a backup",
+  "backup.restoreWarning":
+    "Restoring replaces everything in this library. Books added since the backup was taken are gone.",
+  "backup.chooseFile": "Backup file",
+  "backup.restoreAction": "Restore from {name}",
+  "backup.restoreConfirm":
+    "Replace every book, account and cover in this library with the backup? This cannot be undone.",
+  "backup.restoreFailed": "That backup could not be restored.",
+  "backup.restored": "Restored {books} books and {covers} covers.",
+
+  // ── Saved views ─────────────────────────────────────────────────────────
+  "saved.saveThisView": "Save this view",
+  "saved.nameLabel": "Name for this view",
+  "saved.namePlaceholder": "Unread in the loft",
+  "saved.forget": "Forget {name}",
+
+  // ── Trash ───────────────────────────────────────────────────────────────
+  "nav.trash": "Trash",
+  "trash.title": "Trash",
+  "trash.explain":
+    "Deleted books wait here until you empty it. Nothing is removed on its own.",
+  "trash.empty": "The trash is empty",
+  "trash.emptyHint": "Books you delete land here, with everything on them.",
+  "trash.deletedOn": "Deleted {date}",
+  "trash.restore": "Put back",
+  "trash.restored": "Back on the shelf.",
+  "trash.deleteForever": "Delete for good",
+  "trash.deleteForeverConfirm":
+    'Delete "{title}" for good? This one cannot be undone.',
+  "trash.emptyAll": "Empty the trash",
+  "trash.emptyAllConfirm":
+    "Delete all {count} books in the trash for good? This cannot be undone.",
+  "trash.emptied": "{count} books deleted for good.",
+  "trash.movedCount": "{count} books moved to the trash.",
+  "trash.open": "Open trash",
+
   // ── Wishlist ────────────────────────────────────────────────────────────
   "nav.wishlist": "Wishlist",
   "wishlist.title": "Wishlist",
@@ -378,7 +494,7 @@ export const en = {
 
   // ── Help ────────────────────────────────────────────────────────────────
   "help.title": "What is this?",
-  "help.aboutSearch": "About searching Google Books",
+  "help.aboutSearch": "About searching for a book",
   "help.aboutEnrich": "About extra book details",
 
   "help.googleBooks.title": "Google Books lookup",
@@ -400,9 +516,9 @@ export const en = {
     "Only an admin can save the key. If that is not you, send them this page.",
 
   "help.disabledSearch":
-    "Search is off until an admin adds a Google Books key.",
+    "Search works without a key. A key adds descriptions and genres to the results.",
   "help.disabledEnrich":
-    "Extra details are off until an admin adds a Google Books key.",
+    "Extra details work without a key. A key adds descriptions and genres.",
 
   // ── Masked fields ───────────────────────────────────────────────────────
   "field.show": "Show",

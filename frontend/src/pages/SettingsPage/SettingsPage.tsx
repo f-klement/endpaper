@@ -6,10 +6,13 @@ import { ErrorState, HelpButton, Spinner } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { useTheme, type ThemePreference } from "../../theme";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
-import GoodreadsImport from "./components/GoodreadsImport";
+import BackupSection from "./components/BackupSection";
+import LibraryImport from "./components/LibraryImport";
 import SettingsSection from "./components/SettingsSection";
 import ToggleField from "./components/ToggleField";
-import { useGoodreadsImport, useSettings } from "./hooks";
+import { useBackup, useLibraryImport, useSettings } from "./hooks";
+import { Icon } from "../../components";
+import { Page, PageHeader } from "../components";
 
 const THEMES: { value: ThemePreference; label: MessageKey }[] = [
   { value: "light", label: "theme.light" },
@@ -38,7 +41,8 @@ export default function SettingsPage() {
     saveError,
     hasSaved,
   } = useSettings();
-  const goodreads = useGoodreadsImport();
+  const libraryImport = useLibraryImport();
+  const backup = useBackup();
 
   // The API key is the one field the server never sends back, so it cannot be
   // a controlled mirror of `settings`. It is a write-only box: empty means
@@ -56,14 +60,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 pt-5 pb-4 space-y-6">
-      <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-        ⚙️ {t("settings.title")}
-      </h1>
+    <Page width="narrow">
+      <PageHeader icon="settings" title={t("settings.title")} />
 
       {/* Language is per person and per device, so it works without an admin
           account and is rendered before anything the server has to authorise. */}
-      <SettingsSection title={t("settings.language")} glyph="🌍">
+      <SettingsSection title={t("settings.language")} icon="globe">
         <div
           className="flex gap-2"
           role="group"
@@ -77,20 +79,22 @@ export default function SettingsPage() {
               aria-pressed={locale === language.value}
               className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                 locale === language.value
-                  ? "bg-sky-50 border-sky-300 text-sky-700"
-                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                  ? "bg-accent-50 border-accent-300 text-accent-800 "
+                + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                  : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
             >
               {t(language.label)}
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-paper-500 dark:text-paper-400">
           {t("settings.languageHint")}
         </p>
       </SettingsSection>
 
-      <SettingsSection title={t("theme.label")} glyph="🌗">
+      <SettingsSection title={t("theme.label")} icon="theme">
         <div className="flex gap-2" role="group" aria-label={t("theme.label")}>
           {THEMES.map((option) => (
             <button
@@ -100,17 +104,36 @@ export default function SettingsPage() {
               aria-pressed={preference === option.value}
               className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                 preference === option.value
-                  ? "bg-sky-50 border-sky-300 text-sky-700 dark:bg-sky-950 dark:border-sky-700 dark:text-sky-200"
-                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  ? "bg-accent-50 border-accent-300 text-accent-800 dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                  : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
             >
               {t(option.label)}
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-paper-500 dark:text-paper-400">
           {preference === "system" ? t("theme.systemHint") : t("theme.hint")}
         </p>
+      </SettingsSection>
+
+      {/* Outside the admin block, deliberately. Reading statuses are personal
+          and an import only ever writes the importing member's own, which is
+          the whole reason two people can bring their own histories across.
+          Sitting inside that block meant a non-admin could not import theirs
+          at all, while the endpoint had always allowed it. */}
+      <SettingsSection title={t("import.title")} icon="book">
+        <LibraryImport
+          isPreviewing={libraryImport.isPreviewing}
+          isImporting={libraryImport.isImporting}
+          preview={libraryImport.preview}
+          result={libraryImport.result}
+          error={libraryImport.error}
+          onChoose={libraryImport.choose}
+          onConfirm={libraryImport.confirm}
+          onCancel={libraryImport.reset}
+          onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
+        />
       </SettingsSection>
 
       {isLoading && <Spinner label={t("common.loading")} />}
@@ -118,7 +141,7 @@ export default function SettingsPage() {
       {/* A non-admin gets the language switch and nothing else. That is not an
           error worth showing an error page for, so it is stated plainly. */}
       {isForbidden && (
-        <p className="text-sm text-gray-500 text-center dark:text-gray-400">
+        <p className="text-sm text-paper-500 text-center dark:text-paper-400">
           {t("settings.adminOnly")}
         </p>
       )}
@@ -129,7 +152,7 @@ export default function SettingsPage() {
 
       {settings && (
         <>
-          <SettingsSection title={t("settings.googleBooks")} glyph="🔎">
+          <SettingsSection title={t("settings.googleBooks")} icon="search">
             <ToggleField
               label={t("settings.googleBooksEnable")}
               hint={t("settings.googleBooksHint")}
@@ -142,7 +165,7 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <label
                   htmlFor="google-books-key"
-                  className="block text-xs font-medium text-gray-600 dark:text-gray-300"
+                  className="block text-xs font-medium text-paper-600 dark:text-paper-300"
                 >
                   {t("settings.apiKey")}
                 </label>
@@ -163,7 +186,7 @@ export default function SettingsPage() {
                   // Managed outside the app, so there is nothing here to edit
                   // and nothing to unmask.
                   disabled={fromEnv}
-                  className="w-full px-3 py-2 pr-10 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed dark:border-gray-700 dark:disabled:bg-gray-800"
+                  className="w-full px-3 py-2 pr-10 rounded-xl border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
                 />
                 {!fromEnv && (
                   <button
@@ -171,13 +194,13 @@ export default function SettingsPage() {
                     onClick={() => setShowKey((shown) => !shown)}
                     aria-label={showKey ? t("field.hide") : t("field.show")}
                     aria-pressed={showKey}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm leading-none dark:text-gray-500 dark:hover:text-gray-300"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-400 hover:text-paper-600 text-sm leading-none dark:text-paper-500 dark:hover:text-paper-300"
                   >
-                    <span aria-hidden="true">{showKey ? "🙈" : "👁"}</span>
+                    <span aria-hidden="true"><Icon name={showKey ? "eyeOff" : "eye"} className="w-4 h-4" /></span>
                   </button>
                 )}
               </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-xs text-paper-500 dark:text-paper-400">
                 {settings.has_google_books_api_key
                   ? t("settings.apiKeySet", {
                       preview: settings.google_books_api_key_preview,
@@ -199,7 +222,7 @@ export default function SettingsPage() {
                       update({ google_books_api_key: apiKey.trim() });
                       setApiKey("");
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-sky-500 text-white text-xs font-medium hover:bg-sky-600 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-accent-600 text-white text-xs font-medium hover:bg-accent-700 disabled:opacity-40 transition-colors"
                   >
                     {isSaving ? t("common.saving") : t("common.save")}
                   </button>
@@ -210,20 +233,23 @@ export default function SettingsPage() {
                       // An empty string clears it; `undefined` would mean
                       // "leave alone", which is the opposite.
                       onClick={() => update({ google_books_api_key: "" })}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors dark:border-gray-700 dark:text-red-400"
+                      className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-bloom-600 hover:bg-bloom-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-bloom-300"
                     >
                       {t("settings.apiKeyClear")}
                     </button>
                   )}
                 </div>
               )}
-              <p className="text-xs text-gray-500 leading-relaxed pt-1 dark:text-gray-400">
+              <p className="text-xs text-paper-500 leading-relaxed pt-1 dark:text-paper-400">
                 {t("settings.apiKeyHint")}
               </p>
             </div>
           </SettingsSection>
 
-          <SettingsSection title={t("settings.goodreads")} glyph="📖">
+          {/* The lookup toggle only. The import moved out of the admin block
+              above, because an import writes the importing member's own
+              statuses and nobody else's. */}
+          <SettingsSection title={t("settings.goodreads")} icon="book">
             <ToggleField
               label={t("settings.goodreadsEnable")}
               hint={t("settings.goodreadsHint")}
@@ -233,22 +259,9 @@ export default function SettingsPage() {
                 update({ goodreads_lookup_enabled: checked })
               }
             />
-
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <h3 className="text-xs font-medium text-gray-600 mb-2 dark:text-gray-300">
-                {t("goodreads.import")}
-              </h3>
-              <GoodreadsImport
-                isUploading={goodreads.isUploading}
-                result={goodreads.result}
-                error={goodreads.error}
-                onUpload={goodreads.upload}
-                onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
-              />
-            </div>
           </SettingsSection>
 
-          <SettingsSection title={t("settings.defaultLanguage")} glyph="🏳️">
+          <SettingsSection title={t("settings.defaultLanguage")} icon="flag">
             <div
               className="flex gap-2"
               role="group"
@@ -263,8 +276,10 @@ export default function SettingsPage() {
                   aria-pressed={settings.default_locale === language.value}
                   className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 ${
                     settings.default_locale === language.value
-                      ? "bg-sky-50 border-sky-300 text-sky-700"
-                      : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                      ? "bg-accent-50 border-accent-300 text-accent-800 "
+                + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                      : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
                   }`}
                 >
                   {t(language.label)}
@@ -272,6 +287,16 @@ export default function SettingsPage() {
               ))}
             </div>
           </SettingsSection>
+
+          <BackupSection
+            isDownloading={backup.isDownloading}
+            downloadError={backup.downloadError}
+            onDownload={backup.download}
+            isRestoring={backup.isRestoring}
+            restoreError={backup.restoreError}
+            restored={backup.restored}
+            onRestore={backup.restore}
+          />
 
           {showHelp && (
             <GoogleBooksHelp
@@ -296,6 +321,6 @@ export default function SettingsPage() {
           )}
         </>
       )}
-    </div>
+    </Page>
   );
 }

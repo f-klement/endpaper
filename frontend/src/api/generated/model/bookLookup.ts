@@ -15,6 +15,8 @@ export interface BookLookup {
   cover_url?: string | null;
   description?: string | null;
   isbn: string;
+  language?: string | null;
+  page_count?: number | null;
   publisher?: string | null;
   series_index?: number | null;
   series_name?: string | null;

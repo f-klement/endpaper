@@ -27,17 +27,25 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 ## Features
 
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
-- **Auto metadata**: title, author and cover art from Open Library or Google Books
+- **Auto metadata**: title, author, publisher, page count, language and cover art, merged
+  from four catalogues (the German National Library, K10plus, Open Library, Google Books)
 - **Reading status**: per-person "unread / want to read / reading / read"
 - **Loan tracking**: record who borrowed what, mark it returned
+- **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
+  tags, loans and reading history
 - **Multiple accounts**: the first to register becomes admin
 - **PWA installable**: "Add to Home Screen" on iOS and Android
-- **Tags**: type, genre and age, from a curated list
-- **Search**: by title, author or ISBN
-- **Add without a barcode**: search Google Books by title and pick the edition
+- **Tags**: type, genre and age from a curated list, plus any your household invents
+- **Search**: by title, author or ISBN, and save a filter combination as a named view
+- **Add without a barcode**: search by title across six catalogues and pick the edition,
+  including books printed before ISBNs existed. Works with no API key
+- **Five languages**: English, German, French, Spanish and Portuguese titles all resolve,
+  from the national catalogues that actually hold them
 - **Extra book details**: page count, language and categories, filled in on request
 - **On the shelf or not**: what you own, tracked separately from what you have read
-- **Goodreads import**: upload an export to bring across your reading history
+- **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
+  Libib or Openreads. The columns are worked out for you and shown before anything is saved
+- **Backup and restore**: download the whole library, covers included, and put it back
 - **German and English**: switch in Settings; new visitors follow their browser
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
 
@@ -113,8 +121,14 @@ frontend with Bun, then copies only the built assets into the Python image. Bun 
 `node_modules` are not in the shipped image.
 
 ```
-Phone (PWA) ──► FastAPI ──► Open Library API
-                  │              ↳ Google Books (fallback)
+Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together, merged)
+                  │                       ↳ Open Library  (fallback)
+                  │                       ↳ Google Books  (needs a key)
+                  │
+                  │          search a title: Open Library + K10plus + DNB
+                  │                       + BnF + Library of Congress
+                  │                       + Google Books (needs a key)
+                  │                       ranked, denoised and merged here
               SQLite DB (./data/)
 ```
 

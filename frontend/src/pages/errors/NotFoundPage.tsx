@@ -12,7 +12,7 @@ export default function NotFoundPage() {
   const { t } = useTranslation();
   return (
     <ErrorLayout
-      glyph="📭"
+      icon="inbox"
       code={t("error.404.code")}
       title={t("error.404.title")}
       message={t("error.404.message")}

@@ -1,7 +1,15 @@
-"""Tests for backend/routers/imports.py: the Goodreads CSV import."""
+"""Tests for backend/routers/imports.py: importing a library export.
 
+The Goodreads shape is used throughout because it is the one most people
+arrive with and the one with the awkward parts (formula-wrapped ISBNs, a status
+column that is not the tag column). Every other service's shape is covered at
+the parser, in `tests/test_csv_import.py`.
+"""
+
+import csv_import
 from enums import ReadStatus
-from models import UserBook
+from models import Book, UserBook
+from tests.helpers import items
 
 HEADER = (
     "Book Id,Title,Author,ISBN,ISBN13,My Rating,Publisher,"
@@ -19,7 +27,7 @@ def goodreads_row(title: str, shelf: str, isbn13: str = '=""') -> str:
 
 def upload(client, headers, content: bytes, **params):
     return client.post(
-        "/api/imports/goodreads",
+        "/api/imports/csv",
         files={"file": ("goodreads_library_export.csv", content, "text/csv")},
         headers=headers,
         params=params,
@@ -146,12 +154,23 @@ class TestUnmatched:
         assert created.title == "Some Other Book"
         assert created.isbn == "9780441013593"
 
-    def test_a_custom_shelf_is_skipped_not_reported_as_unmatched(self, client, admin):
+    def test_a_shelf_we_do_not_recognise_leaves_the_status_alone(
+        self, client, admin, make_book, db
+    ):
+        """This used to drop the whole row, and dropping it was wrong.
+
+        A row on a custom shelf is still a book. The status is the part that
+        cannot be read, so the status is the part left unset; the book itself
+        is matched and reported like any other.
+        """
+        make_book(admin["headers"], title="Dune")
+
         res = upload(client, admin["headers"], csv_bytes(goodreads_row("Dune", "borrowed")))
 
         body = res.json()
-        assert body["skipped"] == 1
-        assert body["unmatched_titles"] == []
+        assert body["matched"] == 1
+        assert body["skipped"] == 0
+        assert db.query(UserBook).count() == 0
 
 
 class TestPrivacy:
@@ -168,11 +187,26 @@ class TestPrivacy:
 
 
 class TestBadInput:
-    def test_a_file_that_is_not_an_export_is_refused(self, client, admin):
+    def test_a_plain_title_and_author_list_is_now_accepted(self, client, admin):
+        """This used to be refused for not being a Goodreads export.
+
+        A title column is the whole requirement. Somebody with a list they
+        typed themselves, or an export from a service nobody has heard of, has
+        the thing this endpoint is for.
+        """
         res = upload(client, admin["headers"], b"Title,Author\nDune,Frank Herbert\n")
 
+        assert res.status_code == 200
+        assert res.json()["rows_read"] == 1
+
+    def test_a_file_with_no_title_column_is_refused(self, client, admin):
+        res = upload(client, admin["headers"], b"Colour,Weight\nred,3kg\n")
+
         assert res.status_code == 400
-        assert "Goodreads export" in res.json()["detail"]
+        assert "No title column" in res.json()["detail"]
+        # The real headers are named, so the reader can pick one by hand
+        # rather than guess what the parser wanted.
+        assert "Colour" in res.json()["detail"]
 
     def test_an_empty_file_is_refused(self, client, admin):
         res = upload(client, admin["headers"], b"")
@@ -180,7 +214,7 @@ class TestBadInput:
 
     def test_requires_authentication(self, client):
         res = client.post(
-            "/api/imports/goodreads",
+            "/api/imports/csv",
             files={"file": ("export.csv", csv_bytes(goodreads_row("Dune", "read")), "text/csv")},
         )
         assert res.status_code == 401
@@ -201,11 +235,12 @@ class TestSummary:
         )
 
         body = res.json()
-        # Two rows had a shelf we understand; the third was skipped.
-        assert body["rows_read"] == 2
-        assert body["skipped"] == 1
+        # All three rows are books. The custom shelf is not a status we can
+        # read, which costs that row its status and nothing else.
+        assert body["rows_read"] == 3
+        assert body["skipped"] == 0
         assert body["matched"] == 1
-        assert len(body["unmatched_titles"]) == 1
+        assert len(body["unmatched_titles"]) == 2
 
 
 class TestImportedBooksAreNotAssumedOwned:
@@ -256,8 +291,12 @@ class TestImportedBooksAreNotAssumedOwned:
         ).json()["items"]
 
         res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [book["id"] for book in unverified], "ownership": "owned"},
+            "/api/books/bulk",
+            json={
+                "book_ids": [book["id"] for book in unverified],
+                "action": "set_ownership",
+                "value": "owned",
+            },
             headers=admin["headers"],
         )
 
@@ -298,7 +337,7 @@ class TestImportedRatingsAndDates:
 
     def upload(self, client, headers, content: bytes, **params):
         return client.post(
-            "/api/imports/goodreads",
+            "/api/imports/csv",
             files={"file": ("export.csv", content, "text/csv")},
             params=params,
             headers=headers,
@@ -375,3 +414,212 @@ class TestImportedRatingsAndDates:
 
         seen_by_member = client.get(f"/api/books/{book['id']}", headers=member["headers"])
         assert seen_by_member.json()["my_rating"] is None
+
+
+class TestAnotherMembersPrivateBook:
+    """`books.isbn` is unique across the whole table, invisible rows included.
+
+    Creating a book whose ISBN belongs to somebody else's private one raises on
+    that index, and the raise is two problems at once: it aborts the
+    transaction, so the whole import silently writes nothing, and the 500
+    against a 200 is a clean oracle for "does this house hold this ISBN",
+    which is exactly what the 404-not-403 rule withholds.
+    """
+
+    ISBN = "9780441013593"
+
+    def test_the_import_still_succeeds(self, client, admin, member, make_book):
+        make_book(admin["headers"], isbn=self.ISBN, title="Diary", is_private=True)
+
+        res = upload(
+            client,
+            member["headers"],
+            csv_bytes(goodreads_row("Something", "read", f'="{self.ISBN}"')),
+            create_missing=True,
+        )
+
+        assert res.status_code == 200
+
+    def test_the_rest_of_the_file_is_still_imported(
+        self, client, admin, member, make_book, db
+    ):
+        """One unusable row must not cost the other four thousand."""
+        make_book(admin["headers"], isbn=self.ISBN, title="Diary", is_private=True)
+
+        res = upload(
+            client,
+            member["headers"],
+            csv_bytes(
+                goodreads_row("Blocked", "read", f'="{self.ISBN}"'),
+                goodreads_row("Fine", "read"),
+            ),
+            create_missing=True,
+        )
+
+        assert res.json()["created"] == 1
+        assert {book.title for book in db.query(Book).all()} == {"Diary", "Fine"}
+
+    def test_the_title_is_not_reported_back(self, client, admin, member, make_book):
+        """Naming it would disclose the row the caller may not see."""
+        make_book(admin["headers"], isbn=self.ISBN, title="Diary", is_private=True)
+
+        body = upload(
+            client,
+            member["headers"],
+            csv_bytes(goodreads_row("Blocked", "read", f'="{self.ISBN}"')),
+            create_missing=True,
+        ).json()
+
+        assert body["unmatched_titles"] == []
+        assert body["skipped"] == 1
+
+    def test_the_private_book_is_untouched(self, client, admin, member, make_book, db):
+        make_book(admin["headers"], isbn=self.ISBN, title="Diary", is_private=True)
+
+        upload(
+            client,
+            member["headers"],
+            csv_bytes(goodreads_row("Blocked", "read", f'="{self.ISBN}"')),
+            create_missing=True,
+        )
+
+        assert db.query(Book).filter(Book.isbn == self.ISBN).one().title == "Diary"
+
+
+class TestTagLimits:
+    """Measured: 200 rows of one title created 4032 household-wide tags."""
+
+    def _rows(self, count: int, per_row: int = 5) -> bytes:
+        rows = []
+        for index in range(count):
+            tags = ";".join(f"tag{index}-{n}" for n in range(per_row))
+            rows.append(
+                f'1,"Book {index}","An Author",="",="",0,Pub,300,2000,,"{tags}",read'
+            )
+        return csv_bytes(*rows)
+
+    def test_one_file_cannot_invent_unlimited_tags(self, client, admin, db):
+        from models import Tag
+
+        before = db.query(Tag).count()
+
+        upload(
+            client,
+            admin["headers"],
+            self._rows(100),
+            create_missing=True,
+            apply_tags=True,
+        )
+
+        db.expire_all()
+        invented = db.query(Tag).count() - before
+        assert invented <= csv_import.MAX_NEW_TAGS_PER_IMPORT
+
+    def test_the_books_still_arrive_when_the_cap_is_reached(self, client, admin):
+        """The cap stops inventing rather than failing: the books are the point."""
+        res = upload(
+            client,
+            admin["headers"],
+            self._rows(100),
+            create_missing=True,
+            apply_tags=True,
+        )
+        assert res.json()["created"] == 100
+
+    def test_one_book_cannot_collect_unlimited_tags(self, client, admin):
+        many = ";".join(f"tag{n}" for n in range(60))
+        upload(
+            client,
+            admin["headers"],
+            csv_bytes(
+                f'1,"Solo","An Author",="",="",0,Pub,300,2000,,"{many}",read'
+            ),
+            create_missing=True,
+            apply_tags=True,
+        )
+
+        [book] = items(client.get("/api/books", headers=admin["headers"]))
+        assert len(book["tags"]) <= csv_import.MAX_TAGS_PER_BOOK
+
+    def test_two_tags_sharing_a_long_prefix_do_not_collide(self, client, admin):
+        """Truncating at the insert but not at the lookup violated the unique
+        index on the second one, and took the whole import with it."""
+        long_a = "x" * 99 + "a"
+        long_b = "x" * 99 + "b"
+        res = upload(
+            client,
+            admin["headers"],
+            csv_bytes(
+                f'1,"One","An Author",="",="",0,Pub,300,2000,,"{long_a}",read',
+                f'2,"Two","An Author",="",="",0,Pub,300,2000,,"{long_b}",read',
+            ),
+            create_missing=True,
+            apply_tags=True,
+        )
+        assert res.status_code == 200
+
+    def test_tags_are_left_alone_by_default(self, client, admin, db):
+        from models import Tag
+
+        before = db.query(Tag).count()
+        upload(client, admin["headers"], self._rows(5), create_missing=True)
+
+        db.expire_all()
+        assert db.query(Tag).count() == before
+
+
+REVIEW_CSV = (
+    b'Title,Author,Exclusive Shelf,My Review\n'
+    b'Dune,An Author,read,"A desert planet."\n'
+)
+
+
+class TestImportedReviews:
+    def test_a_review_becomes_this_member_s_note(self, client, admin):
+        """Parsed all along and thrown away, like the rating used to be."""
+        upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
+
+        [book] = items(client.get("/api/books", headers=admin["headers"]))
+        notes = client.get(
+            f"/api/books/{book['id']}/notes", headers=admin["headers"]
+        ).json()
+        assert [note["content"] for note in notes] == ["A desert planet."]
+
+    def test_importing_twice_does_not_append_it_again(self, client, admin):
+        upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
+        upload(client, admin["headers"], REVIEW_CSV, create_missing=True)
+
+        [book] = items(client.get("/api/books", headers=admin["headers"]))
+        notes = client.get(
+            f"/api/books/{book['id']}/notes", headers=admin["headers"]
+        ).json()
+        assert len(notes) == 1
+
+
+class TestRateLimit:
+    def test_a_burst_of_imports_is_refused(self, client, admin):
+        """One import holds the single SQLite writer for its whole duration."""
+        content = csv_bytes(goodreads_row("Dune", "read"))
+        codes = [
+            upload(client, admin["headers"], content).status_code for _ in range(5)
+        ]
+
+        assert 429 in codes
+
+    def test_the_refusal_says_when_to_try_again(self, client, admin):
+        content = csv_bytes(goodreads_row("Dune", "read"))
+        last = None
+        for _ in range(5):
+            last = upload(client, admin["headers"], content)
+        assert last is not None
+        if last.status_code == 429:
+            assert "Retry-After" in last.headers
+
+
+class TestUnreadableFile:
+    def test_a_field_too_large_is_a_400_not_a_500(self, client, admin):
+        """Python's csv module raises past 128k in one field."""
+        huge = "x" * 200_000
+        res = upload(client, admin["headers"], f'Title,Author\n"{huge}",X\n'.encode())
+
+        assert res.status_code == 400
