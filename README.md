@@ -187,6 +187,14 @@ this app's own table. Accounts are created here on first sign-in, so books and n
 have an owner. `AUTH_MODE=proxy` takes the identity from headers set by a reverse proxy and
 hides the login form entirely.
 
+**Test accounts.** In any of the three modes, an admin can create a local account with a
+password in Settings and switch into it, which is how you see the library the way an
+ordinary member sees it when the directory owns everybody's password. Under `ldap` and
+`proxy` they are not offered at the login screen, because that screen offers nothing at
+all there; under `local` one signs in through the ordinary form like any other account.
+They are never admins, and they are the only accounts a switch will accept: nobody can be
+signed in as a real member this way.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `LDAP_URL` | none | e.g. `ldaps://directory.example:636`. Required for `ldap` |

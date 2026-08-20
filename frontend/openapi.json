@@ -5209,6 +5209,82 @@
         ]
       }
     },
+    "/api/users/test-accounts": {
+      "get": {
+        "description": "The accounts an admin may switch into, and no others.\n\n`switch_targets()`, not the flag alone, so that sentence is true of every\nrow returned. The two differ only for a row nothing here writes (a flagged\naccount whose `auth_source` was edited to a directory, or whose hash was\ncleared), and on that row the flag alone would put a Switch button in front\nof an admin that `/auth/switch` then answers 404 to, with nothing the UI\ncould usefully say.\n\nFiltering is presentation either way: `/auth/switch` refuses a bad target\nwhatever the client sends. Admin only because who exists for testing is\nnobody else's business, and because every account on this list is one\nsomebody holds the password to.",
+        "operationId": "list_test_accounts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response List Test Accounts",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Test Accounts",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Create a local account with a password, in any auth mode.\n\n`UserCreate`, so the registration policy applies unchanged: the 8 character\nfloor and the 72 byte bcrypt ceiling the schema already documents.\n\nNever an admin. A test account exists to see the library as an ordinary\nmember sees it, and an admin can already see the admin view. Nothing else\nin this app grants the flag either, so there is no path that turns one into\nan admin later.",
+        "operationId": "create_test_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Test Account",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/auth/config": {
       "get": {
         "description": "Public: the login page reads this before anyone holds a token.\n\nRead per request rather than captured at import, so closing registration\ntakes effect without restarting the container.",
@@ -5349,6 +5425,53 @@
           }
         },
         "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/switch": {
+      "post": {
+        "description": "Exchange a password an admin supplies for a session on a test account.\n\nA login performed on another account's behalf, not impersonation, and the\ndifference is the password: it is required and checked the ordinary way.\nThe admin knows it because the admin set it. Drop that check and this\nbecomes a button that reads anybody's library.\n\n`LoginRequest`, not a schema of its own, because this **is** a login and\nthe same two reasons apply: the registration length floor must not lock out\na password set before it, and a 422 saying \"too short\" is a different\nanswer from a 401 saying \"wrong\".\n\nThe two refusals differ here, unlike at `/auth/login`, and can. That route\nanswers one message for both cases so nobody can enumerate accounts; this\none is called by an admin who may already list every account. So a name\nthat is not a test account is a **404**, which is true of it as far as this\nroute is concerned, and a wrong password is a **401**.\n\nRate limited on the same counter as `/auth/login`, keyed the same way. The\ncaller holds an admin token, so this is not the first line of defence; it\nis that a password check reachable over HTTP is a password check worth\nbounding, and this one hands back a session on a different account.",
+        "operationId": "switch_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Token"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Switch Account",
         "tags": [
           "auth"
         ]

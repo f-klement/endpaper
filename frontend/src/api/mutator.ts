@@ -137,8 +137,13 @@ const LOGIN_PATH = "/login";
  * session: the stored session is cleared and the server's "Incorrect username
  * or password" is replaced with "Your session has expired", which is both
  * wrong and, for someone who was not signed in to begin with, nonsense.
+ *
+ * `/auth/switch` is the sharpest case of the three, because the caller **is**
+ * signed in: an admin who mistypes a test account's password would be signed
+ * out of their own session and sent to the login screen, having changed
+ * nothing. Measured, not predicted.
  */
-const CREDENTIAL_PATHS = ["/auth/login", "/auth/register"];
+const CREDENTIAL_PATHS = ["/auth/login", "/auth/register", "/auth/switch"];
 
 function isCredentialRequest(url: string): boolean {
   return CREDENTIAL_PATHS.some((path) => url.includes(path));

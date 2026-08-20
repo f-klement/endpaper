@@ -20,6 +20,13 @@ store for runtime settings.
 digest; the plaintext is never stored or returned. `is_admin` is granted to whoever
 registers first and is not editable through the API afterwards.
 
+`is_test_account` marks an account an admin created for testing. It decides two things and
+nothing else: the account is the only kind `/auth/switch` will issue a session for, and a
+directory identity of the same name will not adopt its row (it is renamed aside instead).
+A column rather than "`auth_source` is local", because a local account from before a
+deployment moved to a directory is also local and belongs to a real person. See
+[security.md](security.md) and [decisions.md](decisions.md).
+
 `appearance_palette`, `appearance_mode` and `appearance_wallpaper` are the member's own
 look, nullable, with NULL meaning "has not chosen" rather than a value. Columns rather than
 a `user_preferences` table: it is a one-to-one with no history, and a side table would add a
@@ -159,7 +166,8 @@ scanned the barcode on its back cover.
 
 Deleting a book removes its `user_books`, `loans`, `notes` and `book_tags` rows. Books,
 tags and users are never cascade-deleted by anything else. There is no delete-account
-endpoint.
+endpoint, test accounts included: removing a member means deciding what happens to the
+books they added, the loans they are in and the notes they wrote.
 
 ## The privacy rule
 

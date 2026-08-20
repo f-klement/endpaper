@@ -122,49 +122,53 @@ function cacheClears(code: string): number {
   return [...code.matchAll(/queryClient\.clear\(\)/g)].length;
 }
 
+/** The one module that owns the session, and the one that defines it. */
+const SESSION_OWNER = "pages/hooks.ts";
+const SESSION_DEFINITION = "api/mutator.ts";
+
 describe("an identity change drops the cache with it", () => {
-  it("holds in every module that writes the session", () => {
-    // The instance of this that mattered was the whole shelf: React Query's
+  it("is decided in one module, not at each call site", () => {
+    // The instance of this that mattered was the whole shelf. React Query's
     // client is built once per page load and outlives a sign-out, "Switch
-    // account" is a router link rather than a navigation, and `visible_to()`
-    // is "public or mine", so the next member in was handed the previous one's
+    // account" is a router link rather than a navigation, switching into a
+    // test account is a button in Settings, and under proxy auth the identity
+    // can change with nothing happening in this app at all. `visible_to()` is
+    // "public or mine", so the next member in was handed the previous one's
     // private books back under identical keys, with nothing refetching for
     // another thirty seconds.
     //
-    // Asserted as a rule rather than at the two call sites, because the defect
-    // is not in any one query: it is that a member-scoped answer outlives the
-    // member. The next hook keyed on "the caller" reintroduces it for free.
+    // `useSession` now clears on a change of account id, so every path gets
+    // it, including the proxy one, which has no call site here to add a clear
+    // to. What this rule protects is that arrangement: a component that writes
+    // the session itself would change the identity without going past the
+    // hook watching it, and no effect can cover that.
     //
-    // `api/mutator.ts` is the exemption and the reason there is a rule: it
-    // owns both functions, and `endSession()` drops in-memory state by doing a
-    // full navigation instead. The deliberate paths reach the same place
-    // through the router, so they have to say it.
-    //
-    // Counted, and with the prose removed first, for two reasons that are both
-    // reachable here rather than theoretical. This repository quotes
-    // identifiers in comments constantly, and both `pages/hooks.ts` and
-    // `docs/security.md` discuss `queryClient.clear()` by name: a future
-    // comment in a session-writing module explaining why it does not need the
-    // call would otherwise silence the rule for that whole file. And a file is
-    // not compliant because it clears somewhere: `pages/hooks.ts` holds two
-    // writers and two clears today, so a third identity path added without one
-    // would pass a per-file check while leaking exactly what this exists to
-    // stop.
+    // This replaced a count of `queryClient.clear()` against a count of
+    // session writes per file. That was the right question while three call
+    // sites each had to remember; against one effect keyed on the identity it
+    // asks for a redundant call per writer, which is a rule that teaches the
+    // wrong lesson to whoever adds the fourth path.
     //
     // Said out loud so nobody trusts it as total: this counts spellings, not
-    // calls. Anything that spells the call without making it (a string
-    // literal, a clear inside a function nothing invokes) or makes it without
-    // spelling it (an aliased import, a sign-in that writes `localStorage`
-    // itself) is outside it. No regex closes that gap: it is the distance
-    // between a concept and the characters it is usually written with.
+    // calls. A module that writes `localStorage` itself, or through an alias,
+    // is outside it. No regex closes that gap: it is the distance between a
+    // concept and the characters it is usually written with.
     const offenders = entries()
-      .filter(([path]) => path !== "api/mutator.ts")
+      .filter(([path]) => path !== SESSION_DEFINITION && path !== SESSION_OWNER)
       .map(([path, source]) => [path, withoutProse(source)] as const)
       .filter(([, code]) => sessionWrites(code) > 0)
-      .filter(([, code]) => cacheClears(code) < sessionWrites(code))
       .map(([path]) => path);
 
     expect(offenders).toEqual([]);
+  });
+
+  it("still clears the cache somewhere in that module", () => {
+    // A tripwire, not the proof: what the clearing actually does is asserted
+    // in tests/pages/hooks.test.ts, per mode and per path. This is here so
+    // that deleting the mechanism outright cannot be a silent diff.
+    const owner = entries().find(([path]) => path === SESSION_OWNER);
+    expect(owner).toBeDefined();
+    expect(cacheClears(withoutProse(owner![1]))).toBeGreaterThan(0);
   });
 
   it("is watching something", () => {

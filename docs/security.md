@@ -92,6 +92,75 @@ proxy sets those headers itself and strips any arriving from the client; otherwi
 can name themselves admin. The module says so in a docstring that is deliberately hard to
 miss, and the mode is not the default.
 
+### An admin can be signed in as a test account, and as nothing else
+
+`POST /auth/switch` exchanges a password the admin supplies for a token on another
+account. It is a login performed on that account's behalf, not impersonation, and two
+things keep it that way.
+
+**The target must be an admin-created test account** (`users.is_test_account`, which
+implies a local `auth_source` and a stored hash). `models.is_switch_target` is that rule,
+in one function, and a **directory-backed account is never a target, in any mode**. An
+admin able to mint a session for an LDAP or proxy member could read that member's private
+books, and per-book privacy is the single promise the data model makes. A local account
+from before a deployment moved to a directory is excluded by the same rule: it belongs to
+a real person, and under `ldap` or `proxy` its old password is not an authentication path
+any more.
+
+**The password is required and checked** with the ordinary `verify_password`. The admin
+knows it because the admin set it. Removing that check is what would turn this into
+impersonation.
+
+Everything else follows from those two. A name that is not a test account is a 404 and a
+wrong password is a 401, which does not help anyone enumerate accounts, because the caller
+is an admin who can already list them all. The switch is logged at WARNING naming both
+accounts. The token is an ordinary session token with the scoped cover cookie beside it,
+so nothing downstream has to know how the session began.
+
+Getting back: under `local` and `ldap` the admin's own token was replaced, so they sign in
+again, and the UI says so before the switch rather than after. Under `proxy` nothing was
+replaced, so discarding the token is enough.
+
+### Under proxy auth, a token overrides the header only for a switch
+
+`AUTH_MODE=proxy` ignored tokens entirely until test accounts existed. It cannot now: a
+switched session has to win over the header until it is dropped.
+
+The acceptance is deliberately narrow. `auth._switch_session` takes a token only when the
+account it names is **still** a switch target, so it is not a claim inside the token that
+somebody has to remember to set, and it stops mattering the moment the flag comes off the
+row. Accepting any valid token would also revive tokens minted before a deployment moved
+to proxy auth, and those name real members with real libraries.
+
+A token that is expired, forged or no longer a switch target falls back to the header
+rather than failing. The header is the identity the deployment has already authenticated,
+so falling back is never a gain in privilege, and failing closed would strand whoever
+holds a stale token behind an error page with no control on screen to clear it.
+
+The cover route applies the same rule to the cover cookie, and only there: an `<img>` sends
+no Authorization header, so without it a switched session shows the test account's library
+with a hole where every cover only it can see should be. `POST /auth/logout` deletes that
+cookie, which is what the "return to my account" control calls.
+
+**A switched session survives the tab being closed.** The token lasts seven days and the
+cookie a day, both in the browser, so under proxy the next person at that machine is served
+the test account rather than themselves until somebody uses "Return to my account": books
+they add are attributed to the test account, and they see its private books. Ending a
+switch is a deliberate act, and on a shared machine it is the one that matters.
+
+**And there is no way to end one from the server.** Nothing clears `is_test_account`, so
+"the acceptance narrows the moment the flag comes off the row" describes a hand-edited row,
+not an operator control. The only revocations that exist are that edit and a `SECRET_KEY`
+rotation, which ends every session in the deployment.
+
+### A directory identity never adopts a test account
+
+`upsert_directory_user` matches on **username**. A directory identity named like a test
+account would otherwise inherit its row, its books, its loans and its notes, and the test
+account would silently stop being a valid switch target. It is renamed aside instead, at
+WARNING and naming both names. See [decisions.md](decisions.md) for why renaming rather
+than refusing the sign-in.
+
 ### The Google Books API key is never returned
 
 `GET /api/settings` returns a masked preview plus a boolean, never the key. The masking is
@@ -101,11 +170,12 @@ value directly. The 400 raised when the key is missing does not echo it either.
 
 ## Rate limiting
 
-Four things are limited, for three different reasons:
+Five things are limited, for three different reasons:
 
 | Route | Limit | Keyed on | Why |
 |---|---|---|---|
 | `/auth/login` | 10 / min | username + address | Bounds guesses at a token |
+| `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
 | `/api/imports/*` | 3 / min | username | One call writes thousands of rows in one transaction, holding the single SQLite writer against the household |
 | metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this household neither runs nor pays for |
@@ -224,22 +294,40 @@ stamped with that number would start verifying again.
 ### An identity change drops the in-memory cache
 
 React Query's client is created once per page load and does not care who is signed in, and
-two of the three ways **this app** changes the identity itself never reload the page (under
-proxy auth the upstream owns identity and this app offers none of them): `signOut` clears
-`localStorage` and stays put, and "Switch account" is a router link to `/login`, deliberately
-reachable while signed in. So without help the next member gets the previous one's cached
-answers back under identical keys, and at the default `staleTime` nothing refetches for
-another thirty seconds.
+**none** of the ways the identity changes reloads the page:
+
+| How | What happens in the browser |
+|---|---|
+| Signing out | `localStorage` is cleared and the app stays put |
+| "Switch account" | A router link to `/login`, deliberately reachable while signed in |
+| Switching into a test account | A button in Settings, then a router navigation home |
+| The proxy names somebody else | Nothing at all happens in this app |
+
+So without help the next member gets the previous one's cached answers back under identical
+keys, and at the default `staleTime` nothing refetches for another thirty seconds.
 
 What that leaks is the whole shelf. `visible_to()` is "public or mine", so a cached listing
 carries **private** books, and `my_status`, `my_rating` and `active_loan` are computed per
-caller; `/api/stats` and `/api/loans` are the same shape. `useSession` therefore calls
-`queryClient.clear()` in both `signIn` and `signOut`, and `houseRules.test.ts` holds the
-general rule, because the defect is not in any one query: it is that a member-scoped answer
-outlives the member, so the next hook keyed on "the caller" reintroduces it for free.
+caller; `/api/stats` and `/api/loans` are the same shape.
 
-`mutator.ts::endSession` reaches the same place on the 401 path by doing a full navigation
-instead, which is why it is the one exemption to that rule.
+`useSession` therefore clears the cache in an effect keyed on the **account id**, not at
+each of those four places. Three of them have a call site here and the fourth does not:
+under proxy auth the identity arrives from the server, and a change in it is not an event
+this app takes part in. Keying on the id is what covers the one that cannot be covered by
+remembering, and what makes a fifth path free.
+
+Two properties of that effect are load-bearing:
+
+- It fires only between **two known accounts**. `null` means both "nobody" and "not known
+  yet", and the identity is itself two cached queries, so clearing produces a null:
+  treating that as a change is an app that clears and refetches for as long as it is open.
+- `signOut` clears for itself, because a known account becoming nobody is exactly what the
+  effect cannot distinguish, and signing out is deliberate enough to say so.
+
+`houseRules.test.ts` holds the surrounding rule: nothing outside `pages/hooks.ts` and
+`api/mutator.ts` writes the session at all, so every identity change passes in front of the
+effect watching it. `mutator.ts::endSession` reaches the same place on the 401 path by
+doing a full navigation instead, which is why it is the exemption.
 
 ## Known limits
 
@@ -251,8 +339,32 @@ Worth knowing before exposing this beyond a private network:
   There is one cookie, and it is not that token. See below.
 - **No account lockout or password reset.** A forgotten password needs a hand-edited
   database row.
+- **No endpoint deletes or renames an account**, test accounts included. Removing a member
+  means deciding what happens to the books they added, the loans they are part of and the
+  notes they wrote, which is a larger decision than this feature. The cost is that every
+  test account ever made is permanently in the **"Loan to…" picker**, which is the member
+  list and which every member uses, so a typo made once is a name everybody picks past
+  forever.
+- **A renamed test account tells nobody.** The automatic rename above is a WARNING in the
+  log and nothing in the app. Under proxy a session switched into it corrects itself,
+  because `/auth/me` is the identity; under `ldap` and `local` it does not, since the top
+  bar reads the account stored beside the token, so it keeps saying `alice` until that
+  person signs in again. Pre-existing for any username change, and this is the first
+  username change nobody asked for.
+- **Username matching is case-sensitive**, in SQLite and in this app. A test account
+  `Alice` and a directory identity `alice` are two accounts, so they coexist without the
+  rename ever firing. Nothing is merged and nothing leaks; the two simply sit side by side
+  in the member list.
+- **Two directory identities signing in at the same instant** can both pick the same freed
+  name and one of them gets an `IntegrityError`, which is a 500 and a retry, not a wrong
+  answer.
+- **Behind a reverse proxy the login limiter keys on `username|<proxy address>`**, so an
+  anonymous caller who guesses a test account's name can spend that key's budget and leave
+  an admin unable to switch to it for a minute. Denial only, and the shape is the one
+  `/auth/login` has always had.
 - **No audit log.** Deleting a book leaves no trace of who did it, and on a shared shelf
   any member can.
 - **`/api/users` is readable by every member**, exposing usernames and the admin flag. It
-  has to be, for the "Loan to…" picker.
+  has to be, for the "Loan to…" picker. Test accounts appear in it like any other account,
+  because that is what they are; the list of which accounts are test accounts is admin only.
 - **Rate limits reset on restart**, and are per-process.

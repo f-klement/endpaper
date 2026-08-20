@@ -4,11 +4,26 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Locale } from "../../../src/api/generated/model";
+import { AuthMode, Locale } from "../../../src/api/generated/model";
 import SettingsPage from "../../../src/pages/SettingsPage";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
 
 let api: MockApi;
+
+/**
+ * The page with its two shell props supplied.
+ *
+ * `mode` decides one sentence in the test accounts section, and `onSignIn` is
+ * where a switch lands. Neither is what most of these tests are about, so they
+ * are defaulted here rather than repeated thirty times.
+ */
+function renderSettings(
+  props: Partial<React.ComponentProps<typeof SettingsPage>> = {},
+) {
+  return renderWithProviders(
+    <SettingsPage mode={AuthMode.local} onSignIn={() => {}} {...props} />,
+  );
+}
 
 const SETTINGS = {
   google_books_enabled: false,
@@ -29,6 +44,10 @@ beforeEach(() => {
     },
   });
   api.on(/\/api\/settings$/, { body: SETTINGS });
+  // The admin block asks for these. Stubbed here rather than per test: an
+  // unstubbed request throws, and every test that reaches the admin block
+  // would fail for a reason that has nothing to do with what it asserts.
+  api.on("/api/users/test-accounts", { body: [] });
 });
 
 describe("SettingsPage", () => {
@@ -41,7 +60,7 @@ describe("SettingsPage", () => {
         { status: 403, body: { detail: "Admins only" } },
         "GET",
       );
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(
         await screen.findByRole("button", { name: "German" }),
@@ -49,7 +68,7 @@ describe("SettingsPage", () => {
     });
 
     it("switches the whole page's language", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await userEvent
         .setup()
@@ -61,7 +80,7 @@ describe("SettingsPage", () => {
     });
 
     it("remembers the choice", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await userEvent
         .setup()
         .click(await screen.findByRole("button", { name: "German" }));
@@ -69,7 +88,7 @@ describe("SettingsPage", () => {
     });
 
     it("sends nothing to the server", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await userEvent
         .setup()
         .click(await screen.findByRole("button", { name: "German" }));
@@ -79,7 +98,7 @@ describe("SettingsPage", () => {
 
   describe("appearance", () => {
     it("offers the three modes", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       for (const label of ["Light", "Dark", "Follow system"]) {
         expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
@@ -88,7 +107,7 @@ describe("SettingsPage", () => {
 
     it("marks the one in force", async () => {
       // The render helpers force light, the way they force English.
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(await screen.findByRole("button", { name: "Light" })).toHaveAttribute(
         "aria-pressed",
@@ -97,7 +116,7 @@ describe("SettingsPage", () => {
     });
 
     it("switches on a click", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await userEvent
         .setup()
         .click(await screen.findByRole("button", { name: "Dark" }));
@@ -106,7 +125,7 @@ describe("SettingsPage", () => {
     });
 
     it("says nothing about the wallpaper while it is on", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await screen.findByRole("button", { name: "Light" });
 
       expect(screen.queryByText(/wallpaper is off/)).not.toBeInTheDocument();
@@ -123,7 +142,7 @@ describe("SettingsPage", () => {
           removeEventListener: () => {},
         })),
       );
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(await screen.findByText(/wallpaper is off/)).toBeInTheDocument();
       vi.unstubAllGlobals();
@@ -140,7 +159,7 @@ describe("SettingsPage", () => {
     });
 
     it("says so plainly instead of showing an error", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       expect(
         await screen.findByText("Only an admin can change these."),
       ).toBeInTheDocument();
@@ -148,7 +167,7 @@ describe("SettingsPage", () => {
     });
 
     it("hides the admin sections", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await screen.findByText("Only an admin can change these.");
       expect(screen.queryByText("Google Books")).not.toBeInTheDocument();
     });
@@ -161,7 +180,7 @@ describe("SettingsPage", () => {
         { body: { ...SETTINGS, google_books_enabled: true } },
         "PUT",
       );
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await userEvent
         .setup()
@@ -175,7 +194,7 @@ describe("SettingsPage", () => {
     });
 
     it("says when no key is stored", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       expect(await screen.findByText("No key stored yet.")).toBeInTheDocument();
     });
 
@@ -187,7 +206,7 @@ describe("SettingsPage", () => {
           google_books_api_key_preview: "AIza...9f2c",
         },
       });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(
         await screen.findByText("A key is stored (AIza...9f2c)."),
@@ -198,7 +217,7 @@ describe("SettingsPage", () => {
 
     it("saves a typed key", async () => {
       api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       const user = userEvent.setup();
 
       await user.type(
@@ -217,7 +236,7 @@ describe("SettingsPage", () => {
     it("will not save an empty box", async () => {
       // An empty string means "clear the key", which is the Remove button's
       // job. Saving nothing must not silently wipe the stored one.
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       expect(
         await screen.findByRole("button", { name: "Save" }),
       ).toBeDisabled();
@@ -225,7 +244,7 @@ describe("SettingsPage", () => {
 
     it("empties the box after saving, so the key is not left on screen", async () => {
       api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       const user = userEvent.setup();
 
       await user.type(await screen.findByLabelText("API key"), "secret-key");
@@ -237,7 +256,7 @@ describe("SettingsPage", () => {
     });
 
     it("offers removal only when there is something to remove", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       await screen.findByText("No key stored yet.");
       expect(
         screen.queryByRole("button", { name: "Remove stored key" }),
@@ -252,7 +271,7 @@ describe("SettingsPage", () => {
           google_books_api_key_preview: "x",
         },
       });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await userEvent
         .setup()
@@ -271,7 +290,7 @@ describe("SettingsPage", () => {
   describe("Goodreads", () => {
     it("toggles the lookup links", async () => {
       api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await userEvent
         .setup()
@@ -287,14 +306,14 @@ describe("SettingsPage", () => {
     it("names the services a library can come from", async () => {
       // The import stopped being Goodreads-only. Somebody arriving from
       // LibraryThing or StoryGraph needs to see that this is for them too.
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       expect(
         await screen.findByText(/Goodreads, LibraryThing, StoryGraph/),
       ).toBeInTheDocument();
     });
 
     it("says the columns are shown before anything is saved", async () => {
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
       expect(
         await screen.findByText(/shown before anything is saved/),
       ).toBeInTheDocument();
@@ -308,7 +327,7 @@ describe("SettingsPage", () => {
         { body: { ...SETTINGS, default_locale: "de" } },
         "PUT",
       );
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       const group = await screen.findByRole("group", {
         name: "Default language for new visitors",
@@ -327,7 +346,7 @@ describe("SettingsPage", () => {
 
   it("confirms a successful save", async () => {
     api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
 
     await userEvent
       .setup()
@@ -344,7 +363,7 @@ describe("SettingsPage", () => {
       { status: 500, body: { detail: "Nope" } },
       "PUT",
     );
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
 
     await userEvent
       .setup()
@@ -356,7 +375,7 @@ describe("SettingsPage", () => {
 
 describe("SettingsPage API key handling", () => {
   it("masks the typed key by default", async () => {
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
     expect(await screen.findByLabelText("API key")).toHaveAttribute(
       "type",
       "password",
@@ -366,7 +385,7 @@ describe("SettingsPage API key handling", () => {
   it("reveals what was typed on request", async () => {
     // Only ever the value the admin just entered: the server never returns a
     // stored key, so there is nothing else here to reveal.
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("API key"), "typed-key");
 
@@ -376,7 +395,7 @@ describe("SettingsPage API key handling", () => {
   });
 
   it("hides it again", async () => {
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Show" }));
 
@@ -389,7 +408,7 @@ describe("SettingsPage API key handling", () => {
   });
 
   it("offers the explanation next to the field", async () => {
-    renderWithProviders(<SettingsPage />);
+    renderSettings();
 
     await userEvent
       .setup()
@@ -412,7 +431,7 @@ describe("SettingsPage API key handling", () => {
 
     it("disables the field", async () => {
       api.on(/\/api\/settings$/, { body: FROM_ENV });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(await screen.findByLabelText("API key")).toBeDisabled();
     });
@@ -421,7 +440,7 @@ describe("SettingsPage API key handling", () => {
       // There is nothing to reveal: the field is empty and the real key is
       // managed outside the app.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await screen.findByLabelText("API key");
       expect(
@@ -431,7 +450,7 @@ describe("SettingsPage API key handling", () => {
 
     it("explains where it comes from", async () => {
       api.on(/\/api\/settings$/, { body: FROM_ENV });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(
         await screen.findByText(/supplied by the server's configuration/),
@@ -442,7 +461,7 @@ describe("SettingsPage API key handling", () => {
       // Not merely hidden: there is nothing here to save, and a disabled
       // control that cannot ever become enabled is just clutter.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       await screen.findByLabelText("API key");
       expect(
@@ -456,11 +475,109 @@ describe("SettingsPage API key handling", () => {
     it("still allows the feature toggle", async () => {
       // The key is fixed; whether the feature is on is still a local decision.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
-      renderWithProviders(<SettingsPage />);
+      renderSettings();
 
       expect(
         await screen.findByLabelText("Enable extra book details"),
       ).toBeEnabled();
+    });
+  });
+
+  describe("test accounts", () => {
+    const TESTER = {
+      id: 7,
+      username: "tester",
+      is_admin: false,
+      created_at: "2026-01-01T00:00:00",
+    };
+
+    it("lists them for an admin", async () => {
+      api.on("/api/users/test-accounts", { body: [TESTER] });
+      renderSettings();
+
+      expect(await screen.findByText("tester")).toBeInTheDocument();
+    });
+
+    it("is not asked for at all by a member who cannot use it", async () => {
+      // The endpoint is admin only, and every member reaches this page for the
+      // language switch. Asking anyway would be a 403 on every visit.
+      api.on(
+        /\/api\/settings$/,
+        { status: 403, body: { detail: "Admins only" } },
+        "GET",
+      );
+      renderSettings();
+
+      await screen.findByText("Only an admin can change these.");
+      expect(api.lastCall("/api/users/test-accounts")).toBeUndefined();
+    });
+
+    it("creates one and asks for the list again", async () => {
+      api.on("/api/users/test-accounts", { body: [] });
+      renderSettings();
+      const user = userEvent.setup();
+
+      await user.type(await screen.findByLabelText("Username"), "tester");
+      await user.type(screen.getByLabelText("Password"), "pw12345678");
+      api.on("/api/users/test-accounts", { status: 201, body: TESTER }, "POST");
+      await user.click(
+        screen.getByRole("button", { name: "Create test account" }),
+      );
+
+      await waitFor(() =>
+        expect(
+          api.lastCall("/api/users/test-accounts", "POST")?.body,
+        ).toEqual({ username: "tester", password: "pw12345678" }),
+      );
+    });
+
+    it("switches with the password the admin supplies", async () => {
+      api.on("/api/users/test-accounts", { body: [TESTER] });
+      api.on("/auth/switch", {
+        body: { access_token: "switch-token", token_type: "bearer", user: TESTER },
+      });
+      const onSignIn = vi.fn();
+      renderSettings({ onSignIn });
+      const user = userEvent.setup();
+
+      await user.click(
+        await screen.findByRole("button", { name: "Switch to tester" }),
+      );
+      await user.type(
+        screen.getByLabelText("Password for tester"),
+        "pw12345678",
+      );
+      await user.click(screen.getByRole("button", { name: "Switch" }));
+
+      await waitFor(() =>
+        expect(onSignIn).toHaveBeenCalledWith(TESTER, "switch-token"),
+      );
+      expect(api.lastCall("/auth/switch", "POST")?.body).toEqual({
+        username: "tester",
+        password: "pw12345678",
+      });
+    });
+
+    it("reports a refused switch rather than pretending it worked", async () => {
+      api.on("/api/users/test-accounts", { body: [TESTER] });
+      api.on("/auth/switch", {
+        status: 401,
+        body: { detail: "Incorrect password for that account" },
+      });
+      const onSignIn = vi.fn();
+      renderSettings({ onSignIn });
+      const user = userEvent.setup();
+
+      await user.click(
+        await screen.findByRole("button", { name: "Switch to tester" }),
+      );
+      await user.type(screen.getByLabelText("Password for tester"), "wrong");
+      await user.click(screen.getByRole("button", { name: "Switch" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Incorrect password for that account",
+      );
+      expect(onSignIn).not.toHaveBeenCalled();
     });
   });
 });

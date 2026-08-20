@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**1350 tests · 95% line coverage** (2978 statements, 162 missed).
+**1412 tests · 96% line coverage** (3851 statements, 168 missed).
 
 ```bash
 uv run pytest                                    # the suite
@@ -35,13 +35,13 @@ is why the helper uses regexes.
 | `test_backup.py` | 34 | **The whole library out and back.** Round trip, refusing a bad archive, and zip path traversal |
 | `test_metadata.py` | 82 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
 | `test_errors.py` | 35 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
-| `test_auth_backends.py` | 28 | Local, LDAP and proxy identity sources |
+| `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 54 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
 | `test_schemas.py` | 25 | Request/response contracts and their validation rules |
 | `test_google_books.py` | 24 | Volume mapping, the gap-filling merge, upstream failures |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 21 | Password hashing, JWT creation and the auth dependencies |
-| `test_models.py` | 20 | Constraints, defaults, cascades, relationships |
+| `test_models.py` | 44 | Constraints, defaults, cascades, relationships, and what may be switched into |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 19 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 18 | Content-sniffed image validation and the size cap |
@@ -60,10 +60,10 @@ is why the helper uses regexes.
 | `routers/test_settings.py` | 30 | Feature flags, the masked API key, admin-only writes |
 | `routers/test_imports.py` | 43 | The import, the private-ISBN branch, the tag caps, the rate limit |
 | `routers/test_books_tags.py` | 21 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
-| `routers/test_auth.py` | 21 | Registration, login, `/auth/me`, the registration switch |
+| `routers/test_auth.py` | 74 | Registration, login, `/auth/me`, the registration switch, and switching into a test account in all three modes |
 | `routers/test_loans.py` | 19 | Lending, returning, history |
 | `routers/test_stats.py` | 18 | Every aggregation, and that each respects privacy |
-| `routers/test_users.py` | 16 | The member list, and appearance: the caller's own only, never on `UserOut` |
+| `routers/test_users.py` | 33 | The member list, test accounts, and appearance: the caller's own only, never on `UserOut` |
 
 ## The parts that matter most
 

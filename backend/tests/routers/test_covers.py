@@ -303,6 +303,59 @@ class TestProxyMode:
         assert client.get(url, headers=proxy_headers("sam")).status_code == 404
 
 
+class TestASwitchedSessionInProxyMode:
+    """The one case where a cookie does beat the proxy header.
+
+    An admin who has switched into a test account is that account, and an
+    `<img>` sends no Authorization header, so without the cookie the switched
+    session would show the test account's library with a hole where every cover
+    only it can see used to be. The acceptance is narrow: `is_switch_target`
+    has to still hold for the account the cookie names.
+    """
+
+    def _switch_into_a_test_account(self, client, boss):
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=boss,
+        )
+        res = client.post(
+            "/auth/switch",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=boss,
+        )
+        assert res.status_code == 200, res.text
+        return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+    def test_the_switched_session_sees_its_own_private_cover(
+        self, client, proxy_mode, covers_dir
+    ):
+        boss = proxy_headers("boss")
+        client.get("/auth/me", headers=boss)
+        token = self._switch_into_a_test_account(client, boss)
+
+        book_id = _add_book(client, {"headers": token}, title="A diary", is_private=True)
+        url = _upload_cover(client, {"headers": token}, book_id)
+
+        # The cookie the switch set is on the client, and it is all an <img>
+        # would send. The proxy header rides along, as it does on every request
+        # in this mode, and must not be what answers.
+        assert client.get(url, headers=boss).status_code == 200
+
+    def test_the_proxy_identity_alone_still_cannot_see_it(
+        self, client, proxy_mode, covers_dir
+    ):
+        boss = proxy_headers("boss")
+        client.get("/auth/me", headers=boss)
+        token = self._switch_into_a_test_account(client, boss)
+        book_id = _add_book(client, {"headers": token}, title="A diary", is_private=True)
+        url = _upload_cover(client, {"headers": token}, book_id)
+
+        client.cookies.delete(COVER_COOKIE_NAME, path="/covers")
+
+        assert client.get(url, headers=boss).status_code == 404
+
+
 class TestTheLoginBackground:
     """It lives in the covers directory but is not a cover.
 

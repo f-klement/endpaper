@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**958 tests · 92% statements, 88% functions, 78% branches.**
+**992 tests · 91% statements, 87% functions, 78% branches.**
 
 ```bash
 bun run test                 # the suite
@@ -43,9 +43,9 @@ readers as a side effect.
 
 | File                                  | Tests | Covers                                                      |
 | ------------------------------------- | ----: | ----------------------------------------------------------- |
-| `api/mutator.test.ts`                 |    28 | Token attachment, 401 handling, error flattening, downloads |
+| `api/mutator.test.ts`                 |    29 | Token attachment, 401 handling, error flattening, downloads |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
-| `app/*`                               |    45 | The session gate, the top bar, the library export, appearance sync |
+| `app/*`                               |    48 | The session gate, the top bar (incl. the way back from a switched session), the library export, appearance sync |
 | `components/*.test.tsx`               |    28 | The general dumb components, incl. the star rating and the toast |
 | `i18n/index.test.tsx`                 |    33 | Language detection, interpolation, catalogue parity         |
 | `lib/isbn.test.ts`                    |    31 | Check digits, ISBN-10 to ISBN-13, normalisation             |
@@ -53,7 +53,7 @@ readers as a side effect.
 | `lib/lastLocation.test.ts`            |    10 | Shelf carry-over, clearing, storage refusing to work        |
 | `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
-| `pages/hooks.test.ts`                 |    20 | Session state, auth modes, corrupt storage, and dropping the cache when the identity changes |
+| `pages/hooks.test.ts`                 |    33 | Session state, auth modes, corrupt storage, switching into a test account under proxy, and dropping the cache whenever the identity changes |
 | `pages/types.test.ts`                 |    11 | Tag grouping and the style tables                           |
 | `pages/components/TagPicker.test.tsx` |     6 | The picker shared by three pages                            |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
@@ -61,7 +61,7 @@ readers as a side effect.
 | `pages/Home/*`                        |   119 | Filters, ownership, pagination, selection, the bulk verbs   |
 | `pages/BookDetail/*`                  |    73 | Status, ratings, series, shelf, loans, notes, enrichment    |
 | `pages/ScanPage/*`                    |   116 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
-| `pages/SettingsPage/*`                |    42 | Feature toggles, the API key, the Goodreads import, backup and restore |
+| `pages/SettingsPage/*`                |    57 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one |
 | `pages/LoginPage/LoginPage.test.tsx`  |    19 | Sign-in, registration, the background uploader              |
 | `pages/LoansPage/LoansPage.test.tsx`  |    18 | Listing, returning, due dates and the overdue view          |
 | `pages/StatsPage/*`                   |    14 | Every section, and the all-zero case                        |
@@ -83,7 +83,9 @@ its tests are regressions for real bugs:
   showing an error. It now throws.
 - A 401 from `/auth/login` was handled as an _expired session_, clearing the stored
   session and replacing "Incorrect username or password" with "Your session has expired",
-  which is wrong and, for someone not signed in at all, nonsense.
+  which is wrong and, for someone not signed in at all, nonsense. `/auth/switch` joined
+  that list the day it was added, for a sharper version of the same reason: its caller is
+  signed in, so a mistyped test account password signed the admin out of their own session.
 
 **Pagination**, in `pages/Home/hooks.test.ts`: that a second page is _appended_ rather than
 replacing the first, that the next page number is requested, and that `hasMore` goes false

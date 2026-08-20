@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime
+from typing import TypeGuard
 
 from sqlalchemy import (
     Boolean,
@@ -77,6 +78,22 @@ class User(Base):
     auth_source: Mapped[str] = mapped_column(
         String(20), nullable=False, default=AuthMode.LOCAL, server_default=AuthMode.LOCAL.value
     )
+    # An account an admin created for testing, with a password the admin set.
+    #
+    # Two rules hang off this flag, and neither is expressible any other way.
+    # It is the **only** thing an admin may exchange a password for a session
+    # on (`is_switch_target`), so a directory-backed member can never be one.
+    # And `upsert_directory_user` refuses to adopt a row carrying it: matching
+    # on username alone, a directory identity named like a test account would
+    # otherwise inherit its books, loans and notes.
+    #
+    # A column rather than "auth_source is local", because a local account
+    # from before this deployment moved to a directory is also local, belongs
+    # to a real person, and must not become either of those things.
+    is_test_account: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # ── Appearance ────────────────────────────────────────────────────────
@@ -408,6 +425,81 @@ class Setting(Base):
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+def is_switch_target(user: User | None) -> TypeGuard[User]:
+    """Whether an admin may exchange a password for a session on this account.
+
+    Four conditions, and all four have to hold, though the first implies the
+    other three for every row this app creates. They are checked anyway because
+    the cost of being wrong here is one member reading another's private
+    books, and a hand-edited row is not a hypothesis worth being relaxed about.
+
+    `is_admin` is in the list for a sharper reason than symmetry. Under proxy
+    auth a token that names a switch target overrides the portal's own header,
+    so a flagged row that is also an admin would turn a password an admin typed
+    once into a seven day admin session that never passes the portal again.
+    Nothing writes that row today: `create_test_account` forces the flag off,
+    and `upsert_directory_user` renames a flagged row aside rather than
+    applying an admin group to it. This is what keeps that true if either ever
+    changes.
+
+    **A directory-backed account is never a target, in any mode.** An admin who
+    could mint a session for an LDAP or proxy member would be able to read that
+    member's private books, and per-book privacy is the single promise the data
+    model makes. The password check is not what stops that: the admin knows a
+    test account's password because the admin set it, and a directory account
+    has no local password to check at all.
+
+    Used twice, which is why it is a function. `routers/auth.py` decides what
+    may be switched to, and `auth.py` decides which tokens may override a proxy
+    header, and those are the same question: under proxy auth, the only session
+    this app issues itself is a switch into a test account.
+
+    `TypeGuard` rather than `bool` so a caller that has asked the question does
+    not have to assert the answer to satisfy the type checker, and deliberately
+    not `TypeIs`: that one promises the predicate is true *iff* the value is a
+    `User`, which is false here for every ordinary member. It would narrow the
+    negative branch to `None`, so anybody who later needs to tell "no such row"
+    from "exists and is not a test account" would get a bogus error out of a
+    tree that passes today. This narrows the branch both callers use and says
+    nothing about the other one.
+    """
+    return (
+        user is not None
+        and user.is_test_account
+        and not user.is_admin
+        and user.auth_source == AuthMode.LOCAL.value
+        and bool(user.password_hash)
+    )
+
+
+def switch_targets() -> ColumnElement[bool]:
+    """The same rule as a query predicate, for asking the database.
+
+    Two spellings of one rule, which is a thing that drifts, so they are kept
+    adjacent and `tests/test_models.py` asserts they select the same rows.
+    Neither can be the only one: a row already loaded is a Python question,
+    while "which rows are these" is a SQL question, and answering the second by
+    loading every account and filtering in Python is the shortcut that is fine
+    until a household has more than a handful of them.
+
+    `routers/users.py` needs it so the list it offers as switch targets holds
+    only accounts that are. `upsert_directory_user` deliberately does **not**:
+    see the comment there.
+    """
+    return and_(
+        User.is_test_account.is_(True),
+        User.is_admin.is_(False),
+        User.auth_source == AuthMode.LOCAL.value,
+        # Both halves, because `is_switch_target` reads the hash for its
+        # truthiness and an empty string is not NULL. That is the one shape
+        # where the two spellings can disagree, and disagreeing here puts a
+        # Switch button in front of an admin that `/auth/switch` answers 404
+        # to. Nothing writes an empty hash; the equivalence test holds it.
+        User.password_hash.is_not(None),
+        User.password_hash != "",
     )
 
 

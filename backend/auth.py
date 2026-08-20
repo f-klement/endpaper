@@ -10,7 +10,7 @@ import settings_store
 from config import auth_mode, secret_key
 from database import get_db
 from enums import AuthMode
-from models import User
+from models import User, is_switch_target
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 week
@@ -158,6 +158,34 @@ def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> Us
     return db.get(User, int(user_id))
 
 
+def _switch_session(
+    token: str | None, db: Session, *, scope: str | None = None
+) -> User | None:
+    """The test account a switch token names, or None if it names anything else.
+
+    Only consulted under proxy auth, where the upstream owns identity and the
+    one session this app issues itself is an admin switching into a test
+    account. So the token is refused unless the account it names is still a
+    switch target, which a directory-backed account never is: the acceptance is
+    narrow by construction rather than by a claim somebody has to remember to
+    set, and it narrows further the moment the flag comes off the row.
+
+    That matters beyond tidiness. Accepting *any* valid token over the header
+    would also revive tokens minted before a deployment moved to proxy auth,
+    and those name real members with real libraries.
+
+    A token that is expired, forged or no longer a switch target returns None,
+    and the caller falls back to the header. Failing closed instead would
+    strand whoever holds a stale one behind an error page, with no control on
+    screen to clear it, and gains nothing: the header is the identity the
+    deployment already authenticated.
+    """
+    if token is None:
+        return None
+    user = _user_from_token(token, db, scope=scope)
+    return user if is_switch_target(user) else None
+
+
 def get_current_user_for_cover(
     request: Request,
     token: str | None = Depends(oauth2_scheme),
@@ -178,6 +206,18 @@ def get_current_user_for_cover(
 
     if auth_mode() is AuthMode.PROXY:
         from auth_backends import user_from_proxy_headers
+
+        # A switch session wins over the header here too, and the cookie is the
+        # half that matters: an <img> sends no Authorization header, so without
+        # it a switched admin sees the test account's library with a hole where
+        # every cover it may see and the proxy identity may not used to be.
+        switched = _switch_session(token, db)
+        if switched is None:
+            switched = _switch_session(
+                request.cookies.get(COVER_COOKIE_NAME), db, scope=COVER_SCOPE
+            )
+        if switched is not None:
+            return switched
 
         proxied = user_from_proxy_headers(db, request)
         if proxied is None:
@@ -214,6 +254,14 @@ def get_current_user(
         # Imported here rather than at module scope: auth_backends imports this
         # module for verify_password, so a top-level import would be circular.
         from auth_backends import user_from_proxy_headers
+
+        # An admin who exchanged a password for a session on a test account is
+        # that account until the token is discarded, header or no header. That
+        # is the whole of "switch back": drop the token and the proxy names the
+        # admin again on the very next request.
+        switched = _switch_session(token, db)
+        if switched is not None:
+            return switched
 
         proxied = user_from_proxy_headers(db, request)
         if proxied is None:

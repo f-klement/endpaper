@@ -172,3 +172,177 @@ class TestAppearanceForADirectoryAccount:
         )
         assert res.status_code == 200
         assert db.query(User).filter(User.username == "kim").one().appearance_palette == "nord"
+
+
+class TestListTestAccounts:
+    """The switch-target list. Admin only, and it holds nothing else."""
+
+    def test_it_lists_only_test_accounts(self, client, admin, member):
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        res = client.get("/api/users/test-accounts", headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert [row["username"] for row in res.json()] == ["tester"]
+
+    def test_a_non_admin_is_403(self, client, admin, member):
+        assert (
+            client.get("/api/users/test-accounts", headers=member["headers"]).status_code
+            == 403
+        )
+
+    def test_it_needs_a_session(self, client, admin):
+        assert client.get("/api/users/test-accounts").status_code == 401
+
+    def test_it_is_empty_until_one_is_made(self, client, admin, member):
+        assert client.get("/api/users/test-accounts", headers=admin["headers"]).json() == []
+
+
+class TestCreateTestAccount:
+    def test_an_admin_can_create_one(self, client, admin):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert res.json()["username"] == "tester"
+
+    def test_it_is_local_flagged_and_never_an_admin(self, client, admin, db):
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        account = db.query(User).filter(User.username == "tester").one()
+        assert account.is_test_account is True
+        assert account.auth_source == "local"
+        assert account.is_admin is False
+
+    def test_the_password_is_hashed(self, client, admin, db):
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        stored = db.query(User).filter(User.username == "tester").one().password_hash
+        assert stored != "pw12345678"
+        assert stored.startswith("$2")
+
+    def test_the_response_carries_no_password(self, client, admin):
+        body = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        ).json()
+
+        assert "password" not in body
+        assert "password_hash" not in body
+
+    def test_a_short_password_is_refused(self, client, admin):
+        """`UserCreate`, so registration's 8 character floor applies here too."""
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "short"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_a_taken_username_is_refused(self, client, admin):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "admin", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 400
+        assert "taken" in res.json()["detail"].lower()
+
+    def test_a_non_admin_is_403(self, client, admin, member, db):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 403
+        assert db.query(User).filter(User.username == "tester").first() is None
+
+    def test_it_needs_a_session(self, client, admin, db):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+        )
+
+        assert res.status_code == 401
+        assert db.query(User).filter(User.username == "tester").first() is None
+
+    def test_creating_one_is_logged_with_both_names(self, client, admin, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            client.post(
+                "/api/users/test-accounts",
+                json={"username": "tester", "password": "pw12345678"},
+                headers=admin["headers"],
+            )
+
+        created = [r for r in caplog.records if "created the test account" in r.message]
+        assert created and created[0].levelno == logging.WARNING
+        assert "'admin'" in created[0].getMessage()
+        assert "'tester'" in created[0].getMessage()
+
+    def test_a_test_account_appears_in_the_member_list(self, client, admin):
+        """It is a real account, and the loan picker is the reason that list
+        shows every one of them."""
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        names = [row["username"] for row in client.get("/api/users", headers=admin["headers"]).json()]
+        assert names == ["admin", "tester"]
+
+
+class TestCreateTestAccountInDirectoryModes:
+    """The whole point of the feature: it works where registration does not."""
+
+    def test_ldap_mode_still_creates_one(self, client, admin, ldap_mode):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201
+
+    def test_proxy_mode_still_creates_one(self, client, proxy_mode, db):
+        # The first header identity becomes the admin, which is how an admin
+        # exists at all in this mode.
+        client.get("/auth/me", headers=proxy_headers("boss"))
+
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=proxy_headers("boss"),
+        )
+
+        assert res.status_code == 201
+        assert db.query(User).filter(User.username == "tester").one().is_test_account is True
+
+    def test_a_non_admin_proxy_identity_is_still_403(self, client, proxy_mode, db):
+        client.get("/auth/me", headers=proxy_headers("boss"))
+
+        res = client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=proxy_headers("nobody"),
+        )
+
+        assert res.status_code == 403
