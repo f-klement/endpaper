@@ -84,7 +84,7 @@ export default function StarRating({
         <button
           type="button"
           onClick={() => onChange(null)}
-          className="ml-2 text-xs text-paper-400 hover:text-paper-600 underline dark:text-paper-500 dark:hover:text-paper-300"
+          className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
         >
           {t("rating.clear")}
         </button>

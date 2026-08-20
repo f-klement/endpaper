@@ -101,7 +101,7 @@ export default function ScanPage() {
             onDetected={rapid.capture}
             onRejected={setRejectedCode}
           />
-          <p className="text-xs text-paper-500 mt-3 leading-relaxed dark:text-paper-400">
+          <p className="text-xs text-paper-600 mt-3 leading-relaxed dark:text-paper-400">
             {t("rapid.explain")}
           </p>
           {/* Above the queue rather than inside it, so the shelf can be named
@@ -135,13 +135,13 @@ export default function ScanPage() {
             />
           ) : (
             <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
-              <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-500 dark:bg-paper-800 dark:text-paper-400">
+              <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
                 <Icon name="camera" className="w-5 h-5" />
               </span>
               <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
                 {t("scan.cameraIdle")}
               </p>
-              <p className="text-xs text-paper-400 text-center px-8 dark:text-paper-500">
+              <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
                 {t("scan.cameraIdleHint")}
               </p>
             </div>
@@ -173,7 +173,7 @@ export default function ScanPage() {
             </p>
           )}
 
-          <p className="text-center text-sm text-paper-500 mt-4 mb-4 dark:text-paper-400">
+          <p className="text-center text-sm text-paper-600 mt-4 mb-4 dark:text-paper-400">
             {t("scan.orEnterManually")}
           </p>
           <form onSubmit={handleManualLookup} className="flex gap-2">
@@ -215,7 +215,7 @@ export default function ScanPage() {
       {scan.isLookingUp && (
         <div className="text-center py-12">
           <Spinner label={t("scan.lookingUp")} />
-          <p className="text-paper-500 text-sm mt-3 dark:text-paper-400">
+          <p className="text-paper-600 text-sm mt-3 dark:text-paper-400">
             {t("scan.lookingUp")}
           </p>
         </div>

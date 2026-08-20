@@ -29,7 +29,7 @@ export default function DuplicateCard({
   const bookIds = group.books.map((book) => book.id);
 
   return (
-    <div className="bg-white border border-paper-200 rounded-2xl p-4 space-y-3 dark:bg-paper-900 dark:border-paper-700">
+    <div className="bg-paper-0 border border-paper-200 rounded-2xl p-4 space-y-3 dark:bg-paper-900 dark:border-paper-700">
       <ul className="space-y-2">
         {group.books.map((book) => (
           <li
@@ -46,7 +46,7 @@ export default function DuplicateCard({
               <p className="text-sm font-medium text-paper-900 truncate dark:text-paper-100">
                 {book.title}
               </p>
-              <p className="text-xs text-paper-500 truncate dark:text-paper-400">
+              <p className="text-xs text-paper-600 truncate dark:text-paper-400">
                 {describe(book)}
               </p>
             </div>
@@ -66,7 +66,7 @@ export default function DuplicateCard({
                   onMerge(bookIds, book.id);
                 }
               }}
-              className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-600 text-white text-xs font-medium hover:bg-accent-700 disabled:opacity-40 transition-colors"
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
             >
               {isMerging ? t("duplicates.merging") : t("duplicates.keepThis")}
             </button>

@@ -86,7 +86,7 @@ export default function ShelfPanel({
           onChange={(event) => setSeriesName(event.target.value)}
           placeholder={t("series.placeholder")}
           aria-label={t("series.label")}
-          className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
+          className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
         />
         <input
           type="number"
@@ -96,7 +96,7 @@ export default function ShelfPanel({
           onChange={(event) => setSeriesIndex(event.target.value)}
           placeholder={t("series.numberPlaceholder")}
           aria-label={t("series.numberPlaceholder")}
-          className="w-20 px-3 py-2 rounded-xl border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
+          className="w-20 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
         />
       </div>
 
@@ -110,7 +110,7 @@ export default function ShelfPanel({
         onChange={(event) => setLocation(event.target.value)}
         placeholder={t("location.placeholder")}
         aria-label={t("location.label")}
-        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
       />
       {/* Suggestions, not a closed list. Free text with no suggestions turns
           into six spellings of "living room" inside a week, but a fixed
@@ -120,7 +120,7 @@ export default function ShelfPanel({
           <option key={known.name} value={known.name} />
         ))}
       </datalist>
-      <p className="text-xs text-paper-500 dark:text-paper-400">
+      <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("location.hint")}
       </p>
 
@@ -128,7 +128,7 @@ export default function ShelfPanel({
         <button
           type="submit"
           disabled={isSaving}
-          className="w-full py-2 rounded-xl bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 disabled:opacity-50 transition-colors"
+          className="w-full py-2 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover disabled:opacity-50 transition-colors"
         >
           {isSaving ? t("common.saving") : t("common.save")}
         </button>

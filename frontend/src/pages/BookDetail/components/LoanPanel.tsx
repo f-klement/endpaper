@@ -72,7 +72,7 @@ export default function LoanPanel({
           {/* Two radios rather than a select with an "Other..." row: the second
               choice needs a text field, and a select cannot grow one. */}
           <fieldset className="mb-2">
-            <legend className="text-xs text-paper-500 mb-1 dark:text-paper-400">
+            <legend className="text-xs text-paper-600 mb-1 dark:text-paper-400">
               {t("loans.borrowerKind")}
             </legend>
             <div className="flex gap-4">
@@ -87,7 +87,7 @@ export default function LoanPanel({
                     value={option}
                     checked={kind === option}
                     onChange={() => setKind(option)}
-                    className="w-4 h-4 text-accent-600 focus:ring-accent-400"
+                    className="w-4 h-4 text-accent-600"
                   />
                   {option === "member"
                     ? t("loans.borrowerMember")
@@ -103,7 +103,7 @@ export default function LoanPanel({
                 value={target}
                 onChange={(event) => setTarget(event.target.value)}
                 aria-label={t("loans.loanToLabel")}
-                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
+                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm bg-paper-0 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("loans.loanTo")}</option>
                 {members.map((member) => (
@@ -120,13 +120,13 @@ export default function LoanPanel({
                 onChange={(event) => setExternalName(event.target.value)}
                 aria-label={t("loans.externalNameLabel")}
                 placeholder={t("loans.externalNamePlaceholder")}
-                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white dark:border-paper-700 dark:bg-paper-900"
+                className="flex-1 px-3 py-2.5 rounded-lg border border-paper-200 text-sm bg-paper-0 dark:border-paper-700 dark:bg-paper-900"
               />
             )}
             <button
               onClick={lend}
               disabled={!canLend || isBusy}
-              className="px-4 py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold transition-colors"
+              className="px-4 py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent rounded-lg text-sm font-semibold transition-colors"
             >
               {t("loans.loanButton")}
             </button>
@@ -138,7 +138,7 @@ export default function LoanPanel({
         <div className="mt-2">
           <label
             htmlFor="loan-due"
-            className="block text-xs text-paper-500 mb-1 dark:text-paper-400"
+            className="block text-xs text-paper-600 mb-1 dark:text-paper-400"
           >
             {t("loans.dueDate")}
           </label>
@@ -147,7 +147,7 @@ export default function LoanPanel({
             type="date"
             value={dueAt}
             onChange={(event) => setDueAt(event.target.value)}
-            className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
+            className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
           />
         </div>
       )}

@@ -48,7 +48,7 @@ export default function Toast({
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center gap-3 rounded-xl border border-paper-200 bg-white px-4 py-3 shadow-lg dark:border-paper-700 dark:bg-paper-900"
+      className="flex items-center gap-3 rounded-xl border border-paper-200 bg-paper-0 px-4 py-3 shadow-lg dark:border-paper-700 dark:bg-paper-900"
     >
       <span className="min-w-0 flex-1 text-sm text-paper-800 dark:text-paper-100">
         {message}
@@ -69,7 +69,7 @@ export default function Toast({
         type="button"
         onClick={onDismiss}
         aria-label={t("common.close")}
-        className="shrink-0 text-paper-400 hover:text-paper-600 dark:hover:text-paper-200"
+        className="shrink-0 text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-200"
       >
         <Icon name="close" className="w-4 h-4" />
       </button>

@@ -17,8 +17,26 @@ if (!window.matchMedia) {
   })) as unknown as typeof window.matchMedia;
 }
 
+/**
+ * The four palette steps the wallpaper reads.
+ *
+ * The suite runs with `css: false`, so no stylesheet is loaded and every custom
+ * property is empty. `patterns.ts` resolves the wallpaper's ink off these at
+ * runtime rather than owning any hex, so without them the app under test is one
+ * with no palette, which is not the app. They are the shipped values.
+ */
+const PALETTE_TOKENS: Record<string, string> = {
+  "--color-accent-700": "#0f766e",
+  "--color-accent-300": "#71d8c1",
+  "--color-bloom-700": "#9f1239",
+  "--color-bloom-300": "#fda4af",
+};
+
 beforeEach(() => {
   localStorage.clear();
+  for (const [token, value] of Object.entries(PALETTE_TOKENS)) {
+    document.documentElement.style.setProperty(token, value);
+  }
   // Anything the test forgot to stub should fail loudly rather than reach the
   // real network. Tests install their own handlers via mockApi().
   vi.stubGlobal(

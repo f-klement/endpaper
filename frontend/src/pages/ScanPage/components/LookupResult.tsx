@@ -70,7 +70,7 @@ export default function LookupResult({
 }: LookupResultProps) {
   const { t } = useTranslation();
   return (
-    <div className="bg-white rounded-2xl border border-paper-100 shadow-sm overflow-hidden dark:bg-paper-900 dark:border-paper-800">
+    <div className="bg-paper-0 rounded-2xl border border-paper-100 shadow-sm overflow-hidden dark:bg-paper-900 dark:border-paper-800">
       {/* The outer condition stays: a book with no cover at all shows nothing
           here, rather than a placeholder above a form. A cover that fails to
           load is a different case and does get the placeholder. */}
@@ -85,7 +85,7 @@ export default function LookupResult({
       <div className="p-5">
         {draft.notFound ? (
           <>
-            <p className="text-paper-500 text-sm mb-3 dark:text-paper-400">
+            <p className="text-paper-600 text-sm mb-3 dark:text-paper-400">
               {t("scan.notFoundManual", { isbn: draft.isbn })}
             </p>
             <label
@@ -101,7 +101,7 @@ export default function LookupResult({
               onChange={(event) =>
                 onDraftChange({ ...draft, title: event.target.value })
               }
-              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 mb-2 dark:border-paper-700"
+              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm mb-2 dark:border-paper-700"
               placeholder={t("scan.titlePlaceholder")}
             />
             <label
@@ -117,7 +117,7 @@ export default function LookupResult({
               onChange={(event) =>
                 onDraftChange({ ...draft, author: event.target.value })
               }
-              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700"
+              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
               placeholder={t("scan.authorPlaceholder")}
             />
           </>
@@ -130,17 +130,17 @@ export default function LookupResult({
               </p>
             )}
             {draft.author && (
-              <p className="text-paper-500 text-sm mt-1 dark:text-paper-400">
+              <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
                 {t("book.by", { author: draft.author })}
               </p>
             )}
             {draft.publisher && (
-              <p className="text-xs text-paper-400 mt-1 dark:text-paper-500">
+              <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
                 {draft.publisher}
                 {draft.year ? ` · ${draft.year}` : ""}
               </p>
             )}
-            <p className="text-xs text-paper-400 mt-1 dark:text-paper-500">
+            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t("book.isbn", { isbn: draft.isbn })}
             </p>
           </>
@@ -151,7 +151,7 @@ export default function LookupResult({
             <p className="text-sm font-medium text-paper-700 mb-2 dark:text-paper-200">
               {t("library.tags")}
               {selectedTagIds.length > 0 && (
-                <span className="ml-1.5 text-xs text-paper-400 dark:text-paper-500">
+                <span className="ml-1.5 text-xs text-paper-600 dark:text-paper-400">
                   {t("scan.tagsSelected", { count: selectedTagIds.length })}
                 </span>
               )}
@@ -178,10 +178,10 @@ export default function LookupResult({
             type="file"
             accept="image/*"
             onChange={(event) => onCoverChange(event.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-paper-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 dark:text-paper-400"
+            className="block w-full text-sm text-paper-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 dark:text-paper-400"
           />
           {coverFile && (
-            <p className="text-xs text-paper-400 mt-1 dark:text-paper-500">
+            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {coverFile.name}
             </p>
           )}
@@ -221,7 +221,7 @@ export default function LookupResult({
             type="checkbox"
             checked={isPrivate}
             onChange={(event) => onPrivateChange(event.target.checked)}
-            className="w-4 h-4 rounded border-paper-300 text-accent-600 focus:ring-accent-400"
+            className="w-4 h-4 rounded border-paper-300 text-accent-600"
           />
           <span className="text-sm text-paper-700 dark:text-paper-200">
             {t("scan.privateBook")}
@@ -257,7 +257,7 @@ export default function LookupResult({
           <button
             onClick={onConfirm}
             disabled={isAdding || !draft.title}
-            className="flex-1 py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold transition-colors"
+            className="flex-1 py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent rounded-lg text-sm font-semibold transition-colors"
           >
             {isAdding ? t("scan.adding") : t("scan.addToLibrary")}
           </button>

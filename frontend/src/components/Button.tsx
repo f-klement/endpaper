@@ -45,11 +45,10 @@ const BASE =
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-accent-600 text-white shadow-[var(--shadow-soft)] " +
-    "hover:bg-accent-700 hover:shadow-[var(--shadow-lift)] " +
-    "dark:bg-accent-500 dark:hover:bg-accent-400 dark:text-paper-950",
+    "bg-accent-fill text-on-accent shadow-[var(--shadow-soft)] " +
+    "hover:bg-accent-fill-hover hover:shadow-[var(--shadow-lift)]",
   secondary:
-    "bg-white text-paper-800 border border-paper-200 shadow-[var(--shadow-soft)] " +
+    "bg-paper-0 text-paper-800 border border-paper-200 shadow-[var(--shadow-soft)] " +
     "hover:border-paper-300 hover:bg-paper-50 " +
     "dark:bg-paper-900 dark:text-paper-100 dark:border-paper-800 " +
     "dark:hover:bg-paper-800 dark:hover:border-paper-700",
@@ -57,8 +56,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
     "text-paper-600 hover:text-paper-900 hover:bg-paper-100 " +
     "dark:text-paper-400 dark:hover:text-paper-50 dark:hover:bg-paper-800",
   danger:
-    "text-bloom-600 hover:bg-bloom-100 " +
-    "dark:text-bloom-300 dark:hover:bg-bloom-700/25",
+    "text-danger-600 hover:bg-danger-100 " +
+    "dark:text-danger-300 dark:hover:bg-danger-700/25",
 };
 
 // Fixed heights rather than padding alone. Padding plus a variable font size is

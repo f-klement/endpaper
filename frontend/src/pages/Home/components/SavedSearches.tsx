@@ -45,7 +45,7 @@ export default function SavedSearches({
       {searches.map((search) => (
         <span
           key={search.id}
-          className="inline-flex items-center gap-1 rounded-full border border-paper-200 bg-white pl-3 pr-1 text-xs dark:border-paper-700 dark:bg-paper-900"
+          className="inline-flex items-center gap-1 rounded-full border border-paper-200 bg-paper-0 pl-3 pr-1 text-xs dark:border-paper-700 dark:bg-paper-900"
         >
           <button
             type="button"
@@ -58,7 +58,7 @@ export default function SavedSearches({
             type="button"
             onClick={() => onDelete(search.id)}
             aria-label={t("saved.forget", { name: search.name })}
-            className="rounded-full p-1 text-paper-400 hover:text-bloom-600 dark:hover:text-bloom-300"
+            className="rounded-full p-1 text-paper-600 hover:text-danger-600 dark:text-paper-400 dark:hover:text-danger-300"
           >
             <Icon name="close" className="h-3 w-3" />
           </button>
@@ -89,7 +89,7 @@ export default function SavedSearches({
           <button
             type="button"
             onClick={() => setNaming(true)}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-paper-300 px-3 py-1.5 text-xs font-medium text-paper-500 hover:border-accent-400 hover:text-accent-700 dark:border-paper-700 dark:text-paper-400 dark:hover:text-accent-300"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-paper-300 px-3 py-1.5 text-xs font-medium text-paper-600 hover:border-accent-400 hover:text-accent-700 dark:border-paper-700 dark:text-paper-400 dark:hover:text-accent-300"
           >
             <Icon name="bookmark" className="h-3 w-3" />
             {t("saved.saveThisView")}

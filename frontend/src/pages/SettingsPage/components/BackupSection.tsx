@@ -37,7 +37,7 @@ export default function BackupSection({
 
   return (
     <SettingsSection title={t("backup.title")} icon="inbox">
-      <p className="text-sm text-paper-500 dark:text-paper-400">
+      <p className="text-sm text-paper-600 dark:text-paper-400">
         {t("backup.explain")}
       </p>
 
@@ -61,7 +61,7 @@ export default function BackupSection({
       <h3 className="text-sm font-semibold text-paper-800 dark:text-paper-100">
         {t("backup.restoreTitle")}
       </h3>
-      <p className="mt-1 text-sm text-bloom-700 dark:text-bloom-300">
+      <p className="mt-1 text-sm text-danger-700 dark:text-danger-300">
         {t("backup.restoreWarning")}
       </p>
 
@@ -71,7 +71,7 @@ export default function BackupSection({
         accept=".zip,application/zip"
         aria-label={t("backup.chooseFile")}
         onChange={(event) => setPending(event.target.files?.[0] ?? null)}
-        className="mt-3 block w-full text-sm text-paper-500 file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-paper-700 dark:text-paper-400 dark:file:bg-paper-800 dark:file:text-paper-200"
+        className="mt-3 block w-full text-sm text-paper-600 file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-paper-700 dark:text-paper-400 dark:file:bg-paper-800 dark:file:text-paper-200"
       />
 
       {pending && (

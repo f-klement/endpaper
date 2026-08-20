@@ -64,13 +64,13 @@ export default function EnrichPanel({
 
       {/* Not a disabled state: the button works. This says what a key adds. */}
       {!isConfigured && (
-        <p className="text-xs text-paper-500 dark:text-paper-400">
+        <p className="text-xs text-paper-600 dark:text-paper-400">
           {t("help.disabledEnrich")}
         </p>
       )}
 
       {error != null && (
-        <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
+        <p role="alert" className="text-xs text-danger-600 dark:text-danger-300">
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
@@ -95,7 +95,7 @@ export default function EnrichPanel({
             type="button"
             onClick={onDismiss}
             aria-label={t("common.close")}
-            className="shrink-0 text-paper-400 hover:text-paper-600 dark:text-paper-500 dark:hover:text-paper-300"
+            className="shrink-0 text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
           >
             <Icon name="close" className="w-4 h-4" />
           </button>

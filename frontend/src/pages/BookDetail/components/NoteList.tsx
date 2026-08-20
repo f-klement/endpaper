@@ -56,7 +56,7 @@ export default function NoteList({
       </p>
 
       {notes.length === 0 && (
-        <p className="text-sm text-paper-400 italic mb-3 dark:text-paper-500">
+        <p className="text-sm text-paper-600 italic mb-3 dark:text-paper-400">
           {t("notes.none")}
         </p>
       )}
@@ -79,12 +79,12 @@ export default function NoteList({
                     onChange={(event) => setEditDraft(event.target.value)}
                     rows={3}
                     aria-label={t("notes.editLabel")}
-                    className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 resize-none dark:border-paper-700"
+                    className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm resize-none dark:border-paper-700"
                   />
                   <div className="flex gap-2 mt-2">
                     <button
                       onClick={() => saveEdit(note.id)}
-                      className="px-3 py-1.5 bg-accent-600 hover:bg-accent-700 text-white rounded-lg text-xs font-medium"
+                      className="px-3 py-1.5 bg-accent-fill hover:bg-accent-fill-hover text-on-accent rounded-lg text-xs font-medium"
                     >
                       {t("common.save")}
                     </button>
@@ -102,7 +102,7 @@ export default function NoteList({
                     {note.content}
                   </p>
                   <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-paper-400 dark:text-paper-500">
+                    <span className="text-xs text-paper-600 dark:text-paper-400">
                       {note.author?.username} ·{" "}
                       {formatDate(note.created_at, locale)}
                     </span>
@@ -121,7 +121,7 @@ export default function NoteList({
                         )}
                         <button
                           onClick={() => onRemove(note.id)}
-                          className="text-xs text-bloom-300 hover:text-bloom-600"
+                          className="text-xs text-danger-300 hover:text-danger-600"
                         >
                           {t("common.delete")}
                         </button>
@@ -142,12 +142,12 @@ export default function NoteList({
           rows={2}
           placeholder={t("notes.placeholder")}
           aria-label={t("notes.addLabel")}
-          className="flex-1 px-3 py-2 rounded-lg border border-paper-200 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400 resize-none dark:border-paper-700"
+          className="flex-1 px-3 py-2 rounded-lg border border-paper-200 text-sm resize-none dark:border-paper-700"
         />
         <button
           type="submit"
           disabled={isAdding || !draft.trim()}
-          className="px-4 py-2 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white rounded-lg text-sm font-semibold self-end transition-colors"
+          className="px-4 py-2 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent rounded-lg text-sm font-semibold self-end transition-colors"
         >
           {t("common.add")}
         </button>

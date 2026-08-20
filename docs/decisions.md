@@ -280,6 +280,47 @@ nonsense for someone who was never signed in.
 The browser must set it itself to include the multipart boundary. Adding it by hand
 produces a request the server cannot parse.
 
+### `--color-paper-0` exists, and its value is `#ffffff`
+
+A token whose value is plain white looks like a token for the sake of one. It is
+not: it is the *card*, and a card is white only in this palette. Written as
+`bg-white` at forty sites across nineteen files, every card, field and panel
+asserts that the top surface is white, which stops being true the moment a
+palette with a cream ground is offered. The value is a coincidence of the
+default theme and the name is the fact.
+
+`src/index.css` carries the same note beside the token.
+
+### `bloom` and `danger` hold the same five hexes
+
+Two ramps, identical values, and neither is redundant. One rose used to do both
+"want to read" and "delete this", which works only because this particular rose
+reads as both. It does not survive a palette change: map bloom to a candy pink
+and Delete turns cheerful, or keep delete dark enough to alarm and the wishlist
+badge becomes a warning.
+
+They are equal here so that nothing changed on screen when they were split. The
+split is what has to exist before a palette can move one without the other, and
+deleting either ramp because it duplicates the other puts the problem straight
+back.
+
+Two call sites keep `bloom` deliberately: the "want to read" badge on a book
+card, and the books-finished bar on the statistics page. Everything else that was
+rose is `danger`.
+
+### `TAG_PILL_CLASSES` is a four-key table with two values in it
+
+Type, genre and age were a blue, a purple and a green, which was the one place in
+this app where a colour was chosen at random. There is no mnemonic that makes
+genre purple, so the hue had to be looked up, and the pill has the word written
+on it. All four selected chips also failed AA, the green at 2.28:1.
+
+The three now share one neutral and custom keeps the accent, because a tag the
+household invented reading as theirs is a distinction with a reason behind it.
+The table stays keyed by category rather than collapsing to a default and one
+exception, so a category added to the backend enum is a compile error here
+instead of an unstyled pill.
+
 ### Tailwind 4 has no config file
 
 `tailwind.config.js` and `postcss.config.js` are gone; configuration is `@theme` in

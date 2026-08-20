@@ -15,7 +15,7 @@ describe("StatSection", () => {
           { label: "Fantasy", count: 3 },
           { label: "Horror", count: 1 },
         ]}
-        colorClass="bg-purple-400"
+        colorClass="bg-accent-400"
       />,
     );
     expect(screen.getByText("Fantasy")).toBeInTheDocument();
@@ -26,7 +26,7 @@ describe("StatSection", () => {
     // Returning null rather than an empty section is what keeps StatsPage from
     // showing a bare heading with nothing under it.
     const { container } = renderLocalised(
-      <StatSection title="By Genre" rows={[]} colorClass="bg-purple-400" />,
+      <StatSection title="By Genre" rows={[]} colorClass="bg-accent-400" />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -39,10 +39,10 @@ describe("StatSection", () => {
           { label: "Fantasy", count: 10 },
           { label: "Horror", count: 5 },
         ]}
-        colorClass="bg-purple-400"
+        colorClass="bg-accent-400"
       />,
     );
-    const bars = container.querySelectorAll<HTMLElement>(".bg-purple-400");
+    const bars = container.querySelectorAll<HTMLElement>(".bg-accent-400");
     expect(bars[0]!.style.width).toBe("100%");
     expect(bars[1]!.style.width).toBe("50%");
   });
@@ -52,11 +52,11 @@ describe("StatSection", () => {
       <StatSection
         title="By Genre"
         rows={[{ label: "Fantasy", count: 0 }]}
-        colorClass="bg-purple-400"
+        colorClass="bg-accent-400"
       />,
     );
     expect(
-      container.querySelector<HTMLElement>(".bg-purple-400")!.style.width,
+      container.querySelector<HTMLElement>(".bg-accent-400")!.style.width,
     ).toBe("0%");
   });
 });

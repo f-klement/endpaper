@@ -127,9 +127,9 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
       isActive
         ? "text-accent-700 bg-accent-50 dark:text-accent-200 dark:bg-accent-500/12 " +
           "after:absolute after:left-2.5 after:right-2.5 after:-bottom-[7px] " +
-          "after:h-[2px] after:rounded-full after:bg-accent-600 " +
+          "after:h-[2px] after:rounded-full after:bg-accent-fill " +
           "dark:after:bg-accent-400"
-        : "text-paper-500 hover:text-paper-900 hover:bg-paper-100 " +
+        : "text-paper-600 hover:text-paper-900 hover:bg-paper-100 " +
           "dark:text-paper-400 dark:hover:text-paper-100 dark:hover:bg-paper-800/70",
     ].join(" ");
 
@@ -149,7 +149,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
 
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 ${BAR_HEIGHT} flex items-center gap-1 px-2 sm:px-4 z-50 bg-white/85 backdrop-blur-xl border-b border-paper-200/70 dark:bg-paper-900/85 dark:border-paper-800/70`}
+      className={`fixed top-0 left-0 right-0 ${BAR_HEIGHT} flex items-center gap-1 px-2 sm:px-4 z-50 bg-paper-0/85 backdrop-blur-xl border-b border-paper-200/70 dark:bg-paper-900/85 dark:border-paper-800/70`}
     >
       {/* A wordmark, not a logo. The app previously opened straight into a
           column of emoji, which is the single thing that most made it read as
@@ -160,7 +160,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
         </span>
         <span
           aria-hidden="true"
-          className="md:hidden block w-7 h-7 rounded-md bg-accent-600 text-white text-sm font-semibold grid place-items-center dark:bg-accent-500 dark:text-paper-950"
+          className="md:hidden block w-7 h-7 rounded-md bg-accent-fill text-on-accent text-sm font-semibold grid place-items-center"
         >
           E
         </span>
@@ -192,7 +192,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
           // without opening anything.
           aria-label={t("nav.menuFor", { name: user.username })}
           onClick={() => setMenuOpen((open) => !open)}
-          className="flex items-center gap-2 h-9 pl-1 pr-2 rounded-lg text-sm font-medium text-paper-500 hover:text-paper-900 hover:bg-paper-100 transition-colors dark:text-paper-400 dark:hover:text-paper-100 dark:hover:bg-paper-800"
+          className="flex items-center gap-2 h-9 pl-1 pr-2 rounded-lg text-sm font-medium text-paper-600 hover:text-paper-900 hover:bg-paper-100 transition-colors dark:text-paper-400 dark:hover:text-paper-100 dark:hover:bg-paper-800"
         >
           {/* An initial, not a generic person emoji. It is the one place the
               interface can say "this is you" rather than "this is a user". */}
@@ -214,7 +214,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
           <div
             role="menu"
             aria-label={t("nav.menu")}
-            className="absolute right-0 top-full mt-2 w-56 bg-white border border-paper-200 rounded-xl shadow-[var(--shadow-lift)] overflow-hidden dark:bg-paper-900 dark:border-paper-800"
+            className="absolute right-0 top-full mt-2 w-56 bg-paper-0 border border-paper-200 rounded-xl shadow-[var(--shadow-lift)] overflow-hidden dark:bg-paper-900 dark:border-paper-800"
           >
             {SECONDARY.map((link) => go(t(link.label), link.to, link.to))}
 
@@ -241,7 +241,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
                       exportLibrary(format);
                       setMenuOpen(false);
                     }}
-                    className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-white text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
+                    className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
                   >
                     {format}
                   </button>
@@ -261,7 +261,7 @@ export default function NavBar({ user, mode, onSignOut }: NavBarProps) {
                     setMenuOpen(false);
                     onSignOut();
                   }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-bloom-600 hover:bg-bloom-100 transition-colors dark:text-bloom-300 dark:hover:bg-bloom-700/25"
+                  className="w-full text-left px-4 py-2.5 text-sm text-danger-600 hover:bg-danger-100 transition-colors dark:text-danger-300 dark:hover:bg-danger-700/25"
                 >
                   {t("nav.logout")}
                 </button>

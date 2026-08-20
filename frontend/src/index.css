@@ -13,12 +13,25 @@
 
    So: a warm neutral for surfaces, an accent taken from the wallpaper rather
    than chosen separately, and semantic names, so a component says what a colour
-   is FOR and the palette can move underneath it. */
-@theme {
+   is FOR and the palette can move underneath it.
+
+   `static` because Tailwind otherwise emits only the variables some utility
+   uses, and two of these are read at runtime instead: `src/theme/patterns.ts`
+   resolves the wallpaper's ink off `--color-accent-300` and `--color-bloom-300`
+   with `getComputedStyle`. Drop `static` and the day the last `bloom-300`
+   utility is deleted the dark wallpaper loses its colour, with nothing in any
+   diff to say why. */
+@theme static {
   /* ── Surfaces ───────────────────────────────────────────────────────────
      Warm, not the default cool grey. The hue is a few degrees off neutral,
      which is not enough to look tinted and is enough to stop the page reading
-     as a spreadsheet. */
+     as a spreadsheet.
+
+     `paper-0` is the card, and it is a token rather than `bg-white` because
+     white is a card only in this palette. On a cream ground a white card is a
+     hole punched in the page, so every card, field and panel reads the token
+     and the palette decides what the top surface is. */
+  --color-paper-0: #ffffff;
   --color-paper-50: #fbfaf8;
   --color-paper-100: #f5f3ef;
   --color-paper-200: #e9e5de;
@@ -48,6 +61,26 @@
   --color-accent-900: #114842;
   --color-accent-950: #042f2a;
 
+  /* ── The accent as a fill ───────────────────────────────────────────────
+     A filled accent control is two facts, not one: which step carries the
+     fill, and what colour survives on top of it. Written as `bg-accent-600
+     text-white` they are separate guesses at every call site, and white
+     survives on a mid-green only by luck: it fails on a light Frost blue and
+     on an olive at 2.90:1. Both facts are per palette and per mode, so both
+     are tokens, and a call site says `bg-accent-fill text-on-accent`.
+
+     The hover step is the third fact and it is not optional. Moving the
+     foreground without moving the fill is what took dark hover from 5.47:1 to
+     3.52:1: the button darkened to `accent-700` under a foreground that had
+     become `paper-950`. Three tokens, overridden together, is what actually
+     stops the halves of the pairing drifting apart one component at a time.
+
+     Measured here: white on `accent-600` 4.78:1, on `accent-700` 5.47:1;
+     `paper-950` on `accent-500` 5.98:1, on `accent-400` 8.26:1. */
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+
   /* ── Highlight ──────────────────────────────────────────────────────────
      The wallpaper's bloom colour. Used sparingly and on purpose: it is the
      playful note, so it marks the few things worth being pleased about (a
@@ -58,6 +91,22 @@
   --color-bloom-500: #e11d48;
   --color-bloom-600: #be123c;
   --color-bloom-700: #9f1239;
+
+  /* ── Danger ─────────────────────────────────────────────────────────────
+     Split out of `bloom`, which was doing both jobs: "want to read" and
+     "delete this" were the same rose, which works only because this rose
+     happens to read as both. It does not survive a palette change. Map bloom
+     to a candy pink and Delete turns cheerful; keep delete dark enough to
+     alarm and the wishlist badge turns into a warning.
+
+     Here the two are the same five hexes, so nothing changes on screen today.
+     That is the point: the split is the thing that has to land before a
+     palette can move one without moving the other. */
+  --color-danger-100: #ffe4e9;
+  --color-danger-300: #fda4af;
+  --color-danger-500: #e11d48;
+  --color-danger-600: #be123c;
+  --color-danger-700: #9f1239;
 
   /* ── Motion ─────────────────────────────────────────────────────────────
      One duration and one curve for everything, because interfaces feel
@@ -94,6 +143,16 @@
 
   :root.dark {
     color-scheme: dark;
+
+    /* The accent fill is a step, and which step it is depends on the mode: a
+       button dark enough to carry white on a white page is a hole on a black
+       one. In the dark the ramp is also walked the other way, so hover is the
+       lighter neighbour rather than the darker one. Overriding the three here
+       is what lets a call site drop its `dark:` fill, foreground and hover
+       entirely. */
+    --color-accent-fill: var(--color-accent-500);
+    --color-accent-fill-hover: var(--color-accent-400);
+    --color-on-accent: var(--color-paper-950);
   }
 
   body {
@@ -103,9 +162,10 @@
        a grid of book titles read as a row of lightbulbs. This is around 15:1,
        still comfortably AAA, and stops the page shouting. */
     @apply dark:bg-paper-950 dark:text-paper-200;
-    /* The wallpaper is painted here by ThemeProvider. Fixing it stops the
-       pattern sliding under a long list, which is what makes a repeat read as
-       a tiled image rather than as the surface the page sits on. */
+    /* The wallpaper is painted here, synchronously, by applyWallpaper. Fixing
+       it stops the pattern sliding under a long list, which is what makes a
+       repeat read as a tiled image rather than as the surface the page sits
+       on. */
     background-attachment: fixed;
   }
 
@@ -119,9 +179,25 @@
 
   /* One focus ring everywhere, and it is never removed.
      `:focus-visible` rather than `:focus` so a mouse click does not leave a
-     ring behind, while keyboard navigation always shows one. */
+     ring behind, while keyboard navigation always shows one.
+
+     That sentence was false for most of the app until this ring was repaired.
+     Twenty-one controls carried their own `focus:ring-accent-400` at 2.24:1,
+     and sixteen of those killed the browser default with `focus:outline-none`
+     first, so the fields a person actually types into had the weakest focus
+     indicator in the product and no fallback. They are deleted rather than
+     repaired: a control with its own ring is a control that will be missed the
+     next time this one moves. `houseRules.test.ts` asserts none comes back. The
+     single exception is the settings toggle, whose input is `sr-only`, and it
+     says so where it stands.
+
+     Full opacity, not `/60`. Alpha composites in gamma-encoded sRGB, so the
+     ring a person actually saw was `#77c5b5` on the page: 1.93:1, against the
+     3:1 WCAG 1.4.11 asks of a non-text indicator. At full opacity it measures
+     3.09:1 on `paper-50` and 5.98:1 on `paper-950`. The softness the alpha was
+     buying is what `ring-offset-2` is for, and that is already here. */
   :focus-visible {
-    @apply outline-none ring-2 ring-accent-500/60 ring-offset-2;
+    @apply outline-none ring-2 ring-accent-500 ring-offset-2;
     @apply ring-offset-paper-50 dark:ring-offset-paper-950;
   }
 
@@ -146,23 +222,25 @@
      no behaviour worth wrapping, only a look worth agreeing on. */
   .field {
     @apply w-full h-10 px-3 rounded-lg text-sm;
-    @apply bg-white border border-paper-200 text-paper-900 placeholder:text-paper-400;
+    @apply bg-paper-0 border border-paper-200 text-paper-900 placeholder:text-paper-600;
     @apply transition-[border-color,box-shadow] duration-150;
     @apply hover:border-paper-300;
     @apply dark:bg-paper-900 dark:border-paper-800 dark:text-paper-100;
-    @apply dark:placeholder:text-paper-500 dark:hover:border-paper-700;
-  }
-
-  .field:disabled {
-    @apply bg-paper-100 text-paper-400 cursor-not-allowed;
-    @apply dark:bg-paper-950 dark:text-paper-600;
+    @apply dark:placeholder:text-paper-400 dark:hover:border-paper-700;
+    /* Written as `disabled:` variants rather than a `.field:disabled` block so
+       the light-mode text tier rule can be read off the class name. A disabled
+       control is the one place `paper-400` is still text: WCAG 1.4.3 exempts an
+       inactive component, and a disabled field that reads as strongly as a live
+       one is worse than a faint one. */
+    @apply disabled:bg-paper-100 disabled:text-paper-400 disabled:cursor-not-allowed;
+    @apply dark:disabled:bg-paper-950 dark:disabled:text-paper-600;
   }
 
   /* A card. The lift on hover is the playful half and is deliberately small:
      2px and a shadow, not a scale, because a grid of tiles that all grow is
      restless rather than responsive. */
   .card {
-    @apply bg-white border border-paper-200 rounded-2xl shadow-[var(--shadow-soft)];
+    @apply bg-paper-0 border border-paper-200 rounded-2xl shadow-[var(--shadow-soft)];
     @apply dark:bg-paper-900 dark:border-paper-800;
   }
 

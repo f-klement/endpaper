@@ -69,10 +69,10 @@ export default function GoogleBooksHelp({
         <li>{t("help.googleBooks.step4")}</li>
       </ol>
 
-      <p className="text-xs text-paper-500 dark:text-paper-400">
+      <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("help.googleBooks.cost")}
       </p>
-      <p className="text-xs text-paper-500 dark:text-paper-400">
+      <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("help.googleBooks.restrict")}
       </p>
 
@@ -81,12 +81,12 @@ export default function GoogleBooksHelp({
       <Link
         to="/settings"
         onClick={onClose}
-        className="inline-block mt-1 px-4 py-2 rounded-xl bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 transition-colors"
+        className="inline-block mt-1 px-4 py-2 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover transition-colors"
       >
         {t("help.googleBooks.toSettings")}
       </Link>
 
-      <p className="text-xs text-paper-500 dark:text-paper-400">
+      <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("help.googleBooks.adminOnly")}
       </p>
     </Modal>

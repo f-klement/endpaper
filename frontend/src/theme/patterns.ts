@@ -22,12 +22,30 @@
  * the branch and lie along it. Density is then a number rather than an hour of
  * placing shapes.
  *
- * ## Two layers, because one weight reads as clip art
+ * ## Three layers, because one weight reads as clip art
  *
  * A Morris repeat is never a single plane of motifs. There is a **ground**: the
- * slow meandering stem structure that carries the eye around the repeat, and a
- * **foliage** layer on top of it, drawn stronger. Flattening the two into one
- * weight is what turns an arabesque into a scatter of shapes.
+ * slow meandering stem structure that carries the eye around the repeat, a
+ * **foliage** layer on top of it drawn stronger, and the **bloom**: the few
+ * flowers or berries that anchor the design, stronger again and rare. A pattern
+ * declares only the layers it has, so a design with no flower in it has two.
+ * Flattening the weights into one is what turns an arabesque into a scatter of
+ * shapes.
+ *
+ * ## A motif is written once
+ *
+ * Willow places two shapes 126 times. Written out at every placement that is
+ * 3.4 kB of repeated `d` attributes, and it is what makes detail unaffordable:
+ * a vein added to a leaf would cost its 90 bytes times every instance. Each
+ * shape goes into `<defs>` once and every placement is a `<use>`, so detail is
+ * paid for once and the tile gets smaller as it gets more intricate.
+ *
+ * ## Motifs are spaced along the curve, not along the parameter
+ *
+ * `grow` places one motif every `spacing` px of arc. It used to place a count
+ * per cubic, which made density and segment count one variable: refining a stem
+ * silently multiplied its foliage, so no judgement about intricacy could be made
+ * without changing two things at once.
  *
  * ## Seamlessness is structural, not hand-placed
  *
@@ -43,6 +61,19 @@
 
 import type { ResolvedTheme } from "./index";
 
+/** The weights a layer can be drawn at, faintest first. */
+export type LayerWeight = "ground" | "foliage" | "bloom";
+
+export interface Layer {
+  /** Which weight it is drawn at. `WEIGHTS` holds the opacity per mode. */
+  weight: LayerWeight;
+  /**
+   * The layer body. `{ink}` and `{bloom}` are substituted for its colours, so a
+   * pattern names no colour of its own.
+   */
+  body: string;
+}
+
 export interface Pattern {
   /** Stable id, used as the storage key and in tests. */
   id: string;
@@ -50,27 +81,52 @@ export interface Pattern {
   name: string;
   /** Tile size in px. Larger reads as wallpaper, smaller as noise. */
   size: number;
-  /**
-   * The stem structure. Stroked, drawn faintest, sits behind everything.
-   * `{ink}` is substituted for its colour.
-   */
-  ground: string;
-  /**
-   * Leaves, buds and blooms. Filled, drawn a little stronger.
-   * `{bloom}` is substituted for its colour.
-   */
-  foliage: string;
+  /** One `<path id>` per distinct motif, however many times it is placed. */
+  defs: string;
+  /** Faintest first: `patternDataUri` draws them in this order. */
+  layers: Layer[];
+}
+
+/**
+ * Interns the motifs a pattern draws.
+ *
+ * A shape is defined by being placed, so nothing can reach `<defs>` that no
+ * layer references and no `<use>` can point at a definition that is not there.
+ */
+export interface MotifSet {
+  /** The id for a shape, defining it on first use. */
+  id(shape: string): string;
+  /** The `<defs>` body: every shape once, in first-use order. */
+  defs(): string;
+}
+
+function motifSet(): MotifSet {
+  const ids = new Map<string, string>();
+  return {
+    id(shape) {
+      const existing = ids.get(shape);
+      if (existing !== undefined) return existing;
+      const next = `m${ids.size}`;
+      ids.set(shape, next);
+      return next;
+    },
+    defs() {
+      return [...ids]
+        .map(([shape, id]) => `<path id="${id}" d="${shape}"/>`)
+        .join("");
+    },
+  };
 }
 
 // ── Curves ────────────────────────────────────────────────────────────────────
 
-type Point = [number, number];
+export type Point = [number, number];
 
 /** One cubic Bezier: start, two control points, end. */
-type Cubic = [Point, Point, Point, Point];
+export type Cubic = [Point, Point, Point, Point];
 
 /** A branch is a run of cubics sharing endpoints. */
-type Branch = Cubic[];
+export type Branch = Cubic[];
 
 function pointAt([p0, p1, p2, p3]: Cubic, t: number): Point {
   const u = 1 - t;
@@ -124,19 +180,101 @@ function stems(branches: Branch[], width: number): string {
   );
 }
 
+/**
+ * A branch measured by arc length.
+ *
+ * Sampling uniformly in the Bezier parameter is not sampling uniformly along the
+ * curve: motifs bunch where the curve is slow. On the stems as they stand that
+ * is worth 1.14x on Pimpernel's ogee and nothing on the other three, which is
+ * why nobody has needed it. It stops being true the moment a branch gains
+ * segments: refining Willow's serpentine from two cubics to four takes its
+ * spacing spread from 1.01x to 2.83x. Remove this and the next person to add a
+ * cubic gets a bunched stem and twice the leaves.
+ */
+export interface Arc {
+  /** Total length in px. */
+  length: number;
+  /** Position and tangent at a distance along the whole branch. */
+  at(distance: number): { x: number; y: number; angle: number };
+}
+
+/** Samples per cubic. 16 measures these curves to well under a pixel. */
+const ARC_SAMPLES = 16;
+
+interface Mark {
+  distance: number;
+  segment: Cubic;
+  t: number;
+}
+
+export function measure(branch: Branch): Arc {
+  const marks: Mark[] = [];
+  let total = 0;
+
+  for (const segment of branch) {
+    if (marks.length === 0) marks.push({ distance: 0, segment, t: 0 });
+    let previous = pointAt(segment, 0);
+    for (let step = 1; step <= ARC_SAMPLES; step += 1) {
+      const t = step / ARC_SAMPLES;
+      const point = pointAt(segment, t);
+      total += Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+      marks.push({ distance: total, segment, t });
+      previous = point;
+    }
+  }
+
+  return {
+    length: total,
+    at(distance) {
+      let index = 1;
+      while (index < marks.length - 1 && marks[index]!.distance < distance) {
+        index += 1;
+      }
+      const before = marks[index - 1]!;
+      const after = marks[index]!;
+      const span = after.distance - before.distance;
+      const fraction = span > 0 ? (distance - before.distance) / span : 0;
+      // Across a segment boundary the two marks are in different cubics, and
+      // the earlier one is the later one's t=0: the endpoints are shared, so
+      // interpolating from zero is exact rather than approximate.
+      const from = before.segment === after.segment ? before.t : 0;
+      const t = from + (after.t - from) * fraction;
+      const [x, y] = pointAt(after.segment, t);
+      return { x, y, angle: angleAt(after.segment, t) };
+    },
+  };
+}
+
 interface GrowOptions {
   /** The motif, drawn around the origin pointing along +x. */
   shape: string;
-  /** How many motifs per cubic segment. */
-  per: number;
+  /** Px between motifs, measured along the branch rather than per cubic. */
+  spacing: number;
   /** Degrees off the tangent. Positive leans one way, negative the other. */
   lean?: number;
   /** Alternate the lean side down the branch, as a real stem does. */
   alternate?: boolean;
   /** Motif scale, or a pair cycled through for a less mechanical run. */
   scale?: number | number[];
-  /** Skip the first and last fraction of each segment, where branches meet. */
+  /** Skip the first and last fraction of the branch, where branches meet. */
   inset?: number;
+}
+
+/** One placement of a defined motif. */
+function place(
+  href: string,
+  x: number,
+  y: number,
+  rotation: number,
+  size: number,
+): string {
+  const turn = round(rotation);
+  return (
+    `<use href="#${href}" transform="translate(${round(x)} ${round(y)})` +
+    (turn === 0 ? "" : ` rotate(${turn})`) +
+    (size === 1 ? "" : ` scale(${size})`) +
+    `"/>`
+  );
 }
 
 /**
@@ -146,36 +284,57 @@ interface GrowOptions {
  * direction of the stem it grows from, so a run of them follows the curve
  * instead of pointing wherever it was typed.
  */
-function grow(branches: Branch[], options: GrowOptions): string {
+function grow(
+  motifs: MotifSet,
+  branches: Branch[],
+  options: GrowOptions,
+): string {
   const {
     shape,
-    per,
+    spacing,
     lean = 55,
     alternate = true,
     scale = 1,
     inset = 0.08,
   } = options;
+  const href = motifs.id(shape);
   const scales = Array.isArray(scale) ? scale : [scale];
 
   const parts: string[] = [];
-  let index = 0;
 
   for (const branch of branches) {
-    for (const segment of branch) {
-      for (let step = 0; step < per; step += 1) {
-        const t = inset + ((1 - 2 * inset) * step) / Math.max(per - 1, 1);
-        const [x, y] = pointAt(segment, t);
-        const side = alternate && index % 2 === 1 ? -1 : 1;
-        const rotation = angleAt(segment, t) + lean * side;
-        const size = scales[index % scales.length]!;
-        parts.push(
-          `<path d="${shape}" transform="translate(${round(x)} ${round(y)}) ` +
-            `rotate(${round(rotation)})` +
-            (size === 1 ? "" : ` scale(${size})`) +
-            `"/>`,
-        );
-        index += 1;
-      }
+    const arc = measure(branch);
+    const usable = arc.length * (1 - 2 * inset);
+    const count = Math.max(1, Math.round(usable / spacing) + 1);
+    // Where the lean and scale cycles start, taken from where the branch does.
+    //
+    // The cycles used to run off a counter shared by every branch in the call,
+    // so which side a leaf leaned to depended on how many motifs happened to be
+    // emitted before it and adding one twig flipped every leaf downstream.
+    // Restarting them at zero per branch fixes that and introduces the opposite
+    // fault: congruent branches come out pixel-identical, and Willow has two
+    // serpentines that are the same curve 130px apart. Phasing from the start
+    // point separates them without making either depend on the others.
+    //
+    // It separates them, it does not guarantee it. A linear phase collapses
+    // whenever the translation between two congruent branches is a multiple of
+    // the cycle length, which is why Strawberry's stems still coincide, and a
+    // two-scale cycle matches on half its phases whatever the function, which is
+    // why Lily's twigs cannot be fixed this way at all. A hash of the origin
+    // would clear the first case and not the second.
+    const origin = branch[0]?.[0] ?? [0, 0];
+    const phase = Math.round(origin[0] + origin[1]);
+
+    for (let step = 0; step < count; step += 1) {
+      const along =
+        arc.length * inset +
+        (count === 1 ? usable / 2 : (usable * step) / (count - 1));
+      const { x, y, angle } = arc.at(along);
+      const cycle = step + phase;
+      const side = alternate && cycle % 2 === 1 ? -1 : 1;
+      parts.push(
+        place(href, x, y, angle + lean * side, scales[cycle % scales.length]!),
+      );
     }
   }
   return parts.join("");
@@ -190,18 +349,27 @@ interface At {
 }
 
 /** Stamp a shape at chosen points, for blooms that anchor a repeat. */
-function scatter(shape: string, placements: At[]): string {
+function scatter(motifs: MotifSet, shape: string, placements: At[]): string {
+  const href = motifs.id(shape);
   return placements
-    .map(({ x, y, r = 0, s = 1 }) => {
-      const transform =
-        `translate(${x} ${y})` +
-        (r ? ` rotate(${r})` : "") +
-        (s !== 1 ? ` scale(${s})` : "");
-      return `<path d="${shape}" transform="${transform}"/>`;
-    })
+    .map(({ x, y, r = 0, s = 1 }) => place(href, x, y, r, s))
     .join("");
 }
 
+/**
+ * Wrap motifs in the bloom colour.
+ *
+ * Every filled motif takes `{bloom}`, so the leaves are rose and only the stems
+ * are ink. That is deliberate and long-standing rather than an oversight, and it
+ * is the reason `bloom` names two things in this file: a layer weight, and the
+ * colour every motif is painted in whatever weight it is drawn at.
+ *
+ * Splitting the flowers into their own layer is what makes the leaf colour
+ * changeable at all, since the two can now be painted separately. Which colour
+ * a leaf should be is deferred on purpose: at the tile mean the difference
+ * measures 0.0026 to 0.0058 in OKLab, which is below anything worth arguing
+ * about, so it is a decision to be taken by looking at it once.
+ */
 function filled(body: string): string {
   return `<g fill="{bloom}">${body}</g>`;
 }
@@ -493,234 +661,334 @@ const LILY_TWIGS: Branch[] = [
   twig([210, 244], [284, 226], 18),
 ];
 
+interface PatternSpec {
+  id: string;
+  name: string;
+  size: number;
+  /** Built against a motif set, so a shape placed a hundred times is written once. */
+  build: (motifs: MotifSet) => Layer[];
+}
+
+function define({ id, name, size, build }: PatternSpec): Pattern {
+  const motifs = motifSet();
+  const layers = build(motifs);
+  // defs() after build(), never before: the set only knows a shape once a layer
+  // has asked for it.
+  return { id, name, size, defs: motifs.defs(), layers };
+}
+
+// `spacing` is px of arc between motifs. The values below reproduce the motif
+// counts the tiles shipped with, so the change of mechanism is not also a change
+// of weight. Strawberry's stems are the one place they differ: two of its four
+// branches carry three cubics and two carry two, so per-cubic placement was
+// giving the longer branches half again as much foliage per px. Evening that out
+// keeps the total and redistributes it.
 export const PATTERNS: Pattern[] = [
-  {
+  define({
     id: "willow",
     name: "Willow Bough",
     size: WILLOW_SIZE,
-    ground: stems(WILLOW_STEMS, 2) + stems(WILLOW_TWIGS, 1.1),
-    // The densest of the five, which is faithful: the original is a mass of
-    // small leaves with barely any ground showing between them.
-    foliage:
-      filled(
-        grow(WILLOW_STEMS, {
-          shape: WILLOW_LEAF,
-          per: 7,
-          lean: 62,
-          scale: [0.85, 0.7, 0.95],
-        }),
-      ) +
-      filled(
-        grow(WILLOW_TWIGS, {
-          shape: WILLOW_LEAF,
-          per: 5,
-          lean: 48,
-          scale: [0.7, 0.55],
-        }),
-      ) +
-      filled(
-        grow(WILLOW_TWIGS, {
-          shape: BUD,
-          per: 2,
-          lean: 100,
-          scale: 0.6,
-          inset: 0.3,
-        }),
-      ),
-  },
-  {
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(WILLOW_STEMS, 2) + stems(WILLOW_TWIGS, 1.1),
+      },
+      {
+        // The densest of the five, which is faithful: the original is a mass of
+        // small leaves with barely any ground showing between them.
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, WILLOW_STEMS, {
+              shape: WILLOW_LEAF,
+              spacing: 17.5,
+              lean: 62,
+              scale: [0.85, 0.7, 0.95],
+            }),
+          ) +
+          filled(
+            grow(m, WILLOW_TWIGS, {
+              shape: WILLOW_LEAF,
+              spacing: 16.1,
+              lean: 48,
+              scale: [0.7, 0.55],
+            }),
+          ) +
+          filled(
+            grow(m, WILLOW_TWIGS, {
+              shape: BUD,
+              spacing: 30,
+              lean: 100,
+              scale: 0.6,
+              inset: 0.3,
+            }),
+          ),
+      },
+    ],
+  }),
+  define({
     id: "acanthus",
     name: "Acanthus",
     size: ACANTHUS_SIZE,
-    ground: stems(ACANTHUS_STEMS, 2.6) + stems(ACANTHUS_TWIGS, 1.3),
-    foliage:
-      filled(
-        grow(ACANTHUS_STEMS, {
-          shape: ACANTHUS,
-          per: 3,
-          lean: 40,
-          scale: [1.05, 0.85, 1.2],
-        }),
-      ) +
-      filled(
-        grow(ACANTHUS_TWIGS, {
-          shape: CUT_LEAF,
-          per: 4,
-          lean: 52,
-          scale: [0.95, 0.75],
-        }),
-      ) +
-      filled(
-        scatter(BUD, [
-          { x: 150, y: 150, r: 0, s: 1.5 },
-          { x: 0, y: 150, r: 90, s: 1.1 },
-          { x: 300, y: 150, r: 90, s: 1.1 },
-          { x: 150, y: 0, r: 0, s: 1.1 },
-          { x: 150, y: 300, r: 0, s: 1.1 },
-        ]),
-      ),
-  },
-  {
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(ACANTHUS_STEMS, 2.6) + stems(ACANTHUS_TWIGS, 1.3),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, ACANTHUS_STEMS, {
+              shape: ACANTHUS,
+              spacing: 60.7,
+              lean: 40,
+              scale: [1.05, 0.85, 1.2],
+            }),
+          ) +
+          filled(
+            grow(m, ACANTHUS_TWIGS, {
+              shape: CUT_LEAF,
+              spacing: 27.7,
+              lean: 52,
+              scale: [0.95, 0.75],
+            }),
+          ) +
+          // Buds, not blooms: Acanthus has no flower, so it has no bloom layer.
+          filled(
+            scatter(m, BUD, [
+              { x: 150, y: 150, r: 0, s: 1.5 },
+              { x: 0, y: 150, r: 90, s: 1.1 },
+              { x: 300, y: 150, r: 90, s: 1.1 },
+              { x: 150, y: 0, r: 0, s: 1.1 },
+              { x: 150, y: 300, r: 0, s: 1.1 },
+            ]),
+          ),
+      },
+    ],
+  }),
+  define({
     id: "pimpernel",
     name: "Pimpernel",
     size: PIMPERNEL_SIZE,
-    ground: stems(PIMPERNEL_STEMS, 2.4) + stems(PIMPERNEL_TWIGS, 1.2),
-    foliage:
-      filled(
-        grow(PIMPERNEL_STEMS, {
-          shape: ROUND_LEAF,
-          per: 5,
-          lean: 58,
-          scale: [0.9, 0.7, 1],
-        }),
-      ) +
-      filled(
-        grow(PIMPERNEL_TWIGS, {
-          shape: CUT_LEAF,
-          per: 3,
-          lean: 46,
-          scale: [0.9, 0.7],
-        }),
-      ) +
-      // The blooms are placed rather than grown: each one is the centre of an
-      // ogee, which is the point of the design and not somewhere a sampler
-      // would happen to land.
-      filled(
-        scatter(BLOOM, [
-          { x: 70, y: 70, r: -50, s: 1.5 },
-          { x: 210, y: 210, r: 130, s: 1.5 },
-          { x: 210, y: 70, r: 230, s: 1.3 },
-          { x: 70, y: 210, r: 50, s: 1.3 },
-          { x: 140, y: 140, r: -90, s: 1 },
-          { x: 0, y: 140, r: 0, s: 1 },
-          { x: 280, y: 140, r: 180, s: 1 },
-        ]),
-      ),
-  },
-  {
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(PIMPERNEL_STEMS, 2.4) + stems(PIMPERNEL_TWIGS, 1.2),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, PIMPERNEL_STEMS, {
+              shape: ROUND_LEAF,
+              spacing: 39.3,
+              lean: 58,
+              scale: [0.9, 0.7, 1],
+            }),
+          ) +
+          filled(
+            grow(m, PIMPERNEL_TWIGS, {
+              shape: CUT_LEAF,
+              spacing: 41.2,
+              lean: 46,
+              scale: [0.9, 0.7],
+            }),
+          ),
+      },
+      {
+        // The blooms are placed rather than grown: each one is the centre of an
+        // ogee, which is the point of the design and not somewhere a sampler
+        // would happen to land.
+        weight: "bloom",
+        body: filled(
+          scatter(m, BLOOM, [
+            { x: 70, y: 70, r: -50, s: 1.5 },
+            { x: 210, y: 210, r: 130, s: 1.5 },
+            { x: 210, y: 70, r: 230, s: 1.3 },
+            { x: 70, y: 210, r: 50, s: 1.3 },
+            { x: 140, y: 140, r: -90, s: 1 },
+            { x: 0, y: 140, r: 0, s: 1 },
+            { x: 280, y: 140, r: 180, s: 1 },
+          ]),
+        ),
+      },
+    ],
+  }),
+  define({
     id: "strawberry",
     name: "Strawberry Thief",
     size: STRAWBERRY_SIZE,
-    ground: stems(STRAWBERRY_STEMS, 2.2) + stems(STRAWBERRY_TWIGS, 1.1),
-    foliage:
-      filled(
-        grow(STRAWBERRY_STEMS, {
-          shape: CUT_LEAF,
-          per: 4,
-          lean: 56,
-          scale: [0.95, 0.75, 1.05],
-        }),
-      ) +
-      filled(
-        grow(STRAWBERRY_TWIGS, {
-          shape: ROUND_LEAF,
-          per: 2,
-          lean: 44,
-          scale: 0.8,
-        }),
-      ) +
-      filled(
-        scatter(BERRY, [
-          { x: 150, y: 76, r: 10, s: 1.2 },
-          { x: 150, y: 226, r: 190, s: 1.2 },
-          { x: 22, y: 172, r: -70, s: 1 },
-          { x: 278, y: 172, r: 110, s: 1 },
-          { x: 102, y: 112, r: 40, s: 0.9 },
-          { x: 198, y: 112, r: 140, s: 0.9 },
-          { x: 64, y: 224, r: 220, s: 0.9 },
-          { x: 236, y: 224, r: 320, s: 0.9 },
-        ]),
-      ),
-  },
-  {
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(STRAWBERRY_STEMS, 2.2) + stems(STRAWBERRY_TWIGS, 1.1),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, STRAWBERRY_STEMS, {
+              shape: CUT_LEAF,
+              spacing: 29,
+              lean: 56,
+              scale: [0.95, 0.75, 1.05],
+            }),
+          ) +
+          filled(
+            grow(m, STRAWBERRY_TWIGS, {
+              shape: ROUND_LEAF,
+              spacing: 62,
+              lean: 44,
+              scale: 0.8,
+            }),
+          ),
+      },
+      {
+        weight: "bloom",
+        body: filled(
+          scatter(m, BERRY, [
+            { x: 150, y: 76, r: 10, s: 1.2 },
+            { x: 150, y: 226, r: 190, s: 1.2 },
+            { x: 22, y: 172, r: -70, s: 1 },
+            { x: 278, y: 172, r: 110, s: 1 },
+            { x: 102, y: 112, r: 40, s: 0.9 },
+            { x: 198, y: 112, r: 140, s: 0.9 },
+            { x: 64, y: 224, r: 220, s: 0.9 },
+            { x: 236, y: 224, r: 320, s: 0.9 },
+          ]),
+        ),
+      },
+    ],
+  }),
+  define({
     id: "lily",
     name: "Golden Lily",
     size: LILY_SIZE,
-    ground: stems(LILY_STEMS, 2.4) + stems(LILY_TWIGS, 1.3),
-    foliage:
-      filled(
-        grow(LILY_STEMS, {
-          shape: ROUND_LEAF,
-          per: 5,
-          lean: 64,
-          scale: [0.9, 0.7, 1],
-        }),
-      ) +
-      filled(
-        grow(LILY_TWIGS, {
-          shape: WILLOW_LEAF,
-          per: 3,
-          lean: 44,
-          scale: [0.8, 0.6],
-        }),
-      ) +
-      // Each lily is three petals from one point, which no tangent sampler
-      // produces: a flower is a cluster, not a run.
-      filled(
-        scatter(PETAL, [
-          { x: 144, y: 18, r: -34, s: 1.2 },
-          { x: 144, y: 18, r: 6, s: 1.35 },
-          { x: 144, y: 18, r: 46, s: 1.2 },
-          { x: -4, y: 86, r: 146, s: 1.2 },
-          { x: -4, y: 86, r: 186, s: 1.35 },
-          { x: -4, y: 86, r: 226, s: 1.2 },
-          { x: 284, y: 86, r: -34, s: 1.2 },
-          { x: 284, y: 86, r: 6, s: 1.35 },
-          { x: 284, y: 86, r: 46, s: 1.2 },
-          { x: 144, y: 158, r: -34, s: 1.2 },
-          { x: 144, y: 158, r: 6, s: 1.35 },
-          { x: 144, y: 158, r: 46, s: 1.2 },
-          { x: -4, y: 226, r: 146, s: 1.2 },
-          { x: -4, y: 226, r: 186, s: 1.35 },
-          { x: -4, y: 226, r: 226, s: 1.2 },
-          { x: 284, y: 226, r: -34, s: 1.2 },
-          { x: 284, y: 226, r: 6, s: 1.35 },
-          { x: 284, y: 226, r: 46, s: 1.2 },
-          { x: 136, y: 18, r: 134, s: 1.2 },
-          { x: 136, y: 18, r: 174, s: 1.35 },
-          { x: 136, y: 18, r: 214, s: 1.2 },
-          { x: 136, y: 158, r: 134, s: 1.2 },
-          { x: 136, y: 158, r: 174, s: 1.35 },
-          { x: 136, y: 158, r: 214, s: 1.2 },
-        ]),
-      ),
-  },
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(LILY_STEMS, 2.4) + stems(LILY_TWIGS, 1.3),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, LILY_STEMS, {
+              shape: ROUND_LEAF,
+              spacing: 28.1,
+              lean: 64,
+              scale: [0.9, 0.7, 1],
+            }),
+          ) +
+          filled(
+            grow(m, LILY_TWIGS, {
+              shape: WILLOW_LEAF,
+              spacing: 34.5,
+              lean: 44,
+              scale: [0.8, 0.6],
+            }),
+          ),
+      },
+      {
+        // Each lily is three petals from one point, which no tangent sampler
+        // produces: a flower is a cluster, not a run.
+        weight: "bloom",
+        body: filled(
+          scatter(m, PETAL, [
+            { x: 144, y: 18, r: -34, s: 1.2 },
+            { x: 144, y: 18, r: 6, s: 1.35 },
+            { x: 144, y: 18, r: 46, s: 1.2 },
+            { x: -4, y: 86, r: 146, s: 1.2 },
+            { x: -4, y: 86, r: 186, s: 1.35 },
+            { x: -4, y: 86, r: 226, s: 1.2 },
+            { x: 284, y: 86, r: -34, s: 1.2 },
+            { x: 284, y: 86, r: 6, s: 1.35 },
+            { x: 284, y: 86, r: 46, s: 1.2 },
+            { x: 144, y: 158, r: -34, s: 1.2 },
+            { x: 144, y: 158, r: 6, s: 1.35 },
+            { x: 144, y: 158, r: 46, s: 1.2 },
+            { x: -4, y: 226, r: 146, s: 1.2 },
+            { x: -4, y: 226, r: 186, s: 1.35 },
+            { x: -4, y: 226, r: 226, s: 1.2 },
+            { x: 284, y: 226, r: -34, s: 1.2 },
+            { x: 284, y: 226, r: 6, s: 1.35 },
+            { x: 284, y: 226, r: 46, s: 1.2 },
+            { x: 136, y: 18, r: 134, s: 1.2 },
+            { x: 136, y: 18, r: 174, s: 1.35 },
+            { x: 136, y: 18, r: 214, s: 1.2 },
+            { x: 136, y: 158, r: 134, s: 1.2 },
+            { x: 136, y: 158, r: 174, s: 1.35 },
+            { x: 136, y: 158, r: 214, s: 1.2 },
+          ]),
+        ),
+      },
+    ],
+  }),
 ];
 
 /**
- * How each theme paints them.
+ * How strongly each layer is drawn.
  *
- * Dark uses lighter inks at lower opacity than you would expect: a pattern that
- * reads as gentle on white becomes a glare on near-black at the same strength.
+ * Dark uses lighter inks at higher opacity than you would expect: a pattern that
+ * reads as gentle on white disappears into near-black at the same strength. That
+ * is the second tuning of these numbers, and the first one reasoned the opposite
+ * and was wrong: a light ink on near-black does glare at parity for a solid
+ * fill, and this tile is mostly negative space.
  *
- * The ground is deliberately weaker than the foliage. That gap is the whole
- * reason the pattern reads as depth rather than as a flat scatter, so it is the
- * first thing to preserve if these are ever retuned.
+ * The gaps between the three are the whole reason the pattern reads as depth
+ * rather than as a flat scatter, so they are the first thing to preserve if
+ * these are ever retuned. Measured on the light page as an OKLab lightness
+ * delta they are 0.026, 0.042 and 0.057; on the dark page 0.061, 0.083 and
+ * 0.102.
  */
-const PALETTE: Record<
-  ResolvedTheme,
-  { ink: string; bloom: string; groundOpacity: number; foliageOpacity: number }
-> = {
-  light: {
-    ink: "#0f766e",
-    bloom: "#9f1239",
-    groundOpacity: 0.055,
-    foliageOpacity: 0.075,
-  },
-  dark: {
-    ink: "#5eead4",
-    bloom: "#fda4af",
-    // Roughly twice the light values, which is not a mistake and is the second
-    // time this has been tuned. The first pass reasoned that a light ink on
-    // near-black glares at the same strength as a dark ink on white. True for a
-    // solid fill, wrong for this: the tile is mostly negative space, so at
-    // parity the pattern simply disappeared into #030712 and the dark theme had
-    // no texture at all. Measured against the real page background rather than
-    // reasoned about a second time.
-    groundOpacity: 0.075,
-    foliageOpacity: 0.105,
-  },
+const WEIGHTS: Record<ResolvedTheme, Record<LayerWeight, number>> = {
+  light: { ground: 0.055, foliage: 0.075, bloom: 0.1 },
+  dark: { ground: 0.075, foliage: 0.105, bloom: 0.13 },
 };
+
+/**
+ * Which ramp steps the wallpaper takes its two colours from.
+ *
+ * These were four hexes written out in this file. Three of them were exactly
+ * `accent-700`, `bloom-700` and `bloom-300`, and the fourth was a teal one step
+ * off `accent-300`: the rule was already here, written a second time in the one
+ * place that could not follow a palette. Naming the tokens instead is what makes
+ * a new palette's wallpaper correct without this file being opened, and it is
+ * why nothing here is a colour any more.
+ *
+ * The dark ink moves to `accent-300` as a result, measured at dL 0.0805 against
+ * the old 0.0855 on the dark page: under the threshold these weights are tuned
+ * to, and the price of the file owning no hex.
+ */
+const INK_TOKENS: Record<ResolvedTheme, WallpaperInk> = {
+  light: { ink: "--color-accent-700", bloom: "--color-bloom-700" },
+  dark: { ink: "--color-accent-300", bloom: "--color-bloom-300" },
+};
+
+/** The two colours a tile is drawn in. Token names going in, values coming out. */
+export interface WallpaperInk {
+  ink: string;
+  bloom: string;
+}
+
+/**
+ * Read the ink for `theme` off the document's own tokens.
+ *
+ * Separate from `patternDataUri` because a data URI cannot see a custom
+ * property: CSS variables do not cross into the SVG document, so the value has
+ * to be resolved here and substituted in. Keeping the read out of the generator
+ * also keeps the generator pure, which is what lets a test state the ink rather
+ * than mount a stylesheet.
+ */
+export function wallpaperInk(theme: ResolvedTheme): WallpaperInk {
+  const style = getComputedStyle(document.documentElement);
+  const tokens = INK_TOKENS[theme];
+  return {
+    ink: style.getPropertyValue(tokens.ink).trim(),
+    bloom: style.getPropertyValue(tokens.bloom).trim(),
+  };
+}
 
 /**
  * The nine positions a tile is drawn at to make the repeat seamless.
@@ -740,20 +1008,36 @@ function tiled(id: string, size: number): string {
   ).join("");
 }
 
-/** A pattern as a `background-image` value for the given theme. */
-export function patternDataUri(pattern: Pattern, theme: ResolvedTheme): string {
-  const { ink, bloom, groundOpacity, foliageOpacity } = PALETTE[theme];
+/** A pattern as a `background-image` value, in the given ink. */
+export function patternDataUri(
+  pattern: Pattern,
+  theme: ResolvedTheme,
+  colours: WallpaperInk,
+): string {
   const { size } = pattern;
+  const weights = WEIGHTS[theme];
 
-  const ground = pattern.ground.replace(/\{ink\}/g, ink);
-  const foliage = pattern.foliage.replace(/\{bloom\}/g, bloom);
+  // Motif definitions first, then one group per layer, all inside the same
+  // <defs>: a <use> pointing at a group that itself contains <use> elements is
+  // two levels deep, which is legal and is what keeps the nine offsets working
+  // now that a motif is a reference rather than a shape.
+  const defs = [pattern.defs];
+  const drawn: string[] = [];
+
+  pattern.layers.forEach((layer, index) => {
+    const id = `l${index}`;
+    const body = layer.body
+      .replace(/\{ink\}/g, colours.ink)
+      .replace(/\{bloom\}/g, colours.bloom);
+    defs.push(`<g id="${id}">${body}</g>`);
+    drawn.push(`<g opacity="${weights[layer.weight]}">${tiled(id, size)}</g>`);
+  });
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" ` +
     `viewBox="0 0 ${size} ${size}">` +
-    `<defs><g id="g">${ground}</g><g id="f">${foliage}</g></defs>` +
-    `<g opacity="${groundOpacity}">${tiled("g", size)}</g>` +
-    `<g opacity="${foliageOpacity}">${tiled("f", size)}</g>` +
+    `<defs>${defs.join("")}</defs>` +
+    drawn.join("") +
     `</svg>`;
 
   // encodeURIComponent rather than base64: it stays readable in devtools and

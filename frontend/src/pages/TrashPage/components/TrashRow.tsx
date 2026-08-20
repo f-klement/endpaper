@@ -35,12 +35,12 @@ export default function TrashRow({
           {book.title}
         </span>
         {book.author && (
-          <span className="block truncate text-xs text-paper-500 dark:text-paper-400">
+          <span className="block truncate text-xs text-paper-600 dark:text-paper-400">
             {t("book.by", { author: book.author })}
           </span>
         )}
         {deletedOn && (
-          <span className="mt-0.5 block text-xs text-paper-400 dark:text-paper-500">
+          <span className="mt-0.5 block text-xs text-paper-600 dark:text-paper-400">
             {t("trash.deletedOn", { date: deletedOn })}
           </span>
         )}
@@ -62,7 +62,7 @@ export default function TrashRow({
           if (confirm(t("trash.deleteForeverConfirm", { title: book.title })))
             onPurge();
         }}
-        className="shrink-0 text-xs text-paper-400 underline hover:text-bloom-600 disabled:opacity-50 dark:text-paper-500 dark:hover:text-bloom-300"
+        className="shrink-0 text-xs text-paper-600 underline hover:text-danger-600 disabled:opacity-50 dark:text-paper-400 dark:hover:text-danger-300"
       >
         {t("trash.deleteForever")}
       </button>

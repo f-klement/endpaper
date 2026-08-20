@@ -49,7 +49,7 @@ export default function OwnershipPicker({
               value === option.value
                 ? "bg-accent-50 border-accent-300 text-accent-800 "
                 + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                : "bg-white border-paper-200 text-paper-600 hover:bg-paper-50 "
+                : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
             }`}
           >
@@ -57,7 +57,7 @@ export default function OwnershipPicker({
           </button>
         ))}
       </div>
-      <p className="text-xs text-paper-500 mt-1.5 dark:text-paper-400">
+      <p className="text-xs text-paper-600 mt-1.5 dark:text-paper-400">
         {t("ownership.explain")}
       </p>
     </div>

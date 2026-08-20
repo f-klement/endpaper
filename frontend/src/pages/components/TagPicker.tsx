@@ -7,6 +7,7 @@ import {
   TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
   TAG_CHIP_CLASSES,
+  TAG_CHIP_SELECTED,
   groupTagsByCategory,
 } from "../types";
 
@@ -97,7 +98,7 @@ export default function TagPicker({
               onClick={() => toggleCategory(category)}
               aria-expanded={expanded}
               aria-controls={`${panelId}-${category}`}
-              className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-400 hover:text-paper-600 dark:text-paper-500 dark:hover:text-paper-300"
+              className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
             >
               <Icon
                 name="chevron"
@@ -106,7 +107,7 @@ export default function TagPicker({
                 }`}
               />
               {t(TAG_CATEGORY_LABELS[category])}{" "}
-              <span className="font-normal normal-case text-paper-400 dark:text-paper-500">
+              <span className="font-normal normal-case text-paper-600 dark:text-paper-400">
                 {chosen > 0
                   ? t("tags.countWithChosen", {
                       count: inCategory.length,
@@ -125,7 +126,6 @@ export default function TagPicker({
               >
                 {inCategory.map((tag) => {
                   const selected = selectedIds.includes(tag.id);
-                  const styles = TAG_CHIP_CLASSES[category];
                   // Only a tag the household invented can go. A seeded one
                   // comes straight back at the next restart, so offering it
                   // would be offering an action that undoes itself.
@@ -134,7 +134,7 @@ export default function TagPicker({
                     <span
                       key={tag.id}
                       className={`inline-flex items-center rounded-full border text-xs transition-colors ${
-                        selected ? styles.active : styles.base
+                        selected ? TAG_CHIP_SELECTED : TAG_CHIP_CLASSES[category]
                       }`}
                     >
                       <button

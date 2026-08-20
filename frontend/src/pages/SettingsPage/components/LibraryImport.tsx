@@ -52,7 +52,7 @@ export default function LibraryImport({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-paper-500 leading-relaxed dark:text-paper-400">
+      <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
         {t("import.explain")}
       </p>
 
@@ -91,7 +91,7 @@ export default function LibraryImport({
               type="checkbox"
               checked={createMissing}
               onChange={(event) => setCreateMissing(event.target.checked)}
-              className="rounded border-paper-300 text-accent-700 focus:ring-accent-400 dark:text-accent-400"
+              className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
             />
             <span className="text-sm text-paper-700 dark:text-paper-200">
               {t("import.createMissing")}
@@ -108,7 +108,7 @@ export default function LibraryImport({
               type="checkbox"
               checked={applyTags}
               onChange={(event) => setApplyTags(event.target.checked)}
-              className="rounded border-paper-300 text-accent-700 focus:ring-accent-400 dark:text-accent-400"
+              className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
             />
             <span className="text-sm text-paper-700 dark:text-paper-200">
               {t("import.applyTags")}
@@ -138,7 +138,7 @@ export default function LibraryImport({
               type="button"
               disabled={isImporting || preview.total_rows === 0}
               onClick={() => onConfirm({ createMissing, applyTags })}
-              className="flex-1 py-2.5 rounded-xl bg-accent-600 text-sm font-semibold text-white hover:bg-accent-700 disabled:bg-accent-300"
+              className="flex-1 py-2.5 rounded-xl bg-accent-fill text-sm font-semibold text-on-accent hover:bg-accent-fill-hover disabled:bg-accent-300"
             >
               {isImporting
                 ? t("import.importing")
@@ -149,7 +149,7 @@ export default function LibraryImport({
       )}
 
       {error != null && (
-        <p role="alert" className="text-sm text-bloom-600 dark:text-bloom-300">
+        <p role="alert" className="text-sm text-danger-600 dark:text-danger-300">
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
@@ -165,12 +165,12 @@ export default function LibraryImport({
             })}
           </p>
           {result.skipped > 0 && (
-            <p className="text-xs text-paper-500 dark:text-paper-400">
+            <p className="text-xs text-paper-600 dark:text-paper-400">
               {t("import.skipped", { count: result.skipped })}
             </p>
           )}
           {result.unmatched_titles && result.unmatched_titles.length > 0 && (
-            <div className="text-xs text-paper-500 dark:text-paper-400">
+            <div className="text-xs text-paper-600 dark:text-paper-400">
               <p className="font-medium">{t("import.unmatched")}</p>
               <ul className="list-disc list-inside mt-1 space-y-0.5">
                 {result.unmatched_titles.map((title) => (

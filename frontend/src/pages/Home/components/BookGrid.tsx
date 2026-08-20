@@ -41,7 +41,7 @@ export default function BookGrid({
         {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
           <div
             key={index}
-            className="bg-white rounded-xl shadow-sm border border-paper-100 overflow-hidden animate-pulse dark:bg-paper-900 dark:border-paper-800"
+            className="bg-paper-0 rounded-xl shadow-sm border border-paper-100 overflow-hidden animate-pulse dark:bg-paper-900 dark:border-paper-800"
           >
             <Skeleton className="aspect-[2/3] rounded-none" />
             <div className="p-2.5 space-y-1.5">
@@ -73,7 +73,7 @@ export default function BookGrid({
           <button
             onClick={onLoadMore}
             disabled={isLoadingMore}
-            className="px-4 py-2 text-sm font-medium rounded-lg border border-paper-200 bg-white text-paper-700 hover:border-accent-300 disabled:opacity-50 transition-colors dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200"
+            className="px-4 py-2 text-sm font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 disabled:opacity-50 transition-colors dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200"
           >
             {isLoadingMore ? t("common.loading") : t("library.loadMore")}
           </button>

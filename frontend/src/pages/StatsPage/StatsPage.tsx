@@ -1,7 +1,7 @@
 import { TagCategory } from "../../api/generated/model";
 import { ErrorState, Spinner } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
-import { TAG_BAR_CLASSES, TAG_CATEGORY_ORDER } from "../types";
+import { TAG_CATEGORY_ORDER } from "../types";
 import StatSection from "./components/StatSection";
 import { useStats } from "./hooks";
 import { Page, PageHeader } from "../components";
@@ -75,7 +75,7 @@ export default function StatsPage() {
             <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
               {stats.average_rating.toFixed(1)}
             </p>
-            <p className="text-xs text-paper-500 mt-0.5 dark:text-paper-400">
+            <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
               {t("stats.averageRating", { count: stats.rated_count ?? 0 })}
             </p>
           </div>
@@ -83,7 +83,7 @@ export default function StatsPage() {
             <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
               {finishedTotal}
             </p>
-            <p className="text-xs text-paper-500 mt-0.5 dark:text-paper-400">
+            <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
               {t("stats.finishedTotal")}
             </p>
           </div>
@@ -96,6 +96,8 @@ export default function StatsPage() {
           label: formatMonth(row.month, locale),
           count: row.count,
         }))}
+        // Books finished is the one chart worth being pleased about, so it is
+        // the one that keeps the bloom. Every other bar is the accent.
         colorClass="bg-bloom-300"
         labelWidthClass="w-20"
       />
@@ -117,7 +119,7 @@ export default function StatsPage() {
           rows={stats.by_tag
             .filter((row) => row.category === category)
             .map((row) => ({ label: row.name, count: row.count }))}
-          colorClass={TAG_BAR_CLASSES[category]}
+          colorClass="bg-accent-400"
         />
       ))}
 
@@ -127,7 +129,7 @@ export default function StatsPage() {
           label: formatMonth(row.month, locale),
           count: row.count,
         }))}
-        colorClass="bg-indigo-400"
+        colorClass="bg-accent-400"
         labelWidthClass="w-20"
       />
     </Page>

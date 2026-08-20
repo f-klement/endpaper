@@ -56,8 +56,8 @@ export default function BookFilters({
               aria-pressed={filters.status === option.value}
               className={`shrink-0 text-sm px-3 py-1 rounded-full border transition-colors ${
                 filters.status === option.value
-                  ? "bg-accent-600 border-accent-600 text-white"
-                  : "border-paper-200 text-paper-600 bg-white hover:border-accent-300 "
+                  ? "bg-accent-fill border-accent-fill text-on-accent"
+                  : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
               }`}
             >
@@ -71,7 +71,7 @@ export default function BookFilters({
             onSortChange(event.target.value as Filters["sort"])
           }
           aria-label={t("library.sortLabel")}
-          className="shrink-0 text-sm px-2 py-1 rounded-lg border border-paper-200 bg-white text-paper-600 focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
+          className="shrink-0 text-sm px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
         >
           {SORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -89,7 +89,7 @@ export default function BookFilters({
         role="group"
         aria-label={t("ownership.label")}
       >
-        <span className="shrink-0 text-xs text-paper-400 dark:text-paper-500">
+        <span className="shrink-0 text-xs text-paper-600 dark:text-paper-400">
           {t("ownership.label")}
         </span>
         {OWNERSHIP_FILTERS.map((option) => (
@@ -100,7 +100,7 @@ export default function BookFilters({
             className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
               filters.ownership === option.value
                 ? "bg-amber-500 border-amber-500 text-white"
-                : "border-paper-200 text-paper-600 bg-white hover:border-amber-300 "
+                : "border-paper-200 text-paper-600 bg-paper-0 hover:border-amber-300 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
             }`}
           >
@@ -118,7 +118,7 @@ export default function BookFilters({
             )
           }
           aria-label={t("copy.format")}
-          className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-white text-paper-600 focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
+          className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
         >
           {FORMAT_FILTERS.map((option) => (
             <option key={option.label} value={option.value ?? ""}>
@@ -134,7 +134,7 @@ export default function BookFilters({
             value={filters.location ?? ""}
             onChange={(event) => onLocationChange(event.target.value || null)}
             aria-label={t("location.label")}
-            className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-white text-paper-600 focus:outline-none focus:ring-2 focus:ring-accent-400 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
+            className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
           >
             <option value="">{t("location.filterAll")}</option>
             {locations.map((place) => (
@@ -169,8 +169,8 @@ export default function BookFilters({
           onClick={onToggleTagPanel}
           className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
             activeTagCount > 0
-              ? "bg-indigo-500 border-indigo-500 text-white"
-              : "border-paper-200 text-paper-600 bg-white hover:border-indigo-300 "
+              ? "bg-accent-fill border-accent-fill text-on-accent"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
                 + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
           }`}
         >
@@ -185,7 +185,7 @@ export default function BookFilters({
         {activeTagCount > 0 && (
           <button
             onClick={onClearTags}
-            className="ml-2 text-xs text-paper-400 hover:text-paper-600 underline dark:text-paper-500 dark:hover:text-paper-300"
+            className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
           >
             {t("library.clear")}
           </button>

@@ -23,7 +23,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { patternDataUri, randomPattern, type Pattern } from "./patterns";
+import {
+  patternDataUri,
+  randomPattern,
+  wallpaperInk,
+  type Pattern,
+} from "./patterns";
 
 /** What a person can pick. `system` is a real option, not the absence of one. */
 export type ThemePreference = "light" | "dark" | "system";
@@ -80,6 +85,44 @@ export function applyTheme(theme: ResolvedTheme): void {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
 
+/**
+ * The wallpaper for this visit, chosen once per page load.
+ *
+ * Module scope rather than component state, because `main.tsx` paints it before
+ * React exists and the provider then has to render the one already on the page
+ * rather than roll the dice a second time.
+ */
+let visitPattern: Pattern | null = null;
+
+export function currentPattern(): Pattern {
+  visitPattern ??= randomPattern();
+  return visitPattern;
+}
+
+/**
+ * Paint the wallpaper on the body.
+ *
+ * Body rather than a wrapper div, so it covers the viewport even where the
+ * content is shorter than the screen. Exported because `main.tsx` calls it
+ * before React mounts: painted from an effect it arrives a frame after the
+ * page, which is the same flash `applyTheme` exists to avoid and is far more
+ * obvious once the pattern is something a person picked.
+ *
+ * The ink is read at this moment rather than baked in, so it follows whatever
+ * palette is on the document.
+ */
+export function applyWallpaper(pattern: Pattern, theme: ResolvedTheme): void {
+  const colours = wallpaperInk(theme);
+  // No tokens, no wallpaper. An empty custom property would reach the SVG as
+  // `fill=""`, and an SVG shape with no fill is not invisible, it is black: the
+  // failure mode of a missing stylesheet would be a page dirtied with 13% grey
+  // rather than a page with no pattern on it. Nothing should be able to reach
+  // this, which is exactly why it should not be left to be found by looking.
+  if (colours.ink === "" || colours.bloom === "") return;
+
+  document.body.style.backgroundImage = patternDataUri(pattern, theme, colours);
+}
+
 interface ThemeProviderProps {
   children: ReactNode;
   /** Forces a starting preference. Tests use it; the app does not. */
@@ -99,9 +142,9 @@ export function ThemeProvider({
   const [theme, setTheme] = useState<ResolvedTheme>(() =>
     resolveTheme(preference),
   );
-  // Chosen once per mount and never stored: a different one each time somebody
+  // Chosen once per visit and never stored: a different one each time somebody
   // comes back is the whole idea, and remembering it would defeat that.
-  const [pattern] = useState<Pattern>(() => initialPattern ?? randomPattern());
+  const [pattern] = useState<Pattern>(() => initialPattern ?? currentPattern());
 
   // Follow the system while, and only while, nobody has chosen. Someone who
   // picked dark should not be flipped back at sunrise by their laptop.
@@ -109,6 +152,10 @@ export function ThemeProvider({
     const resolved = resolveTheme(preference);
     setTheme(resolved);
     applyTheme(resolved);
+    // In the same call, not a second effect. The wallpaper's ink comes from the
+    // palette, so a mode change that moves one without the other leaves a frame
+    // with the dark page and the light pattern on it.
+    applyWallpaper(pattern, resolved);
 
     if (preference !== "system") return;
 
@@ -119,10 +166,11 @@ export function ThemeProvider({
       const next = systemTheme();
       setTheme(next);
       applyTheme(next);
+      applyWallpaper(pattern, next);
     };
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
-  }, [preference]);
+  }, [preference, pattern]);
 
   const setPreference = useCallback((next: ThemePreference) => {
     try {
@@ -133,14 +181,13 @@ export function ThemeProvider({
     setStoredPreference(next);
   }, []);
 
-  // Painted on the body rather than a wrapper div, so it covers the viewport
-  // even where the content is shorter than the screen.
-  useEffect(() => {
-    document.body.style.backgroundImage = patternDataUri(pattern, theme);
-    return () => {
+  // Unmount only. The paint itself happens with the theme, above.
+  useEffect(
+    () => () => {
       document.body.style.backgroundImage = "";
-    };
-  }, [pattern, theme]);
+    },
+    [],
+  );
 
   const context = useMemo(
     () => ({ preference, setPreference, theme, pattern }),

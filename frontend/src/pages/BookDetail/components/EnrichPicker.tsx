@@ -46,20 +46,20 @@ export default function EnrichPicker({
 
   return (
     <Modal title={t("enrich.pickTitle")} onClose={onClose}>
-      <p className="text-sm text-paper-500 mb-3 dark:text-paper-400">
+      <p className="text-sm text-paper-600 mb-3 dark:text-paper-400">
         {t("enrich.pickHint")}
       </p>
 
       {isSearching && <Spinner label={t("enrich.working")} />}
 
       {error != null && (
-        <p role="alert" className="text-sm text-bloom-600 dark:text-bloom-300">
+        <p role="alert" className="text-sm text-danger-600 dark:text-danger-300">
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
 
       {!isSearching && error == null && candidates.length === 0 && (
-        <p className="text-sm text-paper-500 dark:text-paper-400">
+        <p className="text-sm text-paper-600 dark:text-paper-400">
           {t("enrich.notFound")}
         </p>
       )}
@@ -85,16 +85,16 @@ export default function EnrichPicker({
                     {match.title}
                   </span>
                   {match.subtitle && (
-                    <span className="block text-xs text-paper-500 truncate dark:text-paper-400">
+                    <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
                       {match.subtitle}
                     </span>
                   )}
-                  <span className="block text-xs text-paper-400 truncate mt-0.5 dark:text-paper-500">
+                  <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
                     {summarise(match)}
                   </span>
                   {/* What this row would add, so an obviously thin one can be
                       skipped without clicking it to find out. */}
-                  <span className="block text-xs text-paper-400 truncate dark:text-paper-500">
+                  <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
                     {match.page_count
                       ? t("book.pages", { count: match.page_count })
                       : ""}
@@ -108,7 +108,7 @@ export default function EnrichPicker({
       )}
 
       {!isConfigured && candidates.length > 0 && (
-        <p className="text-xs text-paper-400 mt-3 dark:text-paper-500">
+        <p className="text-xs text-paper-600 mt-3 dark:text-paper-400">
           {t("search.withoutKey")}
         </p>
       )}

@@ -26,7 +26,7 @@ export default function LoansPage() {
               // gets one here rather than losing the frame the others have.
               className={
                 loans.overdueOnly
-                  ? "border border-bloom-300 dark:border-bloom-700"
+                  ? "border border-danger-300 dark:border-danger-700"
                   : ""
               }
               onClick={() => loans.setOverdueOnly(!loans.overdueOnly)}
@@ -48,14 +48,14 @@ export default function LoansPage() {
       {/* Hidden while already filtered to overdue: the nudge would be asking
           for something the reader is already looking at. */}
       {loans.overdueCount > 0 && !loans.overdueOnly && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-bloom-300 bg-bloom-100 px-3 py-2.5 dark:border-bloom-700 dark:bg-bloom-700">
-          <p className="text-sm text-bloom-700 dark:text-bloom-100">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-danger-300 bg-danger-100 px-3 py-2.5 dark:border-danger-700 dark:bg-danger-700">
+          <p className="text-sm text-danger-700 dark:text-danger-100">
             {t("loans.overdueBanner", { count: loans.overdueCount })}
           </p>
           <button
             type="button"
             onClick={() => loans.setOverdueOnly(true)}
-            className="shrink-0 text-xs font-medium text-bloom-700 underline hover:no-underline dark:text-bloom-100"
+            className="shrink-0 text-xs font-medium text-danger-700 underline hover:no-underline dark:text-danger-100"
           >
             {t("loans.chaseThem")}
           </button>
@@ -77,7 +77,7 @@ export default function LoansPage() {
           {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
             <div
               key={index}
-              className="bg-white rounded-xl p-4 border border-paper-100 animate-pulse dark:bg-paper-900 dark:border-paper-800"
+              className="bg-paper-0 rounded-xl p-4 border border-paper-100 animate-pulse dark:bg-paper-900 dark:border-paper-800"
             >
               <div className="flex gap-3">
                 <Skeleton className="w-12 h-16" />

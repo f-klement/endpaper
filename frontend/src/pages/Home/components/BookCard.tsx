@@ -16,6 +16,8 @@ import { CoverImage } from "../../components";
 const STATUS_STYLES: Record<ReadStatus, string> = {
   [ReadStatus.unread]:
     "bg-paper-200/70 text-paper-600 dark:bg-paper-800 dark:text-paper-300",
+  // Bloom, not danger. Wanting to read something is the pleased note, and the
+  // two were one rose until they were split: see --color-danger-* in index.css.
   [ReadStatus.want_to_read]:
     "bg-bloom-100 text-bloom-700 dark:bg-bloom-700/25 dark:text-bloom-300",
   [ReadStatus.reading]:
@@ -80,8 +82,8 @@ export default function BookCard({
             aria-hidden="true"
             className={`absolute top-1.5 left-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
               isSelected
-                ? "bg-accent-600 border-accent-600 text-white"
-                : "bg-white/90 border-paper-300 text-transparent"
+                ? "bg-accent-fill border-accent-fill text-on-accent"
+                : "bg-paper-0/90 border-paper-300 text-transparent"
             }`}
           >
             <Icon name="check" className="w-3.5 h-3.5" strokeWidth={2.5} />
@@ -107,7 +109,7 @@ export default function BookCard({
           {book.title}
         </h3>
         {book.author && (
-          <p className="text-xs text-paper-500 truncate dark:text-paper-400">
+          <p className="text-xs text-paper-600 truncate dark:text-paper-400">
             {book.author}
           </p>
         )}
