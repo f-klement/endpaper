@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Into `base`, so the palettes land in the same layer as the rules below them
+   rather than outranking those rules: unlayered CSS beats every layer whatever
+   its specificity. Inside one layer the ordinary cascade applies, which is what
+   the note at the top of that file is about. */
+@import "./theme/palettes.css" layer(base);
 
 /* Tailwind 4 takes its configuration from CSS rather than tailwind.config.js.
    Custom design tokens go in @theme, where each --color-* entry generates the
@@ -36,8 +41,16 @@
   --color-paper-100: #f5f3ef;
   --color-paper-200: #e9e5de;
   --color-paper-300: #d8d2c8;
-  --color-paper-400: #b0a89b;
-  --color-paper-500: #8a8175;
+  /* 400 and 500 are the two rungs the light ramp had to move to hold the rung
+     contract every palette is now measured against: 3.0 and 4.5 against the
+     card, from 2.35 and 3.83. Neither carries text in this mode (that is the
+     rule `houseRules.test.ts` enforces), so nothing on screen moved except
+     disabled text, which got closer to the 3:1 that a disabled control is
+     exempt from rather than further away. Both are restored to their old
+     values under `:root.dark`, where they are muted text and where the old
+     values are the ones that measure well. */
+  --color-paper-400: #9c9487;
+  --color-paper-500: #7e756a;
   --color-paper-600: #6b6358;
   --color-paper-700: #4d473e;
   --color-paper-800: #2e2a25;
@@ -153,6 +166,30 @@
     --color-accent-fill: var(--color-accent-500);
     --color-accent-fill-hover: var(--color-accent-400);
     --color-on-accent: var(--color-paper-950);
+
+    /* Endpaper's dark ramp, stated as the difference from its light one.
+       A single ramp cannot serve both modes: light `500` has to be dark enough
+       to read on white (4.5:1 needs a luminance at or under 0.183) and dark
+       `500` light enough to read on near black (4.5:1 needs 0.194 or more), so
+       there is no hex that satisfies both and every palette here has two.
+
+       400 and 500 go back to the values the light ramp moved off: in the dark
+       they are muted text at 8.18 and 5.02 on the page, and darkening them
+       would dim 111 call sites to buy nothing. 600 carries no text in this
+       mode and nothing draws a border with it either; it moves because the
+       rung contract holds it at 3.0 whether or not anything paints it today,
+       and it was at 2.96. */
+    --color-paper-400: #b0a89b;
+    --color-paper-500: #8a8175;
+    --color-paper-600: #6c6458;
+
+    /* `text-danger-500` and `text-bloom-500` are written without a `dark:`
+       variant at four call sites, so this rung is read on the dark card as
+       well as the light one: 3.73 there, against the 4.5 it needs. Lifted
+       rather than repaired per call site, because the next one written will
+       have the same problem. */
+    --color-bloom-500: #f23555;
+    --color-danger-500: #f23555;
   }
 
   body {
@@ -199,6 +236,35 @@
   :focus-visible {
     @apply outline-none ring-2 ring-accent-500 ring-offset-2;
     @apply ring-offset-paper-50 dark:ring-offset-paper-950;
+  }
+
+  /* More contrast, asked for at the operating system and not here.
+     Two things happen. The muted ink moves up a rung, so hint text reads at
+     the secondary tier's weight instead of the muted one. And the wallpaper
+     goes, because decoration is the first thing that should: that half is done
+     in `applyWallpaper` rather than with `background-image: none` here, so the
+     picker can say the system turned it off instead of showing an off state
+     the reader did not choose.
+
+     The selectors are padded deliberately. A palette block is
+     `:root[data-theme="x"]` at specificity (0,2,0) and a plain `:root` is
+     (0,1,0), so written once this rule would apply on Endpaper and be silently
+     ignored on the other six.
+
+     `:not(.dark)` is not padding. Without it the light half is (0,2,0) sitting
+     after `:root.dark` in the same layer, so on Endpaper it wins in the dark
+     too and rewrites `paper-600` to `paper-700`: 3.00:1 becomes 1.91:1 against
+     the dark card, for the reader who asked for more contrast. The six
+     palettes escaped it, because their dark blocks are (0,3,0), so the setting
+     did two different things depending on which palette was on. */
+  @media (prefers-contrast: more) {
+    :root:root:not(.dark) {
+      --color-paper-600: var(--color-paper-700);
+    }
+
+    :root:root.dark {
+      --color-paper-400: var(--color-paper-300);
+    }
   }
 
   /* Honour a person's stated preference rather than deciding animation is

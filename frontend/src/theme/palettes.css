@@ -1,0 +1,558 @@
+/* The six palettes that are not this app's own.
+ *
+ * A palette is a block of `--color-*` overrides, selected by `data-theme` on
+ * the document. `applyPalette` in `palettes.ts` sets that attribute and nothing
+ * else: no property is written from JavaScript, so a palette costs nothing at
+ * runtime and cannot arrive a frame late.
+ *
+ * Endpaper is not here. Its light values are the `@theme` block in `index.css`,
+ * which is where Tailwind reads them to generate the utilities in the first
+ * place, and its dark corrections sit in the `:root.dark` block beside them.
+ * Repeating them here as a seventh palette would make the same eleven ramps
+ * two facts that can disagree.
+ *
+ * ## Every block declares every token, including the ones that look redundant
+ *
+ * `:root.dark` in `index.css` and `:root[data-theme="x"]` here are both
+ * specificity (0,2,0), and this file is imported first, so in the dark
+ * Endpaper's overrides win over a light palette block. A dark block outranks
+ * both at (0,3,0). That holds only while each dark block states every token:
+ * drop one on the grounds that it matches the light block above it and, in
+ * dark mode, that token silently takes Endpaper's value instead of the
+ * palette's. The completeness is asserted in `tests/theme/palettes.test.ts`.
+ *
+ * ## Where the numbers come from
+ *
+ * Lightness belongs to this app, hue and chroma belong to the palette. No
+ * upstream publishes eleven rungs of anything, so generating the missing ones
+ * is the method rather than a deviation: a published value is kept verbatim
+ * wherever it clears the rung it lands on, and corrected in OKLab lightness
+ * with its hue and chroma held wherever it does not. Every correction is
+ * tabulated, with the contrast that forced it, in `docs/theming.md`.
+ *
+ * The rungs each mode has to clear, measured against the card:
+ *
+ *   light   400 >= 3.0   500 >= 4.5   700 >= 6.0   900 >= 7.0
+ *   dark    600 >= 3.0   500 >= 4.5   400 >= 6.0   300 >= 7.0
+ *
+ * plus body ink at `200` inside an 8.5 to 16 band on the page, which is the
+ * anti-glare range `index.css` already reasons about.
+ *
+ * The licences are MIT throughout and the attributions are per block below.
+ * None of these projects endorses this one.
+ */
+
+/* ── Catppuccin, Latte and Mocha ────────────────────────────────────────────
+   Catppuccin (MIT). Latte names twelve neutrals and Mocha nine, so every rung
+   here starts from an upstream value. Latte's mid greys are pale: `surface2`
+   and `overlay0` sit at 1.91 and 2.30 on its own base, so both are corrected,
+   as are the two ink rungs below them. The teal is kept verbatim at 500, one rung lighter than most
+   palettes' accents, because 3.31 on Latte's base carries the focus ring and
+   not text. Latte's pink survives at `bloom-300`; the ink steps below it are
+   generated, since no pink that pale can be read on paper. */
+
+:root[data-theme="catppuccin"] {
+  --color-paper-0: #eff1f5;
+  --color-paper-50: #e6e9ef;
+  --color-paper-100: #dce0e8;
+  --color-paper-200: #ccd0da;
+  --color-paper-300: #bcc0cc;
+  --color-paper-400: #878b99;
+  --color-paper-500: #6a6d7c;
+  --color-paper-600: #606277;
+  --color-paper-700: #575971;
+  --color-paper-800: #545770;
+  --color-paper-900: #484b64;
+  --color-paper-950: #444761;
+  --color-accent-50: #eefafb;
+  --color-accent-100: #c6e6e8;
+  --color-accent-200: #97d3d7;
+  --color-accent-300: #61c0c6;
+  --color-accent-400: #32aab1;
+  --color-accent-500: #179299;
+  --color-accent-600: #177980;
+  --color-accent-700: #096469;
+  --color-accent-800: #0f4d51;
+  --color-accent-900: #06383b;
+  --color-accent-950: #012527;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #ffe2f5;
+  --color-bloom-300: #ea76cb;
+  --color-bloom-500: #c300a1;
+  --color-bloom-600: #b40095;
+  --color-bloom-700: #86006e;
+  --color-danger-100: #ffe5e4;
+  --color-danger-300: #e79292;
+  --color-danger-500: #d10e39;
+  --color-danger-600: #b2062e;
+  --color-danger-700: #920424;
+}
+
+:root[data-theme="catppuccin"].dark {
+  --color-paper-0: #f7f9fd;
+  --color-paper-50: #ebeffb;
+  --color-paper-100: #dee4f8;
+  --color-paper-200: #cdd6f4;
+  --color-paper-300: #bac2de;
+  --color-paper-400: #abb3ce;
+  --color-paper-500: #949ab3;
+  --color-paper-600: #7f849c;
+  --color-paper-700: #585b70;
+  --color-paper-800: #45475a;
+  --color-paper-900: #313244;
+  --color-paper-950: #1e1e2e;
+  --color-accent-50: #eff9f7;
+  --color-accent-100: #dcf5f0;
+  --color-accent-200: #c4f3ea;
+  --color-accent-300: #a9f0e4;
+  --color-accent-400: #98eadd;
+  --color-accent-500: #94e2d5;
+  --color-accent-600: #77b8ad;
+  --color-accent-700: #589087;
+  --color-accent-800: #3f6962;
+  --color-accent-900: #244540;
+  --color-accent-950: #0a2421;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #f6e7f1;
+  --color-bloom-300: #f5c2e7;
+  --color-bloom-500: #cf8bbd;
+  --color-bloom-600: #9e5e8f;
+  --color-bloom-700: #6f3462;
+  --color-danger-100: #ffe4ea;
+  --color-danger-300: #f38ba8;
+  --color-danger-500: #fa6998;
+  --color-danger-600: #ba2c63;
+  --color-danger-700: #900044;
+}
+
+/* ── Rose Pine, Dawn and Moon ───────────────────────────────────────────────
+   Rose Pine (MIT). The palette with the least contrast of the seven: Dawn's
+   `highlight_high` is 1.56 on its own surface and its `muted` 2.87, so the ink
+   half of the light ramp moves the furthest of any theme here. Moon's pine carries neither white (3.65) nor
+   its own page ink (4.29) at 4.5, so the fill steps down to `accent-400`
+   rather than the pine being darkened. That is what the fill tokens are for. */
+
+:root[data-theme="rosepine"] {
+  --color-paper-0: #fffaf3;
+  --color-paper-50: #faf4ed;
+  --color-paper-100: #f4ede8;
+  --color-paper-200: #f2e9e1;
+  --color-paper-300: #dfdad9;
+  --color-paper-400: #949194;
+  --color-paper-500: #767183;
+  --color-paper-600: #6d6a80;
+  --color-paper-700: #625d7a;
+  --color-paper-800: #5f5a7d;
+  --color-paper-900: #544e75;
+  --color-paper-950: #474268;
+  --color-accent-50: #f0f9fe;
+  --color-accent-100: #c9e1ed;
+  --color-accent-200: #9dcadf;
+  --color-accent-300: #6eb4d2;
+  --color-accent-400: #4a9bbd;
+  --color-accent-500: #3382a2;
+  --color-accent-600: #286983;
+  --color-accent-700: #1d566d;
+  --color-accent-800: #1a4455;
+  --color-accent-900: #113341;
+  --color-accent-950: #09232d;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #f5e8e7;
+  --color-bloom-300: #e3b8b5;
+  --color-bloom-500: #a95957;
+  --color-bloom-600: #9d5653;
+  --color-bloom-700: #733938;
+  --color-danger-100: #f5e8eb;
+  --color-danger-300: #d2a7b1;
+  --color-danger-500: #a7586f;
+  --color-danger-600: #924d61;
+  --color-danger-700: #713849;
+}
+
+:root[data-theme="rosepine"].dark {
+  --color-paper-0: #fafafd;
+  --color-paper-50: #f2f2fb;
+  --color-paper-100: #ebe9f8;
+  --color-paper-200: #e0def4;
+  --color-paper-300: #b7b4ce;
+  --color-paper-400: #a8a4c3;
+  --color-paper-500: #918daa;
+  --color-paper-600: #736f8c;
+  --color-paper-700: #44415a;
+  --color-paper-800: #393552;
+  --color-paper-900: #2a273f;
+  --color-paper-950: #232136;
+  --color-accent-50: #eff9fd;
+  --color-accent-100: #cae4f0;
+  --color-accent-200: #a1d0e5;
+  --color-accent-300: #74bcdb;
+  --color-accent-400: #51a6c9;
+  --color-accent-500: #3e8fb0;
+  --color-accent-600: #357793;
+  --color-accent-700: #266178;
+  --color-accent-800: #204b5d;
+  --color-accent-900: #133644;
+  --color-accent-950: #08232d;
+  --color-accent-fill: var(--color-accent-400);
+  --color-accent-fill-hover: var(--color-accent-300);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #fee5e4;
+  --color-bloom-300: #ea9a97;
+  --color-bloom-500: #dc706f;
+  --color-bloom-600: #ae4748;
+  --color-bloom-700: #882329;
+  --color-danger-100: #f9e6ea;
+  --color-danger-300: #efb0be;
+  --color-danger-500: #eb6f92;
+  --color-danger-600: #b44b6a;
+  --color-danger-700: #7f2a45;
+}
+
+/* ── Gruvbox, light and dark ────────────────────────────────────────────────
+   Gruvbox (Pavel Pertsev, MIT). Eleven published neutrals in light and ten in
+   dark, so every surface here is upstream and only the ink rungs move. Gruvbox has no pink at all: `bloom` takes
+   its purple, which is the only colour left over once red is spoken for by
+   `danger`. */
+
+:root[data-theme="gruvbox"] {
+  --color-paper-0: #f9f5d7;
+  --color-paper-50: #fbf1c7;
+  --color-paper-100: #f2e5bc;
+  --color-paper-200: #ebdbb2;
+  --color-paper-300: #d5c4a1;
+  --color-paper-400: #9a8b71;
+  --color-paper-500: #7c6d5f;
+  --color-paper-600: #71645c;
+  --color-paper-700: #655b54;
+  --color-paper-800: #504945;
+  --color-paper-900: #3c3836;
+  --color-paper-950: #282828;
+  --color-accent-50: #f1faf4;
+  --color-accent-100: #cfe6d6;
+  --color-accent-200: #a9d3b7;
+  --color-accent-300: #81c198;
+  --color-accent-400: #62ab7e;
+  --color-accent-500: #4e9369;
+  --color-accent-600: #427b58;
+  --color-accent-700: #336446;
+  --color-accent-800: #284d37;
+  --color-accent-900: #1b3926;
+  --color-accent-950: #0e2517;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #f6e7ef;
+  --color-bloom-300: #dbaac5;
+  --color-bloom-500: #a94d87;
+  --color-bloom-600: #8f3f71;
+  --color-bloom-700: #74315b;
+  --color-danger-100: #ffe5e1;
+  --color-danger-300: #ffa99d;
+  --color-danger-500: #d02d27;
+  --color-danger-600: #cf211d;
+  --color-danger-700: #9d0006;
+}
+
+:root[data-theme="gruvbox"].dark {
+  --color-paper-0: #fefbee;
+  --color-paper-50: #fdf7de;
+  --color-paper-100: #fbf1c7;
+  --color-paper-200: #ebdbb2;
+  --color-paper-300: #d9c8a4;
+  --color-paper-400: #c8b99d;
+  --color-paper-500: #afa08a;
+  --color-paper-600: #928374;
+  --color-paper-700: #665c54;
+  --color-paper-800: #504945;
+  --color-paper-900: #3c3836;
+  --color-paper-950: #282828;
+  --color-accent-50: #f2f9f0;
+  --color-accent-100: #ddeed7;
+  --color-accent-200: #c5e5ba;
+  --color-accent-300: #acdb9c;
+  --color-accent-400: #9acf87;
+  --color-accent-500: #8ec07c;
+  --color-accent-600: #749d65;
+  --color-accent-700: #597d4c;
+  --color-accent-800: #425d39;
+  --color-accent-900: #2a3f23;
+  --color-accent-950: #14240f;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #fde5ea;
+  --color-bloom-300: #dd8fa4;
+  --color-bloom-500: #ec809f;
+  --color-bloom-600: #a43f61;
+  --color-bloom-700: #842147;
+  --color-danger-100: #ffe5e0;
+  --color-danger-300: #faa596;
+  --color-danger-500: #ff7964;
+  --color-danger-600: #c62a1a;
+  --color-danger-700: #930900;
+}
+
+/* ── Solarized, light and dark ──────────────────────────────────────────────
+   Solarized (Ethan Schoonover, MIT). One set of sixteen colours used both ways
+   up, so the accent and the two semantic seeds are the same hexes in both
+   modes and only the lightness curve differs. Its ink tiers are compressed
+   against ours (base01 through base1 span 2.4 to 4.9 on the dark card, where
+   this app wants 3.0 to 7.0), which is why four dark rungs move. `bloom` is
+   the magenta: Solarized has no pink, and its red is `danger`. */
+
+:root[data-theme="solarized"] {
+  --color-paper-0: #fdf6e3;
+  --color-paper-50: #f5efdc;
+  --color-paper-100: #eee8d5;
+  --color-paper-200: #cfd0c4;
+  --color-paper-300: #b1b8b2;
+  --color-paper-400: #849192;
+  --color-paper-500: #647476;
+  --color-paper-600: #596c6f;
+  --color-paper-700: #4c6168;
+  --color-paper-800: #32515b;
+  --color-paper-900: #073642;
+  --color-paper-950: #002b36;
+  --color-accent-50: #eefaf9;
+  --color-accent-100: #c4e3e0;
+  --color-accent-200: #94cec8;
+  --color-accent-300: #5cb9b0;
+  --color-accent-400: #2aa198;
+  --color-accent-500: #108b83;
+  --color-accent-600: #14756e;
+  --color-accent-700: #07605a;
+  --color-accent-800: #0f4b46;
+  --color-accent-900: #073834;
+  --color-accent-950: #022523;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #fce5ec;
+  --color-bloom-300: #e599b5;
+  --color-bloom-500: #c82a78;
+  --color-bloom-600: #ad2468;
+  --color-bloom-700: #881550;
+  --color-danger-100: #fee5e2;
+  --color-danger-300: #eb9a90;
+  --color-danger-500: #d22626;
+  --color-danger-600: #b62121;
+  --color-danger-700: #901214;
+}
+
+:root[data-theme="solarized"].dark {
+  --color-paper-0: #fefcf7;
+  --color-paper-50: #fefaee;
+  --color-paper-100: #fdf6e3;
+  --color-paper-200: #eee8d5;
+  --color-paper-300: #b3c1c1;
+  --color-paper-400: #a2b4b6;
+  --color-paper-500: #859ca4;
+  --color-paper-600: #677d85;
+  --color-paper-700: #3f5b64;
+  --color-paper-800: #254853;
+  --color-paper-900: #073642;
+  --color-paper-950: #002b36;
+  --color-accent-50: #edfaf8;
+  --color-accent-100: #c8e9e5;
+  --color-accent-200: #9bd9d2;
+  --color-accent-300: #68cac1;
+  --color-accent-400: #3eb7ad;
+  --color-accent-500: #2aa198;
+  --color-accent-600: #25867e;
+  --color-accent-700: #156c66;
+  --color-accent-800: #14534e;
+  --color-accent-900: #073b38;
+  --color-accent-950: #002523;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #fce5ec;
+  --color-bloom-300: #e599b5;
+  --color-bloom-500: #fc5ea4;
+  --color-bloom-600: #ad2468;
+  --color-bloom-700: #881550;
+  --color-danger-100: #fee5e2;
+  --color-danger-300: #eb9a90;
+  --color-danger-500: #ff665a;
+  --color-danger-600: #b62121;
+  --color-danger-700: #901214;
+}
+
+/* ── Everforest, Medium ─────────────────────────────────────────────────────
+   Everforest (sainnhe, MIT). The green is 2.69 on its own light background, so
+   it carries neither white nor the page ink and is anchored at `accent-400`,
+   which holds no text, rather than being darkened into a colour Everforest
+   does not contain. The fill is the generated 600 below it. */
+
+:root[data-theme="everforest"] {
+  --color-paper-0: #fdf6e3;
+  --color-paper-50: #f4f0d9;
+  --color-paper-100: #efebd4;
+  --color-paper-200: #e6e2cc;
+  --color-paper-300: #bdc3af;
+  --color-paper-400: #889283;
+  --color-paper-500: #697467;
+  --color-paper-600: #616c6c;
+  --color-paper-700: #536068;
+  --color-paper-800: #445259;
+  --color-paper-900: #2e3b42;
+  --color-paper-950: #19252c;
+  --color-accent-50: #f6faeb;
+  --color-accent-100: #dae3be;
+  --color-accent-200: #bfce88;
+  --color-accent-300: #a5b84a;
+  --color-accent-400: #8da101;
+  --color-accent-500: #798a00;
+  --color-accent-600: #657400;
+  --color-accent-700: #525e00;
+  --color-accent-800: #3f4900;
+  --color-accent-900: #2d3500;
+  --color-accent-950: #1d2300;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #f8e6f0;
+  --color-bloom-300: #e8aed2;
+  --color-bloom-500: #b24192;
+  --color-bloom-600: #a9448b;
+  --color-bloom-700: #7a2762;
+  --color-danger-100: #fee5e3;
+  --color-danger-300: #f7a8a1;
+  --color-danger-500: #cf2b30;
+  --color-danger-600: #c23536;
+  --color-danger-700: #8e171c;
+}
+
+:root[data-theme="everforest"].dark {
+  --color-paper-0: #f8f6f2;
+  --color-paper-50: #ede8dd;
+  --color-paper-100: #e2dac7;
+  --color-paper-200: #d3c6aa;
+  --color-paper-300: #c4c3b1;
+  --color-paper-400: #abb7ae;
+  --color-paper-500: #919f95;
+  --color-paper-600: #7a8478;
+  --color-paper-700: #475258;
+  --color-paper-800: #3d484d;
+  --color-paper-900: #2d353b;
+  --color-paper-950: #232a2e;
+  --color-accent-50: #f5f8f0;
+  --color-accent-100: #e4edd8;
+  --color-accent-200: #d3e3bb;
+  --color-accent-300: #c2d99e;
+  --color-accent-400: #b3cd8a;
+  --color-accent-500: #a7c080;
+  --color-accent-600: #889d68;
+  --color-accent-700: #6a7c4e;
+  --color-accent-800: #4f5c3a;
+  --color-accent-900: #343e23;
+  --color-accent-950: #1b220e;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #f9e6ee;
+  --color-bloom-300: #d699b6;
+  --color-bloom-500: #d582ab;
+  --color-bloom-600: #9b4d76;
+  --color-bloom-700: #782e57;
+  --color-danger-100: #ffe5e4;
+  --color-danger-300: #ea8283;
+  --color-danger-500: #ff6b73;
+  --color-danger-600: #b9273b;
+  --color-danger-700: #930023;
+}
+
+/* ── Nord, dark published and light constructed ─────────────────────────────
+   Nord (Arctic Ice Studio and Sven Greb, MIT). The only theme here whose light
+   member is not published: Snow Storm supplies the surfaces, Polar Night the
+   ink, and the picker says so. Nothing is invented, the roles are. It is also
+   the only light palette that needs no paper correction at all, because Nord's
+   neutrals are further apart than anybody else's.
+
+   Frost carries the page ink rather than white: white on `nord7` is 2.08 and
+   `nord0` on it is 5.99, which is the whole reason `--color-on-accent` exists
+   and is why the published Frost blues survive verbatim. */
+
+:root[data-theme="nord"] {
+  --color-paper-0: #eceff4;
+  --color-paper-50: #e5e9f0;
+  --color-paper-100: #d8dee9;
+  --color-paper-200: #bfc6d3;
+  --color-paper-300: #a7aebd;
+  --color-paper-400: #838a9a;
+  --color-paper-500: #656d7e;
+  --color-paper-600: #5a6275;
+  --color-paper-700: #4c566a;
+  --color-paper-800: #434c5e;
+  --color-paper-900: #3b4252;
+  --color-paper-950: #2e3440;
+  --color-accent-50: #f3f8ff;
+  --color-accent-100: #d3e0f0;
+  --color-accent-200: #b0c8e5;
+  --color-accent-300: #8eb0da;
+  --color-accent-400: #7398c7;
+  --color-accent-500: #5e81ac;
+  --color-accent-600: #4f6c90;
+  --color-accent-700: #3f5877;
+  --color-accent-800: #31445c;
+  --color-accent-900: #223244;
+  --color-accent-950: #15202e;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #efeaee;
+  --color-bloom-300: #d0bccc;
+  --color-bloom-500: #815e7c;
+  --color-bloom-600: #7d5e79;
+  --color-bloom-700: #5d4359;
+  --color-danger-100: #f7e8e8;
+  --color-danger-300: #d8a7a9;
+  --color-danger-500: #a84c55;
+  --color-danger-600: #9b4a52;
+  --color-danger-700: #77353c;
+}
+
+:root[data-theme="nord"].dark {
+  --color-paper-0: #f9fafc;
+  --color-paper-50: #f4f5f8;
+  --color-paper-100: #eceff4;
+  --color-paper-200: #e5e9f0;
+  --color-paper-300: #d8dee9;
+  --color-paper-400: #c1c9d7;
+  --color-paper-500: #a5aebe;
+  --color-paper-600: #838d9f;
+  --color-paper-700: #4c566a;
+  --color-paper-800: #434c5e;
+  --color-paper-900: #3b4252;
+  --color-paper-950: #2e3440;
+  --color-accent-50: #f2f8f8;
+  --color-accent-100: #ddecec;
+  --color-accent-200: #c5e1e1;
+  --color-accent-300: #add7d6;
+  --color-accent-400: #9acac9;
+  --color-accent-500: #8fbcbb;
+  --color-accent-600: #759a99;
+  --color-accent-700: #5a7a79;
+  --color-accent-800: #425a5a;
+  --color-accent-900: #2a3d3d;
+  --color-accent-950: #142222;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #efeaee;
+  --color-bloom-300: #d0bccc;
+  --color-bloom-500: #c8a2c1;
+  --color-bloom-600: #876782;
+  --color-bloom-700: #5d4359;
+  --color-danger-100: #f7e8e8;
+  --color-danger-300: #d8a7a9;
+  --color-danger-500: #f59199;
+  --color-danger-600: #9b4a52;
+  --color-danger-700: #77353c;
+}

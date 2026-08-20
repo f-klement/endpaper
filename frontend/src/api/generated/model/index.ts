@@ -6,6 +6,8 @@
  * OpenAPI spec version: 1.0.0
  */
 
+export * from "./appearanceOut.ts";
+export * from "./appearanceUpdate.ts";
 export * from "./applyEnrichmentParams.ts";
 export * from "./authConfigOut.ts";
 export * from "./authMode.ts";
@@ -74,6 +76,7 @@ export * from "./tagCategory.ts";
 export * from "./tagCreate.ts";
 export * from "./tagOut.ts";
 export * from "./tagStat.ts";
+export * from "./themeMode.ts";
 export * from "./token.ts";
 export * from "./userCreate.ts";
 export * from "./userOut.ts";

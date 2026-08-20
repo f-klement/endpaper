@@ -20,11 +20,18 @@ beforeEach(() => {
 
 function renderSession() {
   const client = createTestQueryClient();
-  return renderHook(() => useSession(), {
-    wrapper: ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client }, children),
-  });
+  return {
+    ...renderHook(() => useSession(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, children),
+    }),
+    client,
+  };
 }
+
+/** A cached listing belonging to whoever is signed in at the time. */
+const BOOKS_KEY = ["/api/books", { page: 1 }];
+const BOOKS = { items: [{ id: 1, title: "A private diary", is_private: true }] };
 
 /** Configure the server's reported auth mode. */
 function serverMode(mode: AuthMode, registrationEnabled = true) {
@@ -118,6 +125,37 @@ describe("useSession in local mode", () => {
 
     expect(result.current.user).toBeNull();
     expect(localStorage.getItem("token")).toBeNull();
+  });
+
+  it("drops the cache when signing out", async () => {
+    // The client is created once per page load and survives an identity
+    // change, so without this the next person at this browser is handed the
+    // previous member's entries back under identical keys. `visible_to()` is
+    // "public or mine", so a cached listing carries their private books, and
+    // `my_status`, `my_rating` and `active_loan` are computed per caller.
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+    act(() => result.current.signIn(makeUser(), "token-123"));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+    expect(client.getQueryData(BOOKS_KEY)).toEqual(BOOKS);
+
+    act(() => result.current.signOut());
+
+    expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
+  });
+
+  it("drops the cache when signing in", async () => {
+    // Signing out is not the only way the identity changes: "Switch account"
+    // is a router link to /login, deliberately reachable while signed in, so
+    // the next sign-in happens with the previous member's cache still warm.
+    const { result, client } = renderSession();
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+    client.setQueryData(BOOKS_KEY, BOOKS);
+    expect(client.getQueryData(BOOKS_KEY)).toEqual(BOOKS);
+
+    act(() => result.current.signIn(makeUser({ username: "someone else" }), "t"));
+
+    expect(client.getQueryData(BOOKS_KEY)).toBeUndefined();
   });
 
   it("never asks the server who the caller is", async () => {

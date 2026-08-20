@@ -20,6 +20,13 @@ store for runtime settings.
 digest; the plaintext is never stored or returned. `is_admin` is granted to whoever
 registers first and is not editable through the API afterwards.
 
+`appearance_palette`, `appearance_mode` and `appearance_wallpaper` are the member's own
+look, nullable, with NULL meaning "has not chosen" rather than a value. Columns rather than
+a `user_preferences` table: it is a one-to-one with no history, and a side table would add a
+join to every read plus a row that both shadow-account paths in `auth_backends.py` would
+have to remember to create. They are deliberately absent from `UserOut`; see
+[theming.md](theming.md).
+
 **`books`.** The catalogue. `isbn` is unique **but nullable**, which is deliberate: SQL
 treats NULLs as distinct, so any number of manually-added books can coexist without an
 ISBN while genuine duplicates are still rejected. `added_by_user_id` is nullable so

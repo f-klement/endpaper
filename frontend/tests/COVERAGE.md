@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**749 tests · 92% statements, 88% functions, 78% branches.**
+**958 tests · 92% statements, 88% functions, 78% branches.**
 
 ```bash
 bun run test                 # the suite
@@ -45,7 +45,7 @@ readers as a side effect.
 | ------------------------------------- | ----: | ----------------------------------------------------------- |
 | `api/mutator.test.ts`                 |    28 | Token attachment, 401 handling, error flattening, downloads |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
-| `app/*`                               |    17 | The session gate, the sidebar, the library export           |
+| `app/*`                               |    45 | The session gate, the top bar, the library export, appearance sync |
 | `components/*.test.tsx`               |    28 | The general dumb components, incl. the star rating and the toast |
 | `i18n/index.test.tsx`                 |    33 | Language detection, interpolation, catalogue parity         |
 | `lib/isbn.test.ts`                    |    31 | Check digits, ISBN-10 to ISBN-13, normalisation             |
@@ -53,7 +53,7 @@ readers as a side effect.
 | `lib/lastLocation.test.ts`            |    10 | Shelf carry-over, clearing, storage refusing to work        |
 | `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
-| `pages/hooks.test.ts`                 |    13 | Session state, auth modes, corrupt-storage tolerance        |
+| `pages/hooks.test.ts`                 |    20 | Session state, auth modes, corrupt storage, and dropping the cache when the identity changes |
 | `pages/types.test.ts`                 |    11 | Tag grouping and the style tables                           |
 | `pages/components/TagPicker.test.tsx` |     6 | The picker shared by three pages                            |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
@@ -68,6 +68,10 @@ readers as a side effect.
 | `pages/SeriesPage/*`                  |     7 | Series cards, their counts and their gaps                   |
 | `pages/DuplicatesPage/*`              |     8 | Suspected duplicates and confirming a merge                 |
 | `pages/errors/*`                      |     9 | 404, 403 and the render-crash boundary                      |
+| `theme/index.test.tsx`                |    27 | Mode resolution, the palette on the document, more contrast |
+| `theme/appearance.test.ts`            |    15 | The per account cache, unknown values, corrupt storage      |
+| `theme/palettes.test.ts`              |    77 | Every palette and mode, measured against the rung contract, with and without more contrast |
+| `theme/patterns.test.ts`              |    27 | The wallpaper engine: seamlessness, the ink and byte budgets |
 
 ## The parts that matter most
 

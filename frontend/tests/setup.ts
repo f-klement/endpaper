@@ -20,10 +20,12 @@ if (!window.matchMedia) {
 /**
  * The four palette steps the wallpaper reads.
  *
- * The suite runs with `css: false`, so no stylesheet is loaded and every custom
- * property is empty. `patterns.ts` resolves the wallpaper's ink off these at
- * runtime rather than owning any hex, so without them the app under test is one
- * with no palette, which is not the app. They are the shipped values.
+ * No stylesheet is loaded here: `vite.config.ts` processes CSS only so that one
+ * test can read it as text, and nothing under test imports one. Every custom
+ * property is therefore empty. `patterns.ts` resolves the wallpaper's ink off
+ * these at runtime rather than owning any hex, so without them the app under
+ * test is one with no palette, which is not the app. They are the shipped
+ * values.
  */
 const PALETTE_TOKENS: Record<string, string> = {
   "--color-accent-700": "#0f766e",

@@ -8,6 +8,7 @@ pages are for changing it.
 | [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |
 | [data-model.md](data-model.md) | The seven tables, the relationships, and the privacy rule that every query must honour |
 | [api.md](api.md) | Every endpoint, its auth requirement, and the status codes it returns |
+| [theming.md](theming.md) | The seven palettes, the rule that generated them, and where an appearance is stored |
 | [frontend.md](frontend.md) | Component and page layout, state handling, the typed API client |
 | [security.md](security.md) | The authorization model, rate limiting, uploads, headers, and the known limits |
 | [testing.md](testing.md) | How the mirrored test tree works and the conventions to follow when adding tests |

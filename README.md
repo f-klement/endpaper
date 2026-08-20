@@ -75,6 +75,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 
 - **PWA installable**: "Add to Home Screen" on iOS and Android
 - **German and English**: switch in Settings; new visitors follow their browser
+- **Light and dark**: follows the system unless you say otherwise, and the choice is saved
+  to your account rather than to the browser, so it follows you between devices
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
 - **Health endpoint**: `GET /api/healthz` for container probes. It runs a query, so it
   fails when the database does rather than when the web server does

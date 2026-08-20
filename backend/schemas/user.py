@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from enums import AuthMode
+from enums import AuthMode, ThemeMode
 
 # bcrypt only hashes the first 72 bytes; anything beyond it is not merely
 # useless but actively misleading, since two passwords sharing a 72-byte prefix
@@ -41,6 +41,49 @@ class UserOut(BaseModel):
     is_admin: bool
     created_at: datetime
     model_config = {"from_attributes": True}
+
+
+#: What a palette or wallpaper id may look like.
+#:
+#: Which ids exist is the frontend's business: the palettes are CSS blocks and
+#: the wallpapers are drawing code, and a server that held the list would have
+#: to be redeployed to add one. What the server does own is the shape, so a
+#: stored value cannot be a megabyte of anything or carry characters that mean
+#: something to whatever reads it back.
+_APPEARANCE_ID = r"^[a-z0-9-]{1,30}$"
+
+
+class AppearanceOut(BaseModel):
+    """One member's own appearance. Never another member's.
+
+    Deliberately not part of `UserOut`, which is served inside every book
+    payload and the member list: appearance on that schema would tell everyone
+    in the household what everyone else's library looks like.
+
+    Every field is nullable and null means "has not chosen", which is what a
+    new account and every directory shadow account start as. The client then
+    follows the system for the mode, uses the house palette, and picks a
+    different wallpaper each visit.
+    """
+
+    palette: str | None = None
+    mode: ThemeMode | None = None
+    wallpaper: str | None = None
+
+
+class AppearanceUpdate(BaseModel):
+    """A whole appearance, replaced.
+
+    A PUT rather than a PATCH, because for all three fields null is a value a
+    member can actually choose ("follow the system", "the house palette", "a
+    different wallpaper every time"). Under PATCH semantics an explicit null
+    and an absent key are the same JSON, so clearing a preference and leaving
+    it alone would be indistinguishable without inspecting `model_fields_set`.
+    """
+
+    palette: str | None = Field(default=None, pattern=_APPEARANCE_ID)
+    mode: ThemeMode | None = None
+    wallpaper: str | None = Field(default=None, pattern=_APPEARANCE_ID)
 
 
 class Token(BaseModel):

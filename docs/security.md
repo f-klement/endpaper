@@ -221,6 +221,26 @@ session. The epoch is a random value rather than a counter because the settings 
 itself part of the backup: a counter would be restored to an older number, and tokens
 stamped with that number would start verifying again.
 
+### An identity change drops the in-memory cache
+
+React Query's client is created once per page load and does not care who is signed in, and
+two of the three ways **this app** changes the identity itself never reload the page (under
+proxy auth the upstream owns identity and this app offers none of them): `signOut` clears
+`localStorage` and stays put, and "Switch account" is a router link to `/login`, deliberately
+reachable while signed in. So without help the next member gets the previous one's cached
+answers back under identical keys, and at the default `staleTime` nothing refetches for
+another thirty seconds.
+
+What that leaks is the whole shelf. `visible_to()` is "public or mine", so a cached listing
+carries **private** books, and `my_status`, `my_rating` and `active_loan` are computed per
+caller; `/api/stats` and `/api/loans` are the same shape. `useSession` therefore calls
+`queryClient.clear()` in both `signIn` and `signOut`, and `houseRules.test.ts` holds the
+general rule, because the defect is not in any one query: it is that a member-scoped answer
+outlives the member, so the next hook keyed on "the caller" reintroduces it for free.
+
+`mutator.ts::endSession` reaches the same place on the 401 path by doing a full navigation
+instead, which is why it is the one exemption to that rule.
+
 ## Known limits
 
 Worth knowing before exposing this beyond a private network:

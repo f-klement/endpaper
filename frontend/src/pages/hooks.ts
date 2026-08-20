@@ -15,6 +15,7 @@
  *                  auth screen is ever shown.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -60,6 +61,7 @@ export interface Session {
 }
 
 export function useSession(): Session {
+  const queryClient = useQueryClient();
   const config = useAuthConfig({ query: { retry: false } });
   const mode = config.data?.auth_mode ?? AuthMode.local;
   const isProxy = mode === AuthMode.proxy;
@@ -70,10 +72,25 @@ export function useSession(): Session {
   // token and a request here would be a round trip for something we hold.
   const me = useMe({ query: { enabled: isProxy, retry: false } });
 
-  const signIn = useCallback((account: UserOut, token: string) => {
-    setSession(token, account);
-    setStoredUser(account);
-  }, []);
+  const signIn = useCallback(
+    (account: UserOut, token: string) => {
+      setSession(token, account);
+      // Everything in the cache belongs to whoever was here before. The client
+      // is created once per page load and survives an identity change, and
+      // "Switch account" is a router link to /login rather than a navigation,
+      // so signing in as somebody else would otherwise hand them the previous
+      // member's entries back under identical keys: their books, including the
+      // private ones, their reading status, their loans, their statistics. At
+      // the default staleTime nothing refetches for another thirty seconds.
+      //
+      // `mutator.ts::endSession` already reasons this way on the 401 path, and
+      // drops in-memory state by doing a full navigation. The deliberate paths
+      // reach the same place through the router, so they have to say it.
+      queryClient.clear();
+      setStoredUser(account);
+    },
+    [queryClient],
+  );
 
   const logout = useLogout();
 
@@ -89,8 +106,12 @@ export function useSession(): Session {
   const signOut = useCallback(() => {
     logout.mutate();
     clearSession();
+    // Before the state change rather than after, and for the reason above: the
+    // next person at this browser must not be handed a cache belonging to the
+    // person who just left.
+    queryClient.clear();
     setStoredUser(null);
-  }, [logout]);
+  }, [logout, queryClient]);
 
   return {
     mode,

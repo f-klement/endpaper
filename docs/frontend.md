@@ -284,12 +284,17 @@ Three properties are load bearing:
 The batch is added sequentially, not with `Promise.all`: a 300-book batch would otherwise
 open 300 concurrent requests against one SQLite writer.
 
-## Light, dark and the wallpaper
+## Appearance: the palette, light or dark, and the wallpaper
 
-`src/theme/` resolves the theme exactly the way `src/i18n/` resolves the language:
+`src/theme/` resolves light and dark exactly the way `src/i18n/` resolves the language:
 an explicit choice, then the system's `prefers-color-scheme`, then light. Following the
 system by default is the point, and "system" stays a real option rather than the absence
 of one, so somebody can go back to following it.
+
+All three preferences live on the **account**, not the device, with a write-through
+`localStorage` cache in front of the server so the first paint does not wait on the network.
+`AppearanceSync` is the one component that holds both directions. The palettes themselves,
+the rule that generated them and the storage design are in [theming.md](theming.md).
 
 Three details are load bearing:
 
@@ -314,7 +319,8 @@ so "it is a Morris" is not by itself a licence. An SVG is also about a kilobyte 
 few hundred for a repeating raster, and it takes its colour from the theme instead of
 needing a second file for dark.
 
-The choice is deliberately **not** stored. A different one each time is the whole idea.
+The choice is stored only if somebody makes one: a null wallpaper means a different one
+each time, which is the behaviour this was built around and what a new account starts at.
 Dark uses a lighter ink at a *lower* opacity, because a pattern that reads as gentle on
 white becomes a glare on near black at the same strength.
 

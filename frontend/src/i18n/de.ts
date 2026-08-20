@@ -280,12 +280,14 @@ export const de: Messages = {
   "settings.adminOnly": "Nur Administratoren können das ändern.",
 
   "theme.label": "Darstellung",
-  "theme.hint": "Gilt für dich auf diesem Gerät.",
+  "theme.hint": "Wird in deinem Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
   "theme.system": "Systemeinstellung",
   "theme.systemHint":
     "Übernimmt, was auf deinem Handy oder Rechner eingestellt ist.",
+  "theme.wallpaperOff":
+    "Das Hintergrundmuster ist aus, weil dein System mehr Kontrast verlangt.",
   "settings.language": "Sprache",
   "settings.languageHint": "Gilt für dich auf diesem Gerät.",
   "settings.defaultLanguage": "Standardsprache für neue Besucher",

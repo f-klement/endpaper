@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**1115 tests · 95% line coverage** (2978 statements, 162 missed).
+**1350 tests · 95% line coverage** (2978 statements, 162 missed).
 
 ```bash
 uv run pytest                                    # the suite
@@ -63,7 +63,7 @@ is why the helper uses regexes.
 | `routers/test_auth.py` | 21 | Registration, login, `/auth/me`, the registration switch |
 | `routers/test_loans.py` | 19 | Lending, returning, history |
 | `routers/test_stats.py` | 18 | Every aggregation, and that each respects privacy |
-| `routers/test_users.py` | 6 | The member list, and that it never exposes hashes |
+| `routers/test_users.py` | 16 | The member list, and appearance: the caller's own only, never on `UserOut` |
 
 ## The parts that matter most
 

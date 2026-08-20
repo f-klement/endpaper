@@ -34,3 +34,6 @@ trivy-*.json
 
 # Competitor research, internal
 feature_investi*.md
+
+# Technology evaluation, internal working notes
+capacitor_viability.md

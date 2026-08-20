@@ -1,6 +1,86 @@
 {
   "components": {
     "schemas": {
+      "AppearanceOut": {
+        "description": "One member's own appearance. Never another member's.\n\nDeliberately not part of `UserOut`, which is served inside every book\npayload and the member list: appearance on that schema would tell everyone\nin the household what everyone else's library looks like.\n\nEvery field is nullable and null means \"has not chosen\", which is what a\nnew account and every directory shadow account start as. The client then\nfollows the system for the mode, uses the house palette, and picks a\ndifferent wallpaper each visit.",
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThemeMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "palette": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Palette"
+          },
+          "wallpaper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallpaper"
+          }
+        },
+        "title": "AppearanceOut",
+        "type": "object"
+      },
+      "AppearanceUpdate": {
+        "description": "A whole appearance, replaced.\n\nA PUT rather than a PATCH, because for all three fields null is a value a\nmember can actually choose (\"follow the system\", \"the house palette\", \"a\ndifferent wallpaper every time\"). Under PATCH semantics an explicit null\nand an absent key are the same JSON, so clearing a preference and leaving\nit alone would be indistinguishable without inspecting `model_fields_set`.",
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThemeMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "palette": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9-]{1,30}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Palette"
+          },
+          "wallpaper": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z0-9-]{1,30}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallpaper"
+          }
+        },
+        "title": "AppearanceUpdate",
+        "type": "object"
+      },
       "AuthConfigOut": {
         "description": "Read by the login page before anyone holds a token.",
         "properties": {
@@ -2300,6 +2380,16 @@
         ],
         "title": "TagStat",
         "type": "object"
+      },
+      "ThemeMode": {
+        "description": "Light, dark, or whatever the reader's operating system is asking for.\n\nA closed set, so the server owns it: unlike the palette and the wallpaper,\nwhich are a stylesheet and a drawing routine the frontend can add to\nwithout redeploying anything here, these three are the only answers there\nwill ever be.",
+        "enum": [
+          "light",
+          "dark",
+          "system"
+        ],
+        "title": "ThemeMode",
+        "type": "string"
       },
       "Token": {
         "properties": {
@@ -5042,6 +5132,78 @@
           }
         ],
         "summary": "List Users",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/me/appearance": {
+      "get": {
+        "description": "The caller's own appearance.\n\nThere is no path parameter and no route that takes a member id, so there\nis no object to authorize: the only appearance reachable here is the\ncaller's. That is the point, and it is why this is not a field on\n`UserOut`, which every member can read for every other member.",
+        "operationId": "get_my_appearance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppearanceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get My Appearance",
+        "tags": [
+          "users"
+        ]
+      },
+      "put": {
+        "description": "Replace the caller's own appearance.\n\nNo admin check and no member check, deliberately: a preference about what\na person's own screen looks like needs no permission beyond being signed\nin, and the row written is the one the token names.",
+        "operationId": "set_my_appearance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppearanceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppearanceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set My Appearance",
         "tags": [
           "users"
         ]

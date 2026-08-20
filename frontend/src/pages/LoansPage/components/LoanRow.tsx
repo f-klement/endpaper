@@ -70,7 +70,7 @@ export default function LoanRow({
                 })}
           </p>
           {loan.is_overdue && (
-            <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700">
+            <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700 dark:text-danger-100">
               {loan.due_at
                 ? t("loans.overdueSince", {
                     date: new Date(loan.due_at).toLocaleDateString(locale),

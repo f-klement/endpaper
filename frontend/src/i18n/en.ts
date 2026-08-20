@@ -276,11 +276,13 @@ export const en = {
   "settings.adminOnly": "Only an admin can change these.",
 
   "theme.label": "Appearance",
-  "theme.hint": "Applies to you on this device.",
+  "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
   "theme.dark": "Dark",
   "theme.system": "Follow system",
   "theme.systemHint": "Matches whatever your phone or computer is set to.",
+  "theme.wallpaperOff":
+    "The wallpaper is off because your system asks for more contrast.",
   "settings.language": "Language",
   "settings.languageHint": "Applies to you on this device.",
   "settings.defaultLanguage": "Default language for new visitors",
