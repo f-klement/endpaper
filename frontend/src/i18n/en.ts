@@ -286,6 +286,35 @@ export const en = {
   "theme.systemHint": "Matches whatever your phone or computer is set to.",
   "theme.wallpaperOff":
     "The wallpaper is off because your system asks for more contrast.",
+  "theme.summary": "{palette}, {mode}, {wallpaper}",
+  "theme.change": "Choose a palette, light or dark, and a wallpaper",
+
+  "appearance.title": "Appearance",
+  "appearance.intro":
+    "Everything here applies as you pick it and saves to your account.",
+  "appearance.preview": "Your library, with this look",
+  "appearance.previewEmpty":
+    "No books are loaded on this device right now, so there is nothing real to preview. Visit your library and come back.",
+  "appearance.mode": "Light and dark",
+  "appearance.palette": "Palette",
+  "appearance.attribution": "Colours from {source}.",
+  "appearance.attributionOwn": "This project's own colours.",
+  "appearance.constructedLight":
+    "{palette} publishes no light theme. This one is built here from colours it does publish.",
+  "appearance.constructedDark":
+    "{palette} publishes no dark theme. This one is built here from colours it does publish.",
+  "appearance.wallpaper": "Wallpaper",
+  "appearance.wallpaperNone": "None",
+  "appearance.wallpaperNoneHint": "A plain page.",
+  "appearance.wallpaperSurprise": "Surprise me",
+  "appearance.wallpaperSurpriseHint": "A different one every visit.",
+  "appearance.family.morris": "William Morris",
+  "appearance.family.papers": "Decorated papers",
+  "appearance.licences": "Where these come from",
+  "appearance.licencesPalettes":
+    "The palettes below are used under the MIT licence, with their values taken from each project's own repository. None of these projects endorses this one.",
+  "appearance.licencesMorris":
+    "The Morris pattern names identify the historical designs the drawings are after. This project is not affiliated with, or endorsed by, Morris & Co.",
   "settings.language": "Language",
   "settings.languageHint": "Applies to you on this device.",
   "settings.defaultLanguage": "Default language for new visitors",

@@ -14,6 +14,7 @@
 import { TagCategory } from "../api/generated/model";
 import type { TagOut } from "../api/generated/model";
 import type { MessageKey } from "../i18n";
+import type { ThemePreference } from "../theme";
 
 /**
  * The order tag categories are presented in, everywhere.
@@ -102,3 +103,26 @@ export function groupTagsByCategory(
     ),
   };
 }
+
+/**
+ * What each light and dark mode is called.
+ *
+ * Here rather than in the picker because two screens name them: the picker
+ * draws the buttons, and the settings list prints the one in force in its
+ * summary. Written twice they drift, and the copy that was indexed with a
+ * `Record<string, MessageKey>` needed a non-null assertion to compile, which
+ * is what a fourth mode would have silently walked past.
+ */
+export const MODE_LABELS: Record<ThemePreference, MessageKey> = {
+  light: "theme.light",
+  dark: "theme.dark",
+  system: "theme.system",
+};
+
+/**
+ * The order they are offered in.
+ *
+ * `system` last rather than first: it is the default, and a default reads
+ * better as the thing you return to than the thing you start at.
+ */
+export const MODE_ORDER: readonly ThemePreference[] = ["light", "dark", "system"];

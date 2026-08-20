@@ -4,11 +4,11 @@ import {
   OwnershipStatus,
   ReadStatus,
   type BookOut,
-} from "../../../api/generated/model";
-import { useTranslation, type MessageKey } from "../../../i18n";
-import { TAG_PILL_CLASSES } from "../../types";
-import { Icon } from "../../../components";
-import { CoverImage } from "../../components";
+} from "../../api/generated/model";
+import { useTranslation, type MessageKey } from "../../i18n";
+import { TAG_PILL_CLASSES } from "../types";
+import { Icon } from "../../components";
+import CoverImage from "./CoverImage";
 
 // Exhaustive by type: adding a status to the backend enum makes this a
 // compile error until it is given a presentation here, which is how the
@@ -44,7 +44,13 @@ interface BookCardProps {
   onToggleSelect?: (bookId: number) => void;
 }
 
-/** One book in the grid. Presentational, used only by Home. */
+/**
+ * One book in the grid. Presentational: it takes a book and renders it.
+ *
+ * Shared rather than Home's own, because the appearance picker previews a
+ * palette on the reader's own first two books and a card drawn only for the
+ * preview would be the invented sample content the picker exists to avoid.
+ */
 export default function BookCard({
   book,
   isSelecting = false,

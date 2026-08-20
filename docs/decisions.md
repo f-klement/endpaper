@@ -588,13 +588,16 @@ The rule covers `hover:text-` and not `hover:bg-` or `hover:border-`. A surface 
 in the dark looks slightly wrong; text a shade off is text nobody can read, and WCAG 1.4.3
 has a number for the second and not the first.
 
-### The theming work is not in the changelog yet
+### The theming series is one changelog entry, under v0.4.0
 
-Three phases of it have landed (the token repair, seven palettes, ten wallpapers) and
-`CHANGELOG.md` mentions none of them. That is deliberate and worth writing down rather than
-leaving to be discovered: the entry gets written once, when the appearance picker ships,
-because until somebody can choose a palette there is nothing a reader of a changelog can do
-with the news. Whoever ships the picker writes the whole of it.
+Four phases landed separately (the token repair, seven palettes, ten wallpapers, the
+picker) and only the last of them is a thing a reader can do anything with, so the entry
+was written once, when the picker shipped.
+
+**v0.3.0 was never tagged.** Its section stays as written, because its contents are in
+`main` and the section is a true record of them; the next tag is v0.4.0 and carries both.
+A version in the changelog with no tag beside it is a fact about git, not a hole in the
+record, and folding the bug fixes into the theming release would have lost which was which.
 
 ### `warn`, `ok` and `loan` stay raw Tailwind, for now, minus one repair
 
@@ -630,6 +633,74 @@ Not on `UserOut` because that schema is served inside every book payload and the
 list, so a field there would tell everyone in the household what everyone else's library
 looks like. `/api/users/me/appearance` takes no member id, so there is no object to
 authorize and no way to ask for somebody else's.
+
+### The wallpaper picker is a route, and the wallpaper is not a switch
+
+`/settings/appearance`, not a section of the settings list and not a dialog. The reason is
+the one the design turns on: the only honest preview of a wallpaper is the page. The
+pattern is painted on `body`, so the picker is the app surface with the controls laid over
+it, a choice shows itself the moment it is made, and there is no Save button because there
+is nothing to defer. A dialog would have covered the thing being previewed.
+
+The preview is the reader's **own first two book cards**, taken from the query cache and
+never fetched. Invented sample content is not the real page, and a request made to fill a
+preview would put a book on screen that the reader did not ask for. Where the cache holds
+nothing, the picker says so rather than drawing a placeholder book.
+
+**Off is a value in `wallpaper`, not a flag beside it.** The field already answered two
+questions (which pattern, or a different one every visit) and a boolean next to it would let
+the two disagree: off with a pattern named, or on with none. `WALLPAPER_OFF` is the third
+answer, and `patternFor` is the one place that reads it. It is the only id that does not
+degrade to a random pattern, because an off that came back as a wallpaper would be a choice
+the app declined to keep.
+
+Two off states, and they are not the same thing. A chosen off is `pattern === null`; the
+system asking for more contrast is `wallpaperOff`. Both clear the body, only one is worth
+explaining, and the picker says which happened. The choice stays recorded and stays marked
+underneath the explanation, because it is what comes back when the system stops asking.
+
+### The swatches read the stylesheet rather than restating it
+
+A palette tile draws page, card, ink and the two accents in that palette's own values, and
+none of them is a hex in TypeScript. `readPaletteColours` puts each palette on the document
+in turn and reads the computed custom properties back, which is what `wallpaperColours`
+already does for the wallpaper's ink and for the same reason: thirty five values restated
+would be the same eleven ramps written twice, and a tile that disagrees with the palette it
+applies is a preview that lies.
+
+The read is wrapped in `withPalette`, which restores the attribute in a `finally`. It runs
+from a **layout** effect, so the intermediate states never reach a paint. A passive effect
+would paint them.
+
+**`ThemeProvider` applies from a layout effect too**, and that changed when the picker
+shipped. It was a passive effect, which was invisible while the only appearance change was
+the one `main.tsx` had already painted before React mounted. From a picker, where a choice
+is made with the page open, a passive effect shows one frame of the previous look. The
+component that applies cannot offer a weaker guarantee than the components that read.
+
+`withPalette` is also what keeps the wallpaper tiles honest, for a different reason: a
+child's effect runs before its parent's, so a component that read the tokens after asking
+for a palette change would read the previous palette every time and show a grid one choice
+behind.
+
+**The wallpaper swatches are drawn at true opacity, and are large instead.** A swatch at
+three times the page's opacity is a lie about what is being chosen, and somebody picks
+khatam and finds nothing there. `background-size: contain` with four columns inside
+`max-w-6xl`, less the page's padding and the section's, is a 257px cell, against tiles that
+repeat at 240px to 300px, so nine of the ten are drawn at 86% to 107% of the size they have
+on the page. Asanoha, at 420px, is the one that shrinks, to 61%.
+
+### The front door does not shuffle
+
+A device with nobody on it paints Endpaper, the system's mode and **Willow Bough, fixed**.
+`readCachedAppearance` returns that when no account is named and the cache is empty, and the
+new-account default, which is Surprise me, when one is. Asking for an account is what tells
+the two apart, so no caller has to know which is which.
+
+`LoginPage.tsx` calls itself "the first screen anyone sees, so it is the one that decides
+whether the app looks made or assembled", and a door that is a different pattern every visit
+reads as a slot machine. Randomness is a pleasure once you are inside. An admin-set login
+image, where there is one, covers it anyway.
 
 ### The appearance cache is keyed by account, and the login screen shows the last one
 

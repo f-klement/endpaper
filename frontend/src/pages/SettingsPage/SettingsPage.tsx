@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   AuthMode,
@@ -8,12 +8,13 @@ import {
   type UserOut,
 } from "../../api/generated/model";
 import { ErrorState, HelpButton, Spinner } from "../../components";
-import { useTranslation, type MessageKey } from "../../i18n";
-import { useTheme, type ThemePreference } from "../../theme";
+import { useTranslation, type Translate } from "../../i18n";
+import { paletteEntry, useTheme, WALLPAPER_OFF } from "../../theme";
+import { PATTERNS } from "../../theme/patterns";
+import { MODE_LABELS } from "../types";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BackupSection from "./components/BackupSection";
 import LibraryImport from "./components/LibraryImport";
-import SettingsSection from "./components/SettingsSection";
 import TestAccounts from "./components/TestAccounts";
 import ToggleField from "./components/ToggleField";
 import {
@@ -24,15 +25,26 @@ import {
   useTestAccounts,
 } from "./hooks";
 import { Icon } from "../../components";
-import { Page, PageHeader } from "../components";
+import { Page, PageHeader, SettingsSection } from "../components";
 
-const THEMES: { value: ThemePreference; label: MessageKey }[] = [
-  { value: "light", label: "theme.light" },
-  { value: "dark", label: "theme.dark" },
-  // Listed last rather than first: it is the default, and a default reads
-  // better as the thing you return to than the thing you start at.
-  { value: "system", label: "theme.system" },
-];
+/**
+ * The wallpaper choice, named.
+ *
+ * Three states in one field. The summary names the choice rather than what
+ * happens to be on the page: somebody who picked Surprise me should read
+ * "Surprise me" here, not this visit's pattern, which would read as pinned.
+ *
+ * Membership in `PATTERNS`, not `patternFor`, and the difference matters. An id
+ * this build no longer has degrades to a random pattern on the page, and asking
+ * `patternFor` for its name would print that pattern here as though it were the
+ * one chosen. Both cases that end in a different wallpaper every visit are
+ * named as such.
+ */
+function wallpaperName(wallpaper: string | null, t: Translate): string {
+  if (wallpaper === WALLPAPER_OFF) return t("appearance.wallpaperNone");
+  const named = PATTERNS.find((pattern) => pattern.id === wallpaper);
+  return named ? named.name : t("appearance.wallpaperSurprise");
+}
 
 const LANGUAGES = [
   { value: Locale.en, label: "settings.language.en" },
@@ -51,7 +63,7 @@ interface SettingsPageProps {
 
 export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
   const { t, locale, setLocale } = useTranslation();
-  const { appearance, setAppearance, wallpaperOff } = useTheme();
+  const { appearance, wallpaperOff } = useTheme();
   const navigate = useNavigate();
   const {
     settings,
@@ -81,6 +93,8 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
   // this only ever reveals what the admin has just entered themselves.
   const [showKey, setShowKey] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+
+  const wallpaper = wallpaperName(appearance.wallpaper, t);
 
   const fromEnv = settings?.google_books_api_key_from_env === true;
 
@@ -123,27 +137,31 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
         </p>
       </SettingsSection>
 
+      {/* A link, not the controls. The picker previews a palette and a
+          wallpaper on the page itself, which is the one thing a row in a
+          settings list cannot do. What stays here is the summary, so somebody
+          scanning this page still sees what is set. */}
       <SettingsSection title={t("theme.label")} icon="theme">
-        <div className="flex gap-2" role="group" aria-label={t("theme.label")}>
-          {THEMES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setAppearance({ mode: option.value })}
-              aria-pressed={appearance.mode === option.value}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                appearance.mode === option.value
-                  ? "bg-accent-50 border-accent-300 text-accent-800 dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-              }`}
-            >
-              {t(option.label)}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {appearance.mode === "system" ? t("theme.systemHint") : t("theme.hint")}
-        </p>
+        <Link
+          to="/settings/appearance"
+          className="flex items-center gap-3 rounded-xl border border-paper-200 bg-paper-0 px-3 py-2.5 hover:bg-paper-50 dark:border-paper-700 dark:bg-paper-900 dark:hover:bg-paper-800"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-paper-900 dark:text-paper-100">
+              {t("theme.summary", {
+                palette: paletteEntry(appearance.palette).label,
+                mode: t(MODE_LABELS[appearance.mode]),
+                wallpaper,
+              })}
+            </span>
+            <span className="block text-xs text-paper-600 dark:text-paper-400">
+              {t("theme.change")}
+            </span>
+          </span>
+          <span aria-hidden="true" className="text-paper-600 dark:text-paper-400">
+            <Icon name="chevron" className="w-4 h-4" />
+          </span>
+        </Link>
         {/* Said rather than left to be noticed. The wallpaper is decoration and
             goes first when somebody asks their system for more contrast, and a
             decoration that vanishes with no explanation reads as a fault in

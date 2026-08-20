@@ -30,6 +30,9 @@ beforeEach(() => {
   });
   api.on(/\/api\/books\?/, { body: makeBookPage([]) });
   api.on("/api/stats", { body: makeStats() });
+  // App owns a real BrowserRouter, so the path is jsdom's own and survives
+  // between tests. Reset it, or one test's deep link decides the next one.
+  window.history.pushState({}, "", "/");
 });
 
 function renderApp() {
@@ -77,6 +80,34 @@ describe("App", () => {
     await screen.findByRole("heading", { name: /Library/ });
 
     expect(container.querySelector(`.${BAR_OFFSET}`)).toBeInTheDocument();
+  });
+
+  it("puts no appearance picker in front of the login screen", async () => {
+    // `ThemeProvider` sits above the session gate and does not unmount on sign
+    // out, so a picker reachable from here would write a choice into the cache
+    // of the member who left and move `last` to them. That is the failure
+    // `ThemeProvider.release` exists to prevent, and the route table is what
+    // keeps it out of reach: every path renders the login page signed out.
+    window.history.pushState({}, "", "/settings/appearance");
+    renderApp();
+    await screen.findByRole("button", { name: "Sign In" });
+
+    expect(
+      screen.queryByRole("group", { name: "Palette" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "Wallpaper" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reaches the appearance picker once there is a session", async () => {
+    signIn(makeUser({ username: "kim" }));
+    window.history.pushState({}, "", "/settings/appearance");
+    renderApp();
+
+    expect(
+      await screen.findByRole("group", { name: "Palette" }),
+    ).toBeInTheDocument();
   });
 
   it("survives a corrupt cached account", async () => {

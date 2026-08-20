@@ -1,7 +1,7 @@
 import type { BookOut } from "../../../api/generated/model";
 import { Skeleton } from "../../../components";
 import { useTranslation } from "../../../i18n";
-import BookCard from "./BookCard";
+import BookCard from "../../components/BookCard";
 
 /** Placeholder cards rendered while the first page loads. */
 const SKELETON_COUNT = 8;

@@ -1,6 +1,6 @@
 [project]
 name = "endpaper-backend"
-version = "0.3.0"
+version = "0.4.0"
 description = "Endpaper backend (FastAPI)"
 requires-python = ">=3.14"
 dependencies = [

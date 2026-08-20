@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 
 import { Button, ErrorState, Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
-import SettingsSection from "./SettingsSection";
+import { SettingsSection } from "../../components";
 
 interface BackupSectionProps {
   isDownloading: boolean;

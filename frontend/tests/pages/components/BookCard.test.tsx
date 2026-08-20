@@ -1,7 +1,7 @@
-/** Tests for src/pages/Home/components/BookCard.tsx. */
+/** Tests for src/pages/components/BookCard.tsx. */
 
 import { fireEvent, screen } from "@testing-library/react";
-import { renderLocalised } from "../../../utils";
+import { renderLocalised } from "../../utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,9 +9,9 @@ import {
   OwnershipStatus,
   ReadStatus,
   type BookOut,
-} from "../../../../src/api/generated/model";
-import BookCard from "../../../../src/pages/Home/components/BookCard";
-import { makeBook, makeLoan, makeTag, resetIds } from "../../../factories";
+} from "../../../src/api/generated/model";
+import BookCard from "../../../src/pages/components/BookCard";
+import { makeBook, makeLoan, makeTag, resetIds } from "../../factories";
 
 beforeEach(resetIds);
 

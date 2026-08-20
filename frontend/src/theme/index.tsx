@@ -24,6 +24,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,7 @@ import {
 } from "react";
 
 import {
+  WALLPAPER_OFF,
   cacheAppearance,
   readCachedAppearance,
   type Appearance,
@@ -48,13 +50,25 @@ import {
 
 export {
   DEFAULT_APPEARANCE,
+  DOOR_APPEARANCE,
+  WALLPAPER_OFF,
   readCachedAppearance,
   resolveAppearance,
   sameAppearance,
   type Appearance,
   type ThemePreference,
 } from "./appearance";
-export { PALETTES, isPaletteId, type PaletteId } from "./palettes";
+export {
+  PALETTES,
+  isConstructed,
+  isPaletteId,
+  paletteEntry,
+  readPaletteColours,
+  withPalette,
+  type PaletteColours,
+  type PaletteId,
+  type PaletteMode,
+} from "./palettes";
 
 /** What is actually on screen once `system` has been resolved. */
 export type ResolvedTheme = "light" | "dark";
@@ -100,9 +114,15 @@ interface ThemeContextValue {
   release: () => void;
   /** The theme in force. Use this to render, never `appearance.mode`. */
   theme: ResolvedTheme;
-  /** The wallpaper chosen for this visit. */
-  pattern: Pattern;
-  /** The wallpaper is off because the system asked for more contrast. */
+  /** The wallpaper chosen for this visit, or null for none. */
+  pattern: Pattern | null;
+  /**
+   * The wallpaper is off because the system asked for more contrast.
+   *
+   * Not the same as `pattern === null`, which is somebody choosing. The picker
+   * says which of the two happened, because a decoration that vanishes without
+   * a reason reads as a fault in this app.
+   */
   wallpaperOff: boolean;
 }
 
@@ -147,13 +167,19 @@ export function currentPattern(): Pattern {
 }
 
 /**
- * The pattern a stored preference names, or a different one every visit.
+ * The pattern a stored preference names, none, or a different one every visit.
+ *
+ * Three answers from one field, which is why `WALLPAPER_OFF` is a value in it
+ * rather than a flag beside it. Null out means no wallpaper; null in means
+ * Surprise me.
  *
  * An id this build does not have is the same answer as no id at all: patterns
  * come and go between versions, and a wallpaper nobody recognises should not be
- * a blank page.
+ * a blank page. Off is the exception, and it has to be: an off that degraded to
+ * a random pattern would be a choice the app declined to keep.
  */
-export function patternFor(wallpaper: string | null): Pattern {
+export function patternFor(wallpaper: string | null): Pattern | null {
+  if (wallpaper === WALLPAPER_OFF) return null;
   const chosen = wallpaper
     ? PATTERNS.find((pattern) => pattern.id === wallpaper)
     : undefined;
@@ -172,10 +198,13 @@ export function patternFor(wallpaper: string | null): Pattern {
  * The ink is read at this moment rather than baked in, so it follows whatever
  * palette is on the document.
  */
-export function applyWallpaper(pattern: Pattern, theme: ResolvedTheme): void {
-  if (prefersMoreContrast()) {
+export function applyWallpaper(
+  pattern: Pattern | null,
+  theme: ResolvedTheme,
+): void {
+  if (pattern === null || prefersMoreContrast()) {
     // Cleared rather than skipped: this also runs when the preference is turned
-    // on with the page already open.
+    // on, or the wallpaper turned off, with the page already open.
     document.body.style.backgroundImage = "";
     return;
   }
@@ -219,7 +248,7 @@ export function applyWallpaper(pattern: Pattern, theme: ResolvedTheme): void {
  */
 export function applyAppearance(
   appearance: Appearance,
-  pattern: Pattern,
+  pattern: Pattern | null,
 ): ResolvedTheme {
   const theme = resolveTheme(appearance.mode);
   applyPalette(appearance.palette);
@@ -253,20 +282,32 @@ export function ThemeProvider({
   // appearance it belongs to.
   const account = useRef<number | string | null>(null);
 
-  const pattern = useMemo(
-    () => initialPattern ?? patternFor(appearance.wallpaper),
-    [initialPattern, appearance.wallpaper],
-  );
+  const pattern = useMemo(() => {
+    const chosen = patternFor(appearance.wallpaper);
+    // The override forces which wallpaper, never whether: a test that fixes the
+    // pattern so it is not at the mercy of `Math.random` must still be able to
+    // turn it off.
+    return chosen === null ? null : (initialPattern ?? chosen);
+  }, [initialPattern, appearance.wallpaper]);
 
   // One effect, because the three parts are one paint: the wallpaper's ink is
   // read off the palette's own tokens, so moving the class without the pattern
   // leaves a frame with the new page and the old tile on it.
   //
+  // A layout effect, not a passive one, and this is the same rule the picker's
+  // own reads follow: a passive effect runs after the browser has painted, so
+  // every appearance change would show one frame of the previous look. On the
+  // first mount `main.tsx` has already painted the cached appearance, so there
+  // was nothing to see; from a picker, where a choice is made with the page
+  // open, there is. The picker's `withPalette` reads are layout effects for the
+  // same reason, and it would be inconsistent for the component that reads to
+  // guarantee more than the one that applies.
+  //
   // The dark listener is attached only while the mode is `system`, or somebody
   // who asked for dark gets flipped back at sunrise by their laptop. The
   // contrast listener is always attached, because that preference is not one
   // this app offers and can be turned on with the page already open.
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTheme(applyAppearance(appearance, pattern));
     setWallpaperOff(prefersMoreContrast());
 
@@ -314,8 +355,11 @@ export function ThemeProvider({
   // somebody signs out, but the component that binds the account does. Without
   // this the ref goes on pointing at the member who left, and the next
   // appearance change from a signed-out screen is written into their cache and
-  // moves `last` to them. Nothing can reach that today, because the only
-  // control is behind the gate. Phase 3 puts a picker on the login screen.
+  // moves `last` to them. Nothing can reach that today. The picker is
+  // a route inside `AppRoutes`, which `AppShell` renders only once there is a
+  // session, and the login screen carries no appearance control of its own.
+  // That is a property of the route table rather than of this file, so it is
+  // asserted in `tests/app/App.test.tsx` rather than left to be re-derived.
   const release = useCallback(() => {
     account.current = null;
   }, []);

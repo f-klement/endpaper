@@ -1,6 +1,16 @@
 # Frontend test coverage
 
-**1,017 tests · 92% statements, 88% functions, 79% branches.**
+**1,084 tests.**
+
+No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
+on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
+does not implement, so the run reports `Coverage APIs are not supported` and `no tests`.
+The `node` on that image is `/usr/local/bun-node-fallback-bin/node`, bun's own shim for
+`#!/usr/bin/env node` shebangs, so it is the same runtime and fails the same way.
+
+A stale percentage beside a measured count is worse than no percentage, because a reader
+cannot tell which of the two was measured. `bun run test:coverage` still works wherever V8
+is the runtime; run it there and put the numbers back.
 
 ```bash
 bun run test                 # the suite
@@ -9,8 +19,8 @@ bun run test:watch           # re-run on change
 bunx vitest run tests/pages/Home   # one area
 ```
 
-The tree mirrors `src/`: the tests for `src/pages/Home/components/BookCard.tsx` are at
-`tests/pages/Home/components/BookCard.test.tsx`. Support files that mirror nothing
+The tree mirrors `src/`: the tests for `src/pages/components/BookCard.tsx` are at
+`tests/pages/components/BookCard.test.tsx`. Support files that mirror nothing
 (`setup.ts`, `utils.tsx`, `factories.ts`) sit at the root of the tree.
 
 ## How these tests are written
@@ -55,23 +65,25 @@ readers as a side effect.
 | `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
 | `pages/hooks.test.ts`                 |    33 | Session state, auth modes, corrupt storage, switching into a test account under proxy, and dropping the cache whenever the identity changes |
-| `pages/types.test.ts`                 |    11 | Tag grouping and the style tables                           |
-| `pages/components/TagPicker.test.tsx` |     6 | The picker shared by three pages                            |
+| `pages/types.test.ts`                 |    13 | Tag grouping, the style tables, and the light and dark modes |
+| `pages/components/TagPicker.test.tsx` |    17 | The picker shared by three pages                            |
+| `pages/components/BookCard.test.tsx`  |    23 | One book in a grid: status, tags, ownership, selection      |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
-| `pages/Home/*`                        |   119 | Filters, ownership, pagination, selection, the bulk verbs   |
+| `pages/Home/*`                        |   110 | Filters, ownership, pagination, selection, the bulk verbs   |
 | `pages/BookDetail/*`                  |    73 | Status, ratings, series, shelf, loans, notes, enrichment    |
 | `pages/ScanPage/*`                    |   116 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
-| `pages/SettingsPage/*`                |    57 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one |
+| `pages/SettingsPage/*`                |    73 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one |
+| `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |
 | `pages/LoginPage/LoginPage.test.tsx`  |    19 | Sign-in, registration, the background uploader              |
 | `pages/LoansPage/LoansPage.test.tsx`  |    18 | Listing, returning, due dates and the overdue view          |
 | `pages/StatsPage/*`                   |    14 | Every section, and the all-zero case                        |
 | `pages/SeriesPage/*`                  |     7 | Series cards, their counts and their gaps                   |
 | `pages/DuplicatesPage/*`              |     8 | Suspected duplicates and confirming a merge                 |
 | `pages/errors/*`                      |     9 | 404, 403 and the render-crash boundary                      |
-| `theme/index.test.tsx`                |    27 | Mode resolution, the palette on the document, more contrast |
-| `theme/appearance.test.ts`            |    15 | The per account cache, unknown values, corrupt storage      |
-| `theme/palettes.test.ts`              |    77 | Every palette and mode, measured against the rung contract, with and without more contrast |
+| `theme/index.test.tsx`                |    31 | Mode resolution, the palette on the document, more contrast, and a wallpaper turned off |
+| `theme/appearance.test.ts`            |    16 | The per account cache, unknown values, corrupt storage, the front door |
+| `theme/palettes.test.ts`              |    86 | Every palette and mode, measured against the rung contract, with and without more contrast, plus the catalogue and the swatch read |
 | `theme/patterns.test.ts`              |    43 | The wallpaper engine: the ink budget, the admission rule, the byte cap |
 | `theme/oklab.test.ts`                 |    15 | Lightness, the sRGB composite, and the alpha solve |
 

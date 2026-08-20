@@ -6,7 +6,9 @@
  * pages → here; general and domain-free → `src/components/`.
  */
 
+export { default as BookCard } from "./BookCard";
 export { default as CoverImage } from "./CoverImage";
 export { default as LocationField } from "./LocationField";
 export { Page, PageHeader, PageCount } from "./Page";
+export { default as SettingsSection } from "./SettingsSection";
 export { default as TagPicker } from "./TagPicker";

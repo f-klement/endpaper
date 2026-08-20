@@ -1,11 +1,12 @@
 /** Tests for src/theme/index.tsx. */
 
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ThemeProvider,
+  WALLPAPER_OFF,
   applyWallpaper,
   currentPattern,
   patternFor,
@@ -76,13 +77,16 @@ function Probe() {
       <p data-testid="theme">{theme}</p>
       <p data-testid="mode">{appearance.mode}</p>
       <p data-testid="palette">{appearance.palette}</p>
-      <p data-testid="pattern">{pattern.id}</p>
+      <p data-testid="pattern">{pattern?.id ?? "none"}</p>
       <p data-testid="wallpaper-off">{String(wallpaperOff)}</p>
       <button onClick={() => setAppearance({ mode: "dark" })}>go dark</button>
       <button onClick={() => setAppearance({ mode: "system" })}>
         follow system
       </button>
       <button onClick={() => setAppearance({ palette: "nord" })}>go nord</button>
+      <button onClick={() => setAppearance({ wallpaper: WALLPAPER_OFF })}>
+        no wallpaper
+      </button>
       <button onClick={() => adopt({ ...LIGHT, palette: "gruvbox" }, 7)}>
         adopt
       </button>
@@ -325,5 +329,37 @@ describe("patternFor", () => {
 
   it("falls back for no preference at all", () => {
     expect(patternFor(null)).toBe(currentPattern());
+  });
+
+  it("answers none for the off sentinel", () => {
+    // The one id that does not degrade to a random pattern. An off that came
+    // back as a wallpaper would be a choice the app declined to keep.
+    expect(patternFor(WALLPAPER_OFF)).toBeNull();
+  });
+});
+
+describe("a wallpaper turned off", () => {
+  it("paints nothing on the body", () => {
+    renderTheme({ ...LIGHT, wallpaper: WALLPAPER_OFF });
+
+    expect(document.body.style.backgroundImage).toBe("");
+    expect(screen.getByTestId("pattern")).toHaveTextContent("none");
+  });
+
+  it("is not the same state as the system asking for more contrast", () => {
+    // Both clear the body, and only one of them is worth explaining. The
+    // picker says which happened, so `wallpaperOff` has to mean the system.
+    renderTheme({ ...LIGHT, wallpaper: WALLPAPER_OFF });
+
+    expect(screen.getByTestId("wallpaper-off")).toHaveTextContent("false");
+  });
+
+  it("clears a wallpaper already on the page", () => {
+    renderTheme();
+    expect(document.body.style.backgroundImage).not.toBe("");
+
+    fireEvent.click(screen.getByText("no wallpaper"));
+
+    expect(document.body.style.backgroundImage).toBe("");
   });
 });

@@ -34,7 +34,7 @@ import { ThemeProvider, type Appearance } from "../src/theme";
  * assertion about what is on screen must not depend on the machine's own
  * settings, and the wallpaper is otherwise chosen by `Math.random`.
  */
-const LIGHT_APPEARANCE: Appearance = {
+export const LIGHT_APPEARANCE: Appearance = {
   palette: "endpaper",
   mode: "light",
   wallpaper: null,
@@ -206,6 +206,12 @@ interface ProvidersOptions extends Omit<RenderOptions, "wrapper"> {
    * German laptop.
    */
   locale?: Locale;
+  /**
+   * The appearance to render under. Defaults to light Endpaper with a fixed
+   * wallpaper, forced for the same reason English is. Override it where the
+   * screen under test is about the appearance itself.
+   */
+  appearance?: Appearance;
 }
 
 export function renderWithProviders(
@@ -214,6 +220,7 @@ export function renderWithProviders(
     route = "/",
     queryClient,
     locale = Locale.en,
+    appearance = LIGHT_APPEARANCE,
     ...options
   }: ProvidersOptions = {},
 ): RenderResult & { queryClient: QueryClient } {
@@ -223,7 +230,7 @@ export function renderWithProviders(
     return (
       <QueryClientProvider client={client}>
         <ThemeProvider
-          initialAppearance={LIGHT_APPEARANCE}
+          initialAppearance={appearance}
           initialPattern={PATTERNS[0]}
         >
           <LocaleProvider initialLocale={locale}>

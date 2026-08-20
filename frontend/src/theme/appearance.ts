@@ -41,6 +41,19 @@ const LEGACY_MODE_KEY = "theme";
 /** What a person can pick for light and dark. `system` is a real option. */
 export type ThemePreference = "light" | "dark" | "system";
 
+/**
+ * The wallpaper id that means "no wallpaper".
+ *
+ * A sentinel rather than a fourth field, because `wallpaper` already has three
+ * states and a boolean beside it would let the two disagree: off with a pattern
+ * named, or on with none. It is a tile in the picker for the same reason, and
+ * `patternFor` is the one place that reads it.
+ *
+ * It has to satisfy the server's `^[a-z0-9-]{1,30}$`, and it has to be a word
+ * no pattern will ever take. No pattern is called "none".
+ */
+export const WALLPAPER_OFF = "none";
+
 export interface Appearance {
   palette: PaletteId;
   mode: ThemePreference;
@@ -57,6 +70,26 @@ export const DEFAULT_APPEARANCE: Appearance = {
   palette: DEFAULT_PALETTE,
   mode: "system",
   wallpaper: null,
+};
+
+/**
+ * What a device that has never signed anyone in shows.
+ *
+ * The same as a new account's, except that the wallpaper is named. The front
+ * door never shuffles: `LoginPage.tsx` says it "is the first screen anyone
+ * sees, so it is the one that decides whether the app looks made or
+ * assembled", and a door that is a different pattern every visit reads as a
+ * slot machine rather than as a house. Randomness is a pleasure once you are
+ * inside.
+ *
+ * Willow Bough because it is the sparsest of the ten and the login card is
+ * mostly page. An admin-set login image, where there is one, covers this
+ * anyway: see `LoginPage`.
+ */
+export const DOOR_APPEARANCE: Appearance = {
+  palette: DEFAULT_PALETTE,
+  mode: "system",
+  wallpaper: "willow",
 };
 
 export function isThemePreference(value: unknown): value is ThemePreference {
@@ -110,7 +143,12 @@ function read(): Cache {
  *
  * With an account, that account's own. Without one, whoever used this device
  * last, which is what the login screen shows. With neither, the mode a previous
- * version stored per device, and then the defaults.
+ * version stored per device, over the right defaults.
+ *
+ * The two fallbacks differ in one field and the difference is the point. A
+ * named account with nothing stored has not chosen, so it gets Surprise me. A
+ * device with nobody on it is the front door, which is fixed. Asking for an
+ * account is what tells the two apart, so the caller does not have to.
  */
 export function readCachedAppearance(accountId?: number | string | null): Appearance {
   const cache = read();
@@ -118,10 +156,14 @@ export function readCachedAppearance(accountId?: number | string | null): Appear
   const stored = key != null ? cache.accounts[key] : undefined;
   if (stored) return resolveAppearance(stored);
 
+  const fallback = accountId != null ? DEFAULT_APPEARANCE : DOOR_APPEARANCE;
   try {
-    return resolveAppearance({ mode: localStorage.getItem(LEGACY_MODE_KEY) });
+    return resolveAppearance({
+      ...fallback,
+      mode: localStorage.getItem(LEGACY_MODE_KEY) ?? fallback.mode,
+    });
   } catch {
-    return DEFAULT_APPEARANCE;
+    return fallback;
   }
 }
 

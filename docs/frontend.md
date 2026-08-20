@@ -13,8 +13,8 @@ is genuinely shared. Three levels:
 2. **Shared by sibling pages** → hoisted to the layer above them, `pages/components/`.
 3. **General, reusable and domain-free** → `src/components/`, and nothing else goes there.
 
-Worked examples: `BookCard` is used only by Home, so it is
-`pages/Home/components/BookCard.tsx`. `TagPicker` is used by Home's filter panel,
+Worked examples: `BookCard` is used by Home's grid and by the appearance picker's preview,
+so it moved up to `pages/components/BookCard.tsx`. `TagPicker` is used by Home's filter panel,
 ScanPage's tag step and BookDetail's tag editor, so it is
 `pages/components/TagPicker.tsx`. `Spinner` and `EmptyState` mention no domain concept at
 all, so they are in `src/components/`.
@@ -40,9 +40,10 @@ src/
 ├── i18n/                    en.ts · de.ts · index.tsx (provider + useTranslation)
 ├── lib/                     isbn.ts, goodreads.ts: pure functions, no React
 ├── pages/
-│   ├── components/         shared by several pages (TagPicker)
+│   ├── components/         shared by several pages (TagPicker, BookCard)
 │   ├── hooks.ts            cross-page hooks (useSession)
 │   ├── types.ts            cross-page view types, tag grouping and style tables
+│   ├── AppearancePage/     index.ts · AppearancePage.tsx · hooks.ts · components/
 │   ├── Home/               index.ts · Home.tsx · hooks.ts · types.ts · components/
 │   ├── BookDetail/         index.ts · BookDetail.tsx · hooks.ts · components/
 │   ├── ScanPage/           index.ts · ScanPage.tsx · hooks.ts · types.ts · components/
@@ -59,7 +60,7 @@ src/
 ## The facade
 
 Each page folder has an `index.ts` that is its **only** public surface. `routes.tsx`
-imports `from "../pages/Home"`, never from `"../pages/Home/components/BookCard"`.
+imports `from "../pages/Home"`, never from `"../pages/Home/components/BookGrid"`.
 
 The same rule applies downward: nothing outside a `hooks.ts` imports from
 `api/generated/endpoints/`. That single indirection is what stops a regeneration rippling
@@ -294,7 +295,14 @@ of one, so somebody can go back to following it.
 All three preferences live on the **account**, not the device, with a write-through
 `localStorage` cache in front of the server so the first paint does not wait on the network.
 `AppearanceSync` is the one component that holds both directions. The palettes themselves,
-the rule that generated them and the storage design are in [theming.md](theming.md).
+the rule that generated them, the picker and the storage design are in
+[theming.md](theming.md).
+
+The picker is `pages/AppearancePage/` at `/settings/appearance`, and it is **inside the
+signed-in route table on purpose**. `ThemeProvider` sits above the session gate and does not
+unmount on sign-out, so a picker the login screen could reach would write a choice into the
+cache of the member who left. That is what `ThemeProvider.release` exists to prevent, and
+the route table is the thing that keeps it out of reach.
 
 Three details are load bearing:
 
@@ -322,6 +330,8 @@ for dark.
 
 The choice is stored only if somebody makes one: a null wallpaper means a different one
 each time, which is the behaviour this was built around and what a new account starts at.
+A device with nobody signed in on it is the exception and is fixed on Willow Bough, because
+a front door that changes every visit reads as a slot machine.
 
 Two things about the engine are worth knowing before touching it, and both are measured in
 [theming.md](theming.md):
