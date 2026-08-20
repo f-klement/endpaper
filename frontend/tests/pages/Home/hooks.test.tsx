@@ -313,7 +313,7 @@ describe("useBookSelection", () => {
 
   describe("applying", () => {
     it("sends the selected ids and the chosen state", async () => {
-      api.on("/api/books/bulk/ownership", {
+      api.on("/api/books/bulk", {
         body: { updated: 2, unchanged: 0, skipped: 0 },
       });
       const { result } = renderSelection();
@@ -323,9 +323,12 @@ describe("useBookSelection", () => {
       act(() => result.current.apply(OwnershipStatus.owned));
 
       await waitFor(() =>
-        expect(api.lastCall("/bulk/ownership", "POST")?.body).toEqual({
+        // The same verb as every other bulk action now, not a second endpoint
+        // with an identical body.
+        expect(api.lastCall("/books/bulk", "POST")?.body).toEqual({
           book_ids: [4, 9],
-          ownership: "owned",
+          action: "set_ownership",
+          value: "owned",
         }),
       );
     });
@@ -333,11 +336,11 @@ describe("useBookSelection", () => {
     it("sends nothing when nothing is selected", () => {
       const { result } = renderSelection();
       act(() => result.current.apply(OwnershipStatus.owned));
-      expect(api.lastCall("/bulk/ownership")).toBeUndefined();
+      expect(api.lastCall("/books/bulk")).toBeUndefined();
     });
 
     it("empties the selection once the update lands", async () => {
-      api.on("/api/books/bulk/ownership", {
+      api.on("/api/books/bulk", {
         body: { updated: 1, unchanged: 0, skipped: 0 },
       });
       const { result } = renderSelection();
@@ -349,7 +352,7 @@ describe("useBookSelection", () => {
     });
 
     it("reports what happened", async () => {
-      api.on("/api/books/bulk/ownership", {
+      api.on("/api/books/bulk", {
         body: { updated: 1, unchanged: 2, skipped: 3 },
       });
       const { result } = renderSelection();
@@ -368,7 +371,7 @@ describe("useBookSelection", () => {
 
     it("keeps the selection when the update fails", async () => {
       // Clearing it would make the reader tick every book again.
-      api.on("/api/books/bulk/ownership", {
+      api.on("/api/books/bulk", {
         status: 422,
         body: { detail: "Too many" },
       });

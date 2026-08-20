@@ -2,9 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <!-- SVG first: it scales to any tab-strip density and follows the
+         reader's light or dark chrome. The PNG is the fallback for browsers
+         that ignore an SVG favicon, and apple-touch-icon is what iOS uses for
+         "Add to Home Screen", which never reads the manifest. -->
+    <link rel="icon" type="image/svg+xml" href="/icons/books-icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0ea5e9" />
+    <meta name="theme-color" content="#13816f" />
     <link rel="manifest" href="/manifest.json" />
     <title>Endpaper</title>
   </head>

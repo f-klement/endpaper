@@ -2,6 +2,7 @@ import { EmptyState, ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
 import SeriesCard from "./components/SeriesCard";
 import { useSeries } from "./hooks";
+import { Page, PageHeader } from "../components";
 
 export default function SeriesPage() {
   const { t } = useTranslation();
@@ -10,10 +11,8 @@ export default function SeriesPage() {
   if (isLoading) return <Spinner label={t("common.loading")} />;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pt-5 pb-4 space-y-4">
-      <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-        📚 {t("series.title")}
-      </h1>
+    <Page width="narrow">
+      <PageHeader icon="link" title={t("series.title")} />
 
       {error != null ? (
         <ErrorState
@@ -23,7 +22,7 @@ export default function SeriesPage() {
         />
       ) : series.length === 0 ? (
         <EmptyState
-          glyph="🔗"
+          icon="link"
           title={t("series.none")}
           hint={t("series.noneHint")}
         />
@@ -34,6 +33,6 @@ export default function SeriesPage() {
           ))}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

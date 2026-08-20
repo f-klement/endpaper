@@ -83,3 +83,65 @@ class TestHsts:
     def test_includes_a_long_max_age(self, client):
         res = client.get("/auth/config", headers={"X-Forwarded-Proto": "https"})
         assert "max-age=31536000" in res.headers["strict-transport-security"]
+
+
+class TestBodySizeLimit:
+    """The endpoints check their own limits, but only after Starlette has
+    spooled the whole body to disk. These tests are about what never lands."""
+
+    def test_an_oversized_upload_is_refused_by_its_declared_length(self, client, admin):
+        """No body is sent at all: the Content-Length alone decides."""
+        res = client.post(
+            "/api/settings/login-image",
+            headers=admin["headers"] | {"content-length": str(50 * 1024 * 1024)},
+            content=b"",
+        )
+        assert res.status_code == 413
+        assert "smaller" in res.json()["detail"]
+
+    def test_the_restore_route_is_allowed_a_far_larger_body(self, client, admin):
+        """A library's covers in one zip is legitimately bigger than 5 MB, so
+        the cap is per route rather than global."""
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            headers=admin["headers"] | {"content-length": str(50 * 1024 * 1024)},
+            content=b"",
+        )
+        assert res.status_code != 413
+
+    def test_an_upload_that_declares_no_length_is_refused(self, client, admin):
+        """Without a length there is nothing to check in advance, and the spool
+        is bounded only by how long the client keeps sending."""
+        res = client.post(
+            "/api/settings/login-image",
+            headers=admin["headers"]
+            | {"content-type": "multipart/form-data; boundary=x", "transfer-encoding": "chunked"},
+            content=b"",
+        )
+        assert res.status_code == 411
+
+    def test_a_json_body_without_a_length_is_left_alone(self, client, admin):
+        """The rule is deliberately multipart only: a JSON body is held in
+        memory and bounded by the route's own parsing, and refusing it would
+        break clients that stream."""
+        res = client.post(
+            "/api/books",
+            headers=admin["headers"]
+            | {"transfer-encoding": "chunked", "content-type": "application/json"},
+            content=b'{"title": "Dune", "author": "Herbert"}',
+        )
+        assert res.status_code == 201
+
+    def test_an_ordinary_request_passes_through(self, client, admin):
+        res = client.get("/api/books", headers=admin["headers"])
+        assert res.status_code == 200
+
+    def test_a_refusal_still_carries_the_security_headers(self, client, admin):
+        """It sits innermost so the layers around it still wrap the answer."""
+        res = client.post(
+            "/api/settings/login-image",
+            headers=admin["headers"] | {"content-length": str(50 * 1024 * 1024)},
+            content=b"",
+        )
+        assert res.headers["X-Content-Type-Options"] == "nosniff"

@@ -17,6 +17,14 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /**
+     * The book an error is about, when the server named one.
+     *
+     * Only the duplicate-ISBN 409 sets this, and only when the book is one the
+     * caller may see. It is what lets "already in the library" offer to open
+     * the book rather than being a sentence the reader can do nothing with.
+     */
+    readonly bookId?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -38,33 +46,48 @@ export function clearSession(): void {
 }
 
 /**
- * Read a displayable message out of a failed response.
+ * Read what a failed response says, and anything it says about what to do.
  *
- * FastAPI puts it in `detail`, but that is a string for a raised
- * `HTTPException` and an array of per-field objects for a 422. A non-JSON body
- * is possible too (a reverse proxy's own error page), so all three end up as
- * a string here.
+ * FastAPI puts it in `detail`, which is a string for a raised
+ * `HTTPException`, an array of per-field objects for a 422, and an object
+ * where a route wanted to say more than a sentence. A non-JSON body is
+ * possible too, a reverse proxy's own error page, so all four end up here.
  */
-async function errorMessage(
+async function errorDetail(
   response: Response,
   fallback: string,
-): Promise<string> {
+): Promise<{ message: string; bookId?: number }> {
   try {
     const body: unknown = await response.json();
     const detail = (body as { detail?: unknown }).detail;
 
-    if (typeof detail === "string") return detail;
+    if (typeof detail === "string") return { message: detail };
 
     if (Array.isArray(detail)) {
       const messages = detail
         .map((item) => (item as { msg?: unknown }).msg)
         .filter((msg): msg is string => typeof msg === "string");
-      if (messages.length > 0) return messages.join(", ");
+      if (messages.length > 0) return { message: messages.join(", ") };
+    }
+
+    // An object detail: a message plus whatever the route could say about it.
+    // Only the duplicate-ISBN 409 sends one today.
+    if (detail && typeof detail === "object") {
+      const { message, book_id: bookId } = detail as {
+        message?: unknown;
+        book_id?: unknown;
+      };
+      if (typeof message === "string") {
+        return {
+          message,
+          bookId: typeof bookId === "number" ? bookId : undefined,
+        };
+      }
     }
   } catch {
     // Body was not JSON, so fall through to the status text.
   }
-  return response.statusText || fallback;
+  return { message: response.statusText || fallback };
 }
 
 /** Where to send someone whose session has ended. */
@@ -95,6 +118,43 @@ function endSession(): void {
 }
 
 /**
+ * The session ended at the reverse proxy rather than in this app.
+ *
+ * Endpaper sits behind a forward-auth portal on a different hostname. When its
+ * cookie expires the proxy answers every request, XHR included, with a 302 to
+ * that hostname. Three things follow, and together they were the whole of the
+ * "endless spinner" bug:
+ *
+ * 1. `fetch` follows the redirect, the cross-origin response carries no CORS
+ *    header, and the promise rejects with a bare `TypeError: NetworkError`.
+ *    There is no status to read, so the 401 path below never runs.
+ * 2. Nothing redirects the reader anywhere, because the app never learns it is
+ *    signed out.
+ * 3. React Query retries, forever, behind a spinner.
+ *
+ * Sending the browser to `/login` would not help: that is this app's own login
+ * route, and the proxy sits in front of it too. The only thing that resolves
+ * it is a **top-level navigation**, which is the one request the browser will
+ * follow across origins and render. Hence `reload` rather than a router push.
+ */
+function reauthenticateAtEdge(): void {
+  clearSession();
+  window.location.reload();
+}
+
+/**
+ * Did the request get redirected rather than answered?
+ *
+ * Under `redirect: "manual"` a redirect arrives as an opaque placeholder: the
+ * body is unreadable and the status reads 0. Both are checked because the two
+ * are not reported identically everywhere, and a false negative here puts the
+ * spinner back.
+ */
+export function isRedirect(response: Response): boolean {
+  return response.type === "opaqueredirect" || response.status === 0;
+}
+
+/**
  * The mutator Orval calls for every operation.
  *
  * Generic over the response type so the generated hooks stay fully typed.
@@ -115,7 +175,23 @@ export const customFetch = async <T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(url, { ...options, headers });
+  // `redirect: "manual"` is what makes an edge sign-out detectable. Following
+  // it instead, which is the default, turns the proxy's 302 into an opaque
+  // cross-origin failure with no status attached. See `reauthenticateAtEdge`.
+  //
+  // The cost is that a genuine same-origin redirect is no longer followed
+  // either. Nothing here relies on one: the generated client requests the
+  // exact paths FastAPI declares, so the trailing-slash redirect never fires.
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    redirect: "manual",
+  });
+
+  if (isRedirect(response)) {
+    reauthenticateAtEdge();
+    throw new ApiError("Your session has expired. Please sign in again.", 401);
+  }
 
   // A 401 from a credential endpoint is a rejected sign-in attempt, so it
   // falls through to the ordinary error path below and keeps the server's
@@ -128,10 +204,8 @@ export const customFetch = async <T>(
   }
 
   if (!response.ok) {
-    throw new ApiError(
-      await errorMessage(response, "Request failed"),
-      response.status,
-    );
+    const detail = await errorDetail(response, "Request failed");
+    throw new ApiError(detail.message, response.status, detail.bookId);
   }
 
   if (response.status === 204) return null as T;
@@ -162,7 +236,15 @@ export async function downloadFile(
   const token = getToken();
   const response = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    redirect: "manual",
   });
+
+  // Same edge sign-out as in `customFetch`. Without this an expired portal
+  // session saves the proxy's redirect page to disk under the export's name.
+  if (isRedirect(response)) {
+    reauthenticateAtEdge();
+    throw new ApiError("Your session has expired. Please sign in again.", 401);
+  }
 
   if (response.status === 401) {
     endSession();
@@ -170,7 +252,7 @@ export async function downloadFile(
   }
   if (!response.ok) {
     throw new ApiError(
-      await errorMessage(response, "Download failed"),
+      (await errorDetail(response, "Download failed")).message,
       response.status,
     );
   }

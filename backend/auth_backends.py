@@ -15,6 +15,7 @@ it came from.
 """
 
 import logging
+import re
 
 from fastapi import Request
 from ldap3 import ALL, Connection, Server
@@ -58,8 +59,42 @@ def upsert_directory_user(
     Admin status is re-applied on every sign-in, so removing someone from the
     admin group in the directory takes effect the next time they log in rather
     than being frozen at whatever it was when the row was first created.
+
+    **Two exceptions to that, and both exist because the rule as written locks
+    people out of their own library.**
+
+    *The first account is an admin whatever the directory says.* In local mode
+    that is what registration does. In proxy and LDAP mode registration is
+    refused, and `is_admin` comes only from the configured group, so somebody
+    deploying this image with `AUTH_MODE=proxy` and no groups header gets a
+    catalogue nobody can administer: no settings, no metadata key, no backup,
+    and no way to grant themselves any of it. There is no recovery path that
+    does not involve editing the database by hand.
+
+    *An existing admin is never demoted by a mode switch.* Turning on proxy or
+    LDAP auth in front of a library that already had a local admin used to
+    strip their rights on their first page load, silently, because the header
+    carried no group. Demotion still works: it needs the admin group to be
+    configured, so it is a directory decision rather than an accident of
+    configuration.
     """
     user = db.query(User).filter(User.username == username).first()
+
+    if user is None and db.query(User).count() == 0:
+        # Same rule registration uses, for the same reason.
+        logger.warning(
+            "Making %r an admin: it is the first account in this library", username
+        )
+        is_admin = True
+
+    if user is not None and user.is_admin and not is_admin and not _admin_group_set(source):
+        logger.warning(
+            "Keeping admin rights for %r: no admin group is configured for %s, "
+            "so there is nothing to demote them on",
+            username,
+            source.value,
+        )
+        is_admin = True
 
     if user is None:
         user = User(
@@ -69,15 +104,40 @@ def upsert_directory_user(
             auth_source=source.value,
         )
         db.add(user)
-        logger.info("Created shadow account for %s (%s)", username, source.value)
-    else:
+        # WARNING, not INFO. Creating an account is the most consequential
+        # thing this app does without anybody clicking anything, and under
+        # proxy auth it happens on an ordinary GET. The one record of the
+        # 2026-08-18 incident was an INFO line in a stream nobody reads.
+        logger.warning(
+            "Created account %r from a %s identity, admin=%s",
+            username,
+            source.value,
+            is_admin,
+        )
+        db.commit()
+        db.refresh(user)
+        return user
+
+    # Only write when something actually changed. Every request in proxy mode
+    # reaches this, so an unconditional commit was a write per request against
+    # the single SQLite writer, and an audit trail that could never say when
+    # anything had genuinely changed.
+    changed = user.is_admin != is_admin or user.auth_source != source.value
+    if changed:
+        if user.is_admin != is_admin:
+            logger.warning(
+                "Admin rights for %r changed to %s by a %s identity",
+                username,
+                is_admin,
+                source.value,
+            )
         user.is_admin = is_admin
         # An account that predates the switch to a directory keeps its rows and
         # its history; it simply stops being authenticated locally.
         user.auth_source = source.value
+        db.commit()
+        db.refresh(user)
 
-    db.commit()
-    db.refresh(user)
     return user
 
 
@@ -141,11 +201,24 @@ def _connect(user: str | None = None, password: str | None = None) -> Connection
 
 
 def _is_member_of_admin_group(entry: object, groups: list[str]) -> bool:
+    """Exact, case-insensitive membership. Never a substring.
+
+    This used to accept `wanted in group`, which grants admin for any group
+    whose name merely *contains* the configured one. With `LDAP_ADMIN_GROUP`
+    set to `admins`, membership of `cn=book-admins-readonly,...` was enough;
+    with a full DN configured, a group under a `dc=home-clone` suffix matched
+    too. Both were demonstrated. Creating a group is something ordinary
+    directory users can often do, which makes it a privilege escalation rather
+    than a loose comparison.
+
+    The proxy path at `user_from_proxy_headers` has always compared exactly.
+    """
+    del entry  # Membership comes from `groups`, resolved by the caller.
     wanted = ldap_admin_group()
     if not wanted:
         return False
-    wanted_lower = wanted.lower()
-    return any(wanted_lower == group.lower() or wanted_lower in group.lower() for group in groups)
+    wanted_lower = wanted.strip().lower()
+    return any(wanted_lower == group.strip().lower() for group in groups)
 
 
 def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
@@ -218,6 +291,40 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
 # ── Proxy ─────────────────────────────────────────────────────────────────────
 
 
+#: What a username coming from a header may look like.
+#:
+#: Deliberately narrow: letters, digits and the three separators a directory
+#: actually uses. It is not an attempt to authenticate the header, which is
+#: impossible from here. It bounds the damage of a header that is wrong, which
+#: is a different and achievable goal.
+_PROXY_USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,49}$")
+
+
+def _admin_group_set(source: AuthMode) -> bool:
+    """Whether this mode has been told which group means admin.
+
+    With no group configured, `is_admin` is always False, and re-applying that
+    on every request is not a directory saying somebody is not an admin. It is
+    the app having no opinion, and it must not be read as one.
+    """
+    if source is AuthMode.PROXY:
+        return bool(proxy_admin_group())
+    if source is AuthMode.LDAP:
+        return bool(ldap_admin_group())
+    return False
+
+
+def _peer(request: Request) -> str:
+    """The caller's address, for the log line, and never a raised exception.
+
+    `request.client` is None for an ASGI transport that reports no peer. This
+    is diagnostics on the refusal path: it must not be able to turn a rejected
+    header into a 500.
+    """
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None) or "unknown"
+
+
 def user_from_proxy_headers(db: Session, request: Request) -> User | None:
     """Trust an upstream's assertion of who this is.
 
@@ -227,9 +334,34 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
     That is a property of every proxy-auth integration, not a defect here, but
     it means AUTH_MODE=proxy must never be enabled on a container whose port is
     exposed beyond the proxy.
+
+    **What this function can still do about it**, and now does, because on
+    2026-08-18 a pod inside the cluster sent `Remote-User: intruder` straight
+    to the Service and left a permanent admin account behind:
+
+    * The name has to look like a username. `String(50)` is not enforced by
+      SQLite, so an unvalidated header wrote whatever length it liked; a
+      4000-character `Remote-User` produced a 4000-character account.
+    * Anything rejected is logged at WARNING with the source address. The one
+      trace that incident left was an INFO line nothing was watching.
+
+    Neither makes the header trustworthy. The NetworkPolicy in front of the
+    Service is what does that. These stop a mistake becoming a permanent row.
     """
     username = (request.headers.get(proxy_user_header()) or "").strip()
     if not username:
+        return None
+
+    if not _PROXY_USERNAME.match(username):
+        # WARNING, and it names the peer: a rejected identity assertion is the
+        # signature of either a misconfigured proxy or somebody reaching the
+        # pod directly, and both are worth waking up for.
+        logger.warning(
+            "Refused a proxy identity that does not look like a username: %r (%d chars) from %s",
+            username[:80],
+            len(username),
+            _peer(request),
+        )
         return None
 
     raw_groups = (request.headers.get(proxy_groups_header()) or "").strip()

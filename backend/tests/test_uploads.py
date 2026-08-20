@@ -5,12 +5,14 @@ Anything at all could be stored as `12.png` and then served back from this
 app's own origin.
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException, UploadFile
 
 from config import MAX_UPLOAD_BYTES
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
-from uploads import read_image_upload, sniff_image_extension
+from uploads import read_image_upload, replace_image, sniff_image_extension
 
 
 def upload(data: bytes, filename: str = "whatever.png") -> UploadFile:
@@ -98,3 +100,60 @@ class TestReadImageUpload:
         huge = PNG_BYTES + b"\x00" * (MAX_UPLOAD_BYTES * 3)
         with pytest.raises(HTTPException):
             await read_image_upload(upload(huge))
+
+
+class TestReplaceImage:
+    """The order matters: both callers used to delete the old image and then
+    write the new one."""
+
+    def test_it_writes_the_file(self, tmp_path):
+        path = replace_image(tmp_path, "7", "png", PNG_BYTES)
+        assert path == tmp_path / "7.png"
+        assert path.read_bytes() == PNG_BYTES
+
+    def test_it_removes_the_same_image_in_another_format(self, tmp_path):
+        """Two formats of one base both existing means which is served depends
+        on lookup order."""
+        (tmp_path / "7.jpg").write_bytes(JPEG_BYTES)
+
+        replace_image(tmp_path, "7", "png", PNG_BYTES)
+
+        assert not (tmp_path / "7.jpg").exists()
+
+    def test_it_leaves_another_books_cover_alone(self, tmp_path):
+        (tmp_path / "8.jpg").write_bytes(JPEG_BYTES)
+
+        replace_image(tmp_path, "7", "png", PNG_BYTES)
+
+        assert (tmp_path / "8.jpg").exists()
+
+    def test_a_failed_write_leaves_the_old_image_in_place(self, tmp_path, monkeypatch):
+        """The point of the whole helper. A full disk used to leave the book
+        with no cover and a cover_url pointing at what had been deleted."""
+        (tmp_path / "7.jpg").write_bytes(JPEG_BYTES)
+
+        def full_disk(self, data):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(Path, "write_bytes", full_disk)
+
+        with pytest.raises(OSError):
+            replace_image(tmp_path, "7", "png", PNG_BYTES)
+
+        assert (tmp_path / "7.jpg").read_bytes() == JPEG_BYTES
+
+    def test_a_failed_write_leaves_no_temporary_file_behind(self, tmp_path, monkeypatch):
+        def full_disk(self, data):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(Path, "write_bytes", full_disk)
+
+        with pytest.raises(OSError):
+            replace_image(tmp_path, "7", "png", PNG_BYTES)
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_replacing_the_same_format_keeps_one_file(self, tmp_path):
+        replace_image(tmp_path, "7", "png", PNG_BYTES)
+        replace_image(tmp_path, "7", "png", PNG_BYTES)
+        assert [p.name for p in tmp_path.iterdir()] == ["7.png"]

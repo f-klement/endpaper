@@ -34,6 +34,12 @@ export interface StubResponse {
   /** Parsed JSON body. Omit for a 204. */
   body?: unknown;
   headers?: Record<string, string>;
+  /**
+   * The Response `type`. Only worth setting for `"opaqueredirect"`, which is
+   * what the browser hands back when a request under `redirect: "manual"` is
+   * redirected. The mutator treats that as the reverse proxy signing us out.
+   */
+  type?: ResponseType;
 }
 
 /** Matched against the request URL; the first match wins. */
@@ -117,6 +123,7 @@ export function mockApi(): MockApi {
       return {
         ok: status >= 200 && status < 300,
         status,
+        type: stub.type ?? "basic",
         statusText: `Status ${status}`,
         headers: new Headers({
           "content-type": "application/json",

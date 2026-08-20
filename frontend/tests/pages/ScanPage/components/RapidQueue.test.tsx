@@ -67,7 +67,7 @@ describe("RapidQueue", () => {
 
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Delete" }));
+      .click(screen.getByRole("button", { name: /Remove .* from the queue/ }));
 
     expect(props.onRemove).toHaveBeenCalledWith(found.isbn);
   });
@@ -89,8 +89,42 @@ describe("RapidQueue", () => {
 
   it("reports the outcome, failures included", () => {
     renderQueue({ result: { added: 12, failed: 2 } });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "12 added, 2 could not be added.",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("12 added");
+  });
+
+  it("names the books that could not be added, and why", () => {
+    // "6 could not be added" after a shelf of thirty is unrecoverable:
+    // nothing says which six, and the queue that knew has been cleared.
+    renderQueue({
+      entries: [
+        {
+          isbn: "9780441013593",
+          state: "failed",
+          draft: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+          reason: "Book with this ISBN already in catalog",
+        },
+      ],
+      result: { added: 12, failed: 1 },
+    });
+
+    expect(screen.getByText(/Dune/)).toBeInTheDocument();
+    expect(screen.getByText(/already in catalog/)).toBeInTheDocument();
+  });
+
+  it("keeps the banner above whatever is left, rather than replacing it", () => {
+    renderQueue({
+      entries: [
+        {
+          isbn: "9780441013593",
+          state: "failed",
+          draft: null,
+          reason: "Nope",
+        },
+      ],
+      result: { added: 1, failed: 1 },
+    });
+
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("9780441013593")).toBeInTheDocument();
   });
 });

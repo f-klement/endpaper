@@ -22,11 +22,16 @@ describe("TAG_CATEGORY_ORDER", () => {
     );
   });
 
-  it("is broad-to-narrow, which is the order the UI reads in", () => {
+  it("is broad-to-narrow, with the household's own tags last", () => {
+    // Custom sits at the end rather than being interleaved: scattering
+    // "Holiday reads" through a curated genre list is what makes the curated
+    // list hard to scan, and being easy to scan on the first day is the whole
+    // reason it is curated.
     expect(TAG_CATEGORY_ORDER).toEqual([
       TagCategory.type,
       TagCategory.genre,
       TagCategory.age,
+      TagCategory.custom,
     ]);
   });
 });

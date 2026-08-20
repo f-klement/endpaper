@@ -23,7 +23,7 @@ export default function HelpButton({ label, onClick }: HelpButtonProps) {
       onClick={onClick}
       aria-label={label}
       title={t("help.title")}
-      className="shrink-0 w-5 h-5 rounded-full border border-gray-300 text-gray-500 text-xs font-semibold leading-none hover:border-sky-400 hover:text-sky-600 transition-colors dark:text-gray-400"
+      className="shrink-0 w-5 h-5 rounded-full border border-paper-300 text-paper-500 text-xs font-semibold leading-none hover:border-accent-400 hover:text-accent-700 transition-colors dark:text-paper-400"
     >
       <span aria-hidden="true">?</span>
     </button>

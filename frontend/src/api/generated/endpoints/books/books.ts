@@ -26,24 +26,24 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ApplyEnrichmentParams,
   BodyUploadCover,
   BookCreate,
   BookDetailsUpdate,
   BookEnrichmentOut,
   BookLookup,
+  BookMatch,
   BookOut,
   BookRatingUpdate,
   BookStatusUpdate,
-  BulkOwnershipResult,
-  BulkOwnershipUpdate,
   BulkRequest,
   BulkResult,
   DuplicateGroup,
   EnrichBookParams,
   ExportBooksParams,
-  GoogleBooksMatch,
   HTTPValidationError,
   ListBooksParams,
+  ListTrashParams,
   LocationOut,
   LookupIsbnParams,
   MergeRequest,
@@ -52,8 +52,10 @@ import type {
   OwnershipUpdate,
   PageBookOut,
   PrivacyUpdate,
-  SearchGoogleBooksParams,
+  PurgeResult,
+  SearchBooksParams,
   SeriesOut,
+  TagCreate,
   TagOut,
 } from "../../model";
 
@@ -515,8 +517,11 @@ export const getBulkActionUrl = () => {
  * updated/unchanged/skipped. Six handlers would be six copies of the
  * permission walk, and the fifth one added would be the one that forgot it.
  *
- * `/bulk/ownership` predates this and is kept: it is the older, narrower
- * shape and something may already be calling it.
+ * A separate `/bulk/ownership` used to sit beside this with the same body,
+ * the same permission walk and an identical result shape. It was removed
+ * rather than carried into the first tagged release: two endpoints for one
+ * action is two places for the next change to have to land, and dropping one
+ * after a release is a breaking change rather than a tidy-up.
  * @summary Bulk Action
  */
 export const bulkAction = async (
@@ -596,103 +601,6 @@ export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getBulkActionMutationOptions(options), queryClient);
-};
-export const getBulkSetOwnershipUrl = () => {
-  return `/api/books/bulk/ownership`;
-};
-
-/**
- * Mark a selection of books as owned, not owned, or unverified.
- *
- * Declared before /{book_id} would match "bulk" as an id, which is the same
- * trap /export sits behind.
- *
- * Only books the caller may modify are touched. A selection containing
- * someone else's private book reports it as skipped rather than failing the
- * whole request: the member cannot see that book to deselect it, so failing
- * would leave them stuck with no way to tell which entry was the problem.
- * @summary Bulk Set Ownership
- */
-export const bulkSetOwnership = async (
-  bulkOwnershipUpdate: BulkOwnershipUpdate,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BulkOwnershipResult> => {
-  return customFetch<BulkOwnershipResult>(getBulkSetOwnershipUrl(), {
-    ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(bulkOwnershipUpdate),
-  });
-};
-
-export const getBulkSetOwnershipMutationOptions = <
-  TError = HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof bulkSetOwnership>>,
-    TError,
-    { data: BulkOwnershipUpdate },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof bulkSetOwnership>>,
-  TError,
-  { data: BulkOwnershipUpdate },
-  TContext
-> => {
-  const mutationKey = ["bulkSetOwnership"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof bulkSetOwnership>>,
-    { data: BulkOwnershipUpdate }
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return bulkSetOwnership(data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type BulkSetOwnershipMutationResult = NonNullable<
-  Awaited<ReturnType<typeof bulkSetOwnership>>
->;
-export type BulkSetOwnershipMutationBody = BulkOwnershipUpdate;
-export type BulkSetOwnershipMutationError = HTTPValidationError;
-
-/**
- * @summary Bulk Set Ownership
- */
-export const useBulkSetOwnership = <
-  TError = HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof bulkSetOwnership>>,
-      TError,
-      { data: BulkOwnershipUpdate },
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof bulkSetOwnership>>,
-  TError,
-  { data: BulkOwnershipUpdate },
-  TContext
-> => {
-  return useMutation(getBulkSetOwnershipMutationOptions(options), queryClient);
 };
 export const getListDuplicatesUrl = () => {
   return `/api/books/duplicates`;
@@ -986,193 +894,6 @@ export function useExportBooks<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getExportBooksQueryOptions(params, options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getSearchGoogleBooksUrl = (params: SearchGoogleBooksParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : String(value));
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/books/google/search?${stringifiedParams}`
-    : `/api/books/google/search`;
-};
-
-/**
- * Free-text search, for adding a book nobody can scan.
- *
- * The barcode path covers a book that is physically to hand. This covers the
- * rest: a book with no barcode, a damaged one, or one being added from a
- * list rather than from the shelf. The caller picks a result and the client
- * prefills the form from it, so nothing is written until a person confirms.
- *
- * Two segments (`/google/search`) rather than one, so it cannot be confused
- * with `/{book_id}` however the routes are later reordered.
- * @summary Search Google Books
- */
-export const searchGoogleBooks = async (
-  params: SearchGoogleBooksParams,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<GoogleBooksMatch[]> => {
-  return customFetch<GoogleBooksMatch[]>(getSearchGoogleBooksUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getSearchGoogleBooksQueryKey = (
-  params?: SearchGoogleBooksParams,
-) => {
-  return [`/api/books/google/search`, ...(params ? [params] : [])] as const;
-};
-
-export const getSearchGoogleBooksQueryOptions = <
-  TData = Awaited<ReturnType<typeof searchGoogleBooks>>,
-  TError = HTTPValidationError,
->(
-  params: SearchGoogleBooksParams,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof searchGoogleBooks>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getSearchGoogleBooksQueryKey(params);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof searchGoogleBooks>>
-  > = ({ signal }) => searchGoogleBooks(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof searchGoogleBooks>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type SearchGoogleBooksQueryResult = NonNullable<
-  Awaited<ReturnType<typeof searchGoogleBooks>>
->;
-export type SearchGoogleBooksQueryError = HTTPValidationError;
-
-export function useSearchGoogleBooks<
-  TData = Awaited<ReturnType<typeof searchGoogleBooks>>,
-  TError = HTTPValidationError,
->(
-  params: SearchGoogleBooksParams,
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof searchGoogleBooks>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof searchGoogleBooks>>,
-          TError,
-          Awaited<ReturnType<typeof searchGoogleBooks>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSearchGoogleBooks<
-  TData = Awaited<ReturnType<typeof searchGoogleBooks>>,
-  TError = HTTPValidationError,
->(
-  params: SearchGoogleBooksParams,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof searchGoogleBooks>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof searchGoogleBooks>>,
-          TError,
-          Awaited<ReturnType<typeof searchGoogleBooks>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-export function useSearchGoogleBooks<
-  TData = Awaited<ReturnType<typeof searchGoogleBooks>>,
-  TError = HTTPValidationError,
->(
-  params: SearchGoogleBooksParams,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof searchGoogleBooks>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * @summary Search Google Books
- */
-
-export function useSearchGoogleBooks<
-  TData = Awaited<ReturnType<typeof searchGoogleBooks>>,
-  TError = HTTPValidationError,
->(
-  params: SearchGoogleBooksParams,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof searchGoogleBooks>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getSearchGoogleBooksQueryOptions(params, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,
@@ -1658,6 +1379,178 @@ export const useScanAdd = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getScanAddMutationOptions(options), queryClient);
 };
+export const getSearchBooksUrl = (params: SearchBooksParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/search?${stringifiedParams}`
+    : `/api/books/search`;
+};
+
+/**
+ * Free-text search, for adding a book nobody can scan.
+ *
+ * The barcode path covers a book that is physically to hand. This covers the
+ * rest: a book with no barcode, a damaged one, one printed before ISBNs
+ * existed, or one being added from a list rather than from the shelf. The
+ * caller picks a result and the client prefills the form from it, so nothing
+ * is written until a person confirms.
+ *
+ * **No API key is required.** This used to be Google Books only and was
+ * hidden entirely from a household that had not configured one, which left
+ * them with no way at all to add a book by title. Open Library answers
+ * without a key; Google is merged in on top when one is set, for the blurb
+ * and the categories its search index carries and Open Library's does not.
+ *
+ * Two segments (`/google/search`) used to guard against this being confused
+ * with `/{book_id}`; a single one is safe for the same reason `/export` is,
+ * which is that it is declared first.
+ * @summary Search Books
+ */
+export const searchBooks = async (
+  params: SearchBooksParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookMatch[]> => {
+  return customFetch<BookMatch[]>(getSearchBooksUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getSearchBooksQueryKey = (params?: SearchBooksParams) => {
+  return [`/api/books/search`, ...(params ? [params] : [])] as const;
+};
+
+export const getSearchBooksQueryOptions = <
+  TData = Awaited<ReturnType<typeof searchBooks>>,
+  TError = HTTPValidationError,
+>(
+  params: SearchBooksParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof searchBooks>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getSearchBooksQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof searchBooks>>> = ({
+    signal,
+  }) => searchBooks(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof searchBooks>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type SearchBooksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof searchBooks>>
+>;
+export type SearchBooksQueryError = HTTPValidationError;
+
+export function useSearchBooks<
+  TData = Awaited<ReturnType<typeof searchBooks>>,
+  TError = HTTPValidationError,
+>(
+  params: SearchBooksParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof searchBooks>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof searchBooks>>,
+          TError,
+          Awaited<ReturnType<typeof searchBooks>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useSearchBooks<
+  TData = Awaited<ReturnType<typeof searchBooks>>,
+  TError = HTTPValidationError,
+>(
+  params: SearchBooksParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof searchBooks>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof searchBooks>>,
+          TError,
+          Awaited<ReturnType<typeof searchBooks>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useSearchBooks<
+  TData = Awaited<ReturnType<typeof searchBooks>>,
+  TError = HTTPValidationError,
+>(
+  params: SearchBooksParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof searchBooks>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Search Books
+ */
+
+export function useSearchBooks<
+  TData = Awaited<ReturnType<typeof searchBooks>>,
+  TError = HTTPValidationError,
+>(
+  params: SearchBooksParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof searchBooks>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getSearchBooksQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListSeriesUrl = () => {
   return `/api/books/series`;
 };
@@ -1803,6 +1696,16 @@ export const getListTagsUrl = () => {
 };
 
 /**
+ * The curated vocabulary plus whatever the household has invented.
+ *
+ * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+ * in the frontend), because that is a presentation decision and it needs the
+ * same order in three places. This orders by name within the group, which is
+ * the only part the server can usefully settle.
+ *
+ * `book_count` is one grouped query for the whole list rather than one per
+ * tag: this is fetched on nearly every page, so an N+1 here is an N+1
+ * everywhere.
  * @summary List Tags
  */
 export const listTags = async (
@@ -1933,11 +1836,462 @@ export function useListTags<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getCreateTagUrl = () => {
+  return `/api/books/tags`;
+};
+
+/**
+ * Invent a tag.
+ *
+ * Any member, not just an admin. Public books are a shared shelf that anyone
+ * may curate, and a vocabulary only an admin can extend is a vocabulary
+ * nobody uses.
+ *
+ * Matched case-insensitively against what already exists, so "Cookbooks" and
+ * "cookbooks" cannot both appear. A collision returns the existing tag rather
+ * than a 409: somebody typing a name that is already there wants that tag,
+ * and an error would send them to find it by hand.
+ * @summary Create Tag
+ */
+export const createTag = async (
+  tagCreate: TagCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<TagOut> => {
+  return customFetch<TagOut>(getCreateTagUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(tagCreate),
+  });
+};
+
+export const getCreateTagMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createTag>>,
+    TError,
+    { data: TagCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createTag>>,
+  TError,
+  { data: TagCreate },
+  TContext
+> => {
+  const mutationKey = ["createTag"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createTag>>,
+    { data: TagCreate }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createTag(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateTagMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createTag>>
+>;
+export type CreateTagMutationBody = TagCreate;
+export type CreateTagMutationError = HTTPValidationError;
+
+/**
+ * @summary Create Tag
+ */
+export const useCreateTag = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createTag>>,
+      TError,
+      { data: TagCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createTag>>,
+  TError,
+  { data: TagCreate },
+  TContext
+> => {
+  return useMutation(getCreateTagMutationOptions(options), queryClient);
+};
+export const getDeleteTagUrl = (tagId: number) => {
+  return `/api/books/tags/${tagId}`;
+};
+
+/**
+ * Remove a tag the household invented, and take it off every book.
+ *
+ * **Admin only, and deliberately asymmetric with creating one.** Creating a
+ * tag is additive and reversible by deleting it, so it is open to everyone.
+ * Deleting one is neither: it strips the tag from every book in the house at
+ * once, there is no undo for it as there is for a deleted book, and `Tag`
+ * records nobody as its author. One member should not be able to quietly
+ * unpick the shared vocabulary.
+ *
+ * A seeded tag is refused rather than deleted. `seed_tags()` runs at every
+ * boot and would put it straight back, so the delete would appear to work
+ * and then quietly undo itself at the next restart.
+ *
+ * Declared before `/{book_id}`: two segments, but the ordering is what keeps
+ * that true if either path is later reshaped.
+ * @summary Delete Tag
+ */
+export const deleteTag = async (
+  tagId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteTagUrl(tagId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteTagMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteTag>>,
+    TError,
+    { tagId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteTag>>,
+  TError,
+  { tagId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteTag"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteTag>>,
+    { tagId: number }
+  > = (props) => {
+    const { tagId } = props ?? {};
+
+    return deleteTag(tagId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteTagMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteTag>>
+>;
+
+export type DeleteTagMutationError = HTTPValidationError;
+
+/**
+ * @summary Delete Tag
+ */
+export const useDeleteTag = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteTag>>,
+      TError,
+      { tagId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteTag>>,
+  TError,
+  { tagId: number },
+  TContext
+> => {
+  return useMutation(getDeleteTagMutationOptions(options), queryClient);
+};
+export const getEmptyTrashUrl = () => {
+  return `/api/books/trash`;
+};
+
+/**
+ * Delete everything in the caller's trash for good.
+ *
+ * Scoped by `in_trash_for`, so emptying the trash never reaches a book the
+ * caller could not see in it. There is no automatic expiry: this app has no
+ * scheduler, and a sweep at startup would delete on restart timing rather
+ * than on any schedule anybody chose.
+ * @summary Empty Trash
+ */
+export const emptyTrash = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PurgeResult> => {
+  return customFetch<PurgeResult>(getEmptyTrashUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getEmptyTrashMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof emptyTrash>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof emptyTrash>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["emptyTrash"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof emptyTrash>>,
+    void
+  > = () => {
+    return emptyTrash(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type EmptyTrashMutationResult = NonNullable<
+  Awaited<ReturnType<typeof emptyTrash>>
+>;
+
+export type EmptyTrashMutationError = unknown;
+
+/**
+ * @summary Empty Trash
+ */
+export const useEmptyTrash = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof emptyTrash>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof emptyTrash>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getEmptyTrashMutationOptions(options), queryClient);
+};
+export const getListTrashUrl = (params?: ListTrashParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/trash?${stringifiedParams}`
+    : `/api/books/trash`;
+};
+
+/**
+ * What this member has deleted and could still put back.
+ *
+ * Declared before `/{book_id}`, like `/export`: FastAPI matches in
+ * declaration order, so the reverse would make this a request for the book
+ * with id "trash".
+ *
+ * Most recently deleted first. The trash is read to find something just lost,
+ * not to browse a history.
+ * @summary List Trash
+ */
+export const listTrash = async (
+  params?: ListTrashParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PageBookOut> => {
+  return customFetch<PageBookOut>(getListTrashUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListTrashQueryKey = (params?: ListTrashParams) => {
+  return [`/api/books/trash`, ...(params ? [params] : [])] as const;
+};
+
+export const getListTrashQueryOptions = <
+  TData = Awaited<ReturnType<typeof listTrash>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListTrashParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTrash>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListTrashQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listTrash>>> = ({
+    signal,
+  }) => listTrash(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listTrash>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListTrashQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listTrash>>
+>;
+export type ListTrashQueryError = HTTPValidationError;
+
+export function useListTrash<
+  TData = Awaited<ReturnType<typeof listTrash>>,
+  TError = HTTPValidationError,
+>(
+  params: undefined | ListTrashParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTrash>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTrash>>,
+          TError,
+          Awaited<ReturnType<typeof listTrash>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTrash<
+  TData = Awaited<ReturnType<typeof listTrash>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListTrashParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTrash>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTrash>>,
+          TError,
+          Awaited<ReturnType<typeof listTrash>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListTrash<
+  TData = Awaited<ReturnType<typeof listTrash>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListTrashParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTrash>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Trash
+ */
+
+export function useListTrash<
+  TData = Awaited<ReturnType<typeof listTrash>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListTrashParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listTrash>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListTrashQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getDeleteBookUrl = (bookId: number) => {
   return `/api/books/${bookId}`;
 };
 
 /**
+ * Move a book to the trash. Reversible with `POST /{id}/restore`.
+ *
+ * The row stays and `deleted_at` is stamped. A delete is one tap away from
+ * every book, it is the only action here that repeating does not undo, and a
+ * catalogue is somebody's hours of typing. Reviews of the competition make
+ * the same complaint about all of them: the app does not say what was
+ * deleted and offers no way to put it back.
+ *
+ * The status code is unchanged at 204, so nothing calling this has to know.
  * @summary Delete Book
  */
 export const deleteBook = async (
@@ -2364,11 +2718,19 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
 };
 
 /**
- * Fill in the fields Open Library usually lacks, from Google Books.
+ * Fill in the fields a book is missing, from every catalogue available.
  *
- * Matched by ISBN when there is one, otherwise by title and author. Only
- * empty fields are filled unless `overwrite` is set: enrichment adds what is
- * missing, it does not overrule what somebody typed.
+ * Matched by ISBN when there is one, which runs the full merged chain (the
+ * DNB and K10plus together, then Open Library, then Google), and by title and
+ * author otherwise, which runs the ranked search across all six sources.
+ *
+ * **No API key is required.** This was Google-only and refused outright
+ * without a key, which made it useless for exactly the books the German and
+ * French catalogues were added for: a 978-3 ISBN that Google does not carry
+ * would report "no key" rather than the full record the DNB was holding.
+ *
+ * Only empty fields are filled unless `overwrite` is set: enrichment adds
+ * what is missing, it does not overrule what somebody typed.
  * @summary Enrich Book
  */
 export const enrichBook = async (
@@ -2448,22 +2810,140 @@ export const useEnrichBook = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getEnrichBookMutationOptions(options), queryClient);
 };
+export const getApplyEnrichmentUrl = (
+  bookId: number,
+  params?: ApplyEnrichmentParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/${bookId}/enrich/apply?${stringifiedParams}`
+    : `/api/books/${bookId}/enrich/apply`;
+};
+
+/**
+ * Fill this book in from an edition the member picked.
+ *
+ * Separate from `POST /enrich`, which chooses for them. This exists because
+ * choosing automatically is wrong often enough to matter: a paperback and its
+ * hardback are different page counts and different covers, and a search will
+ * happily return the wrong printing of the right book. Nothing is written
+ * until somebody has looked at the candidates and said which one it is.
+ *
+ * The merge rule is the same either way, and it is the server's rather than
+ * the client's: only empty fields are filled unless `overwrite` is set, so a
+ * publisher somebody typed in by hand is never quietly replaced.
+ * @summary Apply Enrichment
+ */
+export const applyEnrichment = async (
+  bookId: number,
+  bookMatch: BookMatch,
+  params?: ApplyEnrichmentParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookEnrichmentOut> => {
+  return customFetch<BookEnrichmentOut>(getApplyEnrichmentUrl(bookId, params), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookMatch),
+  });
+};
+
+export const getApplyEnrichmentMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof applyEnrichment>>,
+    TError,
+    { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof applyEnrichment>>,
+  TError,
+  { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+  TContext
+> => {
+  const mutationKey = ["applyEnrichment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof applyEnrichment>>,
+    { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams }
+  > = (props) => {
+    const { bookId, data, params } = props ?? {};
+
+    return applyEnrichment(bookId, data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApplyEnrichmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof applyEnrichment>>
+>;
+export type ApplyEnrichmentMutationBody = BookMatch;
+export type ApplyEnrichmentMutationError = HTTPValidationError;
+
+/**
+ * @summary Apply Enrichment
+ */
+export const useApplyEnrichment = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof applyEnrichment>>,
+      TError,
+      { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof applyEnrichment>>,
+  TError,
+  { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+  TContext
+> => {
+  return useMutation(getApplyEnrichmentMutationOptions(options), queryClient);
+};
 export const getEnrichmentCandidatesUrl = (bookId: number) => {
   return `/api/books/${bookId}/enrich/candidates`;
 };
 
 /**
- * Editions Google offers for this book, so the right one can be chosen.
+ * Other editions of this book, so the right one can be chosen.
  *
  * Useful when the automatic match picks a different printing: the page count
- * and cover of a paperback and its hardback are not the same.
+ * and cover of a paperback and its hardback are not the same. Searched across
+ * every catalogue, and ranked, so a German edition of a German book is not
+ * buried under whatever Google happened to return first.
  * @summary Enrichment Candidates
  */
 export const enrichmentCandidates = async (
   bookId: number,
   options?: Parameters<typeof customFetch>[1],
-): Promise<GoogleBooksMatch[]> => {
-  return customFetch<GoogleBooksMatch[]>(getEnrichmentCandidatesUrl(bookId), {
+): Promise<BookMatch[]> => {
+  return customFetch<BookMatch[]>(getEnrichmentCandidatesUrl(bookId), {
     ...options,
     method: "GET",
   });
@@ -3116,6 +3596,90 @@ export const useSetOwnership = <
 > => {
   return useMutation(getSetOwnershipMutationOptions(options), queryClient);
 };
+export const getPurgeBookUrl = (bookId: number) => {
+  return `/api/books/${bookId}/permanent`;
+};
+
+/**
+ * Delete one trashed book for good.
+ * @summary Purge Book
+ */
+export const purgeBook = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getPurgeBookUrl(bookId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getPurgeBookMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof purgeBook>>,
+    TError,
+    { bookId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof purgeBook>>,
+  TError,
+  { bookId: number },
+  TContext
+> => {
+  const mutationKey = ["purgeBook"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof purgeBook>>,
+    { bookId: number }
+  > = (props) => {
+    const { bookId } = props ?? {};
+
+    return purgeBook(bookId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PurgeBookMutationResult = NonNullable<
+  Awaited<ReturnType<typeof purgeBook>>
+>;
+
+export type PurgeBookMutationError = HTTPValidationError;
+
+/**
+ * @summary Purge Book
+ */
+export const usePurgeBook = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof purgeBook>>,
+      TError,
+      { bookId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof purgeBook>>,
+  TError,
+  { bookId: number },
+  TContext
+> => {
+  return useMutation(getPurgeBookMutationOptions(options), queryClient);
+};
 export const getSetPrivacyUrl = (bookId: number) => {
   return `/api/books/${bookId}/privacy`;
 };
@@ -3379,6 +3943,97 @@ export const useRefreshMetadata = <
   TContext
 > => {
   return useMutation(getRefreshMetadataMutationOptions(options), queryClient);
+};
+export const getRestoreBookUrl = (bookId: number) => {
+  return `/api/books/${bookId}/restore`;
+};
+
+/**
+ * Put a trashed book back on the shelf.
+ *
+ * Everything comes back with it: tags, notes, loans and every member's
+ * reading status, because none of it ever left. That is the difference
+ * between this and re-adding the book by hand, and it is the whole point.
+ * @summary Restore Book
+ */
+export const restoreBook = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getRestoreBookUrl(bookId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRestoreBookMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreBook>>,
+    TError,
+    { bookId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreBook>>,
+  TError,
+  { bookId: number },
+  TContext
+> => {
+  const mutationKey = ["restoreBook"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreBook>>,
+    { bookId: number }
+  > = (props) => {
+    const { bookId } = props ?? {};
+
+    return restoreBook(bookId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreBookMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreBook>>
+>;
+
+export type RestoreBookMutationError = HTTPValidationError;
+
+/**
+ * @summary Restore Book
+ */
+export const useRestoreBook = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreBook>>,
+      TError,
+      { bookId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreBook>>,
+  TError,
+  { bookId: number },
+  TContext
+> => {
+  return useMutation(getRestoreBookMutationOptions(options), queryClient);
 };
 export const getUpdateStatusUrl = (bookId: number) => {
   return `/api/books/${bookId}/status`;

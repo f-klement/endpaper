@@ -154,7 +154,7 @@ describe("BookDetail", () => {
 
       await userEvent
         .setup()
-        .click(await screen.findByRole("button", { name: /✅ Read/ }));
+        .click(await screen.findByRole("button", { name: "Read" }));
 
       await waitFor(() =>
         expect(api.lastCall("/api/books/1/status", "PUT")?.body).toEqual({
@@ -173,7 +173,7 @@ describe("BookDetail", () => {
 
       await userEvent
         .setup()
-        .click(await screen.findByRole("button", { name: /✅ Read/ }));
+        .click(await screen.findByRole("button", { name: "Read" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "Book not found",
@@ -218,7 +218,9 @@ describe("BookDetail", () => {
       });
       renderDetail(OTHER);
 
-      expect(await screen.findByText(/🔒 Private/)).toBeInTheDocument();
+      // The lock is a drawn icon now, so the assertion is on the words. The
+      // icon is decorative and carries no accessible name by design.
+      expect(await screen.findByText("Private")).toBeInTheDocument();
     });
   });
 
@@ -249,6 +251,8 @@ describe("BookDetail", () => {
 
       const user = userEvent.setup();
       await user.click(await screen.findByRole("button", { name: "+ Add" }));
+      // The tag categories start closed: the curated vocabulary is 105 tags.
+      await user.click(await screen.findByRole("button", { name: /Genre/ }));
       await user.click(await screen.findByRole("button", { name: "Fantasy" }));
 
       await waitFor(() =>
@@ -531,34 +535,35 @@ describe("BookDetail", () => {
   });
 
   describe("deleting the book", () => {
-    it("asks for confirmation first", async () => {
-      stubLoad();
-      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-      renderDetail();
-
-      await userEvent
-        .setup()
-        .click(
-          await screen.findByRole("button", { name: "Remove from Catalog" }),
-        );
-
-      expect(confirmSpy).toHaveBeenCalled();
-      expect(api.lastCall(/\/api\/books\/1$/, "DELETE")).toBeUndefined();
-    });
-
-    it("deletes and returns to the library once confirmed", async () => {
+    it("deletes and returns to the library", async () => {
       stubLoad();
       api.on(/\/api\/books\/1$/, { status: 204 }, "DELETE");
-      vi.spyOn(window, "confirm").mockReturnValue(true);
       renderDetail();
 
       await userEvent
         .setup()
-        .click(
-          await screen.findByRole("button", { name: "Remove from Catalog" }),
-        );
+        .click(await screen.findByRole("button", { name: "Move to Trash" }));
 
       await waitFor(() => expect(navigate).toHaveBeenCalledWith("/"));
+    });
+
+    it("does not ask for confirmation, because it can be taken back", async () => {
+      // The delete is reversible and raises a toast offering exactly that. A
+      // modal in front of it would be friction ahead of an action undone in
+      // one tap. The irreversible verb lives in the trash and does ask.
+      stubLoad();
+      api.on(/\/api\/books\/1$/, { status: 204 }, "DELETE");
+      const confirmSpy = vi.spyOn(window, "confirm");
+      renderDetail();
+
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Move to Trash" }));
+
+      await waitFor(() =>
+        expect(api.lastCall(/\/api\/books\/1$/, "DELETE")).toBeDefined(),
+      );
+      expect(confirmSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -634,7 +639,7 @@ describe("BookDetail ownership", () => {
     renderDetail();
 
     expect(
-      await screen.findByRole("button", { name: "✅ Read" }),
+      await screen.findByRole("button", { name: "Read" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Not owned" })).toHaveAttribute(
       "aria-pressed",
@@ -643,15 +648,36 @@ describe("BookDetail ownership", () => {
   });
 });
 
+/** One candidate as the picker receives it. */
+const CANDIDATE = {
+  source: "open_library",
+  google_books_id: "abc123",
+  title: "Dune",
+  subtitle: null,
+  author: "Frank Herbert",
+  publisher: "Chilton",
+  year: 1965,
+  description: null,
+  page_count: 412,
+  language: "en",
+  categories: null,
+  cover_url: null,
+  isbn13: "9780441013593",
+  series_name: null,
+  series_index: null,
+  suggested_tag_ids: [],
+};
+
 describe("BookDetail enrichment", () => {
-  it("is hidden unless an admin switched it on", async () => {
-    // A button that could only ever fail is worse than no button.
+  it("is offered even with no Google Books key", async () => {
+    // It used to hide itself without one. The other five catalogues need no
+    // key, so hiding it left a household unable to fill in exactly the books
+    // those catalogues cover best.
     stubLoad({ googleBooks: false });
     renderDetail();
-    await screen.findByRole("heading", { name: "Dune" });
     expect(
-      screen.queryByRole("button", { name: "Find more details" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: "Find more details" }),
+    ).toBeInTheDocument();
   });
 
   it("offers the lookup when enabled", async () => {
@@ -662,10 +688,26 @@ describe("BookDetail enrichment", () => {
     ).toBeInTheDocument();
   });
 
-  it("fills gaps rather than overwriting typed values", async () => {
-    const book = stubLoad({ googleBooks: true });
-    api.on("/api/books/1/enrich", {
-      body: { book, found: true, updated_fields: ["page_count"] },
+  it("writes nothing until an edition is chosen", async () => {
+    // The whole reason the picker exists. The button used to take whichever
+    // result came back first, and a catalogue will happily return the other
+    // printing of the right book.
+    stubLoad({ googleBooks: true });
+    api.on("/api/books/1/enrich/candidates", { body: [CANDIDATE] });
+    renderDetail();
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Find more details" }));
+
+    await screen.findByRole("heading", { name: "Which edition is this?" });
+    expect(api.lastCall("/enrich/apply", "POST")).toBeUndefined();
+  });
+
+  it("offers the editions it found", async () => {
+    stubLoad({ googleBooks: true });
+    api.on("/api/books/1/enrich/candidates", {
+      body: [CANDIDATE, { ...CANDIDATE, year: 1999, page_count: 500 }],
     });
     renderDetail();
 
@@ -673,9 +715,31 @@ describe("BookDetail enrichment", () => {
       .setup()
       .click(await screen.findByRole("button", { name: "Find more details" }));
 
-    await waitFor(() => expect(api.lastCall("/enrich", "POST")).toBeDefined());
+    const dialog = await screen.findByRole("dialog");
+    // Scoped to the dialog: the page heading is also the book's title.
+    expect(within(dialog).getAllByText("Dune")).toHaveLength(2);
+  });
+
+  it("fills gaps rather than overwriting typed values", async () => {
+    const book = stubLoad({ googleBooks: true });
+    api.on("/api/books/1/enrich/candidates", { body: [CANDIDATE] });
+    api.on("/api/books/1/enrich/apply", {
+      body: { book, found: true, updated_fields: ["page_count"] },
+    });
+    renderDetail();
+
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "Find more details" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByText("Dune"));
+
+    await waitFor(() =>
+      expect(api.lastCall("/enrich/apply", "POST")).toBeDefined(),
+    );
     const query = new URL(
-      api.lastCall("/enrich", "POST")!.url,
+      api.lastCall("/enrich/apply", "POST")!.url,
       "http://localhost",
     ).searchParams;
     expect(query.get("overwrite")).toBe("false");
@@ -683,14 +747,18 @@ describe("BookDetail enrichment", () => {
 
   it("says what it added", async () => {
     const book = stubLoad({ googleBooks: true });
-    api.on("/api/books/1/enrich", {
+    api.on("/api/books/1/enrich/candidates", { body: [CANDIDATE] });
+    api.on("/api/books/1/enrich/apply", {
       body: { book, found: true, updated_fields: ["page_count", "language"] },
     });
     renderDetail();
 
-    await userEvent
-      .setup()
-      .click(await screen.findByRole("button", { name: "Find more details" }));
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "Find more details" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByText("Dune"));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Added: page count, language.",

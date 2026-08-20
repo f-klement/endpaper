@@ -61,9 +61,19 @@ src/
 Each page folder has an `index.ts` that is its **only** public surface. `routes.tsx`
 imports `from "../pages/Home"`, never from `"../pages/Home/components/BookCard"`.
 
-The same rule applies downward: nothing outside a page's own `hooks.ts` imports from
-`api/generated/`. That single indirection is what stops a regeneration rippling through
-every component. When the schema changes, the page's hook file absorbs it.
+The same rule applies downward: nothing outside a `hooks.ts` imports from
+`api/generated/endpoints/`. That single indirection is what stops a regeneration rippling
+through every component. When the schema changes, the page's hook file absorbs it.
+
+Generated **types** are a different matter and are imported freely, by about fifty files.
+`api/generated/model` is a description of the API rather than a call to it: a component
+naming the shape it renders is not coupled to how that shape is fetched, and hiding the
+types behind a hand-written copy would mean maintaining a second description that can
+disagree with the first.
+
+`tests/houseRules.test.ts` enforces the boundary. It held with one exception before that
+test existed, a feature-flags call inline in `providers.tsx`, which is now
+`useFeatureFlags` in `app/hooks.ts`. One exception is one more than a test can express.
 
 ## Dumb components
 

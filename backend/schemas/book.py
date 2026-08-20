@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator
 
 import isbn as isbn_utils
-from enums import BulkAction, OwnershipStatus, ReadStatus
+from enums import BookCondition, BookFormat, BulkAction, OwnershipStatus, ReadStatus
 from google_books import split_categories
 from schemas.tag import TagOut
 from schemas.user import UserOut
@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 MIN_YEAR = 1
 MAX_YEAR = 2200
 
+# A price in minor units (cents). The ceiling is 100 million cents, which is a
+# million in any ordinary currency: high enough for a genuinely rare book, low
+# enough that a mistyped field is caught rather than stored.
+MAX_PRICE_MINOR = 100_000_000
+
 
 class BookLookup(BaseModel):
     """Metadata fetched for an ISBN. Nothing is persisted at this point: the
@@ -38,6 +43,11 @@ class BookLookup(BaseModel):
     cover_url: str | None = None
     series_name: str | None = None
     series_index: float | None = None
+    # Carried because the DNB supplies both and is the only source that does so
+    # reliably for German publishing. Without them here a scan pays for the
+    # lookup and then throws half the record away.
+    language: str | None = None
+    page_count: int | None = None
     suggested_tag_ids: list[int] = []
 
 
@@ -57,6 +67,11 @@ class BookCreate(BaseModel):
     series_name: str | None = Field(default=None, max_length=255)
     series_index: float | None = Field(default=None, ge=0, le=1000)
     location: str | None = Field(default=None, max_length=120)
+    language: str | None = Field(default=None, max_length=16)
+    page_count: int | None = Field(default=None, ge=1, le=100_000)
+    # The one collector field offered at add time. Somebody scanning a book is
+    # holding it, so this is the one moment they can answer without checking.
+    format: BookFormat | None = None
 
     @field_validator("isbn")
     @classmethod
@@ -89,6 +104,9 @@ class BookOut(BaseModel):
     description: str | None
     cover_url: str | None
     added_at: datetime
+    #: When this book was trashed, or null while it is on the shelf. Always
+    #: null outside the trash listing, since `visible_to()` excludes the rest.
+    deleted_at: datetime | None = None
     is_private: bool = False
     ownership: OwnershipStatus = OwnershipStatus.OWNED
     added_by: UserOut | None = None
@@ -106,6 +124,15 @@ class BookOut(BaseModel):
     series_name: str | None = None
     series_index: float | None = None
     location: str | None = None
+
+    format: BookFormat | None = None
+    condition: BookCondition | None = None
+    #: Minor units (cents). The client divides by 100 to display it; storing a
+    #: decimal would round-trip through a float over SQLite.
+    purchase_price_minor: int | None = None
+    purchase_currency: str | None = None
+    purchased_at: date | None = None
+    purchase_source: str | None = None
 
     # The two fields below are not columns. They are computed per request and
     # depend on *who is asking*, so the same row serialises differently for
@@ -152,9 +179,16 @@ class BookEnrichmentOut(BaseModel):
     found: bool
 
 
-class GoogleBooksMatch(BaseModel):
-    """One candidate from a free-text search, for picking the right edition."""
+class BookMatch(BaseModel):
+    """One candidate from a free-text search, for picking the right edition.
 
+    Named for what it is rather than where it came from: search asks Open
+    Library always and Google Books when a key is configured, and merges what
+    they agree on into one row. `source` says which of them supplied it.
+    """
+
+    #: Which catalogue this row came from, for the label in the picker.
+    source: str = ""
     google_books_id: str | None = None
     title: str | None = None
     subtitle: str | None = None
@@ -208,6 +242,22 @@ class BookDetailsUpdate(BaseModel):
     series_name: str | None = Field(default=None, max_length=255)
     series_index: float | None = Field(default=None, ge=0, le=1000)
     location: str | None = Field(default=None, max_length=120)
+
+    format: BookFormat | None = None
+    condition: BookCondition | None = None
+    purchase_price_minor: int | None = Field(default=None, ge=0, le=MAX_PRICE_MINOR)
+    # Upper case, three letters, ISO 4217 shaped without asserting the code is
+    # real: a household using a currency this app has never heard of is not an
+    # error worth refusing an edit over.
+    purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    purchased_at: date | None = None
+    purchase_source: str | None = Field(default=None, max_length=120)
+
+    @field_validator("purchase_currency")
+    @classmethod
+    def upper_case_currency(cls, value: str | None) -> str | None:
+        """`eur` and `EUR` are the same currency and must not sort apart."""
+        return value.upper() if value else value
 
 
 class SeriesOut(BaseModel):
@@ -284,28 +334,10 @@ class BulkResult(BaseModel):
     skipped: int = Field(ge=0)
 
 
-class BulkOwnershipUpdate(BaseModel):
-    """Mark several books at once.
+class PurgeResult(BaseModel):
+    """How many books emptying the trash destroyed."""
 
-    The flow this exists for: import a Goodreads library, then pick out the
-    ones actually on the shelf. Doing that one book at a time for a few hundred
-    imported rows is not a realistic ask.
-    """
-
-    book_ids: list[int] = Field(min_length=1, max_length=500)
-    ownership: OwnershipStatus
-
-
-class BulkOwnershipResult(BaseModel):
-    """What the bulk update did.
-
-    `skipped` is not an error: a selection can include a book the caller may
-    not modify, and silently reporting success for it would be a lie.
-    """
-
-    updated: int = Field(ge=0)
-    unchanged: int = Field(ge=0)
-    skipped: int = Field(ge=0)
+    purged: int = Field(ge=0)
 
 
 class PrivacyUpdate(BaseModel):

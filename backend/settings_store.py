@@ -14,6 +14,7 @@ A container that behaves differently depending on database contents is harder
 to reason about, so the second list is kept deliberately short.
 """
 
+import secrets
 from typing import Final
 
 from sqlalchemy.orm import Session
@@ -33,6 +34,8 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # and costs nothing.
     SettingKey.GOODREADS_LOOKUP_ENABLED: "true",
     SettingKey.DEFAULT_LOCALE: Locale.EN.value,
+    # Every issued token carries this. See `bump_token_epoch`.
+    SettingKey.TOKEN_EPOCH: "0",
 }
 
 # Settings whose value must never be sent back to a browser in full.
@@ -102,3 +105,30 @@ def google_books_api_key(db: Session) -> str:
     return config.google_books_api_key_from_env() or get_raw(
         db, SettingKey.GOOGLE_BOOKS_API_KEY
     )
+
+
+def token_epoch(db: Session) -> str:
+    """The value every access token is stamped with when it is issued."""
+    return get_raw(db, SettingKey.TOKEN_EPOCH)
+
+
+def bump_token_epoch(db: Session) -> str:
+    """Invalidate every token issued so far.
+
+    A restore replaces the users table wholesale, which means the id a live
+    token names may afterwards belong to somebody else entirely: the token for
+    user 3 comes back as a different person, with that person's books and, if
+    the row happens to be an admin, their powers. Nothing in the token itself
+    notices, because the id is still an id and the signature is still ours.
+
+    Bumping this on restore ends every pre-restore session instead, which is
+    the honest outcome: those sessions authenticated against a user table that
+    no longer exists.
+
+    A random value rather than a counter, because the settings table is itself
+    part of the backup. A counter would be restored to an older number, and a
+    token stamped with that number would start verifying again.
+    """
+    fresh = secrets.token_hex(8)
+    set_value(db, SettingKey.TOKEN_EPOCH, fresh)
+    return fresh

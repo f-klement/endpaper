@@ -11,7 +11,7 @@ from dependencies import DbSession
 from enums import SettingKey
 from models import User
 from schemas import FeatureFlagsOut, LoginImageOut, SettingsOut, SettingsUpdate
-from uploads import read_image_upload
+from uploads import read_image_upload, replace_image
 
 LOGIN_BG_BASE = "login_bg"
 
@@ -43,15 +43,10 @@ async def set_login_image(
     # Identified by content, not by the caller-supplied filename.
     data, extension = await read_image_upload(file)
 
-    # Remove any existing background first: two formats of login_bg would both
-    # exist and _find_login_bg would pick whichever it saw first.
-    for old_extension in ALLOWED_IMAGE_EXTENSIONS:
-        old_path = COVERS_DIR / f"{LOGIN_BG_BASE}.{old_extension}"
-        if old_path.exists():
-            old_path.unlink()
-
-    destination = COVERS_DIR / f"{LOGIN_BG_BASE}.{extension}"
-    destination.write_bytes(data)
+    # Into place first, stale formats after: _find_login_bg picks whichever it
+    # sees first, and deleting before writing meant a failure left no
+    # background at all. See uploads.replace_image.
+    destination = replace_image(COVERS_DIR, LOGIN_BG_BASE, extension, data)
     return LoginImageOut(url=f"/covers/{destination.name}")
 
 

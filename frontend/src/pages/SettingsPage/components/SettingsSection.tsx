@@ -1,21 +1,25 @@
 import type { ReactNode } from "react";
 
+import { Icon, type IconName } from "../../../components";
+
 interface SettingsSectionProps {
   title: string;
-  glyph: string;
+  icon: IconName;
   children: ReactNode;
 }
 
 /** A titled card. Dumb: layout only, no state and no data. */
 export default function SettingsSection({
   title,
-  glyph,
+  icon,
   children,
 }: SettingsSectionProps) {
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-5 space-y-4 dark:bg-gray-900 dark:border-gray-700">
-      <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2 dark:text-gray-100">
-        <span aria-hidden="true">{glyph}</span>
+    <section className="card p-5 space-y-4">
+      <h2 className="flex items-center gap-2.5 text-sm font-semibold text-paper-900 dark:text-paper-100">
+        <span className="grid place-items-center w-7 h-7 rounded-lg bg-paper-100 text-paper-500 dark:bg-paper-800 dark:text-paper-400">
+          <Icon name={icon} className="w-4 h-4" />
+        </span>
         {title}
       </h2>
       {children}

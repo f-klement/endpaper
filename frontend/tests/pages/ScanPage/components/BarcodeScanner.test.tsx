@@ -1,25 +1,45 @@
 /**
  * Tests for src/pages/ScanPage/components/BarcodeScanner.tsx.
  *
- * @zxing/library is mocked wholesale: there is no camera in jsdom, and what
- * is worth testing is the ISBN filter and the camera lifecycle, not ZXing's
- * decoding.
+ * @zxing/library is mocked wholesale: there is no camera in jsdom, and what is
+ * worth testing is the ISBN filter, what the camera is asked for, and the
+ * lifecycle, not ZXing's decoding.
+ *
+ * The constraints are asserted on rather than taken on trust because they are
+ * the fix for the scanner reading nothing on a phone: the default stream is
+ * around 640x480, and an EAN-13 is 95 modules wide, so at that resolution the
+ * bars fall below a pixel each and no amount of decoding effort recovers them.
  */
 
 import { screen, waitFor } from "@testing-library/react";
 import { renderLocalised } from "../../../utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const decodeFromVideoDevice = vi.fn();
+const decodeFromStream = vi.fn();
 const reset = vi.fn();
+const readerArgs = vi.fn();
 
 vi.mock("@zxing/library", () => {
   class NotFoundException extends Error {}
   class BrowserMultiFormatReader {
-    decodeFromVideoDevice = decodeFromVideoDevice;
+    decodeFromStream = decodeFromStream;
     reset = reset;
+    constructor(hints?: unknown, interval?: number) {
+      readerArgs(hints, interval);
+    }
   }
-  return { BrowserMultiFormatReader, NotFoundException };
+  return {
+    BrowserMultiFormatReader,
+    NotFoundException,
+    BarcodeFormat: {
+      EAN_13: "EAN_13",
+      EAN_8: "EAN_8",
+      UPC_A: "UPC_A",
+      UPC_E: "UPC_E",
+      QR_CODE: "QR_CODE",
+    },
+    DecodeHintType: { POSSIBLE_FORMATS: "POSSIBLE_FORMATS", TRY_HARDER: "TRY_HARDER" },
+  };
 });
 
 import { NotFoundException } from "@zxing/library";
@@ -28,19 +48,53 @@ import BarcodeScanner, {
   readIsbnBarcode,
 } from "../../../../src/pages/ScanPage/components/BarcodeScanner";
 
+const stopTrack = vi.fn();
+const getUserMedia = vi.fn();
+
+function fakeStream(capabilities: Record<string, unknown> = {}) {
+  const track = {
+    stop: stopTrack,
+    getCapabilities: () => capabilities,
+    applyConstraints: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+  } as unknown as MediaStream;
+}
+
 beforeEach(() => {
-  decodeFromVideoDevice.mockReset();
+  decodeFromStream.mockReset().mockResolvedValue(undefined);
   reset.mockReset();
-  decodeFromVideoDevice.mockResolvedValue(undefined);
+  readerArgs.mockReset();
+  stopTrack.mockReset();
+  getUserMedia.mockReset().mockResolvedValue(fakeStream());
+
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 /** Hand the component a decoded barcode through ZXing's callback. */
 function emitBarcode(text: string) {
-  const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
+  const callback = decodeFromStream.mock.calls[0]?.[2] as (
     result: { getText: () => string } | null,
     error: Error | null,
   ) => void;
   callback({ getText: () => text }, null);
+}
+
+function emitError(error: Error) {
+  const callback = decodeFromStream.mock.calls[0]?.[2] as (
+    result: null,
+    error: Error,
+  ) => void;
+  callback(null, error);
 }
 
 describe("readIsbnBarcode", () => {
@@ -75,21 +129,71 @@ describe("readIsbnBarcode", () => {
   });
 });
 
+describe("what the camera is asked for", () => {
+  it("asks for a resolution that can actually resolve a barcode", async () => {
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+
+    const video = getUserMedia.mock.calls[0]![0].video as MediaTrackConstraints;
+    expect((video.width as ConstrainULongRange).ideal).toBeGreaterThanOrEqual(
+      1280,
+    );
+  });
+
+  it("prefers the rear camera without demanding one", async () => {
+    // `exact` fails outright on a laptop with only a front camera, and a front
+    // camera that works beats a rear camera that does not exist.
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+
+    const video = getUserMedia.mock.calls[0]![0].video as MediaTrackConstraints;
+    expect(video.facingMode).toEqual({ ideal: "environment" });
+  });
+
+  it("looks for book symbologies only", async () => {
+    // Otherwise every frame is also tried against QR, Data Matrix and PDF417,
+    // which no book carries: wasted budget and more chances to misread.
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(readerArgs).toHaveBeenCalled());
+
+    const hints = readerArgs.mock.calls[0]![0] as Map<string, string[]>;
+    expect(hints.get("POSSIBLE_FORMATS")).toContain("EAN_13");
+    expect(hints.get("POSSIBLE_FORMATS")).not.toContain("QR_CODE");
+  });
+
+  it("works harder per frame, because book barcodes are creased and curved", async () => {
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(readerArgs).toHaveBeenCalled());
+
+    const hints = readerArgs.mock.calls[0]![0] as Map<string, boolean>;
+    expect(hints.get("TRY_HARDER")).toBe(true);
+  });
+
+  it("checks frames more often than the library's default", async () => {
+    // 500ms skips most of the frames where a hand-held phone happened to be
+    // steady and in focus.
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(readerArgs).toHaveBeenCalled());
+
+    expect(readerArgs.mock.calls[0]![1]).toBeLessThan(500);
+  });
+});
+
 describe("BarcodeScanner", () => {
   it("starts the camera when active", async () => {
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
   });
 
   it("does not start the camera when inactive", () => {
     renderLocalised(<BarcodeScanner active={false} onDetected={vi.fn()} />);
-    expect(decodeFromVideoDevice).not.toHaveBeenCalled();
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it("reports an ISBN barcode", async () => {
     const onDetected = vi.fn();
     renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     emitBarcode("9780441013593");
 
@@ -101,7 +205,7 @@ describe("BarcodeScanner", () => {
     // fired a lookup for a book that cannot exist.
     const onDetected = vi.fn();
     renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     emitBarcode("9780441013594");
 
@@ -112,23 +216,45 @@ describe("BarcodeScanner", () => {
     // Otherwise pointing the camera at a cereal box fires a lookup.
     const onDetected = vi.fn();
     renderLocalised(<BarcodeScanner active onDetected={onDetected} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     emitBarcode("5012345678900");
 
     expect(onDetected).not.toHaveBeenCalled();
   });
 
+  it("says so when it read a barcode that is not a book", async () => {
+    // Discarding it in silence is why the scanner looked broken at exactly the
+    // moment it was working: the price code beside the ISBN decodes perfectly.
+    const onRejected = vi.fn();
+    renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn()} onRejected={onRejected} />,
+    );
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+
+    emitBarcode("5012345678900");
+
+    expect(onRejected).toHaveBeenCalledWith("5012345678900");
+  });
+
+  it("does not report a book as rejected", async () => {
+    const onRejected = vi.fn();
+    renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn()} onRejected={onRejected} />,
+    );
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+
+    emitBarcode("9780441013593");
+
+    expect(onRejected).not.toHaveBeenCalled();
+  });
+
   it("stays quiet on NotFoundException, which fires constantly", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
-    const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
-      result: null,
-      error: Error,
-    ) => void;
-    callback(null, new NotFoundException("no barcode in frame"));
+    emitError(new NotFoundException("no barcode in frame"));
 
     expect(warn).not.toHaveBeenCalled();
   });
@@ -136,13 +262,9 @@ describe("BarcodeScanner", () => {
   it("logs a genuine scanner error", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
-    const callback = decodeFromVideoDevice.mock.calls[0]?.[2] as (
-      result: null,
-      error: Error,
-    ) => void;
-    callback(null, new Error("device lost"));
+    emitError(new Error("device lost"));
 
     expect(warn).toHaveBeenCalled();
   });
@@ -153,7 +275,7 @@ describe("BarcodeScanner", () => {
   });
 
   it("explains a denied camera permission", async () => {
-    decodeFromVideoDevice.mockRejectedValue(new Error("Permission denied"));
+    getUserMedia.mockRejectedValue(new Error("Permission denied"));
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
 
     expect(await screen.findByText("Camera unavailable")).toBeInTheDocument();
@@ -161,7 +283,7 @@ describe("BarcodeScanner", () => {
   });
 
   it("hides the viewfinder once the camera has failed", async () => {
-    decodeFromVideoDevice.mockRejectedValue(new Error("Permission denied"));
+    getUserMedia.mockRejectedValue(new Error("Permission denied"));
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
 
     await screen.findByText("Camera unavailable");
@@ -173,21 +295,50 @@ describe("BarcodeScanner", () => {
     const { unmount } = renderLocalised(
       <BarcodeScanner active onDetected={vi.fn()} />,
     );
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     unmount();
 
     expect(reset).toHaveBeenCalled();
   });
 
+  it("stops the track it opened, not only the reader", async () => {
+    // reset() releases the track ZXing opened. This component opens its own,
+    // so without stopping it the indicator stays lit.
+    const { unmount } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn()} />,
+    );
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+
+    unmount();
+
+    expect(stopTrack).toHaveBeenCalled();
+  });
+
   it("releases the camera when it goes inactive", async () => {
     const { rerender } = renderLocalised(
       <BarcodeScanner active onDetected={vi.fn()} />,
     );
-    await waitFor(() => expect(decodeFromVideoDevice).toHaveBeenCalled());
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
     rerender(<BarcodeScanner active={false} onDetected={vi.fn()} />);
 
-    expect(reset).toHaveBeenCalled();
+    expect(stopTrack).toHaveBeenCalled();
+  });
+});
+
+describe("the camera light", () => {
+  it("is offered when the camera has one", async () => {
+    getUserMedia.mockResolvedValue(fakeStream({ torch: true }));
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+
+    expect(await screen.findByText("Camera light")).toBeInTheDocument();
+  });
+
+  it("is not offered when the camera has none", async () => {
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+
+    expect(screen.queryByText("Camera light")).not.toBeInTheDocument();
   });
 });

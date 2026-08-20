@@ -12,17 +12,45 @@ import pytest
 import respx
 
 from models import Tag
-from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, items, titles
+from tests.helpers import (
+    JPEG_BYTES,
+    NOT_AN_IMAGE,
+    PNG_BYTES,
+    items,
+    silence_covers,
+    titles,
+)
 
 OPEN_LIBRARY_ISBN = "https://openlibrary.org/isbn/9780743273565.json"
 OPEN_LIBRARY_AUTHOR = "https://openlibrary.org/authors/OL123A.json"
 GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes"
+DNB = "https://services.dnb.de/sru/dnb"
+K10PLUS = "https://sru.k10plus.de/opac-de-627"
+
+#: An SRU response holding no records. Both remaining SRU sources answer 200
+#: with an empty set rather than a 404, so mocking a 404 would test a case the
+#: real services never produce.
+SRU_EMPTY = """<?xml version="1.0" encoding="UTF-8"?>
+<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">
+ <zs:numberOfRecords>0</zs:numberOfRecords><zs:records/>
+</zs:searchRetrieveResponse>
+"""
+
+
+def _sru_empty() -> httpx.Response:
+    return httpx.Response(200, text=SRU_EMPTY, headers={"content-type": "text/xml"})
 
 
 @pytest.fixture
 def open_library_hit():
-    """Open Library answers with a complete record."""
+    """Open Library answers with a complete record.
+
+    The fast pair has to be silenced. Open Library is a fallback now, reached
+    only once the DNB and K10plus have both said they do not hold the book.
+    """
     with respx.mock(assert_all_called=False) as mock:
+        mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
+        mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         mock.get(OPEN_LIBRARY_ISBN).mock(
             return_value=httpx.Response(
                 200,
@@ -40,16 +68,92 @@ def open_library_hit():
         mock.get(OPEN_LIBRARY_AUTHOR).mock(
             return_value=httpx.Response(200, json={"name": "F. Scott Fitzgerald"})
         )
+        # A cover is checked before it is stored, so a successful lookup now
+        # reaches the image services too. This fixture is the "Open Library
+        # has it" case, so its cover service answers with a real image; the
+        # DNB's has nothing for an English ISBN.
+        mock.get(url__startswith="https://covers.openlibrary.org/").mock(
+            return_value=httpx.Response(
+                200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
+            )
+        )
+        silence_covers(mock)
         yield mock
+
+
+#: An SRU response for an ISBN the DNB does not hold. It answers 200 with zero
+#: records rather than a 404, so mocking a 404 here would test a case the real
+#: service never produces.
+DNB_EMPTY = """<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+ <numberOfRecords>0</numberOfRecords><records/>
+</searchRetrieveResponse>
+"""
 
 
 @pytest.fixture
 def open_library_miss():
-    """Open Library 404s, so the lookup should fall through to Google Books."""
+    """Every free source misses, leaving Google Books as the answer.
+
+    All three have to be silenced explicitly: respx fails a test that makes an
+    unmocked request rather than letting it reach the real service.
+    """
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith="https://openlibrary.org/").mock(
             return_value=httpx.Response(404)
         )
+        mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
+        mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
+        silence_covers(mock)
+        yield mock
+
+
+#: One DNB SRU record, trimmed to the fields the parser reads. The awkward
+#: shapes are the real ones: the title statement carries the original title in
+#: brackets, the subtitle after a colon and the authors after a slash, and each
+#: creator is tagged with a role that decides whether it is an author at all.
+DNB_RECORD = """<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+ <numberOfRecords>1</numberOfRecords>
+ <records><record><recordData>
+  <dc xmlns="http://www.openarchives.org/OAI/2.0/oai_dc/"
+      xmlns:dc="http://purl.org/dc/elements/1.1/">
+   <dc:title>[Docker: up &amp; running] ; Praxiswissen Docker : Grundlagen und Best \
+Practices / Sean P. Kane mit Karl Matthias</dc:title>
+   <dc:creator>Kane, Sean P. [Verfasser]</dc:creator>
+   <dc:creator>Demmig, Thomas [\u00dcbersetzer]</dc:creator>
+   <dc:publisher>Heidelberg : O'Reilly</dc:publisher>
+   <dc:date>2024</dc:date>
+   <dc:language>ger</dc:language>
+   <dc:subject>004 Informatik</dc:subject>
+   <dc:format>390 Seiten</dc:format>
+  </dc>
+ </recordData></record></records>
+</searchRetrieveResponse>
+"""
+
+
+@pytest.fixture
+def dnb_hit():
+    """The DNB answers, and nothing else is reachable.
+
+    A 978-3 ISBN leads with the DNB, so everything else is mocked as a miss to
+    prove the German record is what came back rather than a fallback.
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
+        mock.get(url__startswith=DNB).mock(
+            return_value=httpx.Response(
+                200, text=DNB_RECORD, headers={"content-type": "text/xml"}
+            )
+        )
+        mock.get(url__startswith="https://openlibrary.org/").mock(
+            return_value=httpx.Response(404)
+        )
+        mock.get(url__startswith=GOOGLE_BOOKS).mock(
+            return_value=httpx.Response(200, json={"items": []})
+        )
+        silence_covers(mock)
         yield mock
 
 
@@ -153,7 +257,7 @@ class TestIsbnLookup:
         ).json()
         assert body["author"] == "Frank Herbert, Brian Herbert"
 
-    def test_both_sources_missing_is_404(self, client, admin, open_library_miss):
+    def test_every_source_missing_is_404(self, client, admin, open_library_miss):
         open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
             return_value=httpx.Response(200, json={"items": []})
         )
@@ -161,6 +265,51 @@ class TestIsbnLookup:
             "/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"]
         )
         assert res.status_code == 404
+
+    def test_a_throttled_source_is_503_not_404(self, client, admin, open_library_miss):
+        """A quota that will reset is not the same answer as "no such book".
+
+        A 404 sends the reader off to type the whole record in by hand. This
+        was the live failure: Google throttled every keyless request and the
+        API reported each one as a book nobody has ever catalogued.
+        """
+        open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
+            return_value=httpx.Response(429)
+        )
+        res = client.get(
+            "/api/books/lookup", params={"isbn": "9780743273565"}, headers=admin["headers"]
+        )
+        assert res.status_code == 503
+        assert "rate limiting" in res.json()["detail"]
+
+    def test_a_german_isbn_resolves_from_the_dnb(self, client, admin, dnb_hit):
+        body = client.get(
+            "/api/books/lookup", params={"isbn": "9783960092353"}, headers=admin["headers"]
+        ).json()
+        assert body["title"] == "Praxiswissen Docker"
+        assert body["subtitle"] == "Grundlagen und Best Practices"
+        assert body["author"] == "Sean P. Kane"
+        assert body["publisher"] == "O'Reilly"
+        assert body["year"] == 2024
+        assert body["language"] == "de"
+        assert body["page_count"] == 390
+
+    def test_a_repeat_lookup_does_not_call_the_source_again(
+        self, client, admin, open_library_hit
+    ):
+        """Holding a barcode in frame produces the same ISBN many times a second."""
+        for _ in range(3):
+            client.get(
+                "/api/books/lookup",
+                params={"isbn": "9780743273565"},
+                headers=admin["headers"],
+            )
+        edition_calls = [
+            call
+            for call in open_library_hit.calls
+            if call.request.url.path == "/isbn/9780743273565.json"
+        ]
+        assert len(edition_calls) == 1
 
     def test_short_isbn_is_rejected_before_any_request(self, client, admin):
         res = client.get("/api/books/lookup", params={"isbn": "123"}, headers=admin["headers"])
@@ -473,7 +622,15 @@ class TestDeleteBook:
     def test_unknown_id_is_404(self, client, admin):
         assert client.delete("/api/books/9999", headers=admin["headers"]).status_code == 404
 
-    def test_deleting_cascades_to_notes(self, client, admin, make_book, db):
+    def test_deleting_keeps_the_notes_so_a_restore_is_whole(
+        self, client, admin, make_book, db
+    ):
+        """A trashed book keeps everything hanging off it.
+
+        This used to cascade, and the cascade is what made a delete final.
+        Restoring a book without its notes would be re-adding it, not undoing
+        anything.
+        """
         from models import Note
 
         book = make_book(admin["headers"])
@@ -481,9 +638,9 @@ class TestDeleteBook:
             f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"]
         )
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
-        assert db.query(Note).filter(Note.book_id == book["id"]).count() == 0
+        assert db.query(Note).filter(Note.book_id == book["id"]).count() == 1
 
-    def test_deleting_cascades_to_loans(self, client, admin, member, make_book, db):
+    def test_deleting_keeps_the_loans(self, client, admin, member, make_book, db):
         from models import Loan
 
         book = make_book(admin["headers"])
@@ -493,6 +650,31 @@ class TestDeleteBook:
             headers=admin["headers"],
         )
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert db.query(Loan).filter(Loan.book_id == book["id"]).count() == 1
+
+    def test_purging_cascades_to_notes(self, client, admin, make_book, db):
+        """The cascade did not go away, it moved to the irreversible verb."""
+        from models import Note
+
+        book = make_book(admin["headers"])
+        client.post(
+            f"/api/books/{book['id']}/notes", json={"content": "note"}, headers=admin["headers"]
+        )
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
+        assert db.query(Note).filter(Note.book_id == book["id"]).count() == 0
+
+    def test_purging_cascades_to_loans(self, client, admin, member, make_book, db):
+        from models import Loan
+
+        book = make_book(admin["headers"])
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        client.delete(f"/api/books/{book['id']}/permanent", headers=admin["headers"])
         assert db.query(Loan).filter(Loan.book_id == book["id"]).count() == 0
 
 
@@ -681,6 +863,8 @@ class TestExport:
         assert header == [
             "Title", "Author", "ISBN", "Publisher", "Year",
             "Description", "Tags", "My Status", "Date Added", "Added By",
+            "Format", "Condition", "Location", "Purchase Price",
+            "Purchase Currency", "Purchased On", "Purchased From",
         ]
 
     def test_csv_contains_the_books(self, client, admin, make_book):
@@ -816,107 +1000,65 @@ class TestOwnership:
         assert owned["id"] not in {book["id"] for book in found}
 
 
-class TestBulkOwnership:
-    def test_marks_several_books_at_once(self, client, admin, make_book):
-        first = make_book(admin["headers"], title="A")
-        second = make_book(admin["headers"], title="B")
+class TestTheDuplicateConflictPointsAtTheBook:
+    """Re-scanning a book already on the shelf is not a rare mistake, it is
+    what happens on a second pass through a bookcase."""
 
-        res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [first["id"], second["id"]], "ownership": "not_owned"},
-            headers=admin["headers"],
-        )
+    ISBN = "9780441013593"
 
-        assert res.status_code == 200
-        assert res.json()["updated"] == 2
-
-    def test_it_actually_persists(self, client, admin, make_book):
-        book = make_book(admin["headers"])
-
-        client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [book["id"]], "ownership": "not_owned"},
-            headers=admin["headers"],
-        )
-
-        fetched = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
-        assert fetched["ownership"] == "not_owned"
-
-    def test_books_already_in_that_state_are_reported_separately(
+    def test_it_carries_the_id_of_the_book_that_holds_the_isbn(
         self, client, admin, make_book
     ):
-        # Otherwise re-running a confirmation reports work it did not do.
-        book = make_book(admin["headers"])
+        existing = make_book(admin["headers"], title="Dune", isbn=self.ISBN)
 
         res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [book["id"]], "ownership": "owned"},
+            "/api/books",
+            json={"title": "Dune", "author": "Frank Herbert", "isbn": self.ISBN},
             headers=admin["headers"],
         )
 
-        assert res.json() == {"updated": 0, "unchanged": 1, "skipped": 0}
+        assert res.status_code == 409
+        assert res.json()["detail"]["book_id"] == existing["id"]
 
-    def test_a_book_the_caller_cannot_touch_is_skipped_not_fatal(
-        self, client, admin, member, make_book
-    ):
-        """A member cannot see someone else's private book to deselect it, so
-        failing the whole request would leave them stuck with no way to tell
-        which entry was the problem."""
-        mine = make_book(member["headers"], title="Mine")
-        theirs = make_book(admin["headers"], title="Theirs", is_private=True)
+    def test_the_message_is_still_there(self, client, admin, make_book):
+        make_book(admin["headers"], title="Dune", isbn=self.ISBN)
 
         res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [mine["id"], theirs["id"]], "ownership": "not_owned"},
+            "/api/books",
+            json={"title": "Dune", "isbn": self.ISBN},
+            headers=admin["headers"],
+        )
+
+        assert "already" in res.json()["detail"]["message"]
+
+    def test_it_says_nothing_about_another_members_private_book(
+        self, client, admin, member, make_book
+    ):
+        """The uniqueness check sees every row, private ones included, so
+        returning the id would turn a 409 into a way to confirm that a member
+        owns a particular book."""
+        make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
+
+        res = client.post(
+            "/api/books",
+            json={"title": "Dune", "isbn": self.ISBN},
             headers=member["headers"],
         )
 
-        assert res.status_code == 200
-        assert res.json()["updated"] == 1
-        assert res.json()["skipped"] == 1
+        assert res.status_code == 409
+        assert isinstance(res.json()["detail"], str)
 
-    def test_an_id_that_does_not_exist_is_skipped(self, client, admin, make_book):
-        book = make_book(admin["headers"])
+    def test_your_own_private_book_is_still_pointed_at(
+        self, client, admin, make_book
+    ):
+        """It is your book. Withholding it here would be protecting you from
+        yourself and leaving you with the dead end."""
+        existing = make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
 
         res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [book["id"], 999999], "ownership": "not_owned"},
+            "/api/books",
+            json={"title": "Dune", "isbn": self.ISBN},
             headers=admin["headers"],
         )
 
-        assert res.json()["updated"] == 1
-        assert res.json()["skipped"] == 1
-
-    def test_an_empty_selection_is_rejected(self, client, admin):
-        res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [], "ownership": "owned"},
-            headers=admin["headers"],
-        )
-        assert res.status_code == 422
-
-    def test_an_enormous_selection_is_rejected(self, client, admin):
-        res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": list(range(1, 2000)), "ownership": "owned"},
-            headers=admin["headers"],
-        )
-        assert res.status_code == 422
-
-    def test_bulk_is_not_matched_as_a_book_id(self, client, admin):
-        """Route order: declared before /{book_id}, like /export.
-
-        A 422 here would mean "bulk" was parsed as an id.
-        """
-        res = client.post(
-            "/api/books/bulk/ownership",
-            json={"book_ids": [1], "ownership": "owned"},
-            headers=admin["headers"],
-        )
-        assert res.status_code == 200
-
-    def test_requires_authentication(self, client):
-        res = client.post(
-            "/api/books/bulk/ownership", json={"book_ids": [1], "ownership": "owned"}
-        )
-        assert res.status_code == 401
+        assert res.json()["detail"]["book_id"] == existing["id"]

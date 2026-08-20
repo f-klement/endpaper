@@ -19,6 +19,7 @@ pages are for changing it.
 endpaper/
 ├── backend/              FastAPI application
 │   ├── main.py           app wiring, tag seeding, the ad-hoc migration
+│   ├── serialisation.py  assembling BookOut, and the per-request fields
 │   ├── config.py         environment-driven settings + the startup secret guard
 │   ├── dependencies.py   book access control and pagination
 │   ├── models.py         ORM models and the visible_to() predicate
@@ -54,8 +55,8 @@ endpaper/
 One container. FastAPI serves both the JSON API and the compiled React bundle, so there
 is no CORS problem in production and no second web server. Authentication is a stateless
 JWT in `localStorage`. Storage is a single SQLite file plus a directory of uploaded cover
-images, both under `DATA_DIR`. Book metadata is fetched on demand from Open Library, with
-Google Books as a fallback.
+images, both under `DATA_DIR`. Book metadata is fetched on demand from the German
+National Library and K10plus together, with Open Library and Google Books as fallbacks.
 
 The frontend's API client and its React Query hooks are **generated** from the backend's
 OpenAPI schema, so the two halves cannot drift apart silently. Access to a book is decided

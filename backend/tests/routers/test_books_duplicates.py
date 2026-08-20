@@ -267,3 +267,86 @@ class TestMergeRefusals:
 
     def test_requires_authentication(self, client):
         assert client.post("/api/books/merge", json={"book_ids": [1, 2], "keep_id": 1}).status_code == 401
+
+
+class TestTheLoanInvariant:
+    """`returned_at IS NULL` is the single active loan, per docs/data-model.md.
+
+    Merging two books that were both lent out broke it: every loan moved to
+    the survivor unconditionally, so it ended up with two open. Every later
+    lend on that book then 409s forever, and the UI renders one `active_loan`,
+    so there is no way to see the other or close it.
+    """
+
+    def _lent_book(self, client, admin, member, make_book, title: str):
+        book = make_book(admin["headers"], title=title, author="One Author")
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+        return book
+
+    def test_merging_two_lent_books_leaves_one_open_loan(
+        self, client, admin, member, make_book, db
+    ):
+        from models import Loan
+
+        first = self._lent_book(client, admin, member, make_book, "Dune")
+        second = self._lent_book(client, admin, member, make_book, "Dune")
+
+        res = client.post(
+            "/api/books/merge",
+            json={"book_ids": [first["id"], second["id"]], "keep_id": first["id"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        db.expire_all()
+        open_loans = (
+            db.query(Loan)
+            .filter(Loan.book_id == first["id"], Loan.returned_at.is_(None))
+            .count()
+        )
+        assert open_loans == 1
+
+    def test_the_survivor_can_still_be_lent_after_it_comes_back(
+        self, client, admin, member, make_book
+    ):
+        first = self._lent_book(client, admin, member, make_book, "Dune")
+        second = self._lent_book(client, admin, member, make_book, "Dune")
+        client.post(
+            "/api/books/merge",
+            json={"book_ids": [first["id"], second["id"]], "keep_id": first["id"]},
+            headers=admin["headers"],
+        )
+
+        [loan] = [
+            row
+            for row in client.get("/api/loans", headers=admin["headers"]).json()["items"]
+            if row["book_id"] == first["id"]
+        ]
+        client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
+
+        res = client.post(
+            "/api/loans",
+            json={"book_id": first["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201
+
+    def test_no_loan_history_is_destroyed(self, client, admin, member, make_book, db):
+        """The extra loans are closed, not deleted: they happened."""
+        from models import Loan
+
+        first = self._lent_book(client, admin, member, make_book, "Dune")
+        second = self._lent_book(client, admin, member, make_book, "Dune")
+
+        client.post(
+            "/api/books/merge",
+            json={"book_ids": [first["id"], second["id"]], "keep_id": first["id"]},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        assert db.query(Loan).filter(Loan.book_id == first["id"]).count() == 2

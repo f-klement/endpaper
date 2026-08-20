@@ -7,8 +7,33 @@ from sqlalchemy.orm import Session, joinedload
 from dependencies import CurrentUser, DbSession, Paging
 from models import Book, Loan, User, visible_to
 from schemas import LoanCreate, LoanOut, Page
+from serialisation import books_to_out
 
 router = APIRouter(prefix="/api/loans", tags=["loans"])
+
+
+def _to_out_many(loans: list[Loan], current_user: User, db: Session) -> list[LoanOut]:
+    """Serialise a page of loans, with each book's per-member fields filled in.
+
+    The nested `BookOut` used to come from a bare `model_validate`, so every
+    book on the loans page reported `my_status: "unread"` and
+    `active_loan: null` regardless of what the reader had actually done with
+    it. Those two fields are computed per request by `books_to_out`, which is
+    the only thing that knows how, so the books go through it here as well.
+    """
+    books = {loan.book.id: loan.book for loan in loans if loan.book}
+    serialised = {
+        out.id: out
+        for out in books_to_out(list(books.values()), current_user, db)
+    }
+
+    results: list[LoanOut] = []
+    for loan in loans:
+        out = _to_out(loan)
+        if loan.book is not None:
+            out.book = serialised.get(loan.book.id)
+        results.append(out)
+    return results
 
 
 def _to_out(loan: Loan) -> LoanOut:
@@ -72,9 +97,16 @@ def list_loans(
     # SQLite's CURRENT_TIMESTAMP has only second resolution, so loans recorded
     # in the same second tie on loaned_at. id breaks the tie and keeps both the
     # ordering and the paging stable.
+    # The book's own relationships are loaded too. `LoanOut.book` is a
+    # `BookOut`, which serialises tags and the adding member, so joinedloading
+    # only `Loan.book` left this endpoint at 53 statements for 25 loans: the
+    # exact N+1 `docs/architecture.md` says was eliminated, surviving here.
     loans = (
         query.options(
-            joinedload(Loan.book), joinedload(Loan.loaned_to), joinedload(Loan.loaned_by)
+            joinedload(Loan.book).selectinload(Book.tags),
+            joinedload(Loan.book).joinedload(Book.added_by),
+            joinedload(Loan.loaned_to),
+            joinedload(Loan.loaned_by),
         )
         .order_by(Loan.loaned_at.desc(), Loan.id.desc())
         .offset(paging.offset)
@@ -83,7 +115,7 @@ def list_loans(
     )
 
     return Page[LoanOut](
-        items=[_to_out(loan) for loan in loans],
+        items=_to_out_many(loans, current_user, db),
         total=total,
         page=paging.page,
         page_size=paging.page_size,

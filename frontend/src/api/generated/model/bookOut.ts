@@ -5,6 +5,8 @@
  * Catalogue, lend and track a family's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { BookCondition } from "./bookCondition.ts";
+import type { BookFormat } from "./bookFormat.ts";
 import type { LoanOut } from "./loanOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
@@ -17,8 +19,11 @@ export interface BookOut {
   added_by?: UserOut | null;
   author: string | null;
   categories?: string[];
+  condition?: BookCondition | null;
   cover_url: string | null;
+  deleted_at?: string | null;
   description: string | null;
+  format?: BookFormat | null;
   google_books_id?: string | null;
   id: number;
   is_private?: boolean;
@@ -32,6 +37,10 @@ export interface BookOut {
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher: string | null;
+  purchase_currency?: string | null;
+  purchase_price_minor?: number | null;
+  purchase_source?: string | null;
+  purchased_at?: string | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle: string | null;

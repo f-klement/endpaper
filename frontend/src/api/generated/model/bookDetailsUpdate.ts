@@ -5,6 +5,8 @@
  * Catalogue, lend and track a family's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { BookCondition } from "./bookCondition.ts";
+import type { BookFormat } from "./bookFormat.ts";
 
 /**
  * The fields a person edits by hand after a book exists.
@@ -15,9 +17,15 @@
  */
 export interface BookDetailsUpdate {
   author?: string | null;
+  condition?: BookCondition | null;
   description?: string | null;
+  format?: BookFormat | null;
   location?: string | null;
   publisher?: string | null;
+  purchase_currency?: string | null;
+  purchase_price_minor?: number | null;
+  purchase_source?: string | null;
+  purchased_at?: string | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle?: string | null;

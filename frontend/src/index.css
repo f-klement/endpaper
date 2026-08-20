@@ -2,13 +2,76 @@
 
 /* Tailwind 4 takes its configuration from CSS rather than tailwind.config.js.
    Custom design tokens go in @theme, where each --color-* entry generates the
-   matching utilities (bg-library-500, text-library-700, and so on). */
+   matching utilities (bg-accent-500, text-ink-muted, and so on).
+
+   ## Why these tokens exist rather than raw Tailwind colours
+
+   The first version of this app reached for `sky-500` and `gray-50` directly at
+   every call site. Two things followed. Changing the accent meant a find and
+   replace across forty files, so it never changed. And "gray" is a cold,
+   blue-tinted neutral, which on a page about paper books reads as a dashboard.
+
+   So: a warm neutral for surfaces, an accent taken from the wallpaper rather
+   than chosen separately, and semantic names, so a component says what a colour
+   is FOR and the palette can move underneath it. */
 @theme {
-  --color-library-50: #f0f9ff;
-  --color-library-100: #e0f2fe;
-  --color-library-500: #0ea5e9;
-  --color-library-600: #0284c7;
-  --color-library-700: #0369a1;
+  /* ── Surfaces ───────────────────────────────────────────────────────────
+     Warm, not the default cool grey. The hue is a few degrees off neutral,
+     which is not enough to look tinted and is enough to stop the page reading
+     as a spreadsheet. */
+  --color-paper-50: #fbfaf8;
+  --color-paper-100: #f5f3ef;
+  --color-paper-200: #e9e5de;
+  --color-paper-300: #d8d2c8;
+  --color-paper-400: #b0a89b;
+  --color-paper-500: #8a8175;
+  --color-paper-600: #6b6358;
+  --color-paper-700: #4d473e;
+  --color-paper-800: #2e2a25;
+  --color-paper-900: #1c1916;
+  --color-paper-950: #100e0c;
+
+  /* ── Accent ─────────────────────────────────────────────────────────────
+     The wallpaper's stem colour (see src/theme/patterns.ts). Deliberately the
+     same hue: the background and the buttons then belong to one design rather
+     than to two people's opinions. A bookbinder's green, and unlike the sky
+     blue it replaced it does not read as a generic web app. */
+  --color-accent-50: #eefbf7;
+  --color-accent-100: #d3f5eb;
+  --color-accent-200: #a9ead9;
+  --color-accent-300: #71d8c1;
+  --color-accent-400: #3cbda4;
+  --color-accent-500: #1fa189;
+  --color-accent-600: #13816f;
+  --color-accent-700: #0f766e;
+  --color-accent-800: #10574f;
+  --color-accent-900: #114842;
+  --color-accent-950: #042f2a;
+
+  /* ── Highlight ──────────────────────────────────────────────────────────
+     The wallpaper's bloom colour. Used sparingly and on purpose: it is the
+     playful note, so it marks the few things worth being pleased about (a
+     rating, a streak, a "new") and never a routine control. Overusing it is
+     what would make this toyish again. */
+  --color-bloom-100: #ffe4e9;
+  --color-bloom-300: #fda4af;
+  --color-bloom-500: #e11d48;
+  --color-bloom-600: #be123c;
+  --color-bloom-700: #9f1239;
+
+  /* ── Motion ─────────────────────────────────────────────────────────────
+     One duration and one curve for everything, because interfaces feel
+     considered when their timings agree. Slightly overshooting ease-out is
+     where the friendliness lives; it costs nothing and reads as responsive. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ── Elevation ──────────────────────────────────────────────────────────
+     Tinted rather than black. A pure-black shadow over a warm surface turns
+     grey and looks like dirt; carrying the surface hue into the shadow is most
+     of the difference between "has a shadow" and "looks designed". */
+  --shadow-soft: 0 1px 2px rgb(28 25 22 / 0.04), 0 2px 8px rgb(28 25 22 / 0.04);
+  --shadow-lift:
+    0 2px 4px rgb(28 25 22 / 0.05), 0 8px 20px rgb(28 25 22 / 0.08);
 }
 
 /* Tailwind 4's `dark:` follows prefers-color-scheme out of the box, which is
@@ -34,7 +97,79 @@
   }
 
   body {
-    @apply bg-gray-50 text-gray-900 min-h-screen;
-    @apply dark:bg-gray-950 dark:text-gray-100;
+    @apply bg-paper-50 text-paper-900 min-h-screen antialiased;
+    /* `paper-200` rather than `paper-100` in the dark. Near-white on
+       near-black is about 18:1, which is well past legible and into glare:
+       a grid of book titles read as a row of lightbulbs. This is around 15:1,
+       still comfortably AAA, and stops the page shouting. */
+    @apply dark:bg-paper-950 dark:text-paper-200;
+    /* The wallpaper is painted here by ThemeProvider. Fixing it stops the
+       pattern sliding under a long list, which is what makes a repeat read as
+       a tiled image rather than as the surface the page sits on. */
+    background-attachment: fixed;
+  }
+
+  /* Headings carry the personality, so they get the tightening. Body text does
+     not: negative tracking at small sizes costs legibility for a look. */
+  h1,
+  h2,
+  h3 {
+    @apply tracking-tight;
+  }
+
+  /* One focus ring everywhere, and it is never removed.
+     `:focus-visible` rather than `:focus` so a mouse click does not leave a
+     ring behind, while keyboard navigation always shows one. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent-500/60 ring-offset-2;
+    @apply ring-offset-paper-50 dark:ring-offset-paper-950;
+  }
+
+  /* Honour a person's stated preference rather than deciding animation is
+     harmless. Everything here is decoration; none of it carries meaning. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* One text field, for the same reason there is one Button: every input in
+     the app had its own copy of the border, radius, focus ring and dark
+     variant, so no two were the same height and the disabled state differed
+     per screen. Kept as a class rather than a component because an input has
+     no behaviour worth wrapping, only a look worth agreeing on. */
+  .field {
+    @apply w-full h-10 px-3 rounded-lg text-sm;
+    @apply bg-white border border-paper-200 text-paper-900 placeholder:text-paper-400;
+    @apply transition-[border-color,box-shadow] duration-150;
+    @apply hover:border-paper-300;
+    @apply dark:bg-paper-900 dark:border-paper-800 dark:text-paper-100;
+    @apply dark:placeholder:text-paper-500 dark:hover:border-paper-700;
+  }
+
+  .field:disabled {
+    @apply bg-paper-100 text-paper-400 cursor-not-allowed;
+    @apply dark:bg-paper-950 dark:text-paper-600;
+  }
+
+  /* A card. The lift on hover is the playful half and is deliberately small:
+     2px and a shadow, not a scale, because a grid of tiles that all grow is
+     restless rather than responsive. */
+  .card {
+    @apply bg-white border border-paper-200 rounded-2xl shadow-[var(--shadow-soft)];
+    @apply dark:bg-paper-900 dark:border-paper-800;
+  }
+
+  .card-interactive {
+    @apply transition-[transform,box-shadow,border-color] duration-200;
+    @apply ease-[var(--ease-out-soft)];
+    @apply hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)];
+    @apply hover:border-paper-300 dark:hover:border-paper-700;
   }
 }

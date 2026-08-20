@@ -1,6 +1,12 @@
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from auth import create_access_token, hash_password
+from auth import (
+    clear_cover_cookie,
+    create_access_token,
+    create_cover_token,
+    hash_password,
+    set_cover_cookie,
+)
 from auth_backends import authenticate, local_signup_allowed
 from config import auth_mode, registration_enabled
 from dependencies import CurrentUser, DbSession
@@ -27,7 +33,9 @@ def auth_config() -> AuthConfigOut:
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-def register(payload: UserCreate, request: Request, db: DbSession) -> Token:
+def register(
+    payload: UserCreate, request: Request, response: Response, db: DbSession
+) -> Token:
     register_limiter.check(client_address(request))
 
     if not local_signup_allowed():
@@ -51,14 +59,20 @@ def register(payload: UserCreate, request: Request, db: DbSession) -> Token:
     db.add(user)
     db.commit()
     db.refresh(user)
+    token = create_access_token(db, user.id, user.username)
+    set_cover_cookie(
+        response, create_cover_token(db, user.id, user.username), secure=_is_https(request)
+    )
     return Token(
-        access_token=create_access_token(user.id, user.username),
+        access_token=token,
         user=UserOut.model_validate(user),
     )
 
 
 @router.post("/login", response_model=Token)
-def login(payload: LoginRequest, request: Request, db: DbSession) -> Token:
+def login(
+    payload: LoginRequest, request: Request, response: Response, db: DbSession
+) -> Token:
     key = login_key(payload.username, request)
     login_limiter.check(key)
 
@@ -76,9 +90,48 @@ def login(payload: LoginRequest, request: Request, db: DbSession) -> Token:
     # Getting it right clears the count, so a member who mistyped a few times
     # is not left rationed for the rest of the window.
     login_limiter.reset(key)
+    token = create_access_token(db, user.id, user.username)
+    # Also as a cookie, scoped to /covers alone, because an <img> tag cannot
+    # send the Authorization header this token normally travels in. See
+    # auth.COVER_COOKIE_NAME for why that is safe on that route and nowhere
+    # else.
+    set_cover_cookie(
+        response, create_cover_token(db, user.id, user.username), secure=_is_https(request)
+    )
     return Token(
-        access_token=create_access_token(user.id, user.username),
+        access_token=token,
         user=UserOut.model_validate(user),
+    )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response) -> Response:
+    """Drop the cover cookie.
+
+    The access token lives in the browser and signing out discards it there,
+    but the cookie is ours and would otherwise sit in the browser until it
+    expired: on a shared machine, the next person's first page load would still
+    fetch covers as the person who left.
+
+    No authentication required, and none wanted. This only deletes something
+    the caller already holds, and demanding a valid token would mean an expired
+    session could never clear its own cookie.
+    """
+    response.status_code = status.HTTP_204_NO_CONTENT
+    clear_cover_cookie(response)
+    return response
+
+
+def _is_https(request: Request) -> bool:
+    """Whether the browser's connection was secure, not ours to the proxy.
+
+    A Secure cookie is silently dropped over plain HTTP, so a LAN deployment
+    without a certificate would lose its covers with nothing to explain why.
+    The forwarded header is what carries the browser's side of it.
+    """
+    return (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "") == "https"
     )
 
 

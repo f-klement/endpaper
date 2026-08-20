@@ -5,14 +5,18 @@
  * Catalogue, lend and track a family's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { BookFormat } from "./bookFormat.ts";
 
 export interface BookCreate {
   author?: string | null;
   cover_url?: string | null;
   description?: string | null;
+  format?: BookFormat | null;
   is_private?: boolean;
   isbn?: string | null;
+  language?: string | null;
   location?: string | null;
+  page_count?: number | null;
   publisher?: string | null;
   series_index?: number | null;
   series_name?: string | null;

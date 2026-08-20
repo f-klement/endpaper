@@ -93,6 +93,32 @@ describe("useSession in local mode", () => {
     expect(result.current.user).toBeNull();
   });
 
+  it("tells the server to drop the cover cookie", async () => {
+    // The cookie is the server's, not ours, and outlives the tab. Clearing
+    // localStorage alone would leave the next person on a shared machine
+    // fetching covers as whoever signed out.
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+    act(() => result.current.signIn(makeUser(), "token-123"));
+
+    act(() => result.current.signOut());
+
+    await waitFor(() => expect(api.lastCall("/auth/logout", "POST")).toBeDefined());
+  });
+
+  it("signs out locally even when that request fails", async () => {
+    // Otherwise a server that is down leaves somebody apparently signed in.
+    api.on("/auth/logout", { status: 500, body: { detail: "no" } });
+    const { result } = renderSession();
+    await waitFor(() => expect(result.current.isResolving).toBe(false));
+    act(() => result.current.signIn(makeUser(), "token-123"));
+
+    act(() => result.current.signOut());
+
+    expect(result.current.user).toBeNull();
+    expect(localStorage.getItem("token")).toBeNull();
+  });
+
   it("never asks the server who the caller is", async () => {
     // The account travels in the token, so a request here would be a round
     // trip for something already held.

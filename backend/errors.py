@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Final
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -27,7 +28,11 @@ logger = logging.getLogger("endpaper.errors")
 _TEMPLATE_PATH: Final = Path(__file__).parent / "templates" / "error.html"
 
 # Paths owned by the API. Everything else belongs to the single-page app.
-API_PREFIXES: Final = ("/api/", "/auth/", "/openapi.json", "/docs", "/redoc")
+# `/covers/` is here because a missing or forbidden cover is requested by an
+# <img> tag, and answering that with a full HTML error page means the browser
+# downloads a document to render as an image. A short JSON body is the honest
+# reply to something that is not a picture.
+API_PREFIXES: Final = ("/api/", "/auth/", "/covers/", "/openapi.json", "/docs", "/redoc")
 
 # Wording per status. Keeping these here rather than inline means an error page
 # never accidentally repeats an internal exception message back to the browser.
@@ -120,7 +125,17 @@ async def validation_exception_handler(request: Request, exc: Exception) -> Resp
     if wants_html(request):
         return render_error_page(status.HTTP_422_UNPROCESSABLE_CONTENT)
     # Keep FastAPI's per-field array: the client flattens it into a message.
-    return _json_error(status.HTTP_422_UNPROCESSABLE_CONTENT, exc.errors())
+    #
+    # Through `jsonable_encoder`, which is not optional. A validator that
+    # rejects a value by raising `ValueError` puts the **exception object**
+    # into the entry's `ctx`, and `JSONResponse` cannot serialise that: the
+    # 422 turns into a TypeError during rendering and the caller gets a 500
+    # for a request that was merely invalid. FastAPI's own handler does the
+    # same encode, which is why this only surfaced once a validator here
+    # started raising.
+    return _json_error(
+        status.HTTP_422_UNPROCESSABLE_CONTENT, jsonable_encoder(exc.errors())
+    )
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:

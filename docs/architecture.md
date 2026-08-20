@@ -8,13 +8,21 @@ The deployed artifact is a single image. FastAPI owns port 8000 and serves three
 |---|---|---|
 | `/api/*`, `/auth/*` | FastAPI routers | The JSON API |
 | unmatched `/api/*`, `/auth/*` | a fallback router | JSON 404, see below |
-| `/covers/*` | `StaticFiles` | Uploaded cover images, from `DATA_DIR/covers` |
+| `/covers/*` | a FastAPI router | Uploaded cover images, from `DATA_DIR/covers` |
+| `/api/healthz` | a FastAPI route | Liveness and readiness, runs a query |
 | everything else | `StaticFiles(html=True)` | The compiled React bundle |
+
+`/covers` is a **router, not a `StaticFiles` mount**, and that is a security fix rather
+than a stylistic choice. A mount has no dependencies, so nothing authenticates or
+authorizes it, and cover filenames are the book id: any member could read another
+member's private book cover by counting. `routers/covers.py` applies the same
+`visible_to()` rule the rest of the API does. Do not turn it back into a mount.
 
 Mount order in `main.py` is load-bearing. The SPA is mounted at `/` with `html=True`,
 making it a catch-all that returns `index.html` for any unmatched path. That is what lets
 client-side routes like `/book/12` survive a refresh, and why it must be mounted **last**.
-`/covers` is mounted before it, or cover requests would be answered with the HTML shell.
+The covers router is registered before it, or cover requests would be answered with the
+HTML shell.
 
 Routers are registered before either mount, so they win over both. Between them sits a
 fallback router matching `/api/{rest:path}` and `/auth/{rest:path}`, returning a JSON 404.

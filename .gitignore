@@ -11,6 +11,9 @@ data/
 .env
 CLAUDE.md
 plan.md
+# Same reason as plan.md, and load-bearing: it names internal hostnames and
+# addresses, which ci/make-public-tree.sh fails the build on.
+implementation.md
 
 # Test artefacts
 .coverage
@@ -28,3 +31,6 @@ runtime-requirements.txt
 junit-*.xml
 trivy-*.json
 .uv-cache/
+
+# Competitor research, internal
+feature_investi*.md

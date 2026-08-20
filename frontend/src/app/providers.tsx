@@ -1,12 +1,12 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
-import { useGetFeatureFlags } from "../api/generated/endpoints/settings/settings";
-import type { FeatureFlagsOut } from "../api/generated/model";
 import { createQueryClient } from "../api/query-client";
+import { useFeatureFlags } from "./hooks";
 import { LocaleProvider } from "../i18n";
 import { ThemeProvider } from "../theme";
 import { ErrorBoundary } from "../pages/errors";
+import { ToastProvider } from "./toast";
 
 interface ProvidersProps {
   children: ReactNode;
@@ -29,7 +29,11 @@ export default function Providers({ children, queryClient }: ProvidersProps) {
     <ErrorBoundary>
       <QueryClientProvider client={client}>
         <ThemeProvider>
-          <LocaleGate>{children}</LocaleGate>
+          {/* Inside the locale gate: a toast is written in the reader's
+              language, so it needs the catalogue that gate supplies. */}
+          <LocaleGate>
+            <ToastProvider>{children}</ToastProvider>
+          </LocaleGate>
         </ThemeProvider>
       </QueryClientProvider>
     </ErrorBoundary>
@@ -46,10 +50,7 @@ export default function Providers({ children, queryClient }: ProvidersProps) {
  * this app does not speak.
  */
 function LocaleGate({ children }: { children: ReactNode }) {
-  const features = useGetFeatureFlags({
-    query: { retry: false, staleTime: 60_000 },
-  });
-  const flags: FeatureFlagsOut | undefined = features.data;
+  const flags = useFeatureFlags();
 
   return (
     <LocaleProvider serverDefault={flags?.default_locale}>

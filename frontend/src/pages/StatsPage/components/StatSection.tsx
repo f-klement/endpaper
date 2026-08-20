@@ -29,19 +29,19 @@ export default function StatSection({
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-gray-700 mb-3 dark:text-gray-200">
+      <h2 className="text-sm font-semibold text-paper-700 mb-3 dark:text-paper-200">
         {title}
       </h2>
       <div className="space-y-2.5">
         {rows.map((row) => (
           <div key={row.label} className="flex items-center gap-3">
             <span
-              className={`text-sm text-gray-600 truncate ${labelWidthClass}`}
+              className={`text-sm text-paper-600 truncate dark:text-paper-300 ${labelWidthClass}`}
             >
               {row.label}
             </span>
             <Bar value={row.count} max={max} colorClass={colorClass} />
-            <span className="text-sm font-medium text-gray-700 w-6 text-right dark:text-gray-200">
+            <span className="text-sm font-medium text-paper-700 w-6 text-right dark:text-paper-200">
               {row.count}
             </span>
           </div>

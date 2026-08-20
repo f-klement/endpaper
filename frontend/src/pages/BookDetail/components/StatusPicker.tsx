@@ -1,15 +1,16 @@
 import { ReadStatus } from "../../../api/generated/model";
+import { Icon, type IconName } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
 
 const STATUS_OPTIONS: {
   value: ReadStatus;
   label: MessageKey;
-  emoji: string;
+  icon: IconName;
 }[] = [
-  { value: ReadStatus.unread, label: "status.unread", emoji: "📋" },
-  { value: ReadStatus.want_to_read, label: "status.want_to_read", emoji: "🔖" },
-  { value: ReadStatus.reading, label: "status.reading", emoji: "📖" },
-  { value: ReadStatus.read, label: "status.read", emoji: "✅" },
+  { value: ReadStatus.unread, label: "status.unread", icon: "list" },
+  { value: ReadStatus.want_to_read, label: "status.want_to_read", icon: "bookmark" },
+  { value: ReadStatus.reading, label: "status.reading", icon: "book" },
+  { value: ReadStatus.read, label: "status.read", icon: "check" },
 ];
 
 interface StatusPickerProps {
@@ -27,7 +28,7 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
   const { t } = useTranslation();
   return (
     <div>
-      <p className="text-sm font-semibold text-gray-700 mb-2 dark:text-gray-200">
+      <p className="text-sm font-semibold text-paper-700 mb-2 dark:text-paper-200">
         {t("status.mine")}
       </p>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -38,11 +39,13 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
             aria-pressed={current === option.value}
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
               current === option.value
-                ? "bg-sky-500 border-sky-500 text-white"
-                : "border-gray-200 text-gray-600 hover:border-sky-300 bg-white"
+                ? "bg-accent-600 border-accent-600 text-white"
+                : "border-paper-200 text-paper-600 hover:border-accent-300 bg-white "
+                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 "
+                + "dark:hover:border-accent-700"
             }`}
           >
-            {option.emoji} {t(option.label)}
+            <Icon name={option.icon} className="w-4 h-4" /> {t(option.label)}
           </button>
         ))}
       </div>

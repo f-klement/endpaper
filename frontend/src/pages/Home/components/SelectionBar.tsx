@@ -9,6 +9,7 @@ import {
 } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
+import { Icon } from "../../../components";
 
 interface SelectionBarProps {
   selectedCount: number;
@@ -48,17 +49,17 @@ export default function SelectionBar({
   const [showMore, setShowMore] = useState(false);
 
   return (
-    <div className="sticky bottom-0 z-40 -mx-4 px-4 py-3 bg-white/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700">
+    <div className="sticky bottom-0 z-40 -mx-4 px-4 py-3 bg-white/95 backdrop-blur-sm border-t border-paper-200 dark:bg-paper-900/95 dark:border-paper-700">
       <div className="max-w-6xl mx-auto space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+          <span className="text-sm font-medium text-paper-700 dark:text-paper-200">
             {t("common.selectedCount", { count: selectedCount })}
           </span>
           <div className="flex gap-3 text-xs">
             <button
               type="button"
               onClick={onSelectAll}
-              className="text-sky-600 hover:underline dark:text-sky-400"
+              className="text-accent-700 hover:underline dark:text-accent-400"
             >
               {t("common.selectAll")}
             </button>
@@ -66,14 +67,14 @@ export default function SelectionBar({
               type="button"
               onClick={onClear}
               disabled={selectedCount === 0}
-              className="text-gray-500 hover:underline disabled:opacity-40 dark:text-gray-400"
+              className="text-paper-500 hover:underline disabled:opacity-40 dark:text-paper-400"
             >
               {t("common.clearSelection")}
             </button>
             <button
               type="button"
               onClick={onDone}
-              className="text-gray-500 hover:underline dark:text-gray-400"
+              className="text-paper-500 hover:underline dark:text-paper-400"
             >
               {t("common.done")}
             </button>
@@ -85,7 +86,7 @@ export default function SelectionBar({
             type="button"
             disabled={selectedCount === 0 || isApplying}
             onClick={() => onApply(OwnershipStatus.owned)}
-            className="flex-1 py-2.5 rounded-xl bg-sky-500 text-white text-sm font-medium hover:bg-sky-600 disabled:opacity-40 transition-colors"
+            className="flex-1 py-2.5 rounded-xl bg-accent-600 text-white text-sm font-medium hover:bg-accent-700 disabled:opacity-40 transition-colors"
           >
             {isApplying ? t("common.saving") : t("ownership.confirmSelected")}
           </button>
@@ -93,7 +94,7 @@ export default function SelectionBar({
             type="button"
             disabled={selectedCount === 0 || isApplying}
             onClick={() => onApply(OwnershipStatus.not_owned)}
-            className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="px-4 py-2.5 rounded-xl border border-paper-200 text-sm font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
           >
             {t("ownership.markNotOwned")}
           </button>
@@ -104,14 +105,20 @@ export default function SelectionBar({
             type="button"
             onClick={() => setShowMore((open) => !open)}
             aria-expanded={showMore}
-            className="text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+            className="inline-flex items-center gap-1.5 text-xs text-paper-500 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-100"
           >
-            {t("bulk.more")} {showMore ? "▲" : "▼"}
+            {t("bulk.more")}
+            <Icon
+              name="chevron"
+              className={`w-3 h-3 opacity-70 transition-transform duration-150 ${
+                showMore ? "-rotate-90" : "rotate-90"
+              }`}
+            />
           </button>
         </div>
 
         {showMore && (
-          <div className="space-y-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+          <div className="space-y-2 border-t border-paper-100 pt-2 dark:border-paper-800">
             <div className="flex flex-wrap gap-2">
               <select
                 aria-label={t("bulk.setStatus")}
@@ -123,7 +130,7 @@ export default function SelectionBar({
                     event.target.value = "";
                   }
                 }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900"
+                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-white disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("bulk.setStatus")}</option>
                 {Object.values(ReadStatus).map((value) => (
@@ -143,7 +150,7 @@ export default function SelectionBar({
                     event.target.value = "";
                   }
                 }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900"
+                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-white disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("bulk.addTag")}</option>
                 {tags.map((tag) => (
@@ -164,7 +171,7 @@ export default function SelectionBar({
                   // the two must not be conflated.
                   if (place !== null) onRun(BulkAction.set_location, place);
                 }}
-                className="flex-1 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                className="flex-1 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               >
                 {t("bulk.setLocation")}
               </button>
@@ -178,7 +185,7 @@ export default function SelectionBar({
                     onRun(BulkAction.delete);
                   }
                 }}
-                className="flex-1 py-1.5 rounded-lg border border-red-200 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 dark:border-red-900 dark:text-red-400"
+                className="flex-1 py-1.5 rounded-lg border border-bloom-300 text-xs font-medium text-bloom-600 hover:bg-bloom-100 disabled:opacity-40 dark:border-bloom-700 dark:text-bloom-300"
               >
                 {t("bulk.delete")}
               </button>
@@ -187,13 +194,13 @@ export default function SelectionBar({
         )}
 
         {error != null && (
-          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          <p role="alert" className="text-xs text-bloom-600 dark:text-bloom-300">
             {errorText(error, t("common.somethingWentWrong"))}
           </p>
         )}
 
         {result && (
-          <p role="status" className="text-xs text-gray-500 dark:text-gray-400">
+          <p role="status" className="text-xs text-paper-500 dark:text-paper-400">
             {t("ownership.bulkResult", {
               updated: result.updated,
               unchanged: result.unchanged,

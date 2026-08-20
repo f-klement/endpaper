@@ -36,6 +36,7 @@ export const de: Messages = {
   "common.done": "Fertig",
   "common.add": "Hinzufügen",
   "common.close": "Schließen",
+  "common.undo": "Rückgängig",
   "common.back": "Zurück",
   "common.tryAgain": "Erneut versuchen",
   "common.loading": "Wird geladen...",
@@ -105,8 +106,8 @@ export const de: Messages = {
   "book.description": "Beschreibung",
   "book.categories": "Kategorien",
   "book.notFound": "Buch nicht gefunden.",
-  "book.remove": "Aus dem Katalog entfernen",
-  "book.removeConfirm": '"{title}" aus dem Katalog entfernen?',
+  "book.remove": "In den Papierkorb",
+  "book.movedToTrash": "In den Papierkorb verschoben.",
   "book.noTags": "Noch keine Schlagwörter",
   "book.addTag": "+ Hinzufügen",
   "book.removeTag": "{tag} entfernen",
@@ -117,6 +118,9 @@ export const de: Messages = {
   "enrich.updated": "Ergänzt: {fields}.",
   "enrich.nothingNew":
     "Nichts Neues gefunden. Die Angaben hier sind bereits vollständig.",
+  "enrich.pickTitle": "Welche Ausgabe ist das?",
+  "enrich.pickHint":
+    "Wähle die Ausgabe, die du in der Hand hast. Es werden nur leere Felder ergänzt, deine eigenen Angaben bleiben stehen.",
   "enrich.notFound": "Google Books hat keinen Eintrag zu diesem Buch.",
   "enrich.disabled":
     "Die Google Books Suche ist ausgeschaltet. Ein Administrator kann sie in den Einstellungen aktivieren.",
@@ -133,26 +137,17 @@ export const de: Messages = {
 
   // ── Goodreads ───────────────────────────────────────────────────────────
   "goodreads.lookup": "Bei Goodreads nachschlagen",
-  "goodreads.import": "Aus Goodreads importieren",
-  "goodreads.importExplain":
-    "Goodreads hat seine Schnittstelle 2020 abgeschaltet, ein Konto lässt sich daher nicht verbinden. Exportiere deine Bibliothek bei Goodreads (My Books, dann Import/Export) und lade die Datei hier hoch.",
-  "goodreads.chooseFile": "Exportdatei auswählen",
-  "goodreads.importing": "Wird importiert...",
-  "goodreads.createMissing":
-    "Auch Bücher anlegen, die noch nicht in der Bibliothek sind",
-  "goodreads.createMissingHint":
-    "Neue Bücher werden als nicht bestätigt markiert, denn ein Export sagt nur, was du gelesen hast, nicht was in deinem Regal steht.",
-  "goodreads.result":
-    "{rowsRead} Einträge gelesen. {matched} zugeordnet, {created} angelegt, {statusesUpdated} Status geändert.",
-  "goodreads.skipped":
-    "{count} Einträge standen auf einem Regal, das keinem Status entspricht.",
-  "goodreads.unmatched": "In deiner Bibliothek nicht gefunden:",
-  "goodreads.confirmPrompt":
-    "Bei den gerade angelegten Büchern ist nicht bestätigt, ob sie in deinem Regal stehen. Jetzt prüfen?",
 
   // ── Scannen ─────────────────────────────────────────────────────────────
   "scan.title": "Barcode scannen",
   "scan.pointAtBarcode": "Auf den Barcode richten",
+  "scan.torch": "Kameralicht",
+  "scan.startScanning": "Scannen starten",
+  "scan.stopScanning": "Scannen beenden",
+  "scan.cameraIdle": "Die Kamera ist aus",
+  "scan.cameraIdleHint": "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis du sie startest.",
+  "scan.notABook": "{code} gelesen, das ist kein Buch-Barcode. Suche den Code ueber der ISBN.",
+  "scan.tryAgain": "Erneut versuchen",
   "scan.cameraUnavailable": "Kamera nicht verfügbar",
   "scan.orEnterManually": "Oder ISBN von Hand eingeben:",
   "scan.isbnLabel": "ISBN",
@@ -166,6 +161,7 @@ export const de: Messages = {
   "scan.titlePlaceholder": "Buchtitel",
   "scan.authorPlaceholder": "Name des Autors",
   "scan.couldNotAdd": "Das Buch konnte nicht hinzugefügt werden.",
+  "scan.openTheOneWeHave": "Vorhandenes Exemplar öffnen",
   "scan.authorField": "Autor",
   "scan.addCover": "Coverfoto hinzufügen (optional)",
   "scan.replaceCover": "Coverfoto ersetzen (optional)",
@@ -177,15 +173,15 @@ export const de: Messages = {
   // ── Suche (Google Books, bevor ein Buch existiert) ──────────────────────
   "search.orSearchByTitle": "Oder nach Titel suchen:",
   "search.placeholder": "Titel, Autor oder beides",
-  "search.label": "Google Books durchsuchen",
+  "search.label": "Nach Titel oder Autor suchen",
   "search.button": "Suchen",
   "search.searching": "Suche läuft...",
   "search.noResults":
     "Keine Treffer. Versuche weniger Wörter, oder trage das Buch von Hand ein.",
   "search.pickHint":
     "Wähle einen Treffer aus, um die Angaben zu übernehmen. Gespeichert wird erst, wenn du bestätigst.",
-  "search.disabled":
-    "Die Suche ist ausgeschaltet. Ein Admin kann sie in den Einstellungen aktivieren.",
+  "search.withoutKey":
+    "Es wird Open Library durchsucht. Ein Google-Books-Schlüssel ergänzt Beschreibungen und Genres.",
 
   // ── Ausleihen ───────────────────────────────────────────────────────────
   "loans.title": "Ausleihen",
@@ -220,6 +216,10 @@ export const de: Messages = {
   "stats.byType": "Nach Art",
   "stats.byGenre": "Nach Genre",
   "stats.byAge": "Nach Alter",
+  "stats.byCustomTag": "Nach euren Schlagwörtern",
+  "stats.finishedByMonth": "Gelesen, nach Monat",
+  "stats.finishedTotal": "Bücher gelesen",
+  "stats.averageRating": "Durchschnitt aus {count} Bewertungen",
   "stats.overTime": "Hinzugefügt im Zeitverlauf",
   "stats.couldNotLoad": "Die Statistik konnte nicht geladen werden.",
   "stats.loading": "Statistik wird geladen",
@@ -228,6 +228,17 @@ export const de: Messages = {
   "tags.type": "Art",
   "tags.genre": "Genre",
   "tags.age": "Alter",
+  "tags.custom": "Eure Schlagwörter",
+  "tags.count": "{count}",
+  "tags.countWithChosen": "{chosen} von {count}",
+  "tags.newLabel": "Neues Schlagwort",
+  "tags.newPlaceholder": "Urlaubslektüre",
+  "tags.add": "Schlagwort hinzufügen",
+  "tags.create": "Anlegen",
+  "tags.delete": "{name} löschen",
+  "tags.deleteConfirm":
+    'Das Schlagwort "{name}" löschen? Es verschwindet bei {count} Büchern, für alle, und lässt sich nicht rückgängig machen.',
+  "tags.builtInHint": "Eingebaute Schlagwörter lassen sich nicht löschen.",
 
   // ── Anmeldung ───────────────────────────────────────────────────────────
   // The product name, left in English on purpose: a brand is not translated.
@@ -325,6 +336,9 @@ export const de: Messages = {
   "location.unset": "Nicht erfasst",
   "location.filterAll": "Überall",
   "location.hint": "Freier Text. So, wie du es auch sagen würdest.",
+  "location.carriedOver":
+    "Bleibt für das nächste Buch stehen, damit ein ganzes Regal nur einmal getippt wird.",
+  "location.batchLabel": "Regal für alles aus diesem Durchgang",
 
   // ── Doppelte Einträge ───────────────────────────────────────────────────
   "duplicates.title": "Mögliche Doppelte",
@@ -369,7 +383,8 @@ export const de: Messages = {
   "rapid.adding": "Wird hinzugefügt...",
   "rapid.discard": "Verwerfen",
   "rapid.added":
-    "{count} hinzugefügt, {failed} konnten nicht hinzugefügt werden.",
+    "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
+  "rapid.removeFromQueue": "{isbn} aus der Liste entfernen",
   "rapid.nothingScanned": "Noch nichts gescannt",
 
   // ── Rückgabefristen ─────────────────────────────────────────────────────
@@ -382,6 +397,107 @@ export const de: Messages = {
   "loans.overdueBanner": "{count} Ausleihen sind überfällig.",
   "loans.chaseThem": "Anzeigen",
 
+  // ── Das Exemplar ────────────────────────────────────────────────────────
+  "copy.title": "Dieses Exemplar",
+  "copy.hint": "Was du besitzt, nicht was das Buch ist.",
+  "copy.format": "Ausgabe",
+  "copy.format.unset": "Nicht erfasst",
+  "copy.format.hardcover": "Gebunden",
+  "copy.format.paperback": "Taschenbuch",
+  "copy.format.ebook": "E-Book",
+  "copy.format.audiobook": "Hörbuch",
+  "copy.format.other": "Sonstiges",
+  "copy.condition": "Zustand",
+  "copy.condition.unset": "Nicht erfasst",
+  "copy.condition.new": "Wie neu",
+  "copy.condition.good": "Gut",
+  "copy.condition.fair": "Gebraucht",
+  "copy.condition.poor": "Stark gebraucht",
+  "copy.condition.ex_library": "Aus einer Bibliothek",
+  "copy.price": "Bezahlter Preis",
+  "copy.priceInvalid": "Schreibe einen Preis wie 12,99, oder lass das Feld leer.",
+  "copy.currency": "Währung",
+  "copy.purchasedAt": "Gekauft am",
+  "copy.purchaseSource": "Gekauft bei",
+  "copy.save": "Angaben zum Exemplar speichern",
+  "copy.purchaseSourcePlaceholder": "Der Buchladen um die Ecke",
+  "format.filterAll": "Jede Ausgabe",
+
+  // ── Bibliothek übernehmen ───────────────────────────────────────────────
+  "import.title": "Bibliothek übernehmen",
+  "import.explain":
+    "Ein CSV- oder TSV-Export aus Goodreads, LibraryThing, StoryGraph, Libib oder allem anderen mit einer Titelspalte. Die Spalten werden erkannt und angezeigt, bevor etwas gespeichert wird.",
+  "import.chooseFile": "Datei auswählen",
+  "import.reading": "Datei wird gelesen...",
+  "import.importing": "Import läuft...",
+  "import.confirm": "{count} Bücher importieren",
+  "import.previewTitle": "{count} Zeilen gelesen. Gefundene Spalten:",
+  "import.notFound": "In dieser Datei nicht gefunden: {fields}",
+  "import.fieldTitle": "Titel",
+  "import.fieldAuthor": "Autor",
+  "import.fieldIsbn": "ISBN",
+  "import.fieldStatus": "Lesestatus",
+  "import.fieldRating": "Bewertung",
+  "import.fieldDateRead": "Gelesen am",
+  "import.fieldPublisher": "Verlag",
+  "import.fieldYear": "Jahr",
+  "import.fieldPages": "Seiten",
+  "import.fieldFormat": "Format",
+  "import.fieldTags": "Schlagwörter",
+  "import.createMissing": "Bücher anlegen, die noch nicht im Katalog sind",
+  "import.createMissingHint":
+    "Sie kommen als nicht bestätigt an: ein Export sagt, was jemand gelesen hat, nicht, was im Regal steht.",
+  "import.applyTags": "Schlagwörter mit übernehmen",
+  "import.applyTagsHint":
+    "Diese Datei enthält {count} verschiedene Schlagwörter. Sie werden hier für alle angelegt, unter Eure Schlagwörter, und lassen sich nur einzeln wieder entfernen.",
+  "import.result":
+    "{rowsRead} Zeilen gelesen, {matched} zugeordnet, {created} angelegt, {statusesUpdated} Lesestände aktualisiert.",
+  "import.skipped": "{count} Zeilen hatten keinen Titel und wurden übersprungen.",
+  "import.unmatched": "Nicht im Katalog gefunden:",
+
+  // ── Sicherung ───────────────────────────────────────────────────────────
+  "backup.title": "Sicherung",
+  "backup.explain":
+    "Eine vollständige Kopie der Bibliothek: alle Bücher, Konten, Notizen, Ausleihen, Lesestände und Cover. Der CSV-Export ist das nicht. Er enthält eine Zeile pro Buch und lässt den Rest weg.",
+  "backup.download": "Sicherung herunterladen",
+  "backup.downloadFailed": "Die Sicherung konnte nicht erstellt werden.",
+  "backup.restoreTitle": "Aus einer Sicherung wiederherstellen",
+  "backup.restoreWarning":
+    "Beim Wiederherstellen wird alles in dieser Bibliothek ersetzt. Bücher, die nach der Sicherung dazugekommen sind, sind weg.",
+  "backup.chooseFile": "Sicherungsdatei",
+  "backup.restoreAction": "Aus {name} wiederherstellen",
+  "backup.restoreConfirm":
+    "Alle Bücher, Konten und Cover dieser Bibliothek durch die Sicherung ersetzen? Das lässt sich nicht rückgängig machen.",
+  "backup.restoreFailed": "Diese Sicherung konnte nicht wiederhergestellt werden.",
+  "backup.restored": "{books} Bücher und {covers} Cover wiederhergestellt.",
+
+  // ── Gespeicherte Ansichten ──────────────────────────────────────────────
+  "saved.saveThisView": "Ansicht speichern",
+  "saved.nameLabel": "Name für diese Ansicht",
+  "saved.namePlaceholder": "Ungelesen auf dem Dachboden",
+  "saved.forget": "{name} vergessen",
+
+  // ── Papierkorb ──────────────────────────────────────────────────────────
+  "nav.trash": "Papierkorb",
+  "trash.title": "Papierkorb",
+  "trash.explain":
+    "Gelöschte Bücher warten hier, bis du den Papierkorb leerst. Von allein wird nichts entfernt.",
+  "trash.empty": "Der Papierkorb ist leer",
+  "trash.emptyHint":
+    "Was du löschst, landet hier, mit allem, was daran hängt.",
+  "trash.deletedOn": "Gelöscht am {date}",
+  "trash.restore": "Zurücklegen",
+  "trash.restored": "Wieder im Regal.",
+  "trash.deleteForever": "Endgültig löschen",
+  "trash.deleteForeverConfirm":
+    '"{title}" endgültig löschen? Das lässt sich nicht rückgängig machen.',
+  "trash.emptyAll": "Papierkorb leeren",
+  "trash.emptyAllConfirm":
+    "Alle {count} Bücher im Papierkorb endgültig löschen? Das lässt sich nicht rückgängig machen.",
+  "trash.emptied": "{count} Bücher endgültig gelöscht.",
+  "trash.movedCount": "{count} Bücher in den Papierkorb verschoben.",
+  "trash.open": "Papierkorb öffnen",
+
   // ── Wunschliste ─────────────────────────────────────────────────────────
   "nav.wishlist": "Wunschliste",
   "wishlist.title": "Wunschliste",
@@ -393,7 +509,7 @@ export const de: Messages = {
 
   // ── Hilfe ───────────────────────────────────────────────────────────────
   "help.title": "Was ist das?",
-  "help.aboutSearch": "Über die Suche bei Google Books",
+  "help.aboutSearch": "Über die Buchsuche",
   "help.aboutEnrich": "Über zusätzliche Buchdetails",
 
   "help.googleBooks.title": "Google-Books-Abfrage",
@@ -415,9 +531,9 @@ export const de: Messages = {
     "Nur ein Admin kann den Schlüssel speichern. Falls du das nicht bist, schick ihm diese Seite.",
 
   "help.disabledSearch":
-    "Die Suche ist aus, bis ein Admin einen Google-Books-Schlüssel hinterlegt.",
+    "Die Suche funktioniert ohne Schlüssel. Ein Schlüssel ergänzt Beschreibungen und Genres in den Treffern.",
   "help.disabledEnrich":
-    "Zusätzliche Details sind aus, bis ein Admin einen Google-Books-Schlüssel hinterlegt.",
+    "Zusätzliche Details funktionieren ohne Schlüssel. Ein Schlüssel ergänzt Beschreibungen und Genres.",
 
   // ── Maskierte Felder ────────────────────────────────────────────────────
   "field.show": "Anzeigen",

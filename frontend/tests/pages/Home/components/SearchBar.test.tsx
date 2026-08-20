@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SearchBar, {
   DEBOUNCE_MS,
+  MIN_QUERY_LENGTH,
 } from "../../../../src/pages/Home/components/SearchBar";
 
 beforeEach(() => {
@@ -51,19 +52,62 @@ describe("SearchBar", () => {
     expect(screen.getByLabelText("Search books")).toBeInTheDocument();
   });
 
-  it("fires once with the empty string on mount", () => {
-    // Home relies on this to load the unfiltered grid.
+  it("does not fire on mount", () => {
+    // Home has already loaded the unfiltered grid by the time this renders, so
+    // firing here re-requests a list nobody asked to change.
     const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
     advance(DEBOUNCE_MS);
-    expect(onSearch).toHaveBeenCalledWith("");
+    expect(onSearch).not.toHaveBeenCalled();
+  });
+
+  it("ignores a query too short to mean anything", () => {
+    // One letter matches most of a library: an expensive request for a useless
+    // answer.
+    const onSearch = vi.fn();
+    renderLocalised(<SearchBar onSearch={onSearch} />);
+
+    type("d".repeat(MIN_QUERY_LENGTH - 1));
+    advance(DEBOUNCE_MS);
+
+    expect(onSearch).not.toHaveBeenCalled();
+  });
+
+  it("fires when the box is emptied again", () => {
+    // Clearing is a real instruction: show me the whole shelf.
+    const onSearch = vi.fn();
+    renderLocalised(<SearchBar onSearch={onSearch} />);
+
+    type("dune");
+    advance(DEBOUNCE_MS);
+    onSearch.mockClear();
+
+    type("");
+    advance(DEBOUNCE_MS);
+
+    expect(onSearch).toHaveBeenCalledExactlyOnceWith("");
+  });
+
+  it("trims what it sends", () => {
+    const onSearch = vi.fn();
+    renderLocalised(<SearchBar onSearch={onSearch} />);
+
+    type("  dune  ");
+    advance(DEBOUNCE_MS);
+
+    expect(onSearch).toHaveBeenCalledExactlyOnceWith("dune");
+  });
+
+  it("waits long enough to catch an unhurried typist", () => {
+    // A debounce only collapses keystrokes closer together than its window.
+    // At 300ms this was firing once per character for anyone typing on a
+    // phone, which is the whole thing it exists to prevent.
+    expect(DEBOUNCE_MS).toBeGreaterThanOrEqual(500);
   });
 
   it("does not fire before the window elapses", () => {
     const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
-    advance(DEBOUNCE_MS);
-    onSearch.mockClear();
 
     type("dune");
     advance(DEBOUNCE_MS - 1);
@@ -74,8 +118,6 @@ describe("SearchBar", () => {
   it("fires with the typed value once the window elapses", () => {
     const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
-    advance(DEBOUNCE_MS);
-    onSearch.mockClear();
 
     type("dune");
     advance(DEBOUNCE_MS);
@@ -87,8 +129,6 @@ describe("SearchBar", () => {
     // Four characters must not become four requests.
     const onSearch = vi.fn();
     renderLocalised(<SearchBar onSearch={onSearch} />);
-    advance(DEBOUNCE_MS);
-    onSearch.mockClear();
 
     for (const value of ["d", "du", "dun", "dune"]) {
       type(value);
@@ -102,10 +142,8 @@ describe("SearchBar", () => {
   it("cancels a pending call when unmounted", () => {
     const onSearch = vi.fn();
     const { unmount } = renderLocalised(<SearchBar onSearch={onSearch} />);
-    advance(DEBOUNCE_MS);
-    onSearch.mockClear();
 
-    type("d");
+    type("du");
     unmount();
     advance(1000);
 

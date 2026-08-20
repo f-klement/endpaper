@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -11,14 +12,16 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    and_,
     func,
     or_,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql.elements import ColumnElement
 
 from database import Base
-from enums import AuthMode, OwnershipStatus, ReadStatus, TagCategory
+from enums import AuthMode, BookCondition, BookFormat, OwnershipStatus, ReadStatus, TagCategory
 
 # Many-to-many association table for books <-> tags
 book_tags = Table(
@@ -26,6 +29,7 @@ book_tags = Table(
     Base.metadata,
     Column("book_id", Integer, ForeignKey("books.id", ondelete="CASCADE"), primary_key=True),
     Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+    Index("ix_book_tags_tag_id", "tag_id"),
 )
 
 
@@ -35,6 +39,21 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     category: Mapped[TagCategory] = mapped_column(String(50), nullable=False)
+
+    # Whether `seed_tags()` owns this row.
+    #
+    # A stored flag rather than "is the name in PREDEFINED_TAGS": that test
+    # would silently reclassify every tag the moment somebody renamed one in
+    # the seed list, and renaming a seeded tag is a thing that has already
+    # happened once here (migration 95b6a61d6668).
+    #
+    # It decides two things. A predefined tag cannot be deleted, because
+    # `seed_tags()` would put it back at the next restart and the delete would
+    # look like it silently failed. And the picker groups by it, so the
+    # household's own tags do not scatter through a curated genre list.
+    is_predefined: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
 
 class User(Base):
@@ -108,10 +127,61 @@ class Book(Base):
     # filter and the distinct-values list stay cheap.
     location: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
 
-    added_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    # What kind of object this copy is. Nullable rather than defaulted to
+    # paperback: a scan cannot tell, and guessing wrong on every imported book
+    # is worse than admitting the answer is not known. Indexed because "have we
+    # got this on audio" is a filter, not a search.
+    format: Mapped[BookFormat | None] = mapped_column(String(20), nullable=True, index=True)
+
+    # ── Collector details ────────────────────────────────────────────────
+    #
+    # Everything below is about this copy as an object rather than about the
+    # work, and none of it is ever filled in by a lookup. They live behind a
+    # disclosure in the UI so the ordinary add flow stays four fields long.
+    #
+    # Goodreads is criticised in review after review for having nowhere to put
+    # condition or where a book is; the shelf location was already here, this
+    # is the other half.
+
+    condition: Mapped[BookCondition | None] = mapped_column(String(20), nullable=True)
+
+    # **Minor units** (cents), not a decimal. SQLite has no decimal type, and
+    # SQLAlchemy's Numeric over it round-trips through a float, which is how a
+    # price becomes 12.989999999999999. An integer count of cents cannot do
+    # that. The client divides by 100 to display; nothing else knows.
+    purchase_price_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Stored per book rather than as one setting, because a book bought on
+    # holiday really does have a different currency, and a single household
+    # currency would silently relabel it.
+    purchase_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+
+    # A date, not a datetime: nobody knows what time they bought a book.
+    purchased_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Free text, like `location`, and for the same reason: "the Oxfam on
+    # Cowley Road" is a real answer and no vocabulary chosen up front contains
+    # it.
+    purchase_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    added_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
     # Indexed for the "Recently Added" sort and the per-month statistic.
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+
+    # When this book was moved to the trash, or null while it is on the shelf.
+    #
+    # A delete is the one action in this app that cannot be undone by repeating
+    # it, and it is one tap away from every book. Reviews of every competitor
+    # here say the same thing: the app does not say what was deleted and offers
+    # no way to put it back. So a delete parks the row instead of dropping it,
+    # and `visible_to()` is what keeps it out of everything else.
+    #
+    # Indexed because the trash listing filters on it and the ordinary case
+    # (`IS NULL`) is every other query in the app.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     # Whether a copy is physically here. Defaults to OWNED because the ordinary
     # way a book arrives is somebody scanning the barcode on its back cover,
@@ -156,7 +226,9 @@ class UserBook(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False, index=True
+    )
     status: Mapped[ReadStatus] = mapped_column(String(20), default=ReadStatus.UNREAD)
 
     # 1 to 5, or absent. Per person for the same reason status is: a shared
@@ -180,9 +252,32 @@ class UserBook(Base):
 class Loan(Base):
     __tablename__ = "loans"
 
+    # A book is in one person's hands at a time. Three code paths had to agree
+    # on that (lending, merging two records, trashing one), and one of them
+    # historically did not: a merge left both books' open loans open, so the
+    # merged book was out with two people at once and the UI showed whichever
+    # the query returned first.
+    #
+    # A partial unique index, which SQLite supports, so the rule holds even if
+    # a fourth path is added later and forgets. Partial rather than plain,
+    # because a book returned and lent again is two rows with the same
+    # `book_id`, and only the open ones are exclusive.
+    __table_args__ = (
+        Index(
+            "uq_loans_one_open_per_book",
+            "book_id",
+            unique=True,
+            sqlite_where=text("returned_at IS NULL"),
+        ),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
-    loaned_to_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False, index=True
+    )
+    loaned_to_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
     loaned_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -206,7 +301,9 @@ class Note(Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id"), nullable=False)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False, index=True
+    )
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -236,13 +333,37 @@ class Setting(Base):
 def visible_to(user_id: int) -> ColumnElement[bool]:
     """Filter predicate for the books a given account is allowed to see.
 
-    A book is visible when it is public, or when this account is the one that
-    added it. Every listing, search, export and statistic must apply this or
-    it leaks other people's private books, so it lives here rather than being
-    retyped at each call site.
+    A book is visible when it is **on the shelf** and either public or added by
+    this account. Every listing, search, export and statistic must apply this
+    or it leaks other people's private books, so it lives here rather than
+    being retyped at each call site.
+
+    The trashed check rides along here deliberately. Soft deletion needs the
+    same universal reach that privacy does, and every book query in this app
+    already calls this function, which is the only reason a delete does not
+    have to be chased through twenty call sites. Adding a second rule that
+    every query must remember would be the thing that eventually gets
+    forgotten. The trash view opts out by using `in_trash_for()` instead.
 
     Note the `.is_(False)` rather than `not Book.is_private`: the latter would
     evaluate the Column's Python truthiness and collapse to a constant, quietly
     matching every row.
     """
-    return or_(Book.is_private.is_(False), Book.added_by_user_id == user_id)
+    return and_(
+        Book.deleted_at.is_(None),
+        or_(Book.is_private.is_(False), Book.added_by_user_id == user_id),
+    )
+
+
+def in_trash_for(user_id: int) -> ColumnElement[bool]:
+    """The mirror image: books this account may see **and** has trashed away.
+
+    Deliberately a separate function rather than a flag on `visible_to`. A
+    predicate that sometimes means "on the shelf" and sometimes means "in the
+    trash" depending on an argument is one a caller can get backwards, and
+    getting it backwards here would show every deleted book in the library.
+    """
+    return and_(
+        Book.deleted_at.isnot(None),
+        or_(Book.is_private.is_(False), Book.added_by_user_id == user_id),
+    )

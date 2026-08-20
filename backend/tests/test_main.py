@@ -1,6 +1,9 @@
 """Tests for backend/main.py: app wiring, seeding and the ad-hoc migration."""
 
+import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 import main
 from database import Base, engine
@@ -46,17 +49,55 @@ class TestAppWiring:
         ):
             assert expected in paths
 
-    def test_covers_are_mounted_before_the_spa_catch_all(self):
+    def test_the_cover_route_exists(self, client):
+        paths = client.get("/openapi.json").json()["paths"]
+        assert "/covers/{book_id}.{extension}" in paths
+
+    def test_covers_are_registered_before_the_spa_catch_all(self):
         """A catch-all mounted at / swallows every path below it, /covers
-        included, so the order these two are mounted in is load-bearing."""
-        mount_paths = [
-            getattr(route, "path", "")
-            for route in main.app.routes
-            if getattr(route, "path", None) in ("/covers", "/")
+        included, so the order these two are registered in is load-bearing.
+
+        The SPA mount exists only when a built frontend is present, which it is
+        not under test, hence the guard.
+        """
+        from starlette.routing import Mount
+
+        routes = list(main.app.routes)
+        spa = [
+            index
+            for index, route in enumerate(routes)
+            if isinstance(route, Mount) and route.path == "/"
         ]
-        assert "/covers" in mount_paths
-        if "/" in mount_paths:
-            assert mount_paths.index("/covers") < mount_paths.index("/")
+        if not spa:
+            return
+        routers = [
+            index
+            for index, route in enumerate(routes)
+            if type(route).__name__ == "_IncludedRouter"
+        ]
+        assert max(routers) < spa[0]
+
+    def test_covers_are_served_by_a_router_not_a_static_mount(self):
+        """This is a security property, not a wiring preference.
+
+        A StaticFiles mount has no dependencies, so nothing authenticated or
+        authorized that path, and cover files are named by book id. Any member
+        could read another member's private book cover by counting integers.
+        Serving them through a route is what puts `book_for_read` in the way.
+        """
+        from starlette.routing import Mount
+
+        mounts = [
+            route.path
+            for route in main.app.routes
+            if isinstance(route, Mount) and route.path == "/covers"
+        ]
+        assert mounts == []
+
+    def test_a_cover_requires_authentication(self, client):
+        """Every other path 401s without an identity. This one used to answer
+        from disk."""
+        assert client.get("/covers/1.jpg").status_code == 401
 
     def test_openapi_schema_builds(self, client):
         """Catches unresolvable response models across every route at once."""
@@ -115,3 +156,30 @@ class TestInitDb:
 
         main.init_db()
         assert COVERS_DIR.is_dir()
+
+
+class TestHealthz:
+    """The probes used to request `/`, which the SPA mount answers from disk."""
+
+    def test_it_reports_ok(self, client):
+        res = client.get("/api/healthz")
+        assert res.status_code == 200
+        assert res.json() == {"status": "ok"}
+
+    def test_it_needs_no_token(self, client):
+        """A probe holds none, and the only thing disclosed is that the service
+        is up, which anyone can tell by connecting."""
+        assert "authorization" not in client.headers
+        assert client.get("/api/healthz").status_code == 200
+
+    def test_it_touches_the_database(self, client, monkeypatch):
+        """Otherwise it answers 200 for a pod whose volume never mounted, which
+        is exactly the failure the probes exist to catch."""
+
+        def broken(*args, **kwargs):
+            raise OperationalError("SELECT 1", {}, Exception("disk I/O error"))
+
+        monkeypatch.setattr(Session, "execute", broken)
+
+        with pytest.raises(OperationalError):
+            client.get("/api/healthz")

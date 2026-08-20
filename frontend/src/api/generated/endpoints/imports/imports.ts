@@ -14,17 +14,20 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
-  BodyImportGoodreads,
-  GoodreadsImportOut,
+  BodyImportCsv,
+  BodyPreviewImport,
   HTTPValidationError,
-  ImportGoodreadsParams,
+  ImportCsvParams,
+  ImportPreviewOut,
+  ImportResultOut,
+  PreviewImportParams,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
-export const getImportGoodreadsUrl = (params?: ImportGoodreadsParams) => {
+export const getImportCsvUrl = (params?: ImportCsvParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -36,12 +39,21 @@ export const getImportGoodreadsUrl = (params?: ImportGoodreadsParams) => {
   const stringifiedParams = normalizedParams.toString();
 
   return stringifiedParams.length > 0
-    ? `/api/imports/goodreads?${stringifiedParams}`
-    : `/api/imports/goodreads`;
+    ? `/api/imports/csv?${stringifiedParams}`
+    : `/api/imports/csv`;
 };
 
 /**
- * Apply the reading statuses from a Goodreads export.
+ * Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib
+ * or anything else with a title column.
+ *
+ * **Declared `def`, not `async def`, and that is load bearing.** Everything
+ * below is blocking: SQLAlchemy has no async here. An `async` handler runs on
+ * the event loop, so a running import stops the whole application answering.
+ * Measured on a 3000 row file: `GET /api/books` went from 7ms to **14.4
+ * seconds**, and exactly one such request completed for the duration.
+ * FastAPI runs a `def` handler in a threadpool instead, which costs nothing
+ * and keeps the app alive while a library comes across.
  *
  * Statuses are **personal**, so this only ever writes the importing member's
  * own `user_books` rows. Importing your shelves does not change what anyone
@@ -49,43 +61,48 @@ export const getImportGoodreadsUrl = (params?: ImportGoodreadsParams) => {
  * fighting over the same books.
  *
  * Books created by `create_missing` are marked `ownership=unknown`: a reading
- * history is not evidence of possession. They can then be confirmed together
+ * history is not evidence of possession. They are then confirmed together
  * from the library view, which is what the bulk ownership endpoint is for.
- * @summary Import Goodreads
+ *
+ * `apply_tags` is off by default and deliberately so. A Goodreads export's
+ * tag column is its shelves, which for most people is a few hundred one-off
+ * names, and turning all of them into tags here buries the curated list under
+ * somebody's filing habits from another app.
+ * @summary Import Csv
  */
-export const importGoodreads = async (
-  bodyImportGoodreads: BodyImportGoodreads,
-  params?: ImportGoodreadsParams,
+export const importCsv = async (
+  bodyImportCsv: BodyImportCsv,
+  params?: ImportCsvParams,
   options?: Parameters<typeof customFetch>[1],
-): Promise<GoodreadsImportOut> => {
+): Promise<ImportResultOut> => {
   const formData = new FormData();
-  formData.append(`file`, bodyImportGoodreads.file);
+  formData.append(`file`, bodyImportCsv.file);
 
-  return customFetch<GoodreadsImportOut>(getImportGoodreadsUrl(params), {
+  return customFetch<ImportResultOut>(getImportCsvUrl(params), {
     ...options,
     method: "POST",
     body: formData,
   });
 };
 
-export const getImportGoodreadsMutationOptions = <
+export const getImportCsvMutationOptions = <
   TError = HTTPValidationError,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof importGoodreads>>,
+    Awaited<ReturnType<typeof importCsv>>,
     TError,
-    { data: BodyImportGoodreads; params?: ImportGoodreadsParams },
+    { data: BodyImportCsv; params?: ImportCsvParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof importGoodreads>>,
+  Awaited<ReturnType<typeof importCsv>>,
   TError,
-  { data: BodyImportGoodreads; params?: ImportGoodreadsParams },
+  { data: BodyImportCsv; params?: ImportCsvParams },
   TContext
 > => {
-  const mutationKey = ["importGoodreads"];
+  const mutationKey = ["importCsv"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -95,45 +112,151 @@ export const getImportGoodreadsMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof importGoodreads>>,
-    { data: BodyImportGoodreads; params?: ImportGoodreadsParams }
+    Awaited<ReturnType<typeof importCsv>>,
+    { data: BodyImportCsv; params?: ImportCsvParams }
   > = (props) => {
     const { data, params } = props ?? {};
 
-    return importGoodreads(data, params, requestOptions);
+    return importCsv(data, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type ImportGoodreadsMutationResult = NonNullable<
-  Awaited<ReturnType<typeof importGoodreads>>
+export type ImportCsvMutationResult = NonNullable<
+  Awaited<ReturnType<typeof importCsv>>
 >;
-export type ImportGoodreadsMutationBody = BodyImportGoodreads;
-export type ImportGoodreadsMutationError = HTTPValidationError;
+export type ImportCsvMutationBody = BodyImportCsv;
+export type ImportCsvMutationError = HTTPValidationError;
 
 /**
- * @summary Import Goodreads
+ * @summary Import Csv
  */
-export const useImportGoodreads = <
-  TError = HTTPValidationError,
-  TContext = unknown,
->(
+export const useImportCsv = <TError = HTTPValidationError, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof importGoodreads>>,
+      Awaited<ReturnType<typeof importCsv>>,
       TError,
-      { data: BodyImportGoodreads; params?: ImportGoodreadsParams },
+      { data: BodyImportCsv; params?: ImportCsvParams },
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<
-  Awaited<ReturnType<typeof importGoodreads>>,
+  Awaited<ReturnType<typeof importCsv>>,
   TError,
-  { data: BodyImportGoodreads; params?: ImportGoodreadsParams },
+  { data: BodyImportCsv; params?: ImportCsvParams },
   TContext
 > => {
-  return useMutation(getImportGoodreadsMutationOptions(options), queryClient);
+  return useMutation(getImportCsvMutationOptions(options), queryClient);
+};
+export const getPreviewImportUrl = (params?: PreviewImportParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/imports/preview?${stringifiedParams}`
+    : `/api/imports/preview`;
+};
+
+/**
+ * Read a file and report what it turned out to be, writing nothing.
+ *
+ * A column guessed wrong is invisible until after the import, and after the
+ * import is too late: undoing it means finding and deleting a few hundred
+ * books. So the mapping is shown first, against the file's real header list,
+ * with the first few rows as the parser actually read them.
+ * @summary Preview Import
+ */
+export const previewImport = async (
+  bodyPreviewImport: BodyPreviewImport,
+  params?: PreviewImportParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ImportPreviewOut> => {
+  const formData = new FormData();
+  formData.append(`file`, bodyPreviewImport.file);
+
+  return customFetch<ImportPreviewOut>(getPreviewImportUrl(params), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getPreviewImportMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewImport>>,
+    TError,
+    { data: BodyPreviewImport; params?: PreviewImportParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewImport>>,
+  TError,
+  { data: BodyPreviewImport; params?: PreviewImportParams },
+  TContext
+> => {
+  const mutationKey = ["previewImport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewImport>>,
+    { data: BodyPreviewImport; params?: PreviewImportParams }
+  > = (props) => {
+    const { data, params } = props ?? {};
+
+    return previewImport(data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewImportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewImport>>
+>;
+export type PreviewImportMutationBody = BodyPreviewImport;
+export type PreviewImportMutationError = HTTPValidationError;
+
+/**
+ * @summary Preview Import
+ */
+export const usePreviewImport = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof previewImport>>,
+      TError,
+      { data: BodyPreviewImport; params?: PreviewImportParams },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof previewImport>>,
+  TError,
+  { data: BodyPreviewImport; params?: PreviewImportParams },
+  TContext
+> => {
+  return useMutation(getPreviewImportMutationOptions(options), queryClient);
 };

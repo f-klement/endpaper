@@ -45,12 +45,61 @@ class OwnershipStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class BookFormat(StrEnum):
+    """What kind of object the copy is.
+
+    Separate from everything else because "do we own this" has a different
+    answer per format: a household can own the audiobook and not the paperback,
+    and a reader looking for something to take on a train cares which. Reviews
+    of every competitor in this space ask for it by name, usually as "where is
+    audiobook".
+
+    OTHER exists so the list can stay short. A boxed set, a magazine or a
+    pamphlet is a real thing on a real shelf and does not need its own value.
+    """
+
+    HARDCOVER = "hardcover"
+    PAPERBACK = "paperback"
+    EBOOK = "ebook"
+    AUDIOBOOK = "audiobook"
+    OTHER = "other"
+
+
+class BookCondition(StrEnum):
+    """The state of this particular copy.
+
+    A deliberately coarse scale. Collectors use finer ones (near fine, very
+    good plus) and nobody else can apply them consistently, so a household
+    would end up with five spellings of "a bit battered".
+
+    EX_LIBRARY is not a point on the scale: it is a fact about provenance that
+    changes what a copy is worth and what it looks like, and it is the one
+    category people actually recognise.
+    """
+
+    NEW = "new"
+    GOOD = "good"
+    FAIR = "fair"
+    POOR = "poor"
+    EX_LIBRARY = "ex_library"
+
+
 class TagCategory(StrEnum):
-    """The three groups tags are presented in throughout the UI."""
+    """The groups tags are presented in throughout the UI.
+
+    The first three are the curated vocabulary, seeded at boot and the same in
+    every deployment. CUSTOM is everything a household invents for itself.
+
+    Keeping them apart, rather than making every tag free-form as Jelu and
+    Openreads do, is deliberate: the curated list is what makes the tag picker
+    useful on the first day, before anybody has typed anything. What was wrong
+    was having no way past it.
+    """
 
     TYPE = "type"
     GENRE = "genre"
     AGE = "age"
+    CUSTOM = "custom"
 
 
 class ExportFormat(StrEnum):
@@ -111,6 +160,7 @@ class SettingKey(StrEnum):
     GOOGLE_BOOKS_ENABLED = "google_books_enabled"
     GOODREADS_LOOKUP_ENABLED = "goodreads_lookup_enabled"
     DEFAULT_LOCALE = "default_locale"
+    TOKEN_EPOCH = "token_epoch"
 
 
 class Locale(StrEnum):

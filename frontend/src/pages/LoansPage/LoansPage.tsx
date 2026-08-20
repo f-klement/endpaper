@@ -1,4 +1,5 @@
-import { EmptyState, ErrorState, Skeleton } from "../../components";
+import { Button, EmptyState, ErrorState, Skeleton } from "../../components";
+import { Page, PageHeader } from "../components";
 import { useTranslation } from "../../i18n";
 import LoanRow from "./components/LoanRow";
 import { useLoans } from "./hooks";
@@ -11,41 +12,50 @@ export default function LoansPage() {
   const loans = useLoans();
 
   return (
-    <div className="max-w-lg mx-auto px-4 pt-5">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          🤝 {t("loans.title")}
-        </h1>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => loans.setOverdueOnly(!loans.overdueOnly)}
-            aria-pressed={loans.overdueOnly}
-            className={`text-sm hover:underline ${
-              loans.overdueOnly ? "text-red-600 font-medium" : "text-gray-500"
-            }`}
-          >
-            {t("loans.overdueOnly")}
-          </button>
-          <button
-            onClick={() => loans.setShowAll(!loans.showAll)}
-            className="text-sm text-sky-600 hover:underline dark:text-sky-400"
-          >
-            {loans.showAll ? t("loans.activeOnly") : t("loans.showAll")}
-          </button>
-        </div>
-      </div>
+    <Page width="narrow">
+      <PageHeader
+        icon="handshake"
+        title={t("loans.title")}
+        actions={
+          <>
+            <Button
+              variant={loans.overdueOnly ? "danger" : "secondary"}
+              size="sm"
+              aria-pressed={loans.overdueOnly}
+              // `danger` carries no border of its own, so the pressed state
+              // gets one here rather than losing the frame the others have.
+              className={
+                loans.overdueOnly
+                  ? "border border-bloom-300 dark:border-bloom-700"
+                  : ""
+              }
+              onClick={() => loans.setOverdueOnly(!loans.overdueOnly)}
+            >
+              {t("loans.overdueOnly")}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-pressed={loans.showAll}
+              onClick={() => loans.setShowAll(!loans.showAll)}
+            >
+              {loans.showAll ? t("loans.activeOnly") : t("loans.showAll")}
+            </Button>
+          </>
+        }
+      />
 
       {/* Hidden while already filtered to overdue: the nudge would be asking
           for something the reader is already looking at. */}
       {loans.overdueCount > 0 && !loans.overdueOnly && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 dark:border-red-900 dark:bg-red-950">
-          <p className="text-sm text-red-800">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-bloom-300 bg-bloom-100 px-3 py-2.5 dark:border-bloom-700 dark:bg-bloom-700">
+          <p className="text-sm text-bloom-700 dark:text-bloom-100">
             {t("loans.overdueBanner", { count: loans.overdueCount })}
           </p>
           <button
             type="button"
             onClick={() => loans.setOverdueOnly(true)}
-            className="shrink-0 text-xs font-medium text-red-900 underline hover:no-underline"
+            className="shrink-0 text-xs font-medium text-bloom-700 underline hover:no-underline dark:text-bloom-100"
           >
             {t("loans.chaseThem")}
           </button>
@@ -67,7 +77,7 @@ export default function LoansPage() {
           {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
             <div
               key={index}
-              className="bg-white rounded-xl p-4 border border-gray-100 animate-pulse dark:bg-gray-900 dark:border-gray-800"
+              className="bg-white rounded-xl p-4 border border-paper-100 animate-pulse dark:bg-paper-900 dark:border-paper-800"
             >
               <div className="flex gap-3">
                 <Skeleton className="w-12 h-16" />
@@ -81,7 +91,7 @@ export default function LoansPage() {
         </div>
       ) : loans.loans.length === 0 ? (
         <EmptyState
-          glyph="✅"
+          icon="check"
           title={loans.showAll ? t("loans.none") : t("loans.noneActive")}
           hint={t("loans.allAccountedFor")}
         />
@@ -97,6 +107,6 @@ export default function LoansPage() {
           ))}
         </div>
       )}
-    </div>
+    </Page>
   );
 }

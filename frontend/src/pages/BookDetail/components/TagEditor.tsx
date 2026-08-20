@@ -10,6 +10,11 @@ interface TagEditorProps {
   allTags: TagOut[];
   onAdd: (tagId: number) => void;
   onRemove: (tagId: number) => void;
+  /** Invent a tag and put it straight on this book. */
+  onCreate: (name: string) => void;
+  isCreating?: boolean;
+  /** Delete a household tag everywhere. Seeded ones are not offered. */
+  onDelete: (tag: TagOut) => void;
 }
 
 /** The book's tags, plus a panel for adding more. Used only by BookDetail. */
@@ -18,6 +23,9 @@ export default function TagEditor({
   allTags,
   onAdd,
   onRemove,
+  onCreate,
+  isCreating = false,
+  onDelete,
 }: TagEditorProps) {
   const { t } = useTranslation();
   const [showPicker, setShowPicker] = useState(false);
@@ -29,12 +37,12 @@ export default function TagEditor({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+        <p className="text-sm font-semibold text-paper-700 dark:text-paper-200">
           {t("library.tags")}
         </p>
         <button
           onClick={() => setShowPicker((open) => !open)}
-          className="text-xs text-sky-500 hover:text-sky-700"
+          className="text-xs text-accent-600 hover:text-accent-800"
         >
           {showPicker ? t("common.done") : t("book.addTag")}
         </button>
@@ -42,7 +50,7 @@ export default function TagEditor({
 
       <div className="flex flex-wrap gap-1.5 mb-2">
         {bookTags.length === 0 && !showPicker && (
-          <p className="text-xs text-gray-400 italic dark:text-gray-500">
+          <p className="text-xs text-paper-400 italic dark:text-paper-500">
             {t("book.noTags")}
           </p>
         )}
@@ -63,11 +71,20 @@ export default function TagEditor({
         ))}
       </div>
 
-      {showPicker && available.length > 0 && (
-        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 dark:bg-gray-900 dark:border-gray-800">
+      {/* Not gated on `available.length`: with every tag already on the book
+          there is nothing to pick and still every reason to invent one. */}
+      {showPicker && (
+        <div className="p-3 bg-paper-50 rounded-xl border border-paper-100 dark:bg-paper-900 dark:border-paper-800">
           {/* selectedIds is empty by design: this panel only offers tags the
               book lacks, so nothing in it is ever in a selected state. */}
-          <TagPicker tags={available} selectedIds={[]} onToggle={onAdd} />
+          <TagPicker
+            tags={available}
+            selectedIds={[]}
+            onToggle={onAdd}
+            onCreate={onCreate}
+            isCreating={isCreating}
+            onDelete={onDelete}
+          />
         </div>
       )}
     </div>

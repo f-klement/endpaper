@@ -32,9 +32,9 @@ export default function LoginForm({
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 dark:bg-gray-900 dark:border-gray-800">
+    <div className="bg-white rounded-2xl shadow-sm border border-paper-100 p-6 dark:bg-paper-900 dark:border-paper-800">
       {registrationEnabled && (
-        <div className="flex mb-5 gap-1 p-1 bg-gray-100 rounded-lg dark:bg-gray-800">
+        <div className="flex mb-5 gap-1 p-1 bg-paper-100 rounded-lg dark:bg-paper-800">
           {(["login", "register"] as const).map((option) => (
             <button
               key={option}
@@ -51,8 +51,8 @@ export default function LoginForm({
               aria-pressed={mode === option}
               className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
                 mode === option
-                  ? "bg-white shadow-sm text-gray-900"
-                  : "text-gray-500"
+                  ? "bg-white shadow-sm text-paper-900 dark:bg-paper-800 dark:text-paper-100"
+                  : "text-paper-500 dark:text-paper-400"
               }`}
             >
               {option === "login"
@@ -67,7 +67,7 @@ export default function LoginForm({
         <div>
           <label
             htmlFor="username"
-            className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-200"
+            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
           >
             {t("login.username")}
           </label>
@@ -78,7 +78,7 @@ export default function LoginForm({
             onChange={(event) => setUsername(event.target.value)}
             required
             autoComplete="username"
-            className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-400 text-sm dark:border-gray-700"
+            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 focus:outline-none focus:ring-2 focus:ring-accent-400 text-sm dark:border-paper-700"
             placeholder={t("login.usernamePlaceholder")}
           />
         </div>
@@ -86,7 +86,7 @@ export default function LoginForm({
         <div>
           <label
             htmlFor="password"
-            className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-200"
+            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
           >
             {t("login.password")}
           </label>
@@ -99,7 +99,7 @@ export default function LoginForm({
             autoComplete={
               mode === "register" ? "new-password" : "current-password"
             }
-            className="w-full px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-400 text-sm dark:border-gray-700"
+            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 focus:outline-none focus:ring-2 focus:ring-accent-400 text-sm dark:border-paper-700"
             placeholder={t("login.passwordPlaceholder")}
           />
         </div>
@@ -111,7 +111,7 @@ export default function LoginForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 disabled:bg-sky-300 text-white font-semibold rounded-lg transition-colors text-sm"
+          className="w-full py-2.5 bg-accent-600 hover:bg-accent-700 disabled:bg-accent-300 text-white font-semibold rounded-lg transition-colors text-sm"
         >
           {isSubmitting
             ? t("login.pleaseWait")

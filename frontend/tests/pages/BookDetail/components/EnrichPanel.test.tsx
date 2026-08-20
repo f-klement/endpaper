@@ -22,7 +22,7 @@ function renderPanel(
     isWorking: false,
     result: null,
     error: null,
-    onEnrich: vi.fn(),
+    onBrowse: vi.fn(),
     onDismiss: vi.fn(),
     ...overrides,
   };
@@ -38,7 +38,7 @@ describe("EnrichPanel", () => {
       .setup()
       .click(screen.getByRole("button", { name: "Find more details" }));
 
-    expect(props.onEnrich).toHaveBeenCalledOnce();
+    expect(props.onBrowse).toHaveBeenCalledOnce();
   });
 
   it("disables the button while it works", () => {
@@ -102,18 +102,20 @@ describe("EnrichPanel", () => {
   });
 });
 
-describe("EnrichPanel without a key", () => {
-  it("greys the button out", () => {
+describe("EnrichPanel without a Google Books key", () => {
+  it("stays usable, because the other catalogues need no key", () => {
+    // It used to grey itself out here, which left a household unable to fill
+    // in exactly the books the national catalogues cover best.
     renderPanel({ isConfigured: false });
     expect(
       screen.getByRole("button", { name: "Find more details" }),
-    ).toBeDisabled();
+    ).not.toBeDisabled();
   });
 
-  it("says why", () => {
+  it("says what a key would add rather than what is broken", () => {
     renderPanel({ isConfigured: false });
     expect(
-      screen.getByText(/Extra details are off until an admin adds/),
+      screen.getByText(/A key adds descriptions and genres/),
     ).toBeInTheDocument();
   });
 

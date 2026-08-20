@@ -8,7 +8,9 @@
 import type { TagCategory } from "./tagCategory.ts";
 
 export interface TagOut {
+  book_count?: number;
   category: TagCategory;
   id: number;
+  is_predefined?: boolean;
   name: string;
 }

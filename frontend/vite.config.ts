@@ -11,11 +11,30 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icons/*.png"],
+      includeAssets: ["icons/*.png", "icons/*.svg"],
       // The manifest is hand-maintained in public/manifest.json.
       manifest: false,
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // No navigation fallback, and that is the fix for a real bug rather
+        // than a lost feature.
+        //
+        // The plugin defaults this to "index.html", which registers a
+        // NavigationRoute answering EVERY navigation from the precache without
+        // touching the network. Endpaper sits behind a forward-auth portal, so
+        // when the portal cookie expires the shell was still served from cache,
+        // the app booted looking signed in, and every request it then made was
+        // redirected to a login page it could not reach. The result was an
+        // endless spinner and a console full of network errors.
+        //
+        // An offline shell cannot be honest here anyway: everything on every
+        // screen comes from the API, and the API is behind the same portal. So
+        // navigations go to the network, where the portal can redirect them,
+        // and the precache keeps doing the part it is good at, which is
+        // serving the assets instantly once you are through.
+        navigateFallback: undefined,
+        // Drop precaches from earlier builds instead of letting them accumulate.
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/covers\.openlibrary\.org\//,

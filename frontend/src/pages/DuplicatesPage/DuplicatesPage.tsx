@@ -2,6 +2,7 @@ import { EmptyState, ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
 import DuplicateCard from "./components/DuplicateCard";
 import { useDuplicates } from "./hooks";
+import { Page, PageHeader } from "../components";
 
 export default function DuplicatesPage() {
   const { t } = useTranslation();
@@ -10,10 +11,8 @@ export default function DuplicatesPage() {
   if (duplicates.isLoading) return <Spinner label={t("common.loading")} />;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 pt-5 pb-4 space-y-4">
-      <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-        🔍 {t("duplicates.title")}
-      </h1>
+    <Page width="narrow">
+      <PageHeader icon="search" title={t("duplicates.title")} />
 
       {duplicates.error != null ? (
         <ErrorState
@@ -34,14 +33,14 @@ export default function DuplicatesPage() {
             </p>
           )}
           <EmptyState
-            glyph="✨"
+            icon="sparkle"
             title={t("duplicates.none")}
             hint={t("duplicates.noneHint")}
           />
         </>
       ) : (
         <>
-          <p className="text-sm text-gray-500 leading-relaxed dark:text-gray-400">
+          <p className="text-sm text-paper-500 leading-relaxed dark:text-paper-400">
             {t("duplicates.explain")}
           </p>
           {duplicates.mergeError != null && (
@@ -57,6 +56,6 @@ export default function DuplicatesPage() {
           ))}
         </>
       )}
-    </div>
+    </Page>
   );
 }

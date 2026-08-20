@@ -13,7 +13,7 @@ export default function ForbiddenPage() {
   const { t } = useTranslation();
   return (
     <ErrorLayout
-      glyph="🚫"
+      icon="ban"
       code={t("error.403.code")}
       title={t("error.403.title")}
       message={t("error.403.message")}

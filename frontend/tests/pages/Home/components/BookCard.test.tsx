@@ -60,9 +60,11 @@ describe("BookCard", () => {
     });
 
     it("falls back to a placeholder when there is none", () => {
-      renderCard(makeBook({ cover_url: null }));
+      const { container } = renderCard(makeBook({ cover_url: null }));
       expect(screen.queryByRole("img")).not.toBeInTheDocument();
-      expect(screen.getByText("📖")).toBeInTheDocument();
+      // A drawn icon now, not an emoji. It is decorative, so it is found by
+      // shape rather than by an accessible name it deliberately does not have.
+      expect(container.querySelector("svg")).toBeInTheDocument();
     });
 
     it("loads lazily", () => {

@@ -5,16 +5,19 @@ endpoints that use it. Guessing at a family password was unbounded before.
 """
 
 import pytest
+import respx
 from fastapi import HTTPException
 
 from ratelimit import (
     LOGIN_LIMIT,
+    METADATA_LIMIT,
     REGISTER_LIMIT,
     RateLimit,
     SlidingWindowLimiter,
     login_limiter,
     register_limiter,
 )
+from tests.helpers import silence_catalogues
 
 
 class TestSlidingWindowLimiter:
@@ -191,3 +194,50 @@ class TestLimitsAreSane:
 
     def test_the_shared_limiters_are_the_configured_ones(self):
         assert login_limiter is not register_limiter
+
+
+class TestTheMetadataLimit:
+    """Unlike the others, what this protects is somebody else's server: every
+    lookup fans out to as many as four public catalogues.
+
+    Every source is silenced, so the burst these tests fire never leaves the
+    machine. Without that they would be sixty real requests to the DNB.
+    """
+
+    ISBN = "9783442267743"
+
+    @pytest.fixture
+    def catalogues(self):
+        with respx.mock(assert_all_called=False) as mock:
+            yield silence_catalogues(mock)
+
+    def _lookup(self, client, account):
+        return client.get(
+            "/api/books/lookup", params={"isbn": self.ISBN}, headers=account["headers"]
+        )
+
+    def test_a_burst_of_lookups_is_cut_off(self, client, admin, catalogues):
+        codes = [
+            self._lookup(client, admin).status_code
+            for _ in range(METADATA_LIMIT.max_attempts + 1)
+        ]
+        assert codes[-1] == 429
+        assert 429 not in codes[:-1]
+
+    def test_one_member_burning_the_quota_does_not_ration_another(
+        self, client, admin, member, catalogues
+    ):
+        for _ in range(METADATA_LIMIT.max_attempts + 1):
+            self._lookup(client, admin)
+
+        assert self._lookup(client, member).status_code != 429
+
+    def test_the_search_route_shares_the_same_budget(self, client, admin, catalogues):
+        """One budget for the fan-out, not one per route: otherwise alternating
+        between them doubles the outbound rate."""
+        for _ in range(METADATA_LIMIT.max_attempts):
+            self._lookup(client, admin)
+
+        res = client.get("/api/books/search", params={"q": "dune"}, headers=admin["headers"])
+
+        assert res.status_code == 429

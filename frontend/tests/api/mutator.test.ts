@@ -163,6 +163,60 @@ describe("errors", () => {
   });
 });
 
+describe("an edge sign-out", () => {
+  // The reverse proxy in front of this app answers an expired session with a
+  // 302 to a login portal on another hostname, XHR requests included. Followed,
+  // that 302 becomes an opaque cross-origin failure with no status to read, so
+  // the 401 path below never runs: nothing redirects, React Query retries, and
+  // the screen spins forever. This is that bug, pinned.
+
+  beforeEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { href: "/", pathname: "/", reload: vi.fn() },
+    });
+  });
+
+  it("treats an opaque redirect as an expired session", async () => {
+    mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
+    await expect(customFetch("/api/books")).rejects.toThrow(
+      "session has expired",
+    );
+  });
+
+  it("requests the redirect rather than following it", async () => {
+    // Following it is what loses the status. Nothing else can detect this.
+    const api = mockApi().on("/api/books", { body: [] });
+    await customFetch("/api/books");
+    expect(api.fetch.mock.calls[0]![1].redirect).toBe("manual");
+  });
+
+  it("reloads rather than pushing to the login route", async () => {
+    // /login is this app's own route and the proxy sits in front of it too, so
+    // a router push would be redirected again. Only a top-level navigation is
+    // followed across origins.
+    mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
+    await expect(customFetch("/api/books")).rejects.toThrow();
+    expect(window.location.reload).toHaveBeenCalled();
+  });
+
+  it("clears the stored session on the way out", async () => {
+    setSession("stale", makeUser());
+    mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
+    await expect(customFetch("/api/books")).rejects.toThrow();
+    expect(localStorage.getItem("token")).toBeNull();
+  });
+
+  it("does not save the portal's page as a download", async () => {
+    // Otherwise an expired session writes the proxy's redirect page to disk
+    // under the export's filename.
+    mockApi().on("/api/books/export", { status: 0, type: "opaqueredirect" });
+    await expect(downloadFile("/api/books/export")).rejects.toThrow(
+      "session has expired",
+    );
+  });
+});
+
 describe("401 handling", () => {
   it("clears the stored session", async () => {
     setSession("expired", makeUser());
