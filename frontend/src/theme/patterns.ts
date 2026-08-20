@@ -104,6 +104,7 @@
 
 import type { ResolvedTheme } from "./index";
 import { parseHex, solveAlpha } from "./oklab";
+import { PAGE_TOKEN } from "./palettes";
 
 /**
  * The weights a layer can be drawn at, faintest first.
@@ -1911,18 +1912,20 @@ const ALPHA_CEILING = 0.3;
  *
  * The page is read for the same reason the inks are. A weight is a distance
  * from something, and the something is the page the tile is pasted onto, so the
- * solve needs all three.
+ * solve needs all three. The page token comes from `palettes.ts` rather than
+ * being named again here: it is the one row this table and the picker's share,
+ * and a cross-reference in a comment is not a mechanism.
  */
 const COLOUR_TOKENS: Record<ResolvedTheme, WallpaperColours> = {
   light: {
     ink: "--color-accent-700",
     bloom: "--color-bloom-700",
-    page: "--color-paper-50",
+    page: PAGE_TOKEN.light,
   },
   dark: {
     ink: "--color-accent-300",
     bloom: "--color-bloom-300",
-    page: "--color-paper-950",
+    page: PAGE_TOKEN.dark,
   },
 };
 

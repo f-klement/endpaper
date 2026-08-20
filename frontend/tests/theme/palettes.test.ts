@@ -14,7 +14,14 @@
 
 import { describe, expect, it } from "vitest";
 
-import { PALETTES, type PaletteId } from "../../src/theme/palettes";
+import {
+  PALETTES,
+  isConstructed,
+  paletteEntry,
+  readPaletteColours,
+  withPalette,
+  type PaletteId,
+} from "../../src/theme/palettes";
 
 const CSS = import.meta.glob("../../src/**/*.css", {
   query: "?raw",
@@ -525,5 +532,96 @@ describe("more contrast is honoured on every palette, not only the default", () 
     // above pass by changing nothing.
     expect(Object.keys(moreContrast("light")).length).toBe(1);
     expect(Object.keys(moreContrast("dark")).length).toBe(1);
+  });
+});
+
+describe("the catalogue", () => {
+  it("names the member of a palette upstream gives a name to", () => {
+    // Latte, Mocha, Dawn, Moon. The docs and the stylesheet comments both used
+    // these before any field held them, so the picker had nothing to print.
+    expect(paletteEntry("catppuccin").modes).toEqual({
+      light: "Latte",
+      dark: "Mocha",
+    });
+    expect(paletteEntry("rosepine").modes).toEqual({
+      light: "Dawn",
+      dark: "Moon",
+    });
+  });
+
+  it("names no member upstream leaves unnamed", () => {
+    // "Gruvbox light" is not a title anybody uses, and inventing one would put
+    // a name in the picker that appears nowhere upstream.
+    expect(paletteEntry("gruvbox").modes).toEqual({ light: null, dark: null });
+    expect(paletteEntry("endpaper").modes).toEqual({ light: null, dark: null });
+  });
+
+  it("records Nord's light member as the only constructed one", () => {
+    const constructed = PALETTES.filter(
+      (palette) => palette.constructed.length > 0,
+    ).map((palette) => palette.id);
+
+    expect(constructed).toEqual(["nord"]);
+    expect(isConstructed("nord", "light")).toBe(true);
+    expect(isConstructed("nord", "dark")).toBe(false);
+  });
+
+  it("credits every palette that is not this project's own", () => {
+    // The licence notices on the picker are generated from this, so a palette
+    // added without one ships uncredited.
+    for (const palette of PALETTES) {
+      if (palette.id === "endpaper") continue;
+      expect(palette.attribution, palette.id).toMatch(/MIT$/);
+    }
+  });
+});
+
+describe("withPalette", () => {
+  it("puts the palette back after reading", () => {
+    // The picker reads seven palettes on a page that can only have one.
+    // Leaving the last one on the document would repaint the whole app.
+    document.documentElement.dataset.theme = "gruvbox";
+
+    withPalette("nord", () => {
+      expect(document.documentElement.dataset.theme).toBe("nord");
+    });
+
+    expect(document.documentElement.dataset.theme).toBe("gruvbox");
+  });
+
+  it("puts it back even when the read throws", () => {
+    document.documentElement.dataset.theme = "gruvbox";
+
+    expect(() =>
+      withPalette("nord", () => {
+        throw new Error("no");
+      }),
+    ).toThrow();
+
+    expect(document.documentElement.dataset.theme).toBe("gruvbox");
+  });
+
+  it("leaves a document with no palette without one", () => {
+    delete document.documentElement.dataset.theme;
+
+    withPalette("nord", () => undefined);
+
+    expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it("reads one entry per palette", () => {
+    const colours = readPaletteColours("light");
+
+    expect(Object.keys(colours).sort()).toEqual(
+      PALETTES.map((palette) => palette.id).sort(),
+    );
+  });
+
+  it("hands back an empty string for a token nothing declares", () => {
+    // No stylesheet is loaded here, so only the six tokens `setup.ts` writes
+    // resolve. That is the case the picker has to survive: an empty
+    // `background` is transparent and an empty `fill` is black, so a tile with
+    // a gap in it draws nothing at all rather than part of itself.
+    expect(readPaletteColours("light").endpaper.card).toBe("");
   });
 });

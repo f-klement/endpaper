@@ -1,5 +1,92 @@
 # Changelog
 
+## v0.4.0
+
+Seven palettes, ten wallpapers, and a screen to choose them on.
+
+**v0.3.0 was never released.** Its section below is a true record of what landed,
+but no tag and no image were ever published for it, so there is nothing to
+upgrade from. This release contains both, and upgrading from v0.2.1 goes
+straight here.
+
+**Two migrations run on start**, in this order: `c4d8e91a2f60` adds the three
+appearance columns to `users`, and `e6f1a94b2d73` adds the flag that marks an
+admin-created test account. Both are additive, both have a working downgrade,
+and neither touches an existing row's data.
+
+### Added
+
+**Appearance is something you pick, at `/settings/appearance`.** A palette, light
+or dark, and a wallpaper, applied the moment you choose and saved to your
+account, so the look follows you from your laptop to your phone. Its own screen
+rather than a row in the settings list, because the only honest preview of a
+wallpaper is the page: the pattern is painted behind everything, so the picker is
+the app with the controls laid over it. The preview on top of it is your own
+first two books, not invented sample content.
+
+**Seven palettes.** Endpaper, Catppuccin, Rose Pine, Gruvbox, Solarized,
+Everforest and Nord, each in light and dark. The colours belong to their
+projects; the lightness of each rung belongs to this app, so every palette clears
+the same contrast floors rather than shipping whatever the upstream editor theme
+happened to publish. Every correction, with the contrast that forced it, is
+tabulated in `docs/theming.md`. Nord publishes no light theme, so its light
+member is built here from Snow Storm and Polar Night, and the picker says so on
+the tile rather than greying out a control every other palette leaves alone.
+
+**Ten wallpapers, in two families.** Five after William Morris (Willow Bough,
+Acanthus, Pimpernel, Strawberry Thief, Golden Lily) and five decorated papers
+(Nonpareil, Seigaiha, Asanoha, Plait, Khatam). They are drawn rather than
+shipped: every tile is generated in the browser from the palette's own ink, so a
+pattern costs no download and follows whatever colours you chose. **None** and
+**Surprise me** are tiles beside them, and a new account starts on Surprise me.
+
+**Licences on the screen that offers them.** Six MIT notices and the note that
+this project is not affiliated with Morris & Co.
+
+**Test accounts an admin can switch into.** Sign in as any member from the
+settings page to see the library as they see it, and come back the same way. The
+query cache is dropped on every change of account, so nobody's private books
+survive the switch.
+
+**A top bar instead of a left rail**, and **lending to somebody who has no
+account**: both landed before this release was tagged, and are described under
+v0.3.0 below.
+
+### Fixed
+
+**The wallpaper no longer arrives a frame late.** The palette, the mode and the
+pattern are applied together before React mounts, rather than the first two
+synchronously and the third from an effect. Nobody noticed while the pattern was
+faint and never changed; a picker makes it the first thing you watch for.
+
+**Muted text on a light card was below AA.** `paper-400` and `paper-500` measure
+2.35:1 and 3.83:1 against the card where WCAG wants 4.5, and were text in
+fourteen places. A test now fails the build if either is used as light-mode text
+again.
+
+**One rose did both "want to read" and "delete".** They are separate colours now,
+because a colour that means both a pleasure and a danger means neither.
+
+**The green success message failed AA on every palette.** `text-green-600`
+measured 2.79 to 3.22 against 4.5; it is `text-green-800` now, measured 6.19 to
+7.13.
+
+**Twenty-one controls drew their own focus ring**, at 2.24:1 against a page where
+WCAG 1.4.11 wants 3:1, and sixteen of them killed the browser's own first. There
+is one ring now, and a test that keeps it that way.
+
+**More contrast was honoured on the default palette only.** The
+`prefers-contrast: more` block was outranked by every palette block, so six of
+the seven silently ignored it. It also turns the wallpaper off, and the picker
+says why rather than showing an off state nobody chose.
+
+### Changed
+
+**Tag pills are no longer colour coded by category.** The category is written on
+the pill, and the three hues cost fifteen tokens per mode to say the same thing
+twice. A tag the household invented keeps the accent, which is the one
+distinction with a reason.
+
 ## v0.3.0
 
 Four bug reports, and what fixing them turned up underneath.

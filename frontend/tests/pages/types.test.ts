@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { TagCategory } from "../../src/api/generated/model";
 import {
+  MODE_LABELS,
+  MODE_ORDER,
   TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
   TAG_CHIP_CLASSES,
@@ -116,5 +118,19 @@ describe("groupTagsByCategory", () => {
       "Horror",
       "Fantasy",
     ]);
+  });
+});
+
+describe("the light and dark modes", () => {
+  it("offers every one it can name", () => {
+    // Two facts, one per constant, and a mode present in one and not the other
+    // is either a button with no label or a label nobody can reach.
+    expect([...MODE_ORDER].sort()).toEqual(Object.keys(MODE_LABELS).sort());
+  });
+
+  it("offers the default last", () => {
+    // A default reads better as the thing you return to than the thing you
+    // start at, and both screens take their order from here.
+    expect(MODE_ORDER[MODE_ORDER.length - 1]).toBe("system");
   });
 });

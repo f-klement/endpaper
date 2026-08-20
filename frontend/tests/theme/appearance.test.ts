@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_APPEARANCE,
+  DOOR_APPEARANCE,
   cacheAppearance,
   readCachedAppearance,
   resolveAppearance,
@@ -77,8 +78,18 @@ describe("the cache", () => {
     expect(readCachedAppearance().palette).toBe("nord");
   });
 
-  it("defaults when this device has never signed anybody in", () => {
-    expect(readCachedAppearance()).toEqual(DEFAULT_APPEARANCE);
+  it("shows the front door when this device has never signed anybody in", () => {
+    // Not the new-account default, which is Surprise me. The login screen is
+    // fixed: a door that is a different pattern every visit reads as a slot
+    // machine rather than as a house.
+    expect(readCachedAppearance()).toEqual(DOOR_APPEARANCE);
+    expect(DOOR_APPEARANCE.wallpaper).toBe("willow");
+  });
+
+  it("keeps Surprise me for an account that has not chosen", () => {
+    // The other half of the same rule. Asking for an account is what tells the
+    // two fallbacks apart, so no caller has to know which is which.
+    expect(readCachedAppearance(99).wallpaper).toBeNull();
   });
 
   it("defaults for an account this device has not seen", () => {
@@ -90,7 +101,7 @@ describe("the cache", () => {
     // The preference used to be a bare string under `theme`, per device. Read
     // once as a fallback so nobody's dark mode is forgotten by an upgrade.
     localStorage.setItem("theme", "dark");
-    expect(readCachedAppearance()).toEqual({ ...DEFAULT_APPEARANCE, mode: "dark" });
+    expect(readCachedAppearance()).toEqual({ ...DOOR_APPEARANCE, mode: "dark" });
   });
 
   it("prefers the account's own record over the old device one", () => {
@@ -105,7 +116,7 @@ describe("the cache", () => {
     // before React exists, and white-screen the app with no way back short of
     // clearing site data by hand.
     localStorage.setItem("appearance", "{not json");
-    expect(readCachedAppearance()).toEqual(DEFAULT_APPEARANCE);
+    expect(readCachedAppearance()).toEqual(DOOR_APPEARANCE);
   });
 
   it("survives storage that refuses to be written", () => {

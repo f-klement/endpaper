@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Icon, type IconName } from "../../../components";
+import { Icon, type IconName } from "../../components";
 
 interface SettingsSectionProps {
   title: string;
@@ -8,7 +8,13 @@ interface SettingsSectionProps {
   children: ReactNode;
 }
 
-/** A titled card. Dumb: layout only, no state and no data. */
+/**
+ * A titled card. Dumb: layout only, no state and no data.
+ *
+ * Shared rather than Settings' own, because `/settings/appearance` is a second
+ * screen of the same settings and drawing its sections a second way would make
+ * one setting look like it belongs to a different app than the one beside it.
+ */
 export default function SettingsSection({
   title,
   icon,

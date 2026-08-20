@@ -8,6 +8,7 @@ import { AuthMode } from "../../../src/api/generated/model";
 import NavBar, {
   BAR_HEIGHT,
   BAR_OFFSET,
+  BAR_STICKY,
 } from "../../../src/app/components/NavBar";
 import { makeUser, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
@@ -50,6 +51,13 @@ describe("the bar's own height", () => {
     // Tailwind scans for whole class names, so these cannot be composed from
     // one number. This is what keeps them saying the same thing.
     expect(BAR_OFFSET).toBe(BAR_HEIGHT.replace("h-", "pt-"));
+  });
+
+  it("is where a sticky heading stops", () => {
+    // The appearance picker's family headings stick under the bar. Composed
+    // from the height they would generate no CSS, and a sticky heading with no
+    // offset slides under the bar rather than stopping at it.
+    expect(BAR_STICKY).toBe(BAR_HEIGHT.replace("h-", "top-"));
   });
 
   it("is applied to the bar", () => {

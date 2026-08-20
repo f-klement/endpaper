@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 
 import type { AuthMode, UserOut } from "../api/generated/model";
+import AppearancePage from "../pages/AppearancePage";
 import BookDetail from "../pages/BookDetail";
 import DuplicatesPage from "../pages/DuplicatesPage";
 import { NotFoundPage } from "../pages/errors";
@@ -41,6 +42,11 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
         path="/settings"
         element={<SettingsPage mode={mode} onSignIn={onSignIn} />}
       />
+      {/* Inside the signed-in table, deliberately. `ThemeProvider` sits above
+          the session gate and does not unmount on sign-out, so a picker the
+          login screen could reach would write a choice into the account that
+          left. See `ThemeProvider.release`. */}
+      <Route path="/settings/appearance" element={<AppearancePage />} />
       <Route path="/trash" element={<TrashPage />} />
       {/* Reachable while signed in so "Switch Account" can show the form
           without ending the current session first. */}

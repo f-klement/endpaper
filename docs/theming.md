@@ -8,6 +8,7 @@ Seven palettes, two modes each, and the rule that generated every rung of them.
 | `frontend/src/theme/palettes.css` | The other six palettes, as `data-theme` blocks |
 | `frontend/src/theme/palettes.ts` | The catalogue: the list, the attributions, and which member was constructed |
 | `frontend/src/theme/appearance.ts` | The per account preference and its write-through cache |
+| `frontend/src/pages/AppearancePage/` | The picker at `/settings/appearance` |
 | `frontend/tests/theme/palettes.test.ts` | The contract below, measured against the shipped stylesheets |
 
 ## The seven
@@ -29,9 +30,25 @@ different licence. None of these projects endorses this one.
 **Mode is an independent axis and no palette may disable it.** Nord publishes no light
 theme, so its light member is built from Snow Storm (the surfaces) and Polar Night (the
 ink), both published sets, with the roles assigned here. The catalogue records that as
-`constructed: ["light"]` and the picker says so. The alternative, a palette that greys out
+`constructed: ["light"]`, and the picker prints it on Nord's tile whenever light is the
+mode in force. The alternative, a palette that greys out
 the light and dark control every other palette leaves alone, makes one theme a special case
 of a control and silently ignores a choice somebody made.
+
+### What each member is called
+
+The picker shows the palette's name and, under it, what upstream calls the member in force.
+Only three publish one:
+
+| Palette | Light | Dark |
+|---|---|---|
+| Catppuccin | Latte | Mocha |
+| Rose Pine | Dawn | Moon |
+| Everforest | Medium light | Medium dark |
+
+The other four get no second line. "Gruvbox light" is not a title anybody uses, and Nord
+names its colour groups rather than its themes: Polar Night and Snow Storm are the two
+neutral sets its members are built out of, not the names of a light and a dark theme.
 
 ### The wallpaper names
 
@@ -486,6 +503,74 @@ away, is in [decisions.md](decisions.md).
 3. Run `bun run test tests/theme/patterns.test.ts`. It measures the budget, the
    admission rule, the byte cap and the interning, and it names the pattern and
    the number in every failure.
+
+## Choosing one
+
+`/settings/appearance`, its own route. The settings list keeps a summary and a link.
+
+The reason for a route rather than a section or a dialog is the design's own: **the only
+honest preview of a wallpaper is the page.** The pattern is painted on `body`, so the picker
+is the app surface with the controls laid over it, every choice applies the moment it is
+made, and there is no Save button. The preview on top of it is the reader's **own first two
+book cards**, read out of the query cache and never fetched, because invented sample content
+is not the real page. An empty cache gets a sentence rather than a placeholder book.
+
+Four controls, in this order:
+
+| Control | What it holds |
+|---|---|
+| Preview | Two of the reader's own books, live |
+| Light and dark | Light, Dark, Follow system |
+| Palette | Seven tiles, each drawn in its own colours, with the attribution and any constructed member |
+| Wallpaper | None, Surprise me, then the ten under **William Morris** and **Decorated papers** |
+
+Plus the licences, on the screen that offers the things they cover.
+
+### None is a tile, not a switch
+
+`wallpaper` already answered two questions, which pattern and Surprise me, so off is a
+third value in it (`WALLPAPER_OFF`) rather than a boolean beside it that could disagree with
+it. It is the one id `patternFor` does not degrade to a random pattern: an off that came
+back as a wallpaper would be a choice the app declined to keep.
+
+**Two off states, and the picker distinguishes them.** A chosen off is `pattern === null`;
+the system asking for more contrast is `wallpaperOff`. Both clear the body, only the second
+is worth explaining, and the reader's own choice stays marked underneath the explanation
+because it is what comes back when the system stops asking.
+
+### The swatches restate nothing
+
+A palette tile draws that palette's page, card, ink, accent and bloom, and none of the
+thirty five values is a hex in TypeScript. `readPaletteColours` puts each palette on the
+document in turn and reads the computed properties back, the same way `wallpaperColours`
+resolves the wallpaper's ink. `withPalette` wraps the swap and restores the attribute in a
+`finally`; the read runs from a layout effect, so no intermediate state is ever painted.
+
+`withPalette` is load bearing for a second reason. A child's effect runs before its
+parent's, so a component that read the document after asking for a palette change would read
+the palette before it and show a grid one choice behind.
+
+`ThemeProvider` applies the appearance from a layout effect for the same reason it reads
+from one. As a passive effect it ran after the browser had painted, so every change made
+with the page open showed one frame of the previous look.
+
+**The wallpaper tiles are drawn at true opacity.** A swatch at three times the page's
+opacity is a lie about what is being chosen. The honest answer to a faint swatch is a bigger
+one: `background-size: contain`, four columns inside `max-w-6xl` less the page's padding and
+the section's, is a 257px cell against tiles that repeat at 240px to 300px, so nine of the
+ten are drawn at 86% to 107% of the size they have on the page. Asanoha, at 420px, shrinks
+to 61%.
+
+### The front door
+
+A device with nobody signed in on it paints Endpaper, the system's mode, and **Willow Bough,
+fixed**. Not Surprise me, which is what a new *account* starts at: `readCachedAppearance`
+returns the fixed look when no account is named and the cache is empty, and the account
+default when one is.
+
+The login screen "decides whether the app looks made or assembled", and a front door that is
+a different pattern every visit reads as a slot machine. Randomness is a pleasure once you
+are inside. An admin-set login image, where one is set, covers it anyway.
 
 ## Where an appearance is kept
 

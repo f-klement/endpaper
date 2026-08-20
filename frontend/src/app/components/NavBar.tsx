@@ -40,20 +40,23 @@ const SECONDARY: { to: string; label: MessageKey }[] = [
 ];
 
 /**
- * The bar's height, and the top padding the content needs to clear it.
+ * The bar's height, the top padding the content needs to clear it, and where a
+ * sticky heading has to stop.
  *
- * The bar is fixed, so these two have to be the same number: too little and
+ * The bar is fixed, so these have to be the same number: too little and
  * the first thing on every page sits behind it, too much and there is a gap.
  * `App.tsx` imports `BAR_OFFSET` rather than restating it.
  *
- * Two literals for one number, and they must stay literals. Tailwind scans the
- * source for whole class names, so a composed `h-${n}` generates no CSS at all
- * and the bar silently loses its height in a production build. Keeping them
+ * Three literals for one number, and they must stay literals. Tailwind scans
+ * the source for whole class names, so a composed `h-${n}` generates no CSS at
+ * all and the bar silently loses its height in a production build. Keeping them
  * adjacent is as close to one fact as that scanner allows; the test asserts
  * they agree.
  */
 export const BAR_HEIGHT = "h-14";
 export const BAR_OFFSET = "pt-14";
+/** Where a sticky heading has to stop, so it does not slide under the bar. */
+export const BAR_STICKY = "top-14";
 
 interface NavBarProps {
   user: UserOut;

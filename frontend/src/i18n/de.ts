@@ -289,6 +289,35 @@ export const de: Messages = {
     "Übernimmt, was auf deinem Handy oder Rechner eingestellt ist.",
   "theme.wallpaperOff":
     "Das Hintergrundmuster ist aus, weil dein System mehr Kontrast verlangt.",
+  "theme.summary": "{palette}, {mode}, {wallpaper}",
+  "theme.change": "Farbwelt, hell oder dunkel und ein Hintergrundmuster wählen",
+
+  "appearance.title": "Darstellung",
+  "appearance.intro":
+    "Alles hier gilt sofort und wird in deinem Konto gespeichert.",
+  "appearance.preview": "Deine Bibliothek in dieser Darstellung",
+  "appearance.previewEmpty":
+    "Auf diesem Gerät sind gerade keine Bücher geladen, also gibt es nichts Echtes zum Ansehen. Geh kurz in deine Bibliothek und komm zurück.",
+  "appearance.mode": "Hell und dunkel",
+  "appearance.palette": "Farbwelt",
+  "appearance.attribution": "Farben von {source}.",
+  "appearance.attributionOwn": "Eigene Farben dieses Projekts.",
+  "appearance.constructedLight":
+    "{palette} veröffentlicht keine helle Variante. Diese ist hier aus veröffentlichten Farben gebaut.",
+  "appearance.constructedDark":
+    "{palette} veröffentlicht keine dunkle Variante. Diese ist hier aus veröffentlichten Farben gebaut.",
+  "appearance.wallpaper": "Hintergrundmuster",
+  "appearance.wallpaperNone": "Keins",
+  "appearance.wallpaperNoneHint": "Eine schlichte Seite.",
+  "appearance.wallpaperSurprise": "Überrasch mich",
+  "appearance.wallpaperSurpriseHint": "Bei jedem Besuch ein anderes.",
+  "appearance.family.morris": "William Morris",
+  "appearance.family.papers": "Buntpapiere",
+  "appearance.licences": "Woher das alles stammt",
+  "appearance.licencesPalettes":
+    "Die Farbwelten unten stehen unter der MIT-Lizenz, ihre Werte stammen aus dem jeweils eigenen Repository. Keines dieser Projekte unterstützt dieses hier.",
+  "appearance.licencesMorris":
+    "Die Morris-Musternamen bezeichnen die historischen Entwürfe, denen die Zeichnungen folgen. Dieses Projekt steht in keiner Verbindung zu Morris & Co und wird von dort nicht unterstützt.",
   "settings.language": "Sprache",
   "settings.languageHint": "Gilt für dich auf diesem Gerät.",
   "settings.defaultLanguage": "Standardsprache für neue Besucher",

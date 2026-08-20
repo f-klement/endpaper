@@ -6,7 +6,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthMode, Locale } from "../../../src/api/generated/model";
 import SettingsPage from "../../../src/pages/SettingsPage";
-import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import { WALLPAPER_OFF, type Appearance } from "../../../src/theme";
+import {
+  LIGHT_APPEARANCE,
+  mockApi,
+  renderWithProviders,
+  type MockApi,
+} from "../../utils";
 
 let api: MockApi;
 
@@ -19,9 +25,11 @@ let api: MockApi;
  */
 function renderSettings(
   props: Partial<React.ComponentProps<typeof SettingsPage>> = {},
+  appearance?: Appearance,
 ) {
   return renderWithProviders(
     <SettingsPage mode={AuthMode.local} onSignIn={() => {}} {...props} />,
+    { appearance },
   );
 }
 
@@ -97,36 +105,41 @@ describe("SettingsPage", () => {
   });
 
   describe("appearance", () => {
-    it("offers the three modes", async () => {
+    it("names what is set without offering the controls", async () => {
+      // The controls moved to their own route, because the only honest preview
+      // of a wallpaper is the page. What stays here is the summary.
       renderSettings();
+      const link = await screen.findByRole("link", {
+        name: /Endpaper, Light, Surprise me/,
+      });
 
-      for (const label of ["Light", "Dark", "Follow system"]) {
-        expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
-      }
+      expect(link).toHaveAttribute("href", "/settings/appearance");
+      expect(screen.queryByRole("button", { name: "Dark" })).not.toBeInTheDocument();
     });
 
-    it("marks the one in force", async () => {
-      // The render helpers force light, the way they force English.
-      renderSettings();
+    it("does not print a wallpaper this build no longer has as though it were pinned", async () => {
+      // `patternFor` degrades an unknown id to a random pattern, so asking it
+      // for a name here would name whichever tile the dice chose. Membership in
+      // `PATTERNS` is the test, and both ways of ending up with a different
+      // wallpaper every visit are named as such.
+      renderSettings({}, { ...LIGHT_APPEARANCE, wallpaper: "hollyhock" });
 
-      expect(await screen.findByRole("button", { name: "Light" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(
+        await screen.findByRole("link", { name: /Endpaper, Light, Surprise me/ }),
+      ).toBeInTheDocument();
     });
 
-    it("switches on a click", async () => {
-      renderSettings();
-      await userEvent
-        .setup()
-        .click(await screen.findByRole("button", { name: "Dark" }));
+    it("names a wallpaper that is turned off", async () => {
+      renderSettings({}, { ...LIGHT_APPEARANCE, wallpaper: WALLPAPER_OFF });
 
-      expect(document.documentElement).toHaveClass("dark");
+      expect(
+        await screen.findByRole("link", { name: /Endpaper, Light, None/ }),
+      ).toBeInTheDocument();
     });
 
     it("says nothing about the wallpaper while it is on", async () => {
       renderSettings();
-      await screen.findByRole("button", { name: "Light" });
+      await screen.findByRole("link", { name: /Endpaper/ });
 
       expect(screen.queryByText(/wallpaper is off/)).not.toBeInTheDocument();
     });
