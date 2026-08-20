@@ -25,7 +25,20 @@ import type { ReactElement, ReactNode } from "react";
 import { Locale } from "../src/api/generated/model";
 import { LocaleProvider } from "../src/i18n";
 import { PATTERNS } from "../src/theme/patterns";
-import { ThemeProvider } from "../src/theme";
+import { ThemeProvider, type Appearance } from "../src/theme";
+
+/**
+ * Light, the house palette, and a fixed wallpaper.
+ *
+ * Every render helper forces it for the same reason they all force English: an
+ * assertion about what is on screen must not depend on the machine's own
+ * settings, and the wallpaper is otherwise chosen by `Math.random`.
+ */
+const LIGHT_APPEARANCE: Appearance = {
+  palette: "endpaper",
+  mode: "light",
+  wallpaper: null,
+};
 
 // ── Network stubbing ──────────────────────────────────────────────────────────
 
@@ -48,7 +61,15 @@ export type RouteMatcher = string | RegExp;
 interface Handler {
   matcher: RouteMatcher;
   method?: string;
-  respond: StubResponse | ((url: string, init: RequestInit) => StubResponse);
+  /**
+   * A response, or a function returning one. The function may return a promise,
+   * which is how a test holds a request open: a race between a reply that is
+   * already on its way and something the reader does in the meantime cannot be
+   * written at all if every stub answers instantly.
+   */
+  respond:
+    | StubResponse
+    | ((url: string, init: RequestInit) => StubResponse | Promise<StubResponse>);
 }
 
 export interface MockApi {
@@ -114,10 +135,9 @@ export function mockApi(): MockApi {
         );
       }
 
-      const stub =
-        typeof handler.respond === "function"
-          ? handler.respond(url, init)
-          : handler.respond;
+      const stub = await (typeof handler.respond === "function"
+        ? handler.respond(url, init)
+        : handler.respond);
       const status = stub.status ?? 200;
 
       return {
@@ -202,7 +222,10 @@ export function renderWithProviders(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={client}>
-        <ThemeProvider initialPreference="light" initialPattern={PATTERNS[0]}>
+        <ThemeProvider
+          initialAppearance={LIGHT_APPEARANCE}
+          initialPattern={PATTERNS[0]}
+        >
           <LocaleProvider initialLocale={locale}>
             <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
           </LocaleProvider>
@@ -260,7 +283,10 @@ export function renderLocalised(
 ): RenderResult {
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <ThemeProvider initialPreference="light" initialPattern={PATTERNS[0]}>
+      <ThemeProvider
+        initialAppearance={LIGHT_APPEARANCE}
+        initialPattern={PATTERNS[0]}
+      >
         <LocaleProvider initialLocale={locale}>
           <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
         </LocaleProvider>
@@ -289,7 +315,10 @@ export function renderHookWithProviders<TResult>(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={client}>
-        <ThemeProvider initialPreference="light" initialPattern={PATTERNS[0]}>
+        <ThemeProvider
+          initialAppearance={LIGHT_APPEARANCE}
+          initialPattern={PATTERNS[0]}
+        >
           <LocaleProvider initialLocale={Locale.en}>
             <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
           </LocaleProvider>

@@ -321,6 +321,74 @@ The table stays keyed by category rather than collapsing to a default and one
 exception, so a category added to the backend enum is a compile error here
 instead of an unstyled pill.
 
+### The palettes are CSS, and the catalogue is TypeScript
+
+`palettes.css` holds every hex; `palettes.ts` holds the list, the attributions and which
+member was constructed. Splitting them looks like indirection and is the only arrangement
+where the values exist once.
+
+Tailwind generates `bg-paper-0` only because `--color-paper-0` is declared literally in
+`@theme`, so the default palette has to be in CSS whatever else happens. Putting the other
+six in TypeScript and applying them as inline custom properties would mean the same eleven
+ramps in two places, with nothing able to compare them: the test suite runs with CSS
+handling scoped to a raw read, so a TypeScript table could be asserted and the stylesheet
+could not.
+
+So the stylesheet is the authority and `tests/theme/palettes.test.ts` reads it as text,
+resolves the cascade the way a browser does, and measures the result. A palette is then a
+block of declarations and a catalogue row, and neither can drift from the other without a
+test failing.
+
+### Every palette block repeats tokens that look identical to the block above it
+
+`:root.dark` in `index.css` and `:root[data-theme="x"]` in `palettes.css` are both
+specificity (0,2,0), and the palettes are imported first, so in the dark Endpaper's
+overrides beat a palette's light block. Only the palette's own dark block, at (0,3,0), beats
+them back. A dark block that omits a token because it matches the light block above it
+therefore gets **Endpaper's** value, silently, in that one mode. The completeness is
+asserted rather than trusted.
+
+### `:root:root` in the `prefers-contrast` block
+
+Doubled deliberately, and not a typo. The rule has to outrank `:root[data-theme="x"]`, which
+is (0,2,0); written once, at (0,1,0), the preference would be honoured on the default
+palette and silently ignored on the other six. The dark half is `:root:root.dark` for the
+same reason.
+
+### Appearance is three columns on `users`, and is not on `UserOut`
+
+The columns rather than a `user_preferences` table: a one-to-one with no history, where a
+side table buys a join on every read and a row that both shadow-account paths would have to
+remember to create.
+
+Not on `UserOut` because that schema is served inside every book payload and the member
+list, so a field there would tell everyone in the household what everyone else's library
+looks like. `/api/users/me/appearance` takes no member id, so there is no object to
+authorize and no way to ask for somebody else's.
+
+### The appearance cache is keyed by account, and the login screen shows the last one
+
+The server is the authority; `localStorage` is a write-through cache, read before React
+mounts. Keyed by account because a household shares devices. The `last` pointer is what the
+login screen paints with, which does disclose to anyone holding the device that somebody
+here uses Gruvbox. That is a decision rather than an oversight: the alternative is a front
+door that looks like a different app every visit.
+
+An inline blocking `<script>` would remove the reconciliation entirely and is not available:
+`middleware.py` sets `script-src 'self'` with no nonce, so it would need a per-build hash
+and the security middleware would have to be generated from the frontend bundle.
+
+### `useSession` clears the whole query cache on sign in as well as sign out
+
+Two lines that look like belt and braces and are neither. The client outlives an identity
+change, and "Switch account" is a router link rather than a navigation, so signing in as
+somebody else with the previous member's cache still warm is a normal thing to do. The
+cached listings are member-scoped by `visible_to()`, so they carry private books. See
+[security.md](security.md).
+
+Clearing on `signIn` and not only on `signOut` is the half that is easy to drop: signing
+out is not the only way the person at the keyboard changes.
+
 ### Tailwind 4 has no config file
 
 `tailwind.config.js` and `postcss.config.js` are gone; configuration is `@theme` in

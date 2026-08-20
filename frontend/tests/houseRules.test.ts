@@ -60,10 +60,11 @@ describe("paper-400 and paper-500 are not text in light mode", () => {
     // to an inactive control, and a disabled field that reads as strongly as a
     // live one is worse than a faint one.
     //
-    // `index.css` is not covered. The suite runs with `css: false`, so a raw
-    // import of it is an empty string, and reading it off disk would mean
-    // `node:fs` and `@types/node` for one assertion. It holds exactly one of
-    // these tokens, on `.field:disabled`, and it is exempt.
+    // `index.css` is not covered, and no longer because it cannot be: the glob
+    // above is TypeScript, while `tests/theme/palettes.test.ts` reads the
+    // stylesheets as text and could do the same here. It holds exactly one of
+    // these tokens, on `.field:disabled`, which is the exemption, so a second
+    // glob would buy an assertion about a line that is already allowed.
     const offenders = entries().flatMap(([path, source]) =>
       [...source.matchAll(/[\w:./[\]-]*text-paper-[45]00/g)]
         .map((match) => match[0])
@@ -105,6 +106,73 @@ describe("no control draws its own focus ring", () => {
     );
 
     expect(offenders).toEqual([]);
+  });
+});
+
+/** The source with comments removed, so a rule cannot be satisfied by prose. */
+function withoutProse(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+}
+
+function sessionWrites(code: string): number {
+  return [...code.matchAll(/\b(set|clear)Session\s*\(/g)].length;
+}
+
+function cacheClears(code: string): number {
+  return [...code.matchAll(/queryClient\.clear\(\)/g)].length;
+}
+
+describe("an identity change drops the cache with it", () => {
+  it("holds in every module that writes the session", () => {
+    // The instance of this that mattered was the whole shelf: React Query's
+    // client is built once per page load and outlives a sign-out, "Switch
+    // account" is a router link rather than a navigation, and `visible_to()`
+    // is "public or mine", so the next member in was handed the previous one's
+    // private books back under identical keys, with nothing refetching for
+    // another thirty seconds.
+    //
+    // Asserted as a rule rather than at the two call sites, because the defect
+    // is not in any one query: it is that a member-scoped answer outlives the
+    // member. The next hook keyed on "the caller" reintroduces it for free.
+    //
+    // `api/mutator.ts` is the exemption and the reason there is a rule: it
+    // owns both functions, and `endSession()` drops in-memory state by doing a
+    // full navigation instead. The deliberate paths reach the same place
+    // through the router, so they have to say it.
+    //
+    // Counted, and with the prose removed first, for two reasons that are both
+    // reachable here rather than theoretical. This repository quotes
+    // identifiers in comments constantly, and both `pages/hooks.ts` and
+    // `docs/security.md` discuss `queryClient.clear()` by name: a future
+    // comment in a session-writing module explaining why it does not need the
+    // call would otherwise silence the rule for that whole file. And a file is
+    // not compliant because it clears somewhere: `pages/hooks.ts` holds two
+    // writers and two clears today, so a third identity path added without one
+    // would pass a per-file check while leaking exactly what this exists to
+    // stop.
+    //
+    // Said out loud so nobody trusts it as total: this counts spellings, not
+    // calls. Anything that spells the call without making it (a string
+    // literal, a clear inside a function nothing invokes) or makes it without
+    // spelling it (an aliased import, a sign-in that writes `localStorage`
+    // itself) is outside it. No regex closes that gap: it is the distance
+    // between a concept and the characters it is usually written with.
+    const offenders = entries()
+      .filter(([path]) => path !== "api/mutator.ts")
+      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .filter(([, code]) => sessionWrites(code) > 0)
+      .filter(([, code]) => cacheClears(code) < sessionWrites(code))
+      .map(([path]) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is watching something", () => {
+    // A rule whose subject has been renamed passes by matching nothing.
+    const writers = entries().filter(
+      ([, source]) => sessionWrites(withoutProse(source)) > 0,
+    );
+    expect(writers.length).toBeGreaterThan(1);
   });
 });
 

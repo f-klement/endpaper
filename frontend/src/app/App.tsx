@@ -7,6 +7,7 @@ import { useTranslation } from "../i18n";
 import { ErrorPage } from "../pages/errors";
 import LoginPage from "../pages/LoginPage";
 import { useSession } from "../pages/hooks";
+import AppearanceSync from "./components/AppearanceSync";
 import NavBar, { BAR_OFFSET } from "./components/NavBar";
 import Providers from "./providers";
 import AppRoutes from "./routes";
@@ -61,6 +62,9 @@ function AppShell() {
 
   return (
     <>
+      {/* Renders nothing. Here rather than in Providers because the appearance
+          belongs to an account, and this is the first place one is known. */}
+      <AppearanceSync accountId={user.id} />
       {/* The bar is fixed, so without this padding the first thing on every
           page sits underneath it. Imported rather than restated: see
           NavBar.BAR_OFFSET. */}

@@ -121,7 +121,15 @@ export default function NoteList({
                         )}
                         <button
                           onClick={() => onRemove(note.id)}
-                          className="text-xs text-danger-300 hover:text-danger-600"
+                          // `danger-300` is the tint tier and measures 1.89:1
+                          // on the card in light mode: a delete control nobody
+                          // could read until they hovered it. The dark hover
+                          // needs saying too, because the ramp runs the other
+                          // way there: `danger-600` on the dark card is 1.67
+                          // to 2.85 across the seven palettes, so repairing
+                          // only the resting state would leave the control
+                          // going illegible the moment it is pointed at.
+                          className="text-xs text-danger-500 hover:text-danger-600 dark:text-danger-300 dark:hover:text-danger-100"
                         >
                           {t("common.delete")}
                         </button>

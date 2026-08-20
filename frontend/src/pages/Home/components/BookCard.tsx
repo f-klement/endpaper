@@ -59,7 +59,13 @@ export default function BookCard({
     <div
       className={`card overflow-hidden ${
         isSelected
-          ? "border-accent-500 ring-2 ring-accent-400/50"
+          ? // The ring is what says "selected" on a card whose contents are
+            // unchanged, so it has to clear the 3:1 that WCAG 1.4.11 asks of a
+            // non-text indicator. `accent-400/50` composited to 1.52:1 over the
+            // card. This is the focus ring's own step at full opacity: 3.09:1
+            // on the light page and 5.98:1 on the dark one, and every palette
+            // holds that rung to the same floor.
+            "border-accent-500 ring-2 ring-accent-500"
           // Only lifts when it is a link. A card that rises under the cursor
           // while selecting suggests it will navigate, and it will not.
           : isSelecting

@@ -5,20 +5,28 @@
  * Catalogue, lend and track a household's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { UserOut } from "../../model";
+import type {
+  AppearanceOut,
+  AppearanceUpdate,
+  HTTPValidationError,
+  UserOut,
+} from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
@@ -181,3 +189,254 @@ export function useListUsers<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getGetMyAppearanceUrl = () => {
+  return `/api/users/me/appearance`;
+};
+
+/**
+ * The caller's own appearance.
+ *
+ * There is no path parameter and no route that takes a member id, so there
+ * is no object to authorize: the only appearance reachable here is the
+ * caller's. That is the point, and it is why this is not a field on
+ * `UserOut`, which every member can read for every other member.
+ * @summary Get My Appearance
+ */
+export const getMyAppearance = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AppearanceOut> => {
+  return customFetch<AppearanceOut>(getGetMyAppearanceUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMyAppearanceQueryKey = () => {
+  return [`/api/users/me/appearance`] as const;
+};
+
+export const getGetMyAppearanceQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMyAppearance>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getMyAppearance>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMyAppearanceQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyAppearance>>> = ({
+    signal,
+  }) => getMyAppearance({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMyAppearance>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetMyAppearanceQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMyAppearance>>
+>;
+export type GetMyAppearanceQueryError = unknown;
+
+export function useGetMyAppearance<
+  TData = Awaited<ReturnType<typeof getMyAppearance>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMyAppearance>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyAppearance>>,
+          TError,
+          Awaited<ReturnType<typeof getMyAppearance>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMyAppearance<
+  TData = Awaited<ReturnType<typeof getMyAppearance>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMyAppearance>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyAppearance>>,
+          TError,
+          Awaited<ReturnType<typeof getMyAppearance>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMyAppearance<
+  TData = Awaited<ReturnType<typeof getMyAppearance>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMyAppearance>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get My Appearance
+ */
+
+export function useGetMyAppearance<
+  TData = Awaited<ReturnType<typeof getMyAppearance>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getMyAppearance>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetMyAppearanceQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getSetMyAppearanceUrl = () => {
+  return `/api/users/me/appearance`;
+};
+
+/**
+ * Replace the caller's own appearance.
+ *
+ * No admin check and no member check, deliberately: a preference about what
+ * a person's own screen looks like needs no permission beyond being signed
+ * in, and the row written is the one the token names.
+ * @summary Set My Appearance
+ */
+export const setMyAppearance = async (
+  appearanceUpdate: AppearanceUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AppearanceOut> => {
+  return customFetch<AppearanceOut>(getSetMyAppearanceUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(appearanceUpdate),
+  });
+};
+
+export const getSetMyAppearanceMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setMyAppearance>>,
+    TError,
+    { data: AppearanceUpdate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setMyAppearance>>,
+  TError,
+  { data: AppearanceUpdate },
+  TContext
+> => {
+  const mutationKey = ["setMyAppearance"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setMyAppearance>>,
+    { data: AppearanceUpdate }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return setMyAppearance(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetMyAppearanceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setMyAppearance>>
+>;
+export type SetMyAppearanceMutationBody = AppearanceUpdate;
+export type SetMyAppearanceMutationError = HTTPValidationError;
+
+/**
+ * @summary Set My Appearance
+ */
+export const useSetMyAppearance = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setMyAppearance>>,
+      TError,
+      { data: AppearanceUpdate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setMyAppearance>>,
+  TError,
+  { data: AppearanceUpdate },
+  TContext
+> => {
+  return useMutation(getSetMyAppearanceMutationOptions(options), queryClient);
+};

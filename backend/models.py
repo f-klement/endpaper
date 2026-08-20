@@ -79,6 +79,26 @@ class User(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # ── Appearance ────────────────────────────────────────────────────────
+    # Three columns here rather than a `user_preferences` table. They are a
+    # one-to-one with no history, no cardinality and no lifecycle of their
+    # own: a side table would buy a join on every read and a nullable row that
+    # every account creation path has to remember to make, including the two
+    # that create shadow accounts on the fly. Columns default to NULL, so a
+    # directory account gets them for free.
+    #
+    # NULL means "this member has not chosen", not a value. The frontend then
+    # follows the system for the mode, uses the house palette, and picks a
+    # different wallpaper every visit, which is the behaviour this app had
+    # before anything was stored at all.
+    #
+    # Deliberately NOT on `UserOut`. That schema is served inside book
+    # payloads and the member list, so putting appearance on it would show
+    # every member what every other member's library looks like.
+    appearance_palette: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    appearance_mode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    appearance_wallpaper: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     books_added: Mapped[list[Book]] = relationship("Book", back_populates="added_by")
     user_books: Mapped[list[UserBook]] = relationship("UserBook", back_populates="user")
     loans_received: Mapped[list[Loan]] = relationship(

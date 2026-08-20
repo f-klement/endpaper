@@ -168,6 +168,20 @@ class Locale(StrEnum):
     DE = "de"
 
 
+class ThemeMode(StrEnum):
+    """Light, dark, or whatever the reader's operating system is asking for.
+
+    A closed set, so the server owns it: unlike the palette and the wallpaper,
+    which are a stylesheet and a drawing routine the frontend can add to
+    without redeploying anything here, these three are the only answers there
+    will ever be.
+    """
+
+    LIGHT = "light"
+    DARK = "dark"
+    SYSTEM = "system"
+
+
 class BulkAction(StrEnum):
     """What a bulk selection does to the books in it.
 

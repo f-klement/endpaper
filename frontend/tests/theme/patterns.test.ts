@@ -260,6 +260,14 @@ describe("PATTERNS", () => {
     // That is a perceptual lightness delta rather than an alpha, so it is not
     // this number and cannot be compared with it: it is stated here only so the
     // person doing the retune knows the target is not written in these units.
+    //
+    // And it is now a function of the palette, which it was not when the band
+    // was agreed. The ink is read off the palette's own tokens, so at this
+    // alpha the mean tile dL runs 0.00984 to 0.01252 across the seven in light
+    // (1.27x) and 0.01435 to 0.01899 in dark (1.32x), against a target band
+    // 1.31x wide. The spread is the size of the band, so the retune is a
+    // choice between an alpha per palette and one alpha with a tolerance.
+    // Measured in docs/theming.md.
     for (const pattern of PATTERNS) {
       const alpha = meanAlpha(pattern, patternDataUri(pattern, "light", INK));
       expect(alpha).toBeGreaterThan(0.008);

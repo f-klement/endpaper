@@ -2,7 +2,7 @@
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Locale } from "../../../src/api/generated/model";
 import SettingsPage from "../../../src/pages/SettingsPage";
@@ -74,6 +74,59 @@ describe("SettingsPage", () => {
         .setup()
         .click(await screen.findByRole("button", { name: "German" }));
       expect(api.lastCall(/\/api\/settings$/, "PUT")).toBeUndefined();
+    });
+  });
+
+  describe("appearance", () => {
+    it("offers the three modes", async () => {
+      renderWithProviders(<SettingsPage />);
+
+      for (const label of ["Light", "Dark", "Follow system"]) {
+        expect(await screen.findByRole("button", { name: label })).toBeInTheDocument();
+      }
+    });
+
+    it("marks the one in force", async () => {
+      // The render helpers force light, the way they force English.
+      renderWithProviders(<SettingsPage />);
+
+      expect(await screen.findByRole("button", { name: "Light" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("switches on a click", async () => {
+      renderWithProviders(<SettingsPage />);
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Dark" }));
+
+      expect(document.documentElement).toHaveClass("dark");
+    });
+
+    it("says nothing about the wallpaper while it is on", async () => {
+      renderWithProviders(<SettingsPage />);
+      await screen.findByRole("button", { name: "Light" });
+
+      expect(screen.queryByText(/wallpaper is off/)).not.toBeInTheDocument();
+    });
+
+    it("says why the wallpaper is off when the system asks for contrast", async () => {
+      // Otherwise decoration vanishes with no explanation, which reads as a
+      // fault in this app rather than as the preference being honoured.
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({
+          matches: query.includes("prefers-contrast"),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        })),
+      );
+      renderWithProviders(<SettingsPage />);
+
+      expect(await screen.findByText(/wallpaper is off/)).toBeInTheDocument();
+      vi.unstubAllGlobals();
     });
   });
 

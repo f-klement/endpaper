@@ -29,7 +29,7 @@ const LANGUAGES = [
 
 export default function SettingsPage() {
   const { t, locale, setLocale } = useTranslation();
-  const { preference, setPreference } = useTheme();
+  const { appearance, setAppearance, wallpaperOff } = useTheme();
   const navigate = useNavigate();
   const {
     settings,
@@ -100,10 +100,10 @@ export default function SettingsPage() {
             <button
               key={option.value}
               type="button"
-              onClick={() => setPreference(option.value)}
-              aria-pressed={preference === option.value}
+              onClick={() => setAppearance({ mode: option.value })}
+              aria-pressed={appearance.mode === option.value}
               className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                preference === option.value
+                appearance.mode === option.value
                   ? "bg-accent-50 border-accent-300 text-accent-800 dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
                   : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
@@ -113,8 +113,17 @@ export default function SettingsPage() {
           ))}
         </div>
         <p className="text-xs text-paper-600 dark:text-paper-400">
-          {preference === "system" ? t("theme.systemHint") : t("theme.hint")}
+          {appearance.mode === "system" ? t("theme.systemHint") : t("theme.hint")}
         </p>
+        {/* Said rather than left to be noticed. The wallpaper is decoration and
+            goes first when somebody asks their system for more contrast, and a
+            decoration that vanishes with no explanation reads as a fault in
+            this app rather than as the setting being honoured. */}
+        {wallpaperOff && (
+          <p className="text-xs text-paper-600 dark:text-paper-400">
+            {t("theme.wallpaperOff")}
+          </p>
+        )}
       </SettingsSection>
 
       {/* Outside the admin block, deliberately. Reading statuses are personal

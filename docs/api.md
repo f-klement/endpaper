@@ -498,6 +498,8 @@ be reached through a book the caller happens to have access to.
 | PUT | `/api/settings` | **admin** | Partial update; absent fields are left alone |
 | GET | `/api/stats` | user | Totals, per-member, per-tag, per-month |
 | GET | `/api/users` | user | The member list |
+| GET | `/api/users/me/appearance` | user | The caller's own palette, mode and wallpaper |
+| PUT | `/api/users/me/appearance` | user | Replaces all three |
 
 `/api/settings/features` is public for the same reason the login image is: the login page
 is localised, so the default language has to be known before a token exists. It carries no
@@ -513,6 +515,17 @@ key**, deliberately and distinctly from omitting it.
 The login image GET is public because the login page renders before anyone is signed in.
 `/api/users` is readable by every member because the book detail page needs it for the
 "Loan to…" picker; it exposes usernames and the admin flag, never password hashes.
+
+Appearance is **not** a field on `UserOut`, which is served inside every book payload and
+the member list: a field there would show every member what every other member's library
+looks like. It has its own pair of endpoints instead, and they take no member id, so the
+only appearance reachable is the caller's own. All three fields are nullable, null meaning
+"has not chosen"; the `PUT` replaces the whole record, so an omitted field is a cleared one.
+Which palettes and wallpapers exist is the frontend's business and the server does not hold
+the list, but it does bound the shape: `^[a-z0-9-]{1,30}$`, and `mode` is one of three. A
+client that does not have a stored palette shows its default instead, and overwrites the
+stored value with that default the next time the member changes anything, because the write
+is a whole record.
 
 Every `/api/stats` aggregation applies the privacy predicate independently.
 

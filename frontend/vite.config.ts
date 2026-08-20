@@ -65,7 +65,17 @@ export default defineConfig({
     // The suite mirrors src/ rather than sitting beside it.
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/setup.ts"],
-    css: false,
+    // Not `false`, which is the usual answer for a suite that asserts on the
+    // DOM rather than on paint. Under `false` Vite replaces every CSS module
+    // with an empty string, `?raw` included, and `tests/theme/palettes.test.ts`
+    // measures the palettes by reading `index.css` and `palettes.css` as text:
+    // the shipped values, not a copy of them kept in TypeScript for the test's
+    // convenience. Nothing imports a stylesheet the ordinary way here, so this
+    // costs one file read and changes nothing else.
+    // Unanchored deliberately: the module id a raw import produces ends in
+    // `?raw`, so a pattern closed with `$` matches nothing at all and the test
+    // silently measures an empty string.
+    css: { include: [/\.css/] },
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],

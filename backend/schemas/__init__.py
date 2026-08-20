@@ -44,7 +44,15 @@ from schemas.settings import (
 )
 from schemas.stats import MonthStat, PerUserStat, StatsOut, TagStat
 from schemas.tag import TagCreate, TagOut
-from schemas.user import AuthConfigOut, LoginRequest, Token, UserCreate, UserOut
+from schemas.user import (
+    AppearanceOut,
+    AppearanceUpdate,
+    AuthConfigOut,
+    LoginRequest,
+    Token,
+    UserCreate,
+    UserOut,
+)
 
 # Resolve the BookOut <-> LoanOut forward references now that both are imported.
 BookOut.model_rebuild()
@@ -53,6 +61,8 @@ LoanOut.model_rebuild()
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "AppearanceOut",
+    "AppearanceUpdate",
     "AuthConfigOut",
     "BookCreate",
     "BookDetailsUpdate",

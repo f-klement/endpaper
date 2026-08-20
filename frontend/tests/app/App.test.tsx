@@ -22,6 +22,12 @@ beforeEach(() => {
     body: { detail: "none" },
   });
   api.on("/api/books/tags", { body: [] });
+  // The shell asks for it as soon as it knows who is signed in. Stubbed here
+  // rather than left unhandled, because an unhandled request in this suite is
+  // meant to be a failure and this one would be swallowed by the hook.
+  api.on("/api/users/me/appearance", {
+    body: { palette: null, mode: null, wallpaper: null },
+  });
   api.on(/\/api\/books\?/, { body: makeBookPage([]) });
   api.on("/api/stats", { body: makeStats() });
 });
