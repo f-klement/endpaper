@@ -99,7 +99,7 @@ export default function RapidQueue({
               type="button"
               onClick={() => onRemove(entry.isbn)}
               aria-label={t("rapid.removeFromQueue", { isbn: entry.isbn })}
-              className="shrink-0 text-paper-600 hover:text-danger-500 dark:text-paper-400"
+              className="shrink-0 text-paper-600 hover:text-danger-500 dark:text-paper-400 dark:hover:text-danger-300"
             >
               ×
             </button>

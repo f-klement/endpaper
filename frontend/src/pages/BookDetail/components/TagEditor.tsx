@@ -42,7 +42,7 @@ export default function TagEditor({
         </p>
         <button
           onClick={() => setShowPicker((open) => !open)}
-          className="text-xs text-accent-600 hover:text-accent-800"
+          className="text-xs text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
         >
           {showPicker ? t("common.done") : t("book.addTag")}
         </button>

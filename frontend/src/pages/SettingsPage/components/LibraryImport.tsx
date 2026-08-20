@@ -183,7 +183,7 @@ export default function LibraryImport({
             <button
               type="button"
               onClick={onReviewUnconfirmed}
-              className="text-sm font-medium text-accent-700 hover:text-accent-800 dark:text-accent-400"
+              className="text-sm font-medium text-accent-700 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
             >
               {t("ownership.reviewThem")}
             </button>

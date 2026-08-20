@@ -28,7 +28,7 @@ export default function SeriesCard({ series }: SeriesCardProps) {
           thing on the card. A complete series says so rather than staying
           silent, which would be indistinguishable from "not calculated". */}
       {complete ? (
-        <p className="text-xs text-green-600 mt-2 dark:text-green-400">
+        <p className="text-xs text-green-800 mt-2 dark:text-green-400">
           {t("series.complete")}
         </p>
       ) : (

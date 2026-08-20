@@ -102,7 +102,7 @@ export default function BookHeader({
         {book.series_name && (
           <Link
             to={`/?series=${encodeURIComponent(book.series_name)}&sort=series`}
-            className="inline-block text-sm text-accent-700 hover:text-accent-800 mt-1 dark:text-accent-400"
+            className="inline-block text-sm text-accent-700 hover:text-accent-800 mt-1 dark:text-accent-400 dark:hover:text-accent-300"
           >
             {book.series_index != null
               ? t("series.partOf", {
@@ -157,7 +157,7 @@ export default function BookHeader({
             <button
               onClick={onRefreshMetadata}
               disabled={isRefreshing}
-              className="text-xs text-accent-600 hover:text-accent-800 disabled:text-accent-300 transition-colors"
+              className="text-xs text-accent-600 hover:text-accent-800 disabled:text-accent-300 transition-colors dark:text-accent-400 dark:hover:text-accent-300 dark:disabled:text-accent-600"
             >
               {isRefreshing ? t("book.refreshing") : t("book.refreshMetadata")}
             </button>

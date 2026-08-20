@@ -35,20 +35,33 @@ of a control and silently ignores a choice somebody made.
 
 ### The wallpaper names
 
-The five wallpapers are named for the historical Morris designs the drawings are after.
-Those names, "Willow Bough", "Strawberry Thief", "Golden Lily", "Pimpernel" and "Acanthus",
-are also current product names of Morris & Co, a live trading brand. The designs are public
-domain; the names are in commercial use, which is a trademark question rather than a
-copyright one, and the two do not expire together.
+The rule, and both halves of the set are an instance of it: **name the tradition, not a
+product; use the historical title where one exists; never a mark that only a company uses.**
+
+Five are named for the historical Morris designs the drawings are after. Those names,
+"Willow Bough", "Strawberry Thief", "Golden Lily", "Pimpernel" and "Acanthus", are also
+current product names of Morris & Co, a live trading brand. The designs are public domain;
+the names are in commercial use, which is a trademark question rather than a copyright one,
+and the two do not expire together.
 
 Naming a design by the name its author gave it is nominative use in its strongest form:
 these are the historical titles, used as such by the V&A and in every scholarly catalogue,
-and there is no alternative name for Strawberry Thief. The rule this is an instance of:
-**name the tradition, not a product; use the historical title where one exists; never a mark
-that only a company uses.**
+and there is no alternative name for Strawberry Thief.
 
 > The Morris pattern names identify the historical designs the drawings are after. This
 > project is not affiliated with, or endorsed by, Morris & Co.
+
+The other five are named for the traditions rather than for any surviving work: nonpareil,
+seigaiha, asanoha, plait and khatam are all common nouns for a kind of pattern, owned by
+nobody. Two of those names were chosen against an obvious alternative and the reason matters
+in both cases. **Khatam, not girih**: girih names the five-tile quasi-periodic system, which
+has no square repeat, and calling a periodic eight-point star field girih is wrong in the one
+way a reader who knows the field notices immediately. **Plait, not Book of Kells**: a plait
+is the construction, and naming a specific manuscript would claim a resemblance to a
+particular page that nothing here is traced from.
+
+No pattern in this app is traced from an image. Every one is generated from a described
+rule, and the rule is in the source.
 
 ## The rule that generates a ramp
 
@@ -350,56 +363,129 @@ rather than left to be discovered, because a contract that is silent about its
 own edges reads as a contract that has none.
 
 **`warn`, `ok` and `loan` are not tokens.** Amber, green and orange are still
-raw Tailwind at 29 lines across 16 files, so six of the seven palettes ship a
-success message and an overdue badge in colours that belong to none of them.
-It is not only coherence: `text-green-600` on the card measures **2.86 (Nord)
-to 3.30 (Endpaper)** for text that needs 4.5, and it is the success message on
-four screens. Each of those pairings is self-contained (`bg-amber-50` with
-`text-amber-800`), which is why nothing here fails, and is also why nothing
-here catches it.
+raw Tailwind at 29 lines across 16 files, so six of the seven palettes ship an
+overdue badge and a caution banner in colours that belong to none of them.
+Tokenising them is three ramps times seven palettes times two modes, which is
+its own piece of work. Most of those pairings are self-contained
+(`bg-amber-50` with `text-amber-800`), which is why nothing here fails and also
+why nothing here catches them.
 
-**Dark hover is not covered.** Every ramp runs the other way in the dark, and
-about twenty sites write `hover:text-accent-800` or `hover:text-danger-600`
-with no `dark:` variant. Measured across the seven palettes they land between
-**1.36 and 2.85** on the dark card: legible at rest, illegible while pointed
-at. The two touched by this phase are repaired; the rest are a call site job
-rather than a token one.
+One was not self-contained and is repaired: `text-green-600` on the card, the
+success message on four screens, measured **2.79 (Nord) to 3.22 (Endpaper)**
+against a floor of 4.5. It is now `text-green-800`, at **6.19 to 7.13**.
+`green-700` looks like the answer and is not: 4.29 on Nord, 4.37 on
+Catppuccin, 4.49 on Gruvbox. A fixed hue is a bet on seven different card
+colours at once, and that is the argument for the token job rather than for
+more repairs like this one.
 
-**The effort is currently inverted.** `paper-500` is held to 4.5 in all
-fourteen theme-modes and painted at **zero** call sites, while the two lists
-above are painted constantly and measured nowhere.
+**Dark hover is covered now.** Twelve sites wrote `hover:text-accent-800` with
+no `dark:` variant and measured **1.36 to 2.85** on the dark card: legible at
+rest, illegible while pointed at. All twelve are repaired, and
+`frontend/tests/houseRules.test.ts` holds the rule with no exemption list.
+
+**The effort is still inverted in one place.** `paper-500` is held to 4.5 in
+all fourteen theme-modes and painted at **zero** call sites, while the amber
+and orange above are painted constantly and measured nowhere.
 
 ## What this does to the wallpaper
 
 The wallpaper's ink is read off `accent-700` and `bloom-700` in light, and
-`accent-300` and `bloom-300` in dark, so it now follows the palette without any
-file that draws a tile knowing a hex. Two consequences, both measured, and the
-second is for whoever does the retune.
+`accent-300` and `bloom-300` in dark, so it follows the palette without any
+file that draws a tile knowing a hex. The page is read with them, off
+`paper-50` and `paper-950`, because that is what the ink is weighed against.
 
-The weight the ground layer carries at the shipped opacities, as an OKLab
-lightness delta over each palette's own page:
+**The opacity is solved, not written down.** A layer states a weight, as an
+OKLab lightness delta over the page, and `wallpaperWeights` bisects for the
+alpha that reaches it:
 
-| | light ground (target 0.026) | dark ground (target 0.061) |
+```
+light   ground 0.026   under 0.033   foliage 0.042   bloom 0.057
+dark    ground 0.061   under 0.070   foliage 0.083   bloom 0.102
+```
+
+It has to work that way. At a fixed alpha the weight is a function of the
+palette, and the spread was the width of the whole budget:
+
+| | at one alpha | solved per palette |
 |---|---|---|
-| Endpaper | 0.0258 | 0.0580 |
-| Catppuccin | 0.0250 | 0.0587 |
-| Rose Pine | 0.0289 | 0.0427 |
-| Gruvbox | 0.0263 | 0.0477 |
-| Solarized | 0.0278 | 0.0441 |
-| Everforest | 0.0259 | 0.0491 |
-| Nord | 0.0247 | 0.0442 |
+| light, spread of the tile's weight | 1.27x | **1.052x** |
+| dark | 1.32x | **1.030x** |
+| light, in continuous colour | | 1.002x |
 
-Light is within 11% of target everywhere. **Dark is not**: the palettes with a
-dimmer ink land up to 30% under, so a single opacity cannot serve all seven
-there.
+The residual is the compositor rounding the blend to 8 bits per channel, not
+the palette: in continuous colour the seven agree to the bisection's own
+precision. The alpha the dark ground needs runs 0.078 (Endpaper) to 0.109
+(Rose Pine) to hold that one weight, and the highest solve anywhere is
+Solarized dark's bloom at 0.2082.
 
-The sharper version of the same fact: **the perceptual weight is now a function
-of the palette, and the spread is as wide as the retune's own target band.** At
-the heaviest tile's budget alpha the mean tile dL runs 0.00984 to 0.01252 in
-light (1.27x) and 0.01435 to 0.01899 in dark (1.32x), while the agreed band,
-0.0070 to 0.0092, is 1.31x wide. So the retune has to choose: an alpha solved
-per palette, or one alpha with a stated tolerance. It cannot have a single
-number and a tight band at the same time.
+Two things follow for whoever adds a palette. Nothing in `patterns.ts` needs
+touching: the eighth palette's wallpaper is solved from its own tokens. And
+the guard on opacity is 0.30 rather than 0.15, because 0.15 was a ceiling in
+the wrong unit; the ceiling on how heavy a tile may look is the table above.
+
+## The ten wallpapers
+
+Two families, which is how the picker groups them.
+
+| William Morris | Decorated papers |
+|---|---|
+| Willow Bough, Acanthus, Pimpernel, Strawberry Thief, Golden Lily | Nonpareil, Seigaiha, Asanoha, Plait, Khatam |
+
+The Morris five are grown along curves; the papers are set out on a lattice.
+Between them they need both halves of the engine, which is the reason to have
+both.
+
+### The ink budget
+
+Mean tile weight, the same number in every palette by construction:
+
+| | | | |
+|---|---|---|---|
+| nonpareil 0.00784 | pimpernel 0.00788 | seigaiha 0.00805 | asanoha 0.00806 |
+| acanthus 0.00815 | khatam 0.00818 | plait 0.00822 | lily 0.00855 |
+| willow 0.00868 | strawberry 0.00879 | | |
+
+The band is 0.0070 to 0.0092 and it binds at both ends. The spread across the
+ten is **1.122x**, against 2.65x for the five that shipped before, and two tiles
+moved to get there: Willow was 0.00485 and gained an underfoliage plane, Golden
+Lily was 0.01343 and its petals came down from 1.2 to 0.85.
+
+The spread is a property of the measure as well as of the tiles. Coverage is
+computed analytically, which double counts ink laid twice on one pixel and
+misses the cap on a stroke, so against the same tiles rasterised the numbers
+run 17.7% heavy on Golden Lily and 12.7% light on Nonpareil, and the spread is
+1.235x. Every tile is inside the band under either measure. Budgeting from the
+rasterised field is the better instrument and is a retune rather than an edit.
+
+### The admission rule
+
+A pattern ships only if its defining feature is discriminable at true opacity
+and native scale. Two numbers, both read off the generated tile:
+
+- **Tint contrast at least 0.196.** The tile's ink blurred to the acuity the
+  rule names, as RMS contrast against its own mean. The floor is what a field
+  of parallel lines at exactly the 12px mark pitch measures; at 4px the same
+  field measures 0.018 and at 30px 1.140. The ten run 0.354 (Nonpareil) to
+  1.696 (Pimpernel). Those three are calibration measurements rather than a
+  formula, and `rasterise.ts` says why that distinction is load bearing.
+- **Peak coverage at least 0.9 per layer.** Somewhere the layer has to lay down
+  a whole mark. A pattern of sub-pixel hairlines has structure and no weight,
+  and that is a stroke-width problem rather than an opacity one.
+
+This is what refused a woven girih and respecified the khatam as a flat field
+at an 80px pitch. Full reasoning, including the filter that had to be thrown
+away, is in [decisions.md](decisions.md).
+
+### Adding a wallpaper
+
+1. Build it in `patterns.ts`, from the primitives if they fit: `lattice`,
+   `radial`, `ribbon`, `flow` and `mirror`, plus `grow` for anything that
+   follows a curve.
+2. Anything that varies with position must be periodic in the tile. `lattice`
+   and `flow` both throw rather than let it through.
+3. Run `bun run test tests/theme/patterns.test.ts`. It measures the budget, the
+   admission rule, the byte cap and the interning, and it names the pattern and
+   the number in every failure.
 
 ## Where an appearance is kept
 

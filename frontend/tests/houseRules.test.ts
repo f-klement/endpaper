@@ -180,6 +180,66 @@ describe("an identity change drops the cache with it", () => {
   });
 });
 
+describe("a dark hover state is stated, never inherited", () => {
+  it("appears nowhere in the source", () => {
+    // Every ramp runs the other way in the dark, so a hover written once is
+    // legible at rest and illegible while pointed at. Twelve sites were:
+    // `text-accent-700 hover:text-accent-800` measures 4.5:1 or better on a
+    // light card and **1.36 to 2.85** on a dark one across the seven palettes,
+    // because `accent-800` in a dark ramp is nearly the card itself.
+    //
+    // This rule ships with no exemption list, which is a claim rather than an
+    // omission: all twelve were repaired in the same change, so there is
+    // nothing to exempt. The alternative shape was considered and rejected for
+    // that reason. A frozen allowlist is what this repository does when a rule
+    // arrives before its repair (`api/mutator.ts` in the session rule,
+    // `.field:disabled` in the paper rule), and a list of twelve would have
+    // been a list of twelve things nobody was going to come back to.
+    //
+    // Only `hover:text-`, and not `hover:bg-` or `hover:border-`. A background
+    // or a border that is a shade off in the dark is a flat surface that looks
+    // slightly wrong; text that is a shade off is text nobody can read, and
+    // WCAG 1.4.3 has a number for the second and not the first.
+    //
+    // Concatenated class strings are joined before matching. Two of these are
+    // written as `"…light…" + "…dark…"` across a line break, and a rule that
+    // read the halves separately would report both as offenders and teach the
+    // next person to work around it.
+    //
+    // Said out loud so nobody trusts it as total: the unit is the string
+    // literal, not the utility. A literal carrying two unqualified hover
+    // states and one `dark:hover:text-` satisfies this rule while leaving one
+    // of them unrepaired. No such site exists, and every site in the tree pairs
+    // one hover with one dark hover, so pinning that shape would assert today's
+    // spelling rather than the rule.
+    const offenders = entries().flatMap(([path, source]) =>
+      [
+        ...source
+          .replace(/["`]\s*\+\s*["`]/g, " ")
+          .matchAll(/["`]([^"`]*hover:text-[^"`]*)["`]/g),
+      ]
+        .filter(([, classes]) => !/dark:hover:text-/.test(classes!))
+        .flatMap(([, classes]) => [
+          ...classes!.matchAll(
+            /(?<![-\w:])hover:text-(?:paper|accent|bloom|danger)-\d+/g,
+          ),
+        ])
+        .map((match) => `${path}: ${match[0]}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is watching something", () => {
+    // A rule whose subject has been renamed passes by matching nothing. There
+    // are dark hover states in this tree; the rule is that they are all stated.
+    const stated = entries().filter(([, source]) =>
+      /dark:hover:text-/.test(source),
+    );
+    expect(stated.length).toBeGreaterThan(10);
+  });
+});
+
 describe("no dash is used as punctuation", () => {
   it("appears nowhere in the source", () => {
     // House style. The message catalogues have their own test; this covers

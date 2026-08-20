@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**992 tests · 91% statements, 87% functions, 78% branches.**
+**1,017 tests · 92% statements, 88% functions, 79% branches.**
 
 ```bash
 bun run test                 # the suite
@@ -43,6 +43,7 @@ readers as a side effect.
 
 | File                                  | Tests | Covers                                                      |
 | ------------------------------------- | ----: | ----------------------------------------------------------- |
+| `houseRules.test.ts`                  |    10 | Rules that hold across the whole tree: the generated client behind hooks, retired text tiers, one focus ring, one session writer, stated dark hover states, no dashes |
 | `api/mutator.test.ts`                 |    29 | Token attachment, 401 handling, error flattening, downloads |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
 | `app/*`                               |    48 | The session gate, the top bar (incl. the way back from a switched session), the library export, appearance sync |
@@ -71,7 +72,8 @@ readers as a side effect.
 | `theme/index.test.tsx`                |    27 | Mode resolution, the palette on the document, more contrast |
 | `theme/appearance.test.ts`            |    15 | The per account cache, unknown values, corrupt storage      |
 | `theme/palettes.test.ts`              |    77 | Every palette and mode, measured against the rung contract, with and without more contrast |
-| `theme/patterns.test.ts`              |    27 | The wallpaper engine: seamlessness, the ink and byte budgets |
+| `theme/patterns.test.ts`              |    43 | The wallpaper engine: the ink budget, the admission rule, the byte cap |
+| `theme/oklab.test.ts`                 |    15 | Lightness, the sRGB composite, and the alpha solve |
 
 ## The parts that matter most
 

@@ -41,7 +41,7 @@ export default function LoanRow({
 
         <div className="flex-1 min-w-0">
           <Link to={`/book/${loan.book_id}`}>
-            <h3 className="font-semibold text-sm leading-tight line-clamp-1 hover:text-accent-700">
+            <h3 className="font-semibold text-sm leading-tight line-clamp-1 hover:text-accent-700 dark:hover:text-accent-300">
               {loan.book?.title}
             </h3>
           </Link>
@@ -88,7 +88,7 @@ export default function LoanRow({
           <p className="text-xs text-paper-600 dark:text-paper-400">
             {new Date(loan.loaned_at).toLocaleDateString(locale)}
             {loan.returned_at && (
-              <span className="ml-2 text-green-600 dark:text-green-400">
+              <span className="ml-2 text-green-800 dark:text-green-400">
                 {t("loans.returnedOn", {
                   date: new Date(loan.returned_at).toLocaleDateString(locale),
                 })}

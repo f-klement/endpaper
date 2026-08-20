@@ -36,12 +36,13 @@ import {
   type Appearance,
   type ThemePreference,
 } from "./appearance";
+import { parseHex } from "./oklab";
 import { applyPalette } from "./palettes";
 import {
   PATTERNS,
   patternDataUri,
   randomPattern,
-  wallpaperInk,
+  wallpaperColours,
   type Pattern,
 } from "./patterns";
 
@@ -69,11 +70,17 @@ const DARK_QUERY = "(prefers-color-scheme: dark)";
  */
 const CONTRAST_QUERY = "(prefers-contrast: more)";
 
-/** A hex colour and nothing else. See `applyWallpaper`. */
-const COLOUR = /^#[0-9a-f]{3,8}$/i;
-
+/**
+ * A hex colour and nothing else. See `applyWallpaper`.
+ *
+ * `parseHex` rather than a second regex here, so this guard and the one the
+ * alpha solve applies are the same rule. They were not: this one admitted the
+ * four and eight digit forms that carry alpha, which `parseHex` refuses, so a
+ * palette stating one would have passed here and produced an empty tile with
+ * nothing saying why.
+ */
 function isColour(value: string): boolean {
-  return COLOUR.test(value);
+  return parseHex(value) !== null;
 }
 
 interface ThemeContextValue {
@@ -173,7 +180,7 @@ export function applyWallpaper(pattern: Pattern, theme: ResolvedTheme): void {
     return;
   }
 
-  const colours = wallpaperInk(theme);
+  const colours = wallpaperColours(theme);
   // No tokens, no wallpaper, and nothing but a colour ever reaches the tile.
   //
   // Two failures, one guard. An empty custom property would arrive as
@@ -188,7 +195,17 @@ export function applyWallpaper(pattern: Pattern, theme: ResolvedTheme): void {
   // set through `resolvePalette`, which checks against the seven, and both
   // stylesheets hold literal hexes. That is now an inference across two files,
   // so it is asserted here instead of being left to be re-derived.
-  if (!isColour(colours.ink) || !isColour(colours.bloom)) return;
+  //
+  // The page is checked with them. It is never painted, but the alpha every
+  // layer is drawn at is solved against it, and an unparseable page would give
+  // `wallpaperWeights` nothing to solve against.
+  if (
+    !isColour(colours.ink) ||
+    !isColour(colours.bloom) ||
+    !isColour(colours.page)
+  ) {
+    return;
+  }
 
   document.body.style.backgroundImage = patternDataUri(pattern, theme, colours);
 }
