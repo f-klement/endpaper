@@ -137,13 +137,27 @@ def book_for_owner(
     return book
 
 
+#: Past any real library, and small enough that `page * page_size` stays far
+#: inside SQLite's INTEGER range.
+MAX_PAGE_NUMBER = 1_000_000
+
+
 class PageParams:
     """`page`/`page_size` query parameters, bounded so a caller cannot ask for
     the entire library and undo the point of paginating."""
 
     def __init__(
         self,
-        page: Annotated[int, Query(ge=1, description="1-based page number")] = 1,
+        # `le` is not decoration, and this parameter had it missing while
+        # `page_size` beside it did not. `offset` multiplies this by the page
+        # size, so an unbounded value overflows SQLite's INTEGER and reaches
+        # `unhandled_exception_handler`: measured, `?page=9999999999999999999999`
+        # answered **500** on the main book listing for any member. A million
+        # pages is past any real library and keeps the product far inside the
+        # driver's range. `tests/test_house_rules.py` is what found this.
+        page: Annotated[
+            int, Query(ge=1, le=MAX_PAGE_NUMBER, description="1-based page number")
+        ] = 1,
         page_size: Annotated[
             int, Query(ge=1, le=MAX_PAGE_SIZE, description="Rows per page")
         ] = DEFAULT_PAGE_SIZE,

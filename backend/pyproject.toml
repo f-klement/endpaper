@@ -1,6 +1,6 @@
 [project]
 name = "endpaper-backend"
-version = "0.4.0"
+version = "0.5.0"
 description = "Endpaper backend (FastAPI)"
 requires-python = ">=3.14"
 dependencies = [
@@ -23,6 +23,7 @@ dev = [
     "pytest>=8.3.4",
     "pytest-cov>=6.0.0",
     "pytest-asyncio>=0.25.2",
+    "pytest-xdist>=3.6.1",
     "respx>=0.22.0",
     "ruff>=0.9.4",
     "mypy>=1.14.1",
@@ -39,7 +40,27 @@ pythonpath = ["."]
 # source tree, so tests/test_auth.py and tests/routers/test_auth.py share a
 # basename. The default "prepend" mode derives module names from the basename
 # and refuses to collect the second one.
-addopts = "-q --strict-markers --import-mode=importlib"
+# `-n 2`, not `-n auto`. The suite is expected to share a small CI host with
+# other work, and the runner is capped at two cores for that reason. `auto`
+# would spawn one worker per core only to be throttled back, which is the same
+# work done slower, and a throttled job looks like one that needs a bigger
+# limit. Raise both numbers together or neither.
+#
+# Parallel is safe here by construction rather than by luck being noticed late:
+# tests/conftest.py builds DATA_DIR with `tempfile.mkdtemp()` at import time, so
+# every xdist worker is a separate process with its own directory, its own
+# test.db and its own COVERS_DIR. Nothing is shared to race over.
+#
+# Measured: 22m50s serial, 11m50s at -n 2, same 1634 tests. Not the full 2x,
+# because the suite is closer to I/O bound than CPU bound: it drops and
+# recreates every table between tests, and two workers were observed using
+# 0.68 cores between them. That is also why the old 3500m CI limit was
+# unjustified even before this: the serial run was never short of cores.
+#
+# `--dist loadfile` keeps a file's tests on one worker. `load` scatters them,
+# and this suite has files whose tests share a module-level counter
+# (covers.reset_counts) or build on one another within the file.
+addopts = "-q --strict-markers --import-mode=importlib -n 2 --dist loadfile"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

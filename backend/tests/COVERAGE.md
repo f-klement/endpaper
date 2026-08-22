@@ -1,6 +1,9 @@
 # Backend test coverage
 
-**1571 tests · 96% line coverage** (4303 statements, 186 missed).
+**1634 tests.** Line coverage was last measured at **96%** (4303 statements, 186
+missed) when the suite held 1571, and has not been re-measured since: the gate runs
+`pytest` without `--cov`, and a percentage carried forward across 63 new tests is a
+number that looks measured and is not.
 
 ```bash
 uv run pytest                                    # the suite

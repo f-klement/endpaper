@@ -101,6 +101,13 @@ export default defineConfig({
   ],
 
   server: {
+    // `docs/` sits above this package, and Vite denies module reads outside the
+    // project root by default. `tests/theme/palettes.test.ts` asserts the
+    // contrast table in docs/decisions.md against the figures it computes, so
+    // the prose cannot drift from the numbers again; it needs to read that one
+    // file. Dev and test only: nothing here affects the built bundle, which is
+    // served by FastAPI in production and never by Vite.
+    fs: { allow: [".."] },
     // `bun run dev` serves the SPA; these two prefixes belong to the FastAPI
     // process, which is expected on :8000.
     proxy: {
@@ -113,6 +120,13 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Two, not one per core. vitest left alone forks per CPU: measured on a
+    // four core CI host it sustained 3.2 of them for the whole run, which is
+    // antisocial on a machine shared with anything else. Two workers bound the
+    // burst by choosing to use less, rather than being throttled into it by a
+    // CPU limit, which is the same work done slower. Keep in step with the CI
+    // runner's own limits.
+    maxWorkers: 2,
     // The suite mirrors src/ rather than sitting beside it.
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/setup.ts"],
