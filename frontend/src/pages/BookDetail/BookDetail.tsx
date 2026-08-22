@@ -16,6 +16,7 @@ import LoanBadge from "./components/LoanBadge";
 import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
+import ProgressPanel from "./components/ProgressPanel";
 import CopyPanel from "./components/CopyPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
@@ -29,6 +30,7 @@ import {
   useBookEnrichment,
   useBookLoan,
   useBookNotes,
+  useBookProgress,
   useGoodreadsLookup,
 } from "./hooks";
 
@@ -50,6 +52,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const actions = useBookActions(bookId, () => navigate("/"));
   const notes = useBookNotes(bookId);
   const loan = useBookLoan(bookId);
+  const progress = useBookProgress(bookId);
   const enrichment = useBookEnrichment(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   const [showEnrichHelp, setShowEnrichHelp] = useState(false);
@@ -70,7 +73,8 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
 
   const isOwner = book.added_by?.id === currentUser.id;
   const otherMembers = users.filter((member) => member.id !== currentUser.id);
-  const pageError = actions.error ?? notes.error ?? loan.error;
+  const pageError =
+    actions.error ?? notes.error ?? loan.error ?? progress.error;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -104,7 +108,8 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         ) : (
           book.is_private && (
             <span className="inline-flex items-center gap-1 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              <Icon name="lock" className="w-3.5 h-3.5" /> {t("book.privateBadge")}
+              <Icon name="lock" className="w-3.5 h-3.5" />{" "}
+              {t("book.privateBadge")}
             </span>
           )
         )}
@@ -127,6 +132,17 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         />
 
         <ReadingPanel book={book} onRate={actions.setRating} />
+
+        {/* Below the status buttons, because the first entry promotes an
+            unstarted book to reading: the control that asserts that sits next
+            to the one that says so. */}
+        <ProgressPanel
+          book={book}
+          entries={progress.entries}
+          isRecording={progress.isRecording}
+          onRecord={progress.record}
+          onRemove={progress.remove}
+        />
 
         <OwnershipPicker
           value={book.ownership ?? OwnershipStatus.owned}

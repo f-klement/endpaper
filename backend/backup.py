@@ -38,7 +38,7 @@ import covers
 import settings_store
 from config import COVERS_DIR
 from database import Base
-from models import Book, Loan, Note, Setting, Tag, User, UserBook, book_tags
+from models import Book, Loan, Note, ReadingProgress, Setting, Tag, User, UserBook, book_tags
 
 logger = logging.getLogger("endpaper.backup")
 
@@ -50,6 +50,8 @@ logger = logging.getLogger("endpaper.backup")
 #: change throw away the household's backups. A column the archive does not
 #: carry takes its database default, which is right for every one of them
 #: except `tags.is_predefined`; see `_repair_seeded_tags`.
+#: Still 1. The envelope has not changed: the manifest layout is the same, the
+#: table list is the same, and covers are the same files under `covers/`.
 FORMAT_VERSION = 1
 
 MANIFEST_NAME = "endpaper.json"
@@ -68,10 +70,32 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         ("tags", Tag),
         ("books", Book),
         ("user_books", UserBook),
+        # After user_books, which is the other per-member table, and before
+        # loans purely to keep the reading rows together. Both parents
+        # (users, books) are already inserted by this point, which is the
+        # only ordering this tuple actually constrains.
+        ("reading_progress", ReadingProgress),
         ("loans", Loan),
         ("notes", Note),
         ("settings", Setting),
     )
+)
+
+#: Tables a manifest must actually list, as opposed to tables this version
+#: knows how to restore.
+#:
+#: The two are not the same set, and conflating them breaks every backup the
+#: household already holds. `FORMAT_VERSION` promises that an archive taken
+#: before a schema change is still restorable, and `read_manifest` used to
+#: enforce presence of every entry in `_TABLES`, so **adding a table would have
+#: refused every older archive** with "the backup is missing: reading_progress".
+#: An absent table restores as empty instead, which is exactly right: there was
+#: no such data when the archive was written.
+#:
+#: A table belongs here only if it existed at `FORMAT_VERSION` 1. Anything
+#: added later must not, or the promise breaks again.
+_REQUIRED_TABLES: frozenset[str] = frozenset(
+    {"users", "tags", "books", "user_books", "loans", "notes", "settings"}
 )
 
 #: A cover named anything else is not one of ours. Guards against a crafted
@@ -233,7 +257,11 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     if not isinstance(tables, dict):
         raise RestoreError("The backup lists no tables.")
 
-    missing = [name for name, _model, _table in _TABLES if name not in tables]
+    missing = [
+        name
+        for name, _model, _table in _TABLES
+        if name in _REQUIRED_TABLES and name not in tables
+    ]
     if missing:
         raise RestoreError(f"The backup is missing: {', '.join(missing)}.")
 
@@ -324,19 +352,24 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     # Covers last, and only once the database is committed. A cover with no row
     # is orphaned clutter; a row with no cover shows the placeholder. The
     # second is the better failure.
+    #
+    # The old files are cleared first, so a restore leaves the directory
+    # describing the library that was restored rather than that library plus
+    # whatever the previous one had. Files are the one thing a row does not
+    # carry with it, which is the standing cost of covers living on disk.
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
     for existing in COVERS_DIR.glob("*"):
         if existing.is_file() and existing.suffix.lower() in _COVER_SUFFIXES:
             existing.unlink()
 
-    covers = 0
+    covers_restored = 0
     for entry in archive.namelist():
         filename = _safe_cover_name(entry)
         if filename is None:
             continue
         (COVERS_DIR / filename).write_bytes(archive.read(entry))
-        covers += 1
-    restored["covers"] = covers
+        covers_restored += 1
+    restored["covers"] = covers_restored
 
     _repair_seeded_tags(db)
 

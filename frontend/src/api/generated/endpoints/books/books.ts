@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApplyEnrichmentParams,
+  BackfillCoversParams,
   BodyUploadCover,
   BookCreate,
   BookDetailsUpdate,
@@ -38,6 +39,7 @@ import type {
   BookStatusUpdate,
   BulkRequest,
   BulkResult,
+  CoverBackfillOut,
   DuplicateGroup,
   EnrichBookParams,
   ExportBooksParams,
@@ -52,6 +54,8 @@ import type {
   OwnershipUpdate,
   PageBookOut,
   PrivacyUpdate,
+  ProgressCreate,
+  ProgressOut,
   PurgeResult,
   SearchBooksParams,
   SeriesOut,
@@ -601,6 +605,137 @@ export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getBulkActionMutationOptions(options), queryClient);
+};
+export const getBackfillCoversUrl = (params?: BackfillCoversParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/covers/backfill?${stringifiedParams}`
+    : `/api/books/covers/backfill`;
+};
+
+/**
+ * Fetch and store the covers of books that are missing one.
+ *
+ * This is what repairs a library that already exists. Storing covers on the
+ * way in only helps books added afterwards, and the books that need it most
+ * are the thousands that arrived through a CSV import, which never resolved a
+ * cover at all.
+ *
+ * **Scoped to the books the caller can see**, like every other query here. An
+ * admin-only backfill would be worse, not better: `visible_to` has no admin
+ * bypass, so an admin running it could never repair another member's private
+ * books, and those books would have no way to be repaired at all. Each member
+ * repairs their own shelf instead, and the privacy rule is not bent to make an
+ * operator action work.
+ *
+ * Targets every book with **no cover file behind its id**, which is the set
+ * that needs one: a book that never had a cover, a book whose `cover_url`
+ * points at a third party (that is what rots, a file on this volume is not),
+ * and a book whose column claims a local cover the directory does not have.
+ * The last case is why this reads the directory rather than the column: they
+ * can drift, files being the one thing a database row does not carry with it.
+ *
+ * **`after_id` is a cursor, and it is what lets this finish.** Without it the
+ * batch is the first hundred candidates by id, and a book that cannot be fixed
+ * stays a candidate, so it sits at the front of every subsequent run for ever.
+ * Measured across ten ISBNs, only eight resolved to an image, so roughly a
+ * fifth of any batch is permanently unfixable and accumulates; a pod with no
+ * egress produces the same shape on the first run. With the cursor each run
+ * starts past what the last one tried, and `next_after_id` comes back as 0
+ * once the end is reached, so pressing again starts over and re-tries the ones
+ * that failed, which may since have become fixable.
+ *
+ * Idempotent either way: a book with a file behind it is never a candidate, so
+ * a second pass over the same range examines nothing it fixed.
+ * @summary Backfill Covers
+ */
+export const backfillCovers = async (
+  params?: BackfillCoversParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CoverBackfillOut> => {
+  return customFetch<CoverBackfillOut>(getBackfillCoversUrl(params), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getBackfillCoversMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof backfillCovers>>,
+    TError,
+    { params?: BackfillCoversParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof backfillCovers>>,
+  TError,
+  { params?: BackfillCoversParams },
+  TContext
+> => {
+  const mutationKey = ["backfillCovers"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof backfillCovers>>,
+    { params?: BackfillCoversParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return backfillCovers(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type BackfillCoversMutationResult = NonNullable<
+  Awaited<ReturnType<typeof backfillCovers>>
+>;
+
+export type BackfillCoversMutationError = HTTPValidationError;
+
+/**
+ * @summary Backfill Covers
+ */
+export const useBackfillCovers = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof backfillCovers>>,
+      TError,
+      { params?: BackfillCoversParams },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof backfillCovers>>,
+  TError,
+  { params?: BackfillCoversParams },
+  TContext
+> => {
+  return useMutation(getBackfillCoversMutationOptions(options), queryClient);
 };
 export const getListDuplicatesUrl = () => {
   return `/api/books/duplicates`;
@@ -3765,6 +3900,357 @@ export const useSetPrivacy = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getSetPrivacyMutationOptions(options), queryClient);
+};
+export const getListProgressUrl = (bookId: number) => {
+  return `/api/books/${bookId}/progress`;
+};
+
+/**
+ * The caller's own recorded positions, newest first.
+ *
+ * Never anybody else's, even on a public book. Two members reading the same
+ * copy is the ordinary case here, and the log is a diary rather than a shelf
+ * fact.
+ * @summary List Progress
+ */
+export const listProgress = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ProgressOut[]> => {
+  return customFetch<ProgressOut[]>(getListProgressUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListProgressQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/progress`] as const;
+};
+
+export const getListProgressQueryOptions = <
+  TData = Awaited<ReturnType<typeof listProgress>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProgress>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListProgressQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listProgress>>> = ({
+    signal,
+  }) => listProgress(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listProgress>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListProgressQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listProgress>>
+>;
+export type ListProgressQueryError = HTTPValidationError;
+
+export function useListProgress<
+  TData = Awaited<ReturnType<typeof listProgress>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProgress>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProgress>>,
+          TError,
+          Awaited<ReturnType<typeof listProgress>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListProgress<
+  TData = Awaited<ReturnType<typeof listProgress>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProgress>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listProgress>>,
+          TError,
+          Awaited<ReturnType<typeof listProgress>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListProgress<
+  TData = Awaited<ReturnType<typeof listProgress>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProgress>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Progress
+ */
+
+export function useListProgress<
+  TData = Awaited<ReturnType<typeof listProgress>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listProgress>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListProgressQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAddProgressUrl = (bookId: number) => {
+  return `/api/books/${bookId}/progress`;
+};
+
+/**
+ * Record where the caller has got to.
+ *
+ * Saying where you are in a book is the same claim the READING button makes,
+ * arrived at from the other direction, so it promotes an unstarted book
+ * rather than leaving a member with a page number and a status of "unread".
+ * The transition itself goes through `_stamp_reading_dates`, which owns those
+ * rules; duplicating them here is how the two would drift.
+ *
+ * **It never sets READ, whatever the page number.** `page_count` comes from a
+ * metadata provider and is off by one often enough that the last page is not
+ * a reliable finish signal, and finishing already has an explicit control.
+ * @summary Add Progress
+ */
+export const addProgress = async (
+  bookId: number,
+  progressCreate: ProgressCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ProgressOut> => {
+  return customFetch<ProgressOut>(getAddProgressUrl(bookId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(progressCreate),
+  });
+};
+
+export const getAddProgressMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addProgress>>,
+    TError,
+    { bookId: number; data: ProgressCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addProgress>>,
+  TError,
+  { bookId: number; data: ProgressCreate },
+  TContext
+> => {
+  const mutationKey = ["addProgress"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addProgress>>,
+    { bookId: number; data: ProgressCreate }
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return addProgress(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddProgressMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addProgress>>
+>;
+export type AddProgressMutationBody = ProgressCreate;
+export type AddProgressMutationError = HTTPValidationError;
+
+/**
+ * @summary Add Progress
+ */
+export const useAddProgress = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof addProgress>>,
+      TError,
+      { bookId: number; data: ProgressCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof addProgress>>,
+  TError,
+  { bookId: number; data: ProgressCreate },
+  TContext
+> => {
+  return useMutation(getAddProgressMutationOptions(options), queryClient);
+};
+export const getDeleteProgressUrl = (bookId: number, progressId: number) => {
+  return `/api/books/${bookId}/progress/${progressId}`;
+};
+
+/**
+ * Remove one of the caller's own entries. A mistyped page is the case.
+ *
+ * 404 for somebody else's row and for one belonging to a different book, not
+ * 403, for the same reason an invisible book is: a 403 would confirm the id
+ * exists. The book/entry pairing is enforced so an id from another book
+ * cannot be deleted through a book the caller happens to have access to,
+ * which is the rule `_note_for_edit` states for notes.
+ *
+ * The status is left alone. Deleting the only entry does not put the book
+ * back to unread: somebody pressed READING, or this endpoint did on their
+ * behalf, and removing a mistyped page number is not a claim about that.
+ * @summary Delete Progress
+ */
+export const deleteProgress = async (
+  bookId: number,
+  progressId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteProgressUrl(bookId, progressId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteProgressMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteProgress>>,
+    TError,
+    { bookId: number; progressId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteProgress>>,
+  TError,
+  { bookId: number; progressId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteProgress"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteProgress>>,
+    { bookId: number; progressId: number }
+  > = (props) => {
+    const { bookId, progressId } = props ?? {};
+
+    return deleteProgress(bookId, progressId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteProgressMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteProgress>>
+>;
+
+export type DeleteProgressMutationError = HTTPValidationError;
+
+/**
+ * @summary Delete Progress
+ */
+export const useDeleteProgress = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteProgress>>,
+      TError,
+      { bookId: number; progressId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteProgress>>,
+  TError,
+  { bookId: number; progressId: number },
+  TContext
+> => {
+  return useMutation(getDeleteProgressMutationOptions(options), queryClient);
 };
 export const getSetRatingUrl = (bookId: number) => {
   return `/api/books/${bookId}/rating`;

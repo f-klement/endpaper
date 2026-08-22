@@ -54,6 +54,10 @@ export const en = {
   "status.want_to_read": "Want to Read",
   "status.reading": "Reading",
   "status.read": "Read",
+  // Named for what Openreads and BookLogr both call it, rather than
+  // "Abandoned": a third spelling of the same shelf costs a reader a moment
+  // every time, and matching the two apps that ship it costs nothing.
+  "status.did_not_finish": "Did not finish",
   "status.all": "All",
   "status.mine": "My Reading Status",
 
@@ -87,6 +91,9 @@ export const en = {
   "library.scanFirstBook": "Scan a barcode to add your first book",
   "library.couldNotLoad": "Could not load your library.",
   "library.select": "Select",
+  "library.viewLabel": "How the library is shown",
+  "library.viewGrid": "Covers",
+  "library.viewTable": "Table",
   "library.loaned": "Loaned",
 
   "sort.title_asc": "Title A to Z",
@@ -114,6 +121,26 @@ export const en = {
   "book.noTags": "No tags yet",
   "book.addTag": "+ Add",
   "book.removeTag": "Remove {tag}",
+
+  // ── Field names ─────────────────────────────────────────────────────────
+  //
+  // Shared by the card's fold out and the table view. Whole phrases, because
+  // a table column header read on its own has no sentence around it.
+  "field.title": "Title",
+  "field.author": "Author",
+  "field.publisher": "Publisher",
+  "field.year": "Year published",
+  "field.language": "Language",
+  "field.pageCount": "Page count",
+  "field.readingStatus": "Reading status",
+  "field.rating": "Rating",
+  "field.ownership": "Ownership",
+  "field.addedBy": "Added by",
+  "field.addedAt": "Date added",
+
+  // ── The card's fold out ─────────────────────────────────────────────────
+  "card.details": "Details",
+  "card.detailsFor": "Details for {title}",
 
   // ── Enrichment ──────────────────────────────────────────────────────────
   "enrich.button": "Find more details",
@@ -230,6 +257,8 @@ export const en = {
   "stats.byCustomTag": "By Household Tags",
   "stats.finishedByMonth": "Finished, by Month",
   "stats.finishedTotal": "books finished",
+  "stats.pagesByMonth": "Pages Read, by Month (books tracked by page)",
+
   "stats.averageRating": "average of {count} ratings",
   "stats.overTime": "Books Added Over Time",
   "stats.couldNotLoad": "Could not load your stats.",
@@ -352,6 +381,49 @@ export const en = {
   "settings.testAccountsSwitchFailed": "Could not switch to that account.",
   "settings.testAccountsPasswordFor": "Password for {name}",
 
+  // ── Overdue reminders ───────────────────────────────────────────────────
+  //
+  // A generic webhook rather than one chat service, so the strings name the
+  // shape rather than a brand.
+  "settings.overdue": "Overdue reminders",
+  "settings.overdueEnable": "Send a reminder when a book is overdue",
+  "settings.overdueHint":
+    "Endpaper looks every hour and posts one message naming the loans it is chasing. An hour with nothing to chase sends nothing.",
+  "settings.overduePrivacyNote":
+    "Private books are never included. A webhook goes to a channel with no account behind it, so a private title would be readable by everyone there. Overdue private books are still shown to their owner in the loans list.",
+  "settings.overdueUrl": "Webhook address",
+  "settings.overdueUrlPlaceholder": "https://example.org/hooks/books",
+  "settings.overdueSecret": "Signing secret",
+  "settings.overdueSecretPlaceholder":
+    "Paste a new secret to replace the stored one",
+  "settings.overdueSecretShow": "Show the signing secret",
+  "settings.overdueSecretHide": "Hide the signing secret",
+  "settings.overdueSecretSet": "A secret is stored ({preview}).",
+  "settings.overdueSecretMissing":
+    "No secret stored. Set one and the receiver can check the message really came from here.",
+  "settings.overdueSecretClear": "Remove stored secret",
+  "settings.overdueDays": "Days between reminders for the same loan",
+  "settings.overdueDaysHint":
+    "A loan is chased again once this many days have passed since the last reminder.",
+  "settings.overdueUrlSave": "Save address",
+  "settings.overdueSecretSave": "Save secret",
+  "settings.overdueDaysSave": "Save interval",
+  "settings.overdueSendNow": "Send now",
+  "settings.overdueSending": "Sending...",
+  "settings.overdueSent": "Sent, covering {count} loans.",
+  "settings.overdueNothingSent": "Nothing was sent.",
+  // One per reason the server can give. A refused webhook and a quiet week used
+  // to be the same sentence here, which is the confusion the button exists to
+  // clear up.
+  "settings.overdueNotSentDisabled":
+    "Nothing was sent: overdue reminders are switched off.",
+  "settings.overdueNotSentNoUrl":
+    "Nothing was sent: no webhook address is stored.",
+  "settings.overdueNotSentNothingDue": "Nothing was sent: nothing is overdue.",
+  "settings.overdueNotSentUnreachable":
+    "The webhook could not be reached, so nothing was sent. The loans will be chased again on the next attempt.",
+  "settings.overdueSkippedPrivate": "{count} private books were left out.",
+
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Show Goodreads lookup links",
   "settings.goodreadsHint":
@@ -367,6 +439,26 @@ export const en = {
   "reading.started": "Started {date}",
   "reading.finished": "Finished {date}",
   "reading.finishedThisYear": "Finished this year",
+
+  // ── Reading progress ────────────────────────────────────────────────────
+  //
+  // Two units, and the strings say which one each number is in. A bare "64"
+  // beside a bare "40" is two different claims that look like one.
+  "progress.label": "Reading progress",
+  "progress.none": "Nothing recorded yet.",
+  "progress.onPage": "Page {page}",
+  "progress.onPageOf": "Page {page} of {total}",
+  "progress.atPercent": "{percent}% through",
+  "progress.unit": "Record a page or a percentage",
+  "progress.unitPage": "Page",
+  "progress.unitPercent": "Percent",
+  "progress.pagePlaceholder": "Page reached",
+  "progress.percentPlaceholder": "Percent read",
+  "progress.minutes": "Minutes read",
+  "progress.minutesPlaceholder": "Minutes",
+  "progress.minutesRead": "{minutes} min",
+  "progress.record": "Record progress",
+  "progress.removeEntry": "Remove this entry",
 
   // ── Series ──────────────────────────────────────────────────────────────
   "series.label": "Series",
@@ -521,6 +613,19 @@ export const en = {
     "Replace every book, account and cover in this library with the backup? This cannot be undone.",
   "backup.restoreFailed": "That backup could not be restored.",
   "backup.restored": "Restored {books} books and {covers} covers.",
+
+  // ── Covers ──────────────────────────────────────────────────────────────
+  "covers.title": "Covers",
+  "covers.explain":
+    "Covers are fetched once and served from this library, so a book keeps its cover even when the image service that had it goes away. Books that arrived through an import have none yet.",
+  "covers.backfill": "Fetch missing covers",
+  "covers.backfillFailed": "The covers could not be fetched.",
+  "covers.result":
+    "Looked at {examined} books and stored {stored} covers. No image service has one for {missing}.",
+  "covers.unreachable":
+    "{count} of them have a cover somewhere that could not be downloaded from here. They keep their link and are tried again on the next pass through the library.",
+  "covers.remaining": "{remaining} books still to go. Run it again to carry on.",
+  "covers.allDone": "Every book that could have a cover has one.",
 
   // ── Saved views ─────────────────────────────────────────────────────────
   "saved.saveThisView": "Save this view",

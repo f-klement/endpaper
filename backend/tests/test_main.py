@@ -183,3 +183,112 @@ class TestHealthz:
 
         with pytest.raises(OperationalError):
             client.get("/api/healthz")
+
+    def test_it_reaches_the_storage_as_well_as_the_database(self, client, monkeypatch):
+        """Measured during a total NFS outage: this endpoint answered 200 for 39
+        hours while the volume was unresponsive. `SELECT 1` on an already-open
+        SQLite handle is served from the page cache and crosses no wire, so a
+        stat of the data directory is what actually reaches the mount."""
+        import main
+
+        monkeypatch.setattr(main, "storage_is_reachable", lambda: False)
+
+        assert client.get("/api/healthz").status_code == 503
+
+    def test_a_stat_that_never_returns_is_a_failure_not_a_hang(self, monkeypatch):
+        """A hung NFS call blocks in uninterruptible sleep and never errors, so
+        storage death can only ever surface as a timeout. Without an internal
+        clock the handler simply stops answering, which some probes read as a
+        hang rather than a failure and which makes the diagnosis harder."""
+        import threading
+
+        import main
+
+        release = threading.Event()
+        monkeypatch.setattr(main, "STORAGE_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr("main.os.stat", lambda _path: release.wait())
+        monkeypatch.setattr(main, "_pending_stat", None)
+        try:
+            assert main.storage_is_reachable() is False
+            # The stuck call is not re-queued behind itself: a backlog of stats
+            # that will never run is not a second opinion.
+            assert main.storage_is_reachable() is False
+        finally:
+            release.set()
+
+    def test_an_unreadable_data_directory_is_a_failure(self, monkeypatch):
+        import main
+
+        monkeypatch.setattr("main.os.stat", _raise_oserror)
+        monkeypatch.setattr(main, "_pending_stat", None)
+
+        assert main.storage_is_reachable() is False
+
+
+def _raise_oserror(_path):
+    raise OSError("stale file handle")
+
+
+class TestTheOverdueTicker:
+    """The lifespan wiring, not the digest. What the digest does is pinned in
+    `tests/test_notifications.py`.
+
+    The ticker is reached through the module (`notifications.ticker()`), which
+    is what lets these replace it without touching the loop the real one would
+    sit in for an hour.
+    """
+
+    async def _run_lifespan(self, monkeypatch, *, enabled: str) -> list[str]:
+        import asyncio
+
+        import main
+        import notifications
+
+        started: list[str] = []
+
+        async def fake_ticker() -> None:
+            started.append("started")
+            # Long enough that the lifespan's cancel is what ends it, which is
+            # the half of the wiring a started-only assertion would miss.
+            await asyncio.sleep(3600)
+
+        monkeypatch.setattr(notifications, "ticker", fake_ticker)
+        monkeypatch.setenv("ENABLE_OVERDUE_TICKER", enabled)
+
+        async with main.lifespan(main.app):
+            # One turn of the loop, or the task is created and never scheduled.
+            await asyncio.sleep(0)
+        return started
+
+    async def test_it_starts_a_ticker(self, monkeypatch):
+        assert await self._run_lifespan(monkeypatch, enabled="true") == ["started"]
+
+    async def test_shutdown_cancels_it_rather_than_leaving_it_pending(self, monkeypatch):
+        """Without the await after the cancel, the interpreter can exit while
+        the task is between statements, which surfaces as "Task was destroyed
+        but it is pending" on every container stop."""
+        import asyncio
+
+        before = len(asyncio.all_tasks())
+        await self._run_lifespan(monkeypatch, enabled="true")
+
+        assert len(asyncio.all_tasks()) == before
+
+    async def test_it_starts_nothing_when_switched_off(self, monkeypatch):
+        """A background task waking on a timer inside a suite that drops every
+        table between tests is a source of order-dependent failures, which is
+        why `conftest.py` sets this."""
+        assert await self._run_lifespan(monkeypatch, enabled="false") == []
+
+    def test_the_suite_runs_with_it_switched_off(self):
+        import config
+
+        assert config.overdue_ticker_enabled() is False
+
+    def test_it_ticks_hourly(self):
+        """Hourly rather than daily, so a one day interval is honoured within
+        an hour of a book coming due rather than at whatever time the container
+        last restarted."""
+        import notifications
+
+        assert notifications.TICK_SECONDS == 3600

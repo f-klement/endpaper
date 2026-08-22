@@ -34,17 +34,68 @@ export default defineConfig({
         // serving the assets instantly once you are through.
         navigateFallback: undefined,
         // Drop precaches from earlier builds instead of letting them accumulate.
+        //
+        // **This does not touch a runtime cache**, which is the trap below: it
+        // cleans precaches Workbox itself wrote in an earlier build, and a
+        // runtime cache survives every deploy under its own name. Shipping a
+        // fix therefore does not clear what is already in a reader's browser.
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/covers\.openlibrary\.org\//,
-            handler: "CacheFirst",
+            // Remote covers, from every image service the backend may hand back.
+            //
+            // **This is the bug the owner reported as "covers used to show and
+            // now show nowhere", and it was never server side.** Measured on
+            // the live deployment: four books, all four with a `cover_url`,
+            // three of the four URLs answering 200 image/jpeg (8 KB, 21 KB,
+            // 30 KB) from inside the pod, the fourth a genuine 404; the CSP
+            // permitting the host; and both resolvers answering as a public one
+            // does. Everything the server does was right, so the failure was in
+            // the browser, and it was these five lines.
+            //
+            // Three faults, and the first is what made it stick:
+            //
+            // 1. `CacheFirst` never revalidates. Whatever landed in the cache,
+            //    good or bad, was served for **thirty days** without the
+            //    network being consulted. That is why it reads as "they have
+            //    all gone" rather than as something intermittent.
+            // 2. No `cacheableResponse`. A cross-origin `<img>` is not a CORS
+            //    request, so the response is **opaque**: a 404 and a real image
+            //    are indistinguishable by status, and `CacheFirst` then pinned
+            //    the 404 for a month.
+            // 3. The cache name was inherited across deploys, so a fix would
+            //    have helped nobody who already had the bad entries.
+            //
+            // `StaleWhileRevalidate` so a bad entry heals itself on the next
+            // view, `statuses: [200]` so an opaque or error response is never
+            // stored in the first place, and a **new cache name** so the
+            // poisoned entries are orphaned rather than inherited. A cover is
+            // tens of kilobytes; never revalidating was not worth this.
+            //
+            // Covers this app stores itself are `/covers/<id>.<ext>` on our own
+            // origin and are **not** matched here: they are same origin, so
+            // their responses carry a real status, which removes fault 2 at the
+            // root. That is a second reason to store them beyond the ones in
+            // `docs/decisions.md`.
+            urlPattern:
+              /^https:\/\/(covers\.openlibrary\.org|portal\.dnb\.de|books\.google\.com|[^/]+\.googleusercontent\.com)\//,
+            handler: "StaleWhileRevalidate",
             options: {
-              cacheName: "book-covers",
+              // Renamed from `book-covers`. Renaming is the only thing that
+              // orphans what is already poisoned in a reader's browser; see
+              // `claimAndCleanUp` below for the deletion.
+              cacheName: "book-covers-v2",
+              cacheableResponse: { statuses: [200] },
               expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
         ],
+        // Delete the cache the rule above replaced. Workbox will not do it on
+        // its own: `cleanupOutdatedCaches` is about precaches, so an orphaned
+        // runtime cache is never read again and still holds a month of wrong
+        // answers in the reader's quota. `public/sw-cleanup.js` is four lines
+        // that drop it on activate.
+        importScripts: ["/sw-cleanup.js"],
       },
     }),
   ],

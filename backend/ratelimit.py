@@ -58,6 +58,13 @@ IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 # and far below what would be noticed upstream.
 METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 
+# One run of the cover backfill fetches up to a hundred images from the same two
+# services the metadata limit protects, and it is the one call here that a
+# member would reasonably press twice in frustration while the first is still
+# running. Six a minute leaves a large library repairable in a few minutes and
+# stops a held-down button becoming a fan-out at the image services.
+COVER_BACKFILL_LIMIT = RateLimit(max_attempts=6, window_seconds=60)
+
 
 class SlidingWindowLimiter:
     """A rolling-window counter per key.
@@ -106,6 +113,7 @@ login_limiter = SlidingWindowLimiter(LOGIN_LIMIT)
 register_limiter = SlidingWindowLimiter(REGISTER_LIMIT)
 import_limiter = SlidingWindowLimiter(IMPORT_LIMIT)
 metadata_limiter = SlidingWindowLimiter(METADATA_LIMIT)
+cover_backfill_limiter = SlidingWindowLimiter(COVER_BACKFILL_LIMIT)
 
 
 def client_address(request: Request) -> str:

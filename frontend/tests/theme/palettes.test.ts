@@ -268,6 +268,11 @@ function lightPairs(): Pair[] {
     pair("muted text on the page", "paper-600", "paper-50", 4.5),
     pair("muted text on the sunken tier", "paper-600", "paper-100", 4.5),
     pair("secondary text on the card", "paper-800", "paper-0", 4.5),
+    // The "did not finish" pill, which is the one status pill drawn from the
+    // paper ramp rather than a semantic one. Giving up on a book is neither an
+    // error nor an achievement, so it must not borrow danger or bloom, and it
+    // still has to be readable at pill size.
+    pair("the did-not-finish pill", "paper-800", "paper-200", 4.5),
     // The accent, at the rungs that carry text.
     pair("link on the card", "accent-700", "paper-0", 4.5),
     pair("link on the page", "accent-700", "paper-50", 4.5),
@@ -298,6 +303,7 @@ function darkPairs(): Pair[] {
     pair("paper-400", "paper-400", "paper-900", 6.0),
     pair("paper-300", "paper-300", "paper-900", 7.0),
     pair("body text on the card", "paper-200", "paper-900", 7.0),
+    pair("the did-not-finish pill", "paper-200", "paper-800", 4.5),
     pair("muted text on the page", "paper-400", "paper-950", 6.0),
     pair("accent text on the card", "accent-400", "paper-900", 4.5),
     pair("accent text on the page", "accent-400", "paper-950", 4.5),

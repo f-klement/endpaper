@@ -11,6 +11,13 @@
  *
  * Counted per table rather than reported as "done", so a backup that was
  * missing its covers or its loans says so instead of looking successful.
+ *
+ * The list is the tables whose absence a household would notice: their books,
+ * their accounts, what they wrote, who has what, and what they have read. It
+ * is not every table, and the two it leaves out are the two nobody counts:
+ * `tags` and `book_tags` come back with the books, and `settings` is one row
+ * per toggle. A table added to `backup._TABLES` belongs here if losing it
+ * silently would look like a successful restore.
  */
 export interface RestoreResult {
   /** @minimum 0 */
@@ -21,6 +28,10 @@ export interface RestoreResult {
   loans: number;
   /** @minimum 0 */
   notes: number;
+  /** @minimum 0 */
+  reading_progress?: number;
+  /** @minimum 0 */
+  user_books?: number;
   /** @minimum 0 */
   users: number;
 }

@@ -230,10 +230,15 @@ export const getGetCoverUrl = (bookId: number, extension: string) => {
 /**
  * The cover for a book the caller may see.
  *
- * `book_id` is consumed by the `BookForRead` dependency rather than by this
+ * `book_id` is consumed by the `BookForCover` dependency rather than by this
  * function: declaring it as a path parameter of the route is what lets the
  * dependency resolve the book and apply `visible_to()` before any of this
  * runs. An invisible book raises 404 there and never reaches this body.
+ *
+ * `FileResponse` rather than reading the bytes here, which is half the reason
+ * covers are files: it can hand the file off to the kernel, where reading a
+ * column would pull every image through the Python heap of a pod limited to
+ * 512Mi.
  * @summary Get Cover
  */
 export const getCover = async (

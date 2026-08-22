@@ -37,5 +37,11 @@ class StatsOut(BaseModel):
     # shared, unlike every other series here: "we added 12 books in March" is a
     # fact about the shelf, "I finished 3" is a fact about a reader.
     finished_by_month: list[MonthStat] = []
+    # Pages the *requesting member* read, by month, from the recorded positions
+    # in `reading_progress`. Personal like `finished_by_month`, and **page
+    # tracked books only**: an audiobook records a percent, and turning 40% of
+    # something with no page count into a page number would produce a figure
+    # that adds up with the others while meaning something else.
+    pages_by_month: list[MonthStat] = []
     average_rating: float | None = None
     rated_count: int = Field(default=0, ge=0)

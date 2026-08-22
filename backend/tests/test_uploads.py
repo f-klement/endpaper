@@ -127,6 +127,59 @@ class TestReplaceImage:
 
         assert (tmp_path / "8.jpg").exists()
 
+    def test_two_threads_writing_one_book_do_not_share_a_scratch_name(
+        self, tmp_path, monkeypatch
+    ):
+        """The pid used to be the whole of the uniqueness, which was true while
+        the only concurrency here was separate processes.
+
+        The cover backfill fans out across a ThreadPoolExecutor **inside one
+        process**, so two overlapping writes of the same book built an identical
+        temp path: one `os.replace` won and the other failed ENOENT. The barrier
+        below holds both threads between the write and the replace, so the two
+        temporary files must coexist, which is exactly the case the pid alone
+        could not survive.
+        """
+        import os
+        import threading
+
+        both_written = threading.Barrier(2, timeout=10)
+        scratch: list[str] = []
+        real_replace = os.replace
+
+        def replace_once_both_have_written(source, target):
+            scratch.append(str(source))
+            both_written.wait()
+            return real_replace(source, target)
+
+        # Patched by name: `uploads.os` is the same module object, and mypy
+        # refuses an attribute access through a module that does not re-export.
+        monkeypatch.setattr("uploads.os.replace", replace_once_both_have_written)
+
+        failures: list[BaseException] = []
+
+        def write(payload: bytes) -> None:
+            try:
+                replace_image(tmp_path, "7", "png", payload)
+            except BaseException as error:  # noqa: BLE001
+                failures.append(error)
+
+        threads = [
+            threading.Thread(target=write, args=(PNG_BYTES + bytes([n]),))
+            for n in (1, 2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert failures == []
+        assert len(set(scratch)) == 2, scratch
+        assert (tmp_path / "7.png").read_bytes() in (
+            PNG_BYTES + bytes([1]),
+            PNG_BYTES + bytes([2]),
+        )
+
     def test_a_failed_write_leaves_the_old_image_in_place(self, tmp_path, monkeypatch):
         """The point of the whole helper. A full disk used to leave the book
         with no cover and a cover_url pointing at what had been deleted."""

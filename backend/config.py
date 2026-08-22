@@ -65,6 +65,23 @@ def registration_enabled() -> bool:
     return os.getenv("ALLOW_REGISTRATION", "true").strip().lower() != "false"
 
 
+def overdue_ticker_enabled() -> bool:
+    """Whether the in-process hourly overdue digest runs.
+
+    On by default, because the feature is worthless if it only fires when
+    somebody presses a button. Set `ENABLE_OVERDUE_TICKER=false` to run it from
+    an external cron against `POST /api/loans/overdue/notify` instead, which is
+    also what a deployment with more than one web process has to do: the ticker
+    assumes exactly one, and the Dockerfile's single uvicorn is what makes that
+    true. See `notifications.ticker`.
+
+    The test suite sets it false. A background task that wakes on a timer in a
+    suite that manipulates the clock is a source of failures that depend on how
+    long the run took.
+    """
+    return os.getenv("ENABLE_OVERDUE_TICKER", "true").strip().lower() != "false"
+
+
 def cors_origins() -> list[str]:
     """Browser origins allowed to make credentialed calls.
 

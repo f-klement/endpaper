@@ -1,6 +1,6 @@
 # Data model
 
-Eight tables in `backend/models.py`. Six entities, one association table, and one key/value
+Nine tables in `backend/models.py`. Seven entities, one association table, and one key/value
 store for runtime settings.
 
 ```
@@ -8,6 +8,8 @@ store for runtime settings.
                  │                         │  ▲
                  ├──── UserBook ───────────┤  │
                  │     (read status)       │  │
+                 ├──── ReadingProgress ────┤  │
+                 │     (where you are)     │  │
                  ├──── Loan ───────────────┤  │
                  │     (to / by)           │  │
                  └──── Note ───────────────┘  │
@@ -70,11 +72,26 @@ book drops its tag links without touching the tags themselves. That cascade did 
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
-**`user_books`.** Per-person read status, rating and reading dates (`unread` / `reading` / `read`). This is the table
+**`user_books`.** Per-person read status, rating and reading dates (`unread` / `want_to_read` /
+`reading` / `read` / `did_not_finish`). This is the table
 that makes "read" a property of *a person and a book*, not of a book. A row only appears
 once someone sets a status, so **absence means `unread`**. Every query filtering on status
 has to treat a missing row as unread, and the API fills in `"unread"` when building
 `my_status`.
+
+**Cover images are files** under `data/covers/<book id>.<ext>`, not a column. `cover_url` is
+the pointer a client renders: `/covers/<id>.<ext>` for a cover this app holds, the remote URL
+for a book whose download failed. `docs/decisions.md` records why that rather than a BLOB,
+with the measurements, and what it costs.
+
+The cost, in one line so it is not rediscovered: **a row delete does not delete a file.**
+Purging a book, emptying the trash and merging two books each deal with the cover
+explicitly, and nothing decides whether a cover exists by reading `cover_url`. The column and
+the directory can drift, so the filesystem is the authority.
+
+**`reading_progress`.** An append-only log of where a member has got to in a book. One
+row is one moment somebody recorded a position, and nothing ever updates one. See
+*Progress is a log* below.
 
 **`loans`.** One row per lending event, never deleted. `returned_at IS NULL` identifies
 the single active loan; a returned loan is retained as history. Two separate foreign keys
@@ -82,6 +99,11 @@ point at `users` (borrower and lender), which is why the relationships declare e
 `foreign_keys=`. `due_at` is optional, because most family lending has no deadline;
 `is_overdue` is **computed per request, never stored**, since a stored flag would be wrong
 from the moment the deadline passed until something happened to write to the row.
+
+`notified_at` is the one piece of state the overdue digest keeps: when a reminder last
+went out for this loan, or null if none ever has. Stamped only after a delivery that
+succeeded, so a failed one retries on the next run. Without it the digest either sends
+once and forgets a book that is still out, or repeats the same list every hour.
 
 **A borrower need not be a member.** `loaned_to_user_id` is nullable, and
 `loaned_to_name` holds a free-text name (120 characters) for somebody with no account: a
@@ -99,8 +121,9 @@ deliberately not a loan. See [decisions.md](decisions.md).
 **`notes`.** Free text, attached to a book and authored by a user.
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
-at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, and the
-default language. Values are strings; `backend/settings_store.py` handles typing. This
+at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the
+default language, and the four that configure overdue reminders (the toggle, the webhook
+URL, its signing secret, and the days between reminders). Values are strings; `backend/settings_store.py` handles typing. This
 exists so turning a feature on does not require an environment change and a restart.
 
 ## What `user_books` carries beyond a status
@@ -115,7 +138,7 @@ rules, each of which exists for a case that came up:
 
 | Transition | Effect |
 |---|---|
-| to `reading` or `read` | stamps `started_at` if it is not already set |
+| to `reading`, `read` or `did_not_finish` | stamps `started_at` if it is not already set |
 | to `read` | stamps `finished_at` if it is not already set |
 | to anything but `read` | clears `finished_at` |
 | to `unread` or `want_to_read` | clears `started_at` too |
@@ -124,6 +147,59 @@ Only stamping what is unset matters more than it looks: a UI with pressable butt
 re-selecting the current status easy, and that must not move a date already recording
 something true. Clearing on the way back matters for the opposite reason: a book marked
 unread again would otherwise sit in "books finished this year" forever.
+
+`did_not_finish` needed **no fourth rule**, and that is the point of listing it in the table
+rather than as an exception. It is a claim that reading started, so it stamps `started_at`
+alongside the other two; it is not a finish, so the third row already clears `finished_at`
+for it. What it must never do is reach the fourth row: clearing `started_at` would erase
+that the book was ever picked up, which is the one thing the status is for.
+
+It also deletes no `reading_progress` row. How far somebody got before giving up is exactly
+the interesting part.
+
+No migration was needed: `user_books.status` is a plain `String(20)`, so a new member of the
+enum is a new value in a text column, and existing rows are untouched.
+
+## Progress is a log
+
+`reading_progress` answers "where am I" the same way a bank statement answers "how much
+have I got": by recording every movement rather than by keeping one number.
+
+| Column | Rule |
+|---|---|
+| `user_id`, `book_id` | Whose reading of which book. Personal, like a status |
+| `recorded_at` | Server-stamped. Ordered under `(user_id, book_id)`, never on its own |
+| `page` | The page reached |
+| `percent` | 0 to 100, for anything with no page count |
+| `minutes` | How long the sitting was. Optional, and nothing derives from it |
+
+**A log, not a `current_page` column on `user_books`.** A column answers "where am I" and
+destroys everything else on every save. The questions this table exists for, "how much did
+I read in March" and "how long did that one take", are about the history.
+
+**Exactly one unit per row**, enforced by `ck_reading_progress_one_unit`:
+`(page IS NULL) <> (percent IS NULL)`. An audiobook has no pages, and neither has a book
+whose `page_count` no provider supplied. Carrying both units on one row would need a rule
+for which wins; carrying one needs no such rule. A second CHECK,
+`ck_reading_progress_bounds`, refuses page 0, a percent outside 0 to 100, and zero minutes.
+Both are in the database and not only in `ProgressCreate`, for the same reason
+`ck_loans_one_borrower` is: a restore inserts through Core.
+
+**The displayed percentage is derived, never stored twice.** `page / books.page_count`
+when the page count is known, else the stored `percent`, else nothing. Clamped at 100,
+because a provider's page count is off by one often enough that the last page computes to
+101. `serialisation.derived_percent` is the single definition.
+
+**Recording progress promotes an unstarted book to `reading`** and stamps `started_at`,
+through `_stamp_reading_dates`, which owns those rules. It **never** sets `read`, whatever
+the page number: `page_count` is a provider's figure, and there is already an explicit
+control for finishing.
+
+**A status change never deletes progress rows.** That is deliberately unlike `started_at`
+and `finished_at`, which are derived from the current status and are therefore cleared on
+the way back to unread. These rows claim nothing about now, and a re-read is a real thing
+whose earlier passes are worth keeping. A merge repoints them onto the surviving book
+rather than letting the cascade take them.
 
 ## Series and location
 
@@ -221,7 +297,14 @@ predicate in listings.
 columns:
 
 - `active_loan`: the open `Loan`, or null.
-- `my_status`: the caller's row from `user_books`, defaulting to `"unread"`.
+- `my_status`, `my_rating`, `my_started_at`, `my_finished_at`: the caller's row from
+  `user_books`, with the status defaulting to `"unread"`.
+- `my_progress_page`, `my_progress_percent`, `my_progress_recorded_at`: the caller's newest
+  row from `reading_progress`. The percentage is the derived one.
+
+All of them are filled in one query each for the whole page, not one per book.
+`serialisation.books_to_out` carries the measured statement counts; they are not repeated
+here, because a number restated in three places is a number that is wrong in two of them.
 
 Both depend on *who is asking*, so the same book row serialises differently for different
 accounts. Do not cache `BookOut` across users.
@@ -252,6 +335,17 @@ checks the child side once per deleted parent row, so emptying the trash was qua
 again is two rows with the same `book_id`, and only the open ones are exclusive. The rule
 lived in application code in three places and one of them was wrong: merging two records
 left both open loans open, so the merged book was out with two people at once.
+
+**Reading progress** (migration `f7c2a1e50b93`). One composite index, on
+`(user_id, book_id, recorded_at)`, which is the only question asked of the table: this
+member, this book, in order. `recorded_at` deliberately has **no** index of its own: the
+per-month statistic reads it under `user_id` and the history reads it under
+`(user_id, book_id)`, so the composite serves both, and a second index on an append-only
+table would be a write cost with no read behind it.
+
+`reading_progress.book_id` is indexed as well, for the reason in *Foreign keys* above
+rather than for any query: it is a child of a table whose rows get deleted, and purging a
+book from the trash checks it once per deleted row.
 
 **Exactly one borrower** (migration `d5c31b7a09fe`). The CHECK constraint
 `ck_loans_one_borrower`: `(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL)`, plus a

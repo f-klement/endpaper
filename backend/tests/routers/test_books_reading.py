@@ -191,6 +191,131 @@ class TestReadingDates:
         assert seen_by_member.json()["my_finished_at"] is None
 
 
+class TestGivingUpOnABook:
+    """Started, not finished, and not going to be.
+
+    Openreads' fourth list is "books you didn't finish" and BookLogr's is "Did
+    not finish", so that is what this is called. The rules it has to obey are
+    the ones already in `_stamp_reading_dates`, which is the point: it needed no
+    fourth branch.
+    """
+
+    def test_it_keeps_the_date_reading_started(self, client, admin, make_book):
+        """The one fact this status exists to record. Falling into the branch
+        that clears `started_at` would erase that the book was picked up."""
+        book = make_book(admin["headers"])
+        started = set_status(client, admin["headers"], book["id"], "reading").json()
+
+        body = set_status(client, admin["headers"], book["id"], "did_not_finish").json()
+
+        assert body["my_started_at"] == started["my_started_at"]
+
+    def test_marking_it_straight_away_still_records_a_start(
+        self, client, admin, make_book
+    ):
+        """It is a claim that reading started, whether or not READING was ever
+        pressed."""
+        book = make_book(admin["headers"])
+
+        body = set_status(client, admin["headers"], book["id"], "did_not_finish").json()
+
+        assert body["my_started_at"] is not None
+
+    def test_it_is_not_a_finish(self, client, admin, make_book):
+        """A book somebody gave up on must not appear in "books finished this
+        year"."""
+        book = make_book(admin["headers"])
+        set_status(client, admin["headers"], book["id"], "read")
+
+        body = set_status(client, admin["headers"], book["id"], "did_not_finish").json()
+
+        assert body["my_finished_at"] is None
+
+    def test_it_is_not_counted_as_finished_in_the_stats(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"])
+        set_status(client, admin["headers"], book["id"], "read")
+        set_status(client, admin["headers"], book["id"], "did_not_finish")
+
+        stats = client.get("/api/stats", headers=admin["headers"]).json()
+
+        assert stats["finished_by_month"] == []
+
+    def test_recording_progress_picks_the_book_back_up(self, client, admin, make_book):
+        """A position contradicts the claim. Otherwise the shelf says "gave up
+        on this" while the log says "reached page 240 this morning"."""
+        book = make_book(admin["headers"], page_count=300)
+        set_status(client, admin["headers"], book["id"], "did_not_finish")
+
+        client.post(
+            f"/api/books/{book['id']}/progress",
+            json={"page": 240},
+            headers=admin["headers"],
+        )
+
+        body = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+        assert body["my_status"] == "reading"
+        assert body["my_finished_at"] is None
+
+    def test_picking_it_back_up_keeps_the_earlier_progress(
+        self, client, admin, make_book
+    ):
+        book = make_book(admin["headers"], page_count=300)
+        client.post(
+            f"/api/books/{book['id']}/progress",
+            json={"page": 120},
+            headers=admin["headers"],
+        )
+        set_status(client, admin["headers"], book["id"], "did_not_finish")
+
+        client.post(
+            f"/api/books/{book['id']}/progress",
+            json={"page": 240},
+            headers=admin["headers"],
+        )
+
+        entries = client.get(
+            f"/api/books/{book['id']}/progress", headers=admin["headers"]
+        ).json()
+        assert sorted(entry["page"] for entry in entries) == [120, 240]
+
+    def test_it_does_not_delete_the_reading_progress(self, client, admin, make_book):
+        """How far somebody got before giving up is the interesting part."""
+        book = make_book(admin["headers"], page_count=300)
+        client.post(
+            f"/api/books/{book['id']}/progress",
+            json={"page": 120},
+            headers=admin["headers"],
+        )
+
+        set_status(client, admin["headers"], book["id"], "did_not_finish")
+
+        entries = client.get(
+            f"/api/books/{book['id']}/progress", headers=admin["headers"]
+        ).json()
+        assert [entry["page"] for entry in entries] == [120]
+
+    def test_it_can_be_filtered_for(self, client, admin, make_book):
+        given_up = make_book(admin["headers"], title="Given up")
+        make_book(admin["headers"], title="Still going")
+        set_status(client, admin["headers"], given_up["id"], "did_not_finish")
+
+        res = client.get("/api/books?status=did_not_finish", headers=admin["headers"])
+
+        assert [book["title"] for book in res.json()["items"]] == ["Given up"]
+
+    def test_it_is_not_swept_up_by_the_unread_filter(self, client, admin, make_book):
+        """The unread filter counts a book with no row at all, so a fourth
+        status is exactly the kind of thing it could silently absorb."""
+        book = make_book(admin["headers"], title="Given up")
+        set_status(client, admin["headers"], book["id"], "did_not_finish")
+
+        res = client.get("/api/books?status=unread", headers=admin["headers"])
+
+        assert [book["title"] for book in res.json()["items"]] == []
+
+
 class TestUnratedFilter:
     def test_lists_only_what_you_have_not_rated(self, client, admin, make_book):
         rated = make_book(admin["headers"], title="Rated")

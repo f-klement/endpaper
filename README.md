@@ -36,6 +36,10 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   from four catalogues (the German National Library, K10plus, Open Library, Google Books)
 - **Covers that are actually there**: every candidate image is fetched and checked before
   it is saved, so you get a cover rather than a broken one
+- **Covers are downloaded and served from here**, not linked to somebody else's server, so
+  a shelf does not go blank when an image service moves a URL. Settings has a button that
+  fetches the ones already missing, and your browser never tells a third party which books
+  the household owns
 - **Add without a barcode**: search by title across the same catalogues and pick the
   edition, including books printed before ISBNs existed. Works with no API key
 - **Five languages resolve**: English, German, French, Spanish and Portuguese titles, from
@@ -47,11 +51,18 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 
 - **Per-book privacy**: a book can be yours alone inside a shared household catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
-- **Reading status**: per-person "unread / want to read / reading / read", with ratings,
-  notes and the dates you started and finished
+- **Reading status**: per-person "unread / want to read / reading / read / did not finish",
+  with ratings, notes and the dates you started and finished. A book you gave up on keeps
+  the date you started it and is never counted as finished
+- **Reading progress**: record the page you reached, or a percentage for an audiobook, as
+  often as you like. It is a log, not one number, so it can say how much you read in March
+  as well as where you are now. Recording a page starts the book for you
 - **On the shelf or not**: what you own, tracked separately from what you have read
 - **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
   The borrower does not need an account: lend to a neighbour by typing their name
+- **Overdue reminders**: Endpaper can POST a digest of every overdue loan to a webhook you
+  choose, on a schedule you set, signed so the receiver can check it came from here.
+  Private books are never included: a webhook goes to a channel with no account behind it
 - **Multiple accounts**: the first account is admin, whichever way you sign in
 
 ### Keeping it tidy
@@ -61,6 +72,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
   tags, loans and reading history
 - **Bulk edits**: tag, re-shelve, set a status or delete a whole selection at once
+- **Two ways to look at it**: a grid of covers whose cards fold out for the details, or a
+  table of nineteen metadata columns. Your choice is remembered in your browser
 - **Backup and restore**: download the whole library, covers included, and put it back
 
 ### Finding things again
@@ -69,7 +82,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
 - **Saved views**: keep a filter combination under a name, including a wishlist of books
   you want but do not own
-- **Statistics**: what is on the shelf, who reads what, and what got finished when
+- **Statistics**: what is on the shelf, who reads what, what got finished when, and how
+  many pages you read each month
 
 ### Running it
 
@@ -82,8 +96,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   look is saved to your account rather than to the browser, so it follows you between
   devices
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
-- **Health endpoint**: `GET /api/healthz` for container probes. It runs a query, so it
-  fails when the database does rather than when the web server does
+- **Health endpoint**: `GET /api/healthz` for container probes. It runs a query and stats
+  the data directory under its own timeout, so it fails when the database or the storage
+  does rather than when the web server does
 
 ## Local Development
 
@@ -179,6 +194,7 @@ Environment variables:
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
 | `AUTH_MODE` | `local` | `local`, `ldap` or `proxy`. See below. |
 | `GOOGLE_BOOKS_API_KEY` | none | Supplies the key from the deployment instead of the settings screen |
+| `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
 
 **Where the Google Books key lives.** By default an admin pastes it into Settings and it is
 stored in the database. Setting `GOOGLE_BOOKS_API_KEY` instead hands that job to the

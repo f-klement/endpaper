@@ -97,6 +97,352 @@ the migration exists at all: nothing rewrites an old row, so nothing else would 
 one. `data:` is still listed in `img-src`, so a legacy row carrying one does not merely fail
 to load.
 
+### The fourth reading status is "Did not finish", not "Abandoned"
+
+Started, not finished, and not going to be. The two self-hosted apps that ship this shelf
+were both checked rather than taken on trust: **Openreads** describes its fourth list as
+"books you didn't finish", and **BookLogr** ships a predefined list called "Did not finish".
+**Neither calls it "Abandoned"**, so that name was rejected: a third spelling of the same
+shelf costs a reader a moment every time they meet it, and matching the two apps costs
+nothing.
+
+The enum member is `DID_NOT_FINISH = "did_not_finish"`, which also keeps the existing
+convention (`want_to_read` is already a three-word value in that column). The German label is
+**"Abgebrochen"**, not a literal rendering of the English: it is what a German reader says
+about a book they gave up on, and it fits a pill.
+
+The importers accept `did not finish`, `dnf`, `abandoned`, `gave up`, `unfinished`,
+`stopped reading`, `abgebrochen` and `nicht beendet`, because Goodreads users file this as a
+custom shelf and StoryGraph as a status and both spellings turn up in the same export folder.
+"finished" stays READ and "unfinished" is DID_NOT_FINISH: the match is exact after
+normalising separators, so no prefix rule has to get that pair right.
+
+**Recording progress promotes it to READING.** `add_progress` promotes from UNREAD and
+WANT_TO_READ and deliberately does not promote from READ, which is a re-read. Did not finish
+is the third case and it promotes, because it is a claim about the past and a new position
+contradicts it: leaving it alone would have the shelf say "gave up on this" while the log
+says "reached page 240 this morning". Picking an abandoned book back up is the case the
+status exists for. The earlier progress rows are untouched, and `finished_at` is already null
+and stays null, because READING is not READ.
+
+**It needed no new rule in `_stamp_reading_dates`**, and that was checked rather than
+assumed. It is a claim that reading started, so it joins READING and READ in stamping
+`started_at`; it is not a finish, so the existing `else` already clears `finished_at`. What
+it must never do is fall into the UNREAD/WANT_TO_READ branch, which clears `started_at`:
+that would erase the fact the book was ever picked up. It deletes no `reading_progress` row
+either, because how far somebody got before giving up is the interesting part.
+
+**No migration.** `user_books.status` is a plain `String(20)`, so a new enum member is a new
+value in a text column and every existing row is untouched. Confirmed against `models.py`,
+not assumed from "it is a StrEnum".
+
+The status pill is drawn from the **paper ramp**, not from `bloom` or `danger`. Giving up on
+a book is neither an error nor an achievement, and a rose pill would make the shelf look like
+it was reporting a problem.
+
+`paper-800` on `paper-200` rather than the `paper-600` the `unread` pill uses. Measured across
+all seven light palettes with the same formula `tests/theme/palettes.test.ts` uses:
+
+| Pair | Worst | Where | Best |
+|---|---|---|---|
+| `paper-600` on `paper-200` | **3.55:1** | solarized (then 3.56 nord, 3.87 catppuccin) | 4.71 default |
+| `paper-700` on `paper-200` | 4.19:1 | solarized | 7.32 default |
+| `paper-800` on `paper-200` | **4.57:1** | catppuccin | 11.35 default |
+| `paper-200` on `paper-800`, dark | 5.57:1 | everforest (then 6.31 catppuccin, 6.43 gruvbox, 7.09 nord) | 11.35 default |
+
+Only the 800 pairing clears 4.5 on every palette, so that is the one, and
+`tests/theme/palettes.test.ts` holds it there in both modes.
+
+**Two figures in earlier drafts of this table were wrong, and the corrections are worth
+keeping.** The first claimed 4.19:1 for `paper-600` on `paper-200`, which is in fact the
+`paper-700` figure; the 600 pairing is 3.55:1. The second attributed the dark row's 5.57:1 to
+nord, where it belongs to everforest (`#d3c6aa` on `#3d484d`); nord is 7.09:1, three rungs up
+the sorted list. Neither changed a conclusion, and that is the point: a number in a table like
+this one is a thing the next person re-measures, and one that corresponds to nothing costs
+them the time to find out why. A row is not finished when the figure is right, only when the
+figure and the palette it came from are both right.
+
+**The `unread` pill is under the floor and this change did not put it there.** As it actually
+draws, `paper-600` on `paper-200` at 70% over the `paper-0` card, it measures **3.97:1 on
+solarized**, 4.02 on nord and 4.27 on catppuccin. It is left alone deliberately: a status
+pill's colour is one decision across five values, and a change that owns one of them should
+not quietly restyle the other four. Recorded here so it is a known debt rather than something
+to be rediscovered, and the test added with `did_not_finish` pins that pill only.
+
+### The health probe touches the database, and that was not enough
+
+The original reasoning stands and is left here because it is right as far as it goes. The
+Kubernetes probes used to request `/`, which the SPA mount answers from disk, so a pod whose
+data volume never mounted stayed Ready and kept taking traffic while index.html was still
+readable. Touching the database is the whole point, so `healthz` runs `SELECT 1`.
+
+**It does not detect the failure it was written to detect.** Measured on the running
+deployment during a total NFS outage on 2026-08-22: `/api/healthz` answered 200 continuously
+and the pod stayed 1/1 Ready for **39 hours** while the data volume was unresponsive to every
+new namespace operation. Verified at 12:35:11 +02:00, mid-outage.
+
+The shallow reason is that `SELECT 1` on an already-open SQLite handle is served from the
+page cache and issues no RPC, so the query crosses no wire.
+
+The reason worth keeping is larger: **the probe could not fail in the mode that matters.** A
+hung NFS call blocks in uninterruptible sleep and never returns an error, so storage death can
+only ever reach a probe as a *timeout*. A handler that never reaches the mount never times
+out. Readiness built on a long-lived handle measures the process, not its storage. An
+unmounted volume was catchable; a hung one was not, by construction.
+
+Both halves of the fix are needed:
+
+1. **A `stat` of the data directory**, which is a namespace operation and therefore has to
+   cross the wire. The query stays: it catches a corrupt or missing database, which the stat
+   does not.
+2. **Its own timeout**, `STORAGE_TIMEOUT_SECONDS`, at 2 seconds, which must stay comfortably
+   under the deployment probe's `timeoutSeconds`. Without it the endpoint simply stops
+   answering, and some probe configurations treat that as a hang rather than a failure, which
+   makes the diagnosis harder rather than easier.
+
+**The chart is not in this repository, and it currently defeats this.** The deployment sets no
+`timeoutSeconds`, so both probes use the Kubernetes default of **1 second**, which is shorter
+than the handler's own 2. The kubelet gives up while the handler is still waiting, which is
+precisely the hang-instead-of-failure this exists to prevent. `docs/api.md` states the numbers
+a deployer has to set (`timeoutSeconds: 5`) rather than only the direction of the inequality,
+because that is the document they will be reading.
+
+**It is the liveness probe as well as readiness, and that is intended.** A hung mount now
+restarts the pod, and the restarted pod blocks in `init_db()` on the same mount, so it stays
+down and visible. That is the right outcome: a container in `CrashLoopBackOff` reaches every
+alert a household has, where a pod that is 1/1 Ready and serving nothing reaches none of them,
+which is the 39 hours this entry is about. It recovers by itself when the mount does.
+
+The stat runs in a **dedicated single-thread executor that is never joined**, and that is not
+tidiness. The thread that made a hung call is gone for the life of the process, and running
+the stat inline would leak a thread from FastAPI's own pool on every probe until the app
+answered nothing at all: a worse failure than the one being detected. A stat that has not
+come back is also not re-queued behind itself, because a backlog of calls that will never run
+is not a second opinion.
+
+Recording the incomplete version beside the correction is the point of the entry. The record
+of why a plausible fix turned out to be insufficient is worth more than a tidy one.
+
+### The covers that "stopped appearing" were a service worker cache, not the server
+
+This is the answer to the question the earlier entries recorded as unmeasured, and it is
+worth stating plainly: **nothing server side was wrong.** Measured on the live deployment
+once storage came back:
+
+| Checked | Result |
+|---|---|
+| Books in the library | 4, **all four with a `cover_url` stored** |
+| Those URLs fetched from inside the pod | 3 of 4 answer `200 image/jpeg` (8 KB, 21 KB, 30 KB); the fourth is a genuine 404 |
+| The live CSP | `img-src` permits `covers.openlibrary.org`, `portal.dnb.de`, `books.google.com`, `*.googleusercontent.com` |
+| DNS | Both resolvers answer for `covers.openlibrary.org` identically to a public one |
+
+So the record was right, the network was right, the policy was right, and the images existed.
+The failure was in the browser, in five lines of `frontend/vite.config.ts`.
+
+Three faults, and the first is what made it stick:
+
+1. **`CacheFirst` never revalidates.** Whatever landed in the `book-covers` runtime cache was
+   served for **thirty days** with the network never consulted. That is why this reads as
+   "they have all gone" rather than as something intermittent, and why it did not recover.
+2. **No `cacheableResponse`.** A cross-origin `<img>` is not a CORS request, so the response
+   is **opaque**: a 404 and a real image cannot be told apart by status. `CacheFirst` then
+   pinned the 404 for a month.
+3. **`cleanupOutdatedCaches: true` does not help**, and it is easy to think it does. It
+   cleans *precaches* from earlier Workbox builds. A runtime cache survives every deploy
+   under its own name, so shipping a fix would have helped nobody who already had the bad
+   entries, which is precisely the person who reported this.
+
+All three are fixed: `StaleWhileRevalidate` so a bad entry heals itself on the next view,
+`cacheableResponse: { statuses: [200] }` so an opaque or error response is never stored, and
+the cache renamed to `book-covers-v2` so what is already poisoned is orphaned rather than
+inherited. Orphaned is not deleted, so `public/sw-cleanup.js` drops `book-covers` on activate;
+`importScripts` is how a `generateSW` build reaches into the worker.
+
+The rule now matches **all four** hosts in `COVER_HOSTS` rather than Open Library alone. There
+was never a reason for the other three to be uncached; the pattern simply predated them.
+
+That makes the service worker's pattern a **third** copy of the host list, after `COVER_HOSTS`
+and the CSP that is derived from it, and unlike the CSP nothing ties it to the tuple. That is
+a considered trade rather than an oversight: the two that are tied together are tied because
+drifting apart **breaks covers**, silently and with nothing in any log, which is the incident
+recorded further up. A host missing from this third list costs a cache miss. The cover still
+loads, from the network, every time. A test to hold a build-time config file against a Python
+constant would cost more than the failure it prevents.
+
+**Two things this says about storing covers locally.** A `/covers/<id>.<ext>` is same origin,
+so it is not matched by this rule at all and its responses carry a real status: fault 2
+cannot happen to it. That is a reason to store covers beyond the ones already recorded, and
+it is the reason the entry above no longer has an unanswered question at the end of it.
+
+### A cover is stored here, not hotlinked
+
+Every cover in the library used to be a URL on somebody else's server, and five separate
+things had to keep working for a reader to see one: the image service being up, the URL not
+rotting, the pod being able to reach it, the reader's own browser being able to reach it, and
+the CSP permitting it. Four of the five are outside this application, so the grid can go
+blank for a reason nothing here can see, log or fix. That is not hypothetical: it is the
+reported failure this change answers.
+
+**Measured on the running deployment before the storage outage: `/app/data/covers` held zero
+files** (link count 2, unchanged since 18 August), so every cover the library rendered
+depended on a third party being reachable from every reader's browser. There was no
+half-migrated state to reconcile, which is why nothing here tries to.
+
+So `covers.resolve_and_store` fetches the bytes once, and `cover_url` becomes
+`/covers/<id>.<ext>`, served by the authenticated route that already applies `visible_to()`.
+
+Four consequences worth writing down.
+
+* **The remote URL stays as the fallback.** A failed fetch degrades to what the app did
+  before, not to no cover. A URL the pod cannot reach may still load from a reader's browser.
+* **The extension comes from the magic bytes**, never from the URL and never from the
+  response's `Content-Type`. A cover from a third party is untrusted input, neither of those
+  is evidence about the bytes, and `portal.dnb.de/opac/mvb/cover?isbn=` has no extension in
+  it at all. Same rule and the same function as an upload.
+* **The download is capped at `MAX_UPLOAD_BYTES`** and read in chunks, so a service answering
+  with a stream that never ends is refused at the cap rather than filling the container.
+* **`COVER_HOSTS` and the CSP are unchanged.** The fallback still renders remote URLs, so
+  removing a host from the policy would break exactly the case this fallback exists for.
+
+### The cover bytes are files on the volume, not a column
+
+**Decided by the owner on 2026-08-22, after both sides were put to them twice.** Covers are
+files under `COVERS_DIR`, named `<book id>.<ext>`. A `books.cover_blob` column was built and
+withdrawn, so the alternative is not hypothetical: it was measured on this schema.
+
+What decided it:
+
+* **A BLOB on `books` is loaded by every `query(Book)` unless it is deferred.** That is a
+  permanent hazard managed by a test (listing, export, stats, duplicates, series, backup)
+  rather than one that does not exist.
+* **The database sits on the NFS mount that deadlocked earlier today.** Measured, 40 KB
+  covers at the default `page_size` of 4096: 100 books is 4.1 MB, 1,000 books is 39.8 MB and
+  3,000 books is 119.2 MB, against 176 KB today. A 176 KB file is trivially copyable and
+  recoverable; a 120 MB one mid checkpoint is the worst thing to own when that mount wedges.
+* **A backfill writes the payload roughly twice**, through the WAL, all of it over NFS.
+* **`FileResponse` can hand off to sendfile.** Reading a column pulls every image through the
+  Python heap of a pod limited to 512Mi.
+
+What it costs, which is real and is handled rather than waved at:
+
+* **Orphan files.** A row delete does not delete a file. `_purge` calls `covers.forget`, so
+  purging a book and emptying the trash both take the cover with them, and a merge moves the
+  loser's file to the keeper when the keeper absorbed its `cover_url` and deletes it
+  otherwise. `_trash` deliberately does not: a trashed book can be restored, and restoring
+  one to a placeholder is a delete that half happened. All four paths have a test in
+  `tests/routers/test_books_covers.py::TestTheDirectoryDoesNotDriftFromTheDatabase`.
+  Getting this wrong is not only clutter: SQLite reuses an id once the highest row goes, so a
+  leftover file becomes the next book's cover.
+* **The column and the directory can drift.** So nothing trusts `cover_url` to decide whether
+  a cover exists. `_store_cover` and the backfill ask the filesystem, via `covers.stored_ids`
+  (one directory read for the whole library, not a `stat` per book), and a `/covers/<id>.<ext>`
+  with no file behind it is treated as missing and re-fetched. That is also what makes the
+  backfill safe to press twice.
+
+`FORMAT_VERSION` stays at **1**: the backup envelope did not change, covers are the same
+files under `covers/` in the same zip, and bumping it would refuse every archive a household
+already holds for no reason.
+
+### The cover backfill is every member's own, not the admin's
+
+`POST /api/books/covers/backfill` is what repairs a library that already exists. Storing
+covers on the way in only ever helps books added afterwards, and the books that need it most
+are the ones that arrived through a CSV import, which never resolved a cover at all.
+
+It is **not** admin-only, and that is deliberate rather than an oversight of the request that
+asked for an admin action. `visible_to()` has no admin bypass, so an admin running a
+privacy-scoped backfill could never repair another member's private books, and those books
+would then have no way to be repaired at all. Bending the privacy rule to make an operator
+action work is the worse of the two, so each member repairs the shelf they can see, and the
+run is rate limited (`COVER_BACKFILL_LIMIT`, six a minute) rather than gated on a role.
+
+The run is **bounded at 100 books** because it holds an HTTP request open while it fetches,
+and it is a **cursor**, which is the part that makes "press again" mean anything. The batch is
+the first hundred candidates by book id, and a book that could not be fixed is still a
+candidate on the next run, so without carrying `next_after_id` back it would sit at the front
+of every run for ever. Measured across ten ISBNs, only eight resolved to an image, so roughly
+a fifth of any batch is permanently unfixable and accumulates; a pod with no egress produces
+the same shape on the first run, where every book is unfixable and the counter never moves at
+all. `next_after_id` comes back as 0 at the end of the library, so the next press starts over
+and re-tries the failures, which a service that was down may since have made fixable.
+
+The reply counts **`unreachable` separately** from `still_missing` for the same reason. A
+cover that resolved to a URL this server could not download is neither stored nor absent from
+the world, and folding it into either produced "looked at 100 books and stored 0. No image
+service has one for 0", which reads as a clean no-op in exactly the situation the feature
+exists for. It is concurrent
+(`covers.MAX_CONCURRENT_FETCHES`, six at a time) because serial would be one round trip per
+book. Only the fetch runs in the pool: the SQLAlchemy Session is not thread safe, so the
+assignment happens on one thread. The results are matched to their books **positionally**,
+which is correct because `ThreadPoolExecutor.map` yields in the order it was given its
+inputs rather than in completion order. That is the property the `zip(..., strict=True)`
+depends on, and it is worth naming, because a switch to `as_completed` would silently give
+every book somebody else's cover.
+
+**Threading the backfill made a correct helper elsewhere wrong**, which is the kind of
+consequence worth recording where the decision was taken rather than only where it landed.
+`uploads.replace_image` named its temporary file after the pid, and its comment said the pid
+was what stopped two writes of the same book colliding. That held while the only concurrency
+here was separate processes. It stopped holding the moment this pool existed: two overlapping
+requests for the same book id in one process built the same path, one `os.replace` won and
+the other failed ENOENT. The name now carries the thread id as well. Two members repairing a
+shared book reach it, and so does one member inside their own rate limit.
+
+The upper bound on `after_id` belongs to the same family. A Python int has no ceiling and
+SQLite's does, so an unbounded `int` query parameter is a 500 out of the unhandled-exception
+handler, which classes a bad request as a bug in our own code. Every other numeric query
+parameter in this tree was already bounded at both ends; this one was new and was not.
+
+It targets books whose `cover_url` is NULL or points at a third party, which is exactly the
+set that rots. A locally stored cover is bytes on this volume. Running it twice is therefore
+cheap and idempotent: the second run examines nothing it fixed on the first.
+
+### The CSV import does not fetch covers inline
+
+Every other add path stores a cover on the way in. The import does not, because it runs over
+thousands of rows inside a single request and a fetch per row would be thousands of round
+trips holding that request open until a proxy gives up on it. The books arrive without covers
+and the backfill fills them in afterwards, concurrently and in bounded batches, which is the
+same work with nothing waiting on it.
+
+### The server checks which host it may fetch a cover from
+
+`covers.is_fetchable`, derived from `COVER_HOSTS`, is applied in both `covers.download` and
+`covers._check`, and both clients run with `follow_redirects=False` and walk redirects by
+hand with `is_fetchable` re-run per hop.
+
+The reason is that `cover_url` is member input on `BookCreate` and adding a book makes the
+server fetch it: without the test, any account could point the pod at an address of its
+choosing, be redirected into private space and down to plain http, and read an image-shaped
+answer back out. `COVER_HOSTS` already existed as the source of the CSP's `img-src` and was
+**never applied at fetch time**, which is the same drift the tuple exists to prevent, one
+door along.
+
+It is deliberately not `storable`. `storable` governs what a **browser** may be pointed at
+and has to keep admitting any https URL, because a hotlinked cover is the fallback when a
+download fails. This governs what **this server** may connect to. Two questions, two answers.
+
+**The blind version predates covers being stored.** `resolve` has put a supplied URL at the
+front of its candidate list and called `_check` on it since the check existed; storing the
+bytes turned a blind request into a read primitive. Both call sites are fixed, because
+fixing only the newer one would have left the older hole open and looked closed. Full detail
+in `docs/security.md`.
+
+### Five cover outcomes are counted, because they used to be indistinguishable
+
+The only trace this area left was one WARNING in `Book._store_covers_over_https` for a URL it
+refused. "Covers stopped appearing" could be the image service being down, the pod having no
+egress, the browser blocking the request, the stored URL having rotted, or nothing being
+resolved in the first place, and the log said the same thing about all five.
+`covers.CoverOutcome` names them (verified, unverified, no candidate, downloaded, download
+failed), each is logged at INFO with the ISBN or URL, and `covers.outcome_counts()` is
+reported in the backfill's log line.
+
+This was written while the deployment's storage was unresponsive, when the cause could not be
+measured and nothing here would guess at one. It has since been measured: see *The covers
+that "stopped appearing" were a service worker cache, not the server*. The counters stay,
+because they are what will answer the next one without a browser in the loop.
+
 ### A test account is a column, not "auth_source is local"
 
 An admin can create a local account with a password to see the library the way an
@@ -222,6 +568,221 @@ Goodreads shut its public API to new developers in December 2020 and has issued 
 since. There is no supported way to authenticate an account or read a shelf live, so
 "connect your Goodreads account" is not an option that could be built. It is one that could
 be built and never work.
+
+### Reading progress is a log, not a `current_page` column
+
+A column on `user_books` answers "where am I" and nothing else, because every save
+destroys the previous answer. The questions this feature exists for, "how much did I read
+in March" and "how long did that one take", are questions about the history.
+
+BookLogr keeps a current page and is the reference for the position itself; it cannot
+answer either question. Jelu keeps a log, and its events are per status transition, which
+is a different fact from a position in a book. `reading_progress` takes the log shape from
+one and the position from the other. MyBibliotheca's daily log stores `pages_read`, a
+delta, which was rejected here: a delta cannot be reconciled against the book, so a
+mistyped one is uncorrectable, and the deltas this app reports are computed from positions
+instead.
+
+### Two units on `reading_progress`, exactly one per row
+
+`(page IS NULL) <> (percent IS NULL)`, as a CHECK constraint.
+
+An audiobook has no pages, and neither has a book whose `page_count` no metadata provider
+supplied, which is most of a freshly scanned shelf. So a percentage has to be recordable.
+Carrying both units on one row would need a rule for which one wins when they disagree,
+and a rule like that is one somebody eventually gets backwards. Carrying exactly one needs
+no such rule.
+
+In the database rather than only in `ProgressCreate`, for the same reason
+`ck_loans_one_borrower` is: a restore inserts through Core and never sees a Pydantic
+model.
+
+### The displayed percentage is derived, never stored
+
+`page / books.page_count` when the page count is known, else the recorded `percent`, else
+nothing. `serialisation.derived_percent` is the single definition, and the frontend does
+not repeat it: `ProgressOut` deliberately omits a percentage per row.
+
+Storing it alongside the page would be the same fact twice, and the two would part company
+the first time a metadata refresh corrected a page count. Clamped at 100 because a
+provider's page count is off by one often enough that the last page computes to 101.
+
+### Recording progress promotes to `reading` and never to `read`
+
+Saying where you are in a book is the same claim the READING button makes, arrived at from
+the other direction, so a first entry on an unstarted book promotes it and stamps
+`started_at`. The transition goes through `_stamp_reading_dates`, which owns those rules;
+duplicating them in the progress endpoint is how the two would drift.
+
+It never sets `read`, however high the page number. `page_count` is a provider's figure and
+is wrong often enough that "reached the last page" is not a reliable finish signal, and
+finishing already has an explicit control.
+
+### A status change never deletes progress rows
+
+Deliberately unlike `started_at` and `finished_at`, which are cleared on the way back to
+unread. Those two are *derived* from the current status and would otherwise claim something
+false about now. A progress row claims nothing about now: it records that somebody was on
+page 64 on a Tuesday, which stays true. A re-read is a real thing, and its earlier passes
+are worth keeping.
+
+The asymmetry is stated in the endpoint's docstring so it does not read as an oversight.
+
+### The progress endpoints sit beside `/{book_id}/status`, not before `/{book_id}`
+
+The route-order rule in this repository is about a **literal** first segment losing to
+`/{book_id}`, which is why `/export`, `/search` and `/bulk` are declared above it.
+`/{book_id}/progress` has a path parameter in that position and cannot lose to
+`/{book_id}` at all: they differ in segment count. So they are declared where they belong
+conceptually, next to the status endpoint they cooperate with, alongside `/{book_id}/notes`
+and `/{book_id}/tags`, which are placed the same way for the same reason.
+
+`POST /api/loans/overdue/notify` **is** declared before `/{loan_id}/return`, because that
+one is the shape the rule is about.
+
+### `pages_by_month` is computed in Python, and covers page-tracked books only
+
+The figure is a difference between *consecutive* rows per book. SQL that expresses that is
+a window function feeding a conditional sum feeding a group, and nobody would be able to
+check it against its description a year later. What bounds the Python version is the input:
+one row per recorded sitting per member, so it is the size of one person's reading, not of
+the library.
+
+Percent-unit entries are excluded rather than converted. A book with no page count has no
+page figure to convert to, and inventing one would produce a number that adds up with the
+others while meaning something else. The scope is stated where each audience meets it: in
+`docs/api.md` for a caller, and inside the `stats.pagesByMonth` heading string itself for a
+reader, who otherwise has no way to find out why the total is lower than they expect.
+
+Two rules inside it drop something on purpose. The first entry on a book counts in full,
+because crediting nothing would mean a single sitting per book never appears. A backwards
+step counts nothing, which covers both a re-read and a corrected typo: those are
+indistinguishable from here, and crediting the lower page in full would let a typo of 400
+followed by its correction to 40 report 440 pages read. Missing a re-read's first sitting
+is the better of the two errors, because the other one invents reading that never happened.
+
+### Overdue reminders are a generic webhook, not email and not one chat service
+
+A self-hosted app that other households run should not carry an integration with a service
+nobody else runs, and email means SMTP credentials, deliverability and a second failure
+mode. A webhook is the shape every receiver already speaks: a chat bridge, a home
+automation flow, or a five-line script.
+
+Handy Library's named differentiator in this space is **configurable reminder timing**, and
+that is the part worth copying: a week is nagging in one house and silence in another, so
+`overdue_reminder_days` is the household's to set.
+
+Koha's `overdue_notices.pl` was read for the scheduling shape and **not** adopted. Its
+`--triggered` mode fires only when a loan is overdue by exactly the configured number of
+days, so a run that is missed sends nothing at all, ever, for those loans. State on the
+loan (`notified_at`) plus an interval is robust to a skipped tick, which matters here
+because the ticker lives in the web process and dies with a restart.
+
+### The overdue digest excludes private books
+
+A webhook has no member identity behind it and lands in a channel the whole household
+reads, so shipping a private book's title through it defeats the single promise the data
+model makes. The exclusion is in the query, not a filter afterwards, so a counting mistake
+downstream cannot put one in the payload.
+
+The owner is still chased: the in-app overdue view is per member and already scoped. The
+digest reports `skipped_private` as a count so a household that expects five entries and
+receives four can see why, and the settings screen says so in words rather than leaving it
+to the docs.
+
+### `notified_at` is a timestamp on the loan, stamped after a delivery that succeeded
+
+Without any state the digest has two behaviours and both are wrong: send once and forget a
+book that is still out, or repeat the same list into the channel every hour.
+
+Stamped after the POST rather than before it, so a failure leaves the loans to be retried
+on the next run. That is why it is a timestamp rather than a "sent" flag: the interval
+question ("has this been chased recently") and the retry question ("did the last attempt
+land") are the same question, and one column answers both.
+
+### The digest result carries a `reason`, and it is null exactly when it sent
+
+`sent: false` on its own made four different outcomes one answer on the screen: switched
+off, no address stored, nothing overdue, and a webhook that refused the request. A person
+pressing "Send now" to check their configuration was told "nothing was sent" by a broken
+setup and by a quiet week alike, which is the whole thing the button exists to tell apart.
+
+`detail` was already there and is not enough. It is a sentence, and a client cannot branch
+on a sentence or translate one. `reason` is the closed set beside it, so the frontend keys a
+`Record` off the generated union and adding a fifth reason on the server is a compile error
+in the catalogue rather than a silent fall through.
+
+**Nullable rather than total.** A `sent` member would make `reason` and `sent: bool` two
+spellings of one fact, which is the duplication this repository treats as a defect. So the
+invariant is stated instead: null exactly when `sent` is true, and `_outcome()` in
+`notifications.py` is the only thing that builds a not-sent result, so a new exit cannot
+forget it. The frontend still carries a fallback for the pair the type allows and the server
+never produces, because a screen that renders nothing is worse than one that is vague.
+
+### `count_private_overdue` takes no reminder interval
+
+It answers "how many overdue loans did privacy hold back", and that does not depend on when
+anything was last sent.
+
+It used to restate `due_for_reminder`'s predicate clause for clause, including the
+`notified_at` one, and had already diverged in the only case where the two differ: a private
+book is never sent, so nothing in this feature ever stamps its `notified_at`, and the only
+way one carries a value at all is a book that was public when it was chased and was made
+private afterwards. Filtering on it hid exactly those from the count for the length of the
+interval, so the number under-reported the thing it exists to report.
+
+`_overdue_clauses()` now holds what the two share and each query adds only what it owns. The
+parameter is gone rather than ignored: one nothing reads is one the next caller passes
+wrongly.
+
+### A measured number lives in one place, and the other places point at it
+
+`books_to_out`'s statement count was stated in its own docstring, in `docs/data-model.md`
+and in `docs/architecture.md`. All three were wrong, twice, and the second time was a diff
+that rewrote both sentences without re-measuring: a number is easy to edit and hard to
+check, so an edit that looks like a correction is the likeliest way one goes wrong.
+
+The docstring holds the measurement now, with what it was measured against, and both
+documents reference it. The measurement itself is worth keeping in mind: five statements
+constant in the page size, **plus one per distinct `added_by` author**, and that last one
+belongs to the caller rather than to this function, because `BookOut` reads a relationship
+that lazy loads unless the caller fetched it. Every listing in `routers/books.py` passes
+`joinedload(Book.added_by)` and so pays none of it.
+
+### `SECRET_KEYS` is enforced by a test that walks it, not by being read
+
+Nothing in the application reads that set. Masking is written by hand per field in
+`_read_settings`, so the set was a list beside the code rather than a rule over it: a third
+secret added to it would have been masked by nothing, returned in full to every admin page
+load, and no test would have failed.
+
+The fix is a test rather than machinery. Making `_read_settings` iterate the set would mean
+generating a field name per key and lose the per-field decisions that are the point: the
+Google Books key reports whether the environment supplied it, and the webhook URL beside the
+secret is deliberately **not** masked. So the set stays a list, and a test stores a known
+value for every key in it and asserts none of them appears in the response body.
+
+### The webhook URL is returned in full; the signing secret is masked
+
+The two are not the same kind of secret. A destination an admin cannot read back is a
+destination nobody can proofread, and spotting a wrong one is the entire reason to show
+it; an admin who can read it is an admin who can change it. The signing secret has no use
+in a browser at all, so it follows the Google Books key exactly: masked on the way out,
+absent means "leave alone", an empty string clears.
+
+The URL's scheme is checked twice, in `SettingsUpdate` and again in `notifications.py`
+before every send. The first gives the caller a 422 naming the field; the second still runs
+for a row a restore wrote.
+
+### The ticker is one asyncio task, and assumes one process
+
+The Dockerfile's CMD is a single uvicorn with no `--workers`, so there is exactly one
+ticker and no double-send. That is the assumption that breaks first: `--workers 4` would
+give four tickers racing on the same rows, and the fix then is `ENABLE_OVERDUE_TICKER=false`
+plus an external cron calling `POST /api/loans/overdue/notify`, not a lock inside the app.
+
+It is off under test. A background task waking on a timer inside a suite that drops and
+recreates every table between tests produces failures that depend on how long the run took.
 
 ### Reading dates are derived, not entered
 

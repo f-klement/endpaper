@@ -98,6 +98,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | DELETE | `/api/books/trash` | user | Empties it for good. Returns `{purged}` |
 | POST | `/api/books/merge` | user | Fold several entries into one |
 | POST | `/api/books/bulk` | user | One verb applied to a selection of books |
+| POST | `/api/books/covers/backfill?after_id=` | user | Fetch and store the covers of books that have none. Bounded per run: send the reply's `next_after_id` back to carry on, and it returns 0 at the end. `after_id` is 0 to 2^63-1; outside that is a **422** |
 | GET | `/api/books/{id}` | read | **404** if absent *or* invisible |
 | DELETE | `/api/books/{id}` | write | 204. Moves it to the trash, reversibly |
 | POST | `/api/books/{id}/restore` | trashed | Puts it back, with everything on it |
@@ -147,6 +148,39 @@ reading dates: rating a book is not a claim to have finished it just now.
 
 The reading dates are never sent by a client. They are stamped from status transitions;
 see [data-model.md](data-model.md) for the rules.
+
+### Reading progress
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/{id}/progress` | read | The caller's own entries, newest first |
+| POST | `/api/books/{id}/progress` | read | 201. Exactly one of `page` and `percent`; optional `minutes` |
+| DELETE | `/api/books/{id}/progress/{progress_id}` | read, own rows | 204 |
+
+Read access is enough, like status and rating: a position is personal and changes nothing
+for anyone else. Every query filters on `user_id` **as well** as on the book, so a member
+never sees another member's progress even on a public book that both are reading.
+
+**Exactly one unit.** `{"page": 64}` or `{"percent": 40}`, never both and never neither;
+both and neither are a **422**. A percent exists for an audiobook and for a book whose
+`page_count` no provider supplied. `page` must be at least 1, `percent` is 0 to 100, and
+`minutes` is 1 to 1440. The same rule is a CHECK constraint in the database, because a
+restore does not go through this schema.
+
+Recording progress on an unstarted book **promotes it to `reading`** and stamps
+`started_at`. It never sets `read`, whatever the page number: `page_count` comes from a
+metadata provider and is off by one often enough that the last page is not a finish
+signal, and there is already an explicit control for finishing. A status change never
+deletes progress rows, unlike the reading dates, which are derived and are cleared.
+
+Another member's entry, and an entry belonging to a different book, are both **404**, not
+403: a 403 would confirm the id exists. Deleting the last entry does not put the book back
+to unread.
+
+`BookOut` carries `my_progress_page`, `my_progress_percent` and
+`my_progress_recorded_at`, all of them the caller's own. The percentage is **derived**,
+never stored twice: `page / page_count` when the page count is known, else the recorded
+`percent`, else null, clamped at 100. `ProgressOut` deliberately does not repeat it.
 
 ### Series, shelves and duplicates
 
@@ -474,6 +508,7 @@ likes, including one outside the covers directory.
 | GET | `/api/loans?active_only=&overdue_only=` | user | Paginated; defaults to active only |
 | POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out, **404** for an unknown or invisible book |
 | PUT | `/api/loans/{id}/return` | user | **400** if already returned |
+| POST | `/api/loans/overdue/notify` | **admin** | Runs the overdue digest now and reports what it sent |
 
 **The borrower is either a member or a name.** `loaned_to_user_id` names a member;
 `loaned_to_name` is free text (120 characters) for somebody with no account here. Sending
@@ -490,6 +525,43 @@ the field answers "chase this", not "was this late".
 A book has at most one open loan. Recording a return is a shelf action, not an ownership
 one, so any member may do it for any book they can see. The listing excludes loans of books
 the caller cannot see, which would otherwise disclose a private book's title and holder.
+
+**Overdue reminders** go out as one JSON digest POSTed to an admin-configured webhook,
+hourly from a task started with the app. `POST /api/loans/overdue/notify` runs the same
+pass immediately, which is what makes the feature testable by a person and what an
+external cron would call instead. It answers
+`{sent, loans, skipped_private, reason, detail}` rather than a bare 204, because "nothing
+is overdue" and "the receiver refused it" both look like silence otherwise.
+
+`reason` is `disabled`, `no_url`, `nothing_due` or `unreachable`, and is **null exactly
+when `sent` is true**. It is a closed set because a client has to render the difference and
+cannot branch on prose; `detail` is the same outcome as a sentence, for a log or a caller
+with no message catalogue. A 200 with `sent: false` is the ordinary answer for all four:
+none of them is an error in the request.
+
+```json
+{
+  "event": "overdue_loans",
+  "generated_at": "2026-08-22T09:00:00",
+  "count": 1,
+  "loans": [
+    { "loan_id": 7, "book_id": 12, "title": "Dune", "borrower": "kim",
+      "due_at": "2026-08-01T00:00:00", "days_overdue": 21 }
+  ]
+}
+```
+
+Three properties of the request are load bearing. **Private books are excluded**, in the
+query rather than afterwards: a webhook has no member identity and lands in a channel the
+whole household reads. `skipped_private` counts what was held back, never names it. The
+body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a secret is
+set, over the raw bytes, so a receiver verifying a re-serialised payload will fail. And
+**redirects are not followed**, unlike the metadata lookups: this is the one request in
+the app whose payload is catalogue content going somewhere unauthenticated.
+
+A loan is chased again only once `overdue_reminder_days` have passed since its last
+reminder. `notified_at` is stamped after a delivery that succeeded, so a failure retries
+on the next run.
 
 ### Notes
 
@@ -512,7 +584,7 @@ be reached through a book the caller happens to have access to.
 | GET | `/api/settings/features` | **public** | Feature flags and the default language |
 | GET | `/api/settings` | **admin** | The full record, API key masked |
 | PUT | `/api/settings` | **admin** | Partial update; absent fields are left alone |
-| GET | `/api/stats` | user | Totals, per-member, per-tag, per-month |
+| GET | `/api/stats` | user | Totals, per-member, per-tag, per-month, pages read |
 | GET | `/api/users` | user | The member list |
 | GET | `/api/users/test-accounts` | **admin** | The accounts an admin may switch into |
 | POST | `/api/users/test-accounts` | **admin** | 201. **400** if the name is taken, **422** under the 8 character floor |
@@ -555,17 +627,66 @@ switch target. That is presentation: `POST /auth/switch` refuses one regardless.
 accounts do appear in `/api/users` like any other account, because the loan picker is a
 list of everybody who could hold a book.
 
+`PUT /api/settings` also carries the four overdue-reminder fields.
+`overdue_webhook_url` is returned **in full**, unlike the Google Books key: a destination
+nobody can read back is a destination nobody can proofread, and an admin who can read it
+is an admin who can change it. A URL whose scheme is not `http` or `https` is a **422**,
+checked again in `notifications.py` before any send because a restore writes the settings
+table through Core. `overdue_webhook_secret` follows the API key exactly: masked on the way
+out, absent means "leave alone", an empty string clears.
+`overdue_reminder_days` is 1 to 365; zero would mean resending the same list on every tick.
+
+`StatsOut.pages_by_month` is the pages the requesting member read, by month, computed from
+the positive deltas between their consecutive page-unit entries per book. **Page-tracked
+books only**, which the heading on the stats page says as well: an audiobook records a percentage, and converting that into a page count
+would produce a number that adds up with the others while meaning something else. The
+first entry on a book counts in full; a backwards step counts nothing, which covers both a
+re-read and a corrected typo and refuses to let the second inflate the figure.
+
 Every `/api/stats` aggregation applies the privacy predicate independently.
 
 ## System
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/healthz` | public | `{"status": "ok"}`. Runs a query, so it fails when the database does |
+| GET | `/api/healthz` | public | `{"status": "ok"}`, or **503** when the database or the data volume does not answer |
 
 The Kubernetes probes point here rather than at `/`, which the SPA mount answers from disk:
 a pod whose data volume never mounted stayed Ready and kept taking traffic. Unauthenticated
 because a probe holds no token, and the only thing disclosed is that the service is up.
+
+It runs two checks, and the second is there because the first is not enough. `SELECT 1` on an
+already-open SQLite handle is served from the page cache and issues no RPC, so during a total
+NFS outage on 2026-08-22 this endpoint answered 200 continuously and the pod stayed 1/1 Ready
+for 39 hours. A `stat` of the data directory is a namespace operation and has to cross the
+wire.
+
+### What a deployer has to set
+
+The stat carries its own timeout, `main.STORAGE_TIMEOUT_SECONDS`, currently **2 seconds**. A
+hung mount can only ever surface as a timeout, so if the handler is the slower of the two the
+kubelet gives up while it is still waiting and the pod reports a hang rather than a failure,
+which is the outcome the internal timeout exists to prevent.
+
+**Set `timeoutSeconds: 5` on both probes.** Kubernetes defaults it to **1**, which is shorter
+than the internal timeout and therefore wrong: leaving it unset defeats this check. The
+numbers, rather than the direction of the inequality, because the person who has to act on
+this is reading these docs and not the source:
+
+| Setting | Value | Why |
+|---|---|---|
+| `main.STORAGE_TIMEOUT_SECONDS` | 2 | The handler gives up here and answers 503 |
+| probe `timeoutSeconds` | 5 | Comfortably longer, so the failure is a 503 and not a hang |
+| probe `periodSeconds` | 10 or more | Longer than the handler's worst case, so probes cannot queue |
+
+**This is the liveness probe too, and that is intended.** Once the check works, a hung mount
+restarts the pod, and the restarted pod runs `init_db()` against the same mount and blocks
+there, so it will not come Ready and will keep restarting. That is the correct outcome and
+not an accident: a pod whose storage is gone cannot serve, and a container in
+`CrashLoopBackOff` is visible to every alert a household has, where a pod that is 1/1 Ready
+and serving nothing is visible to none of them. It also recovers on its own the moment the
+mount does. What would be wrong is answering 200 while the data is unreachable, which is what
+happened for 39 hours.
 
 ## Errors
 

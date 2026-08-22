@@ -1,11 +1,55 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from sqlalchemy import func
 
 from dependencies import CurrentUser, DbSession
-from models import Book, Tag, User, UserBook, book_tags, visible_to
+from models import Book, ReadingProgress, Tag, User, UserBook, book_tags, visible_to
 from schemas import MonthStat, PerUserStat, StatsOut, TagStat
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
+
+
+def _pages_by_month(rows: list[tuple[int, datetime, int]]) -> list[MonthStat]:
+    """Pages read per month, from a member's own page-unit entries.
+
+    In Python rather than SQL because the figure is a difference between
+    *consecutive* rows per book, and SQL that expresses that (a window
+    function feeding a conditional sum feeding a group) is a query nobody will
+    be able to check against this description a year from now.
+
+    What bounds it: one row per sitting per member, so the input is the size of
+    one person's reading, not of the library. A member who logs a page every
+    day for five years is 1,825 rows.
+
+    `rows` must arrive ordered by `(book_id, recorded_at, id)`, which is what
+    makes "the previous row" mean "the previous entry on this book".
+
+    Two rules, and each drops something on purpose:
+
+    * The **first** entry on a book counts in full. Reaching page 80 means
+      eighty pages were read, and crediting nothing would mean a single sitting
+      per book never appears at all.
+    * A **backwards** step counts nothing. That covers both a re-read and a
+      corrected typo, and the two are indistinguishable from here. Crediting
+      the lower page in full would let a typo of 400 followed by its correction
+      to 40 report 440 pages read, which is the worse of the two errors: this
+      way a re-read's first sitting is missed, rather than a mistake inventing
+      reading that never happened.
+    """
+    totals: dict[str, int] = {}
+    current_book: int | None = None
+    previous_page = 0
+
+    for book_id, recorded_at, page in rows:
+        delta = page if book_id != current_book else page - previous_page
+        current_book = book_id
+        previous_page = page
+        if delta > 0:
+            month = recorded_at.strftime("%Y-%m")
+            totals[month] = totals.get(month, 0) + delta
+
+    return [MonthStat(month=month, count=totals[month]) for month in sorted(totals)]
 
 
 @router.get("", response_model=StatsOut)
@@ -64,6 +108,26 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         .all()
     )
 
+    # Joined to Book for the privacy predicate, like the aggregation above.
+    # Page-unit entries only: a percent cannot be added to a page count.
+    progress_rows = (
+        db.query(ReadingProgress.book_id, ReadingProgress.recorded_at, ReadingProgress.page)
+        .join(Book, ReadingProgress.book_id == Book.id)
+        .filter(
+            visible,
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.page.isnot(None),
+        )
+        .order_by(
+            ReadingProgress.book_id,
+            ReadingProgress.recorded_at,
+            # Two entries recorded in the same second would otherwise tie, and
+            # SQLite's CURRENT_TIMESTAMP has only second resolution.
+            ReadingProgress.id,
+        )
+        .all()
+    )
+
     rating_row = (
         db.query(func.avg(UserBook.rating), func.count(UserBook.id))
         .join(Book, UserBook.book_id == Book.id)
@@ -82,6 +146,17 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         finished_by_month=[
             MonthStat(month=month, count=count) for month, count in finished_by_month
         ],
+        # The comprehension narrows `page`, which is nullable on the column
+        # and non-null in these rows because the query filters on it. Written
+        # out rather than cast, so a query that stops filtering drops the rows
+        # instead of adding None to an integer.
+        pages_by_month=_pages_by_month(
+            [
+                (book_id, recorded_at, page)
+                for book_id, recorded_at, page in progress_rows
+                if page is not None
+            ]
+        ),
         # Rounded here rather than in the client: it is one number with one
         # sensible precision, and every client would round it the same way.
         average_rating=round(float(average), 2) if average is not None else None,

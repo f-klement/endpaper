@@ -102,6 +102,25 @@ export default function StatsPage() {
         labelWidthClass="w-20"
       />
 
+      {/* Pages, not books, and page tracked books only: an audiobook records a
+          percent, and converting that into a page count would produce a number
+          that adds up with these while meaning something else. The scope is in
+          `stats.pagesByMonth` itself, in the parenthesis, because a reader who
+          keeps audiobooks has no other way to find out why this total is lower
+          than they expect. */}
+      <StatSection
+        title={t("stats.pagesByMonth")}
+        rows={(stats.pages_by_month ?? []).map((row) => ({
+          label: formatMonth(row.month, locale),
+          count: row.count,
+        }))}
+        colorClass="bg-accent-400"
+        labelWidthClass="w-20"
+        // Pages, not books: four digits is an ordinary month here, and the
+        // default column fits three.
+        countWidthClass="w-12 tabular-nums"
+      />
+
       <StatSection
         title={t("stats.byMember")}
         rows={stats.per_user.map((row) => ({

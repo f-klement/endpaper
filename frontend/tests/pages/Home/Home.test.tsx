@@ -163,6 +163,55 @@ describe("Home", () => {
   });
 });
 
+describe("Home's view toggle", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    api.on(/\/api\/books\?/, {
+      body: makeBookPage([makeBook({ title: "Dune", publisher: "Chilton" })]),
+    });
+  });
+
+  it("starts on the covers", async () => {
+    renderWithProviders(<Home />);
+
+    expect(await screen.findByText("Dune")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("switches the grid for a table", async () => {
+    renderWithProviders(<Home />);
+    await screen.findByText("Dune");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Table" }));
+
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("Chilton")).toBeInTheDocument();
+  });
+
+  it("remembers the choice in this browser", async () => {
+    // Local first, like the saved views: a habit rather than household data,
+    // and it needs no endpoint and no migration to be useful.
+    renderWithProviders(<Home />);
+    await screen.findByText("Dune");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Table" }));
+
+    expect(localStorage.getItem("libraryView")).toBe("table");
+  });
+
+  it("shows the covers again while selecting", async () => {
+    // The checkbox lives on a card, so a selection offered from a table would
+    // be a selection that does nothing.
+    localStorage.setItem("libraryView", "table");
+    renderWithProviders(<Home />);
+    await screen.findByRole("table");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Select" }));
+
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+});
+
 describe("Home as the wishlist", () => {
   // The wishlist is a saved view rather than a page, and it used to look like
   // one: headed "Library", and telling a reader whose wishlist was empty to go

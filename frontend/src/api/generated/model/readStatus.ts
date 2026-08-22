@@ -13,6 +13,20 @@
  * started" and "I intend to read this" are different statements, and
  * Goodreads exports carry the distinction (its `to-read` shelf), so
  * collapsing them would lose information on import.
+ *
+ * DID_NOT_FINISH is started, not finished, and not going to be. Named for
+ * what the two apps that ship it call it rather than for the act: Openreads'
+ * fourth list is "books you didn't finish" and BookLogr's is "Did not
+ * finish". Neither calls it "abandoned", and matching them costs nothing
+ * while a third spelling of the same shelf costs a reader a moment every
+ * time. The importers accept `abandoned`, `dnf` and the German for both, so
+ * nothing turns on the stored spelling.
+ *
+ * **It is not a kind of READ**, and every query that counts finished books
+ * tests `finished_at`, which `_stamp_reading_dates` clears for it. A book
+ * somebody gave up on must never appear in "books finished this year".
+ *
+ * No migration: the column is a plain string, so a new member needs no DDL.
  */
 export type ReadStatus = (typeof ReadStatus)[keyof typeof ReadStatus];
 
@@ -21,4 +35,5 @@ export const ReadStatus = {
   want_to_read: "want_to_read",
   reading: "reading",
   read: "read",
+  did_not_finish: "did_not_finish",
 } as const;

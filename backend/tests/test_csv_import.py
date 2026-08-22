@@ -216,6 +216,16 @@ class TestFieldParsing:
             ("currently-reading", ReadStatus.READING),
             ("in_progress", ReadStatus.READING),
             ("Not Begun", ReadStatus.WANT_TO_READ),
+            # Goodreads users file this as a custom shelf and StoryGraph as a
+            # status, and both spellings turn up in the same export folder.
+            ("did-not-finish", ReadStatus.DID_NOT_FINISH),
+            ("DNF", ReadStatus.DID_NOT_FINISH),
+            ("Abandoned", ReadStatus.DID_NOT_FINISH),
+            ("abgebrochen", ReadStatus.DID_NOT_FINISH),
+            # "finished" is READ and "unfinished" is not a negation of it that
+            # any prefix rule would get right, which is why these match exactly.
+            ("finished", ReadStatus.READ),
+            ("unfinished", ReadStatus.DID_NOT_FINISH),
             ("borrowed", None),
             ("", None),
         ],

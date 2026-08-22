@@ -4,6 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import config
+import covers
+import notifications
 import settings_store
 from auth import require_admin
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
@@ -13,7 +15,11 @@ from models import User
 from schemas import FeatureFlagsOut, LoginImageOut, SettingsOut, SettingsUpdate
 from uploads import read_image_upload, replace_image
 
-LOGIN_BG_BASE = "login_bg"
+#: One definition, in the module that owns what the covers directory is called.
+#: It used to be spelled out here and again in `routers/covers.py`, justified by
+#: a circular import that does not exist: `covers.py` imports `config`, `isbn`
+#: and `uploads` and no router.
+LOGIN_BG_BASE = covers.LOGIN_BG_BASE
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -59,6 +65,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
     # stored key's preview while a different key is actually being used would
     # be worse than showing nothing.
     key = from_env or settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+    webhook_secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
 
     return SettingsOut(
         google_books_enabled=settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED),
@@ -69,6 +76,16 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
         ),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
+        overdue_webhook_enabled=settings_store.get_bool(
+            db, SettingKey.OVERDUE_WEBHOOK_ENABLED
+        ),
+        # In full, unlike the secret below it. A destination an admin cannot
+        # read back is a destination nobody can proofread, and spotting a wrong
+        # one is what the field is for.
+        overdue_webhook_url=settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_URL),
+        overdue_webhook_secret_preview=settings_store.mask(webhook_secret),
+        has_overdue_webhook_secret=bool(webhook_secret),
+        overdue_reminder_days=notifications.reminder_days(db),
     )
 
 
@@ -144,5 +161,31 @@ def update_settings(
 
     if payload.default_locale is not None:
         settings_store.set_value(db, SettingKey.DEFAULT_LOCALE, payload.default_locale.value)
+
+    if payload.overdue_webhook_enabled is not None:
+        settings_store.set_value(
+            db,
+            SettingKey.OVERDUE_WEBHOOK_ENABLED,
+            "true" if payload.overdue_webhook_enabled else "false",
+        )
+
+    if payload.overdue_webhook_url is not None:
+        # Already scheme-checked by `SettingsUpdate.http_or_https`, which
+        # answers a 422 naming the field. `notifications.checked_url` checks it
+        # again before every send, for the row a restore wrote.
+        settings_store.set_value(
+            db, SettingKey.OVERDUE_WEBHOOK_URL, payload.overdue_webhook_url
+        )
+
+    if payload.overdue_webhook_secret is not None:
+        # An empty string is a deliberate clear, like the Google key.
+        settings_store.set_value(
+            db, SettingKey.OVERDUE_WEBHOOK_SECRET, payload.overdue_webhook_secret.strip()
+        )
+
+    if payload.overdue_reminder_days is not None:
+        settings_store.set_value(
+            db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days)
+        )
 
     return _read_settings(db)

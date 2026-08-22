@@ -14,12 +14,16 @@ import { PATTERNS } from "../../theme/patterns";
 import { MODE_LABELS } from "../types";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BackupSection from "./components/BackupSection";
+import CoversSection from "./components/CoversSection";
 import LibraryImport from "./components/LibraryImport";
+import OverdueSection from "./components/OverdueSection";
 import TestAccounts from "./components/TestAccounts";
 import ToggleField from "./components/ToggleField";
 import {
   useBackup,
+  useCoverBackfill,
   useLibraryImport,
+  useOverdueDigest,
   useSettings,
   useSwitchToTestAccount,
   useTestAccounts,
@@ -76,7 +80,9 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
     hasSaved,
   } = useSettings();
   const libraryImport = useLibraryImport();
+  const coverBackfill = useCoverBackfill();
   const backup = useBackup();
+  const overdue = useOverdueDigest();
   // `settings` answering at all is what says this account is an admin: the
   // endpoint is admin only and a 403 is reported as `isForbidden`. Asking for
   // the test accounts on that same condition keeps every member off a route
@@ -122,10 +128,10 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
               aria-pressed={locale === language.value}
               className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${
                 locale === language.value
-                  ? "bg-accent-50 border-accent-300 text-accent-800 "
-                + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+                  ? "bg-accent-50 border-accent-300 text-accent-800 " +
+                    "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 " +
+                    "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
               }`}
             >
               {t(language.label)}
@@ -158,7 +164,10 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
               {t("theme.change")}
             </span>
           </span>
-          <span aria-hidden="true" className="text-paper-600 dark:text-paper-400">
+          <span
+            aria-hidden="true"
+            className="text-paper-600 dark:text-paper-400"
+          >
             <Icon name="chevron" className="w-4 h-4" />
           </span>
         </Link>
@@ -191,6 +200,17 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
           onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
         />
       </SettingsSection>
+
+      {/* Beside the import, and outside the admin block for the same reason it
+          is: the backfill only ever touches books the caller can see, so it is
+          each member's own shelf they are repairing. It is also what an import
+          leaves undone, which is why it reads next. */}
+      <CoversSection
+        result={coverBackfill.result}
+        isRunning={coverBackfill.isRunning}
+        error={coverBackfill.error}
+        onRun={coverBackfill.run}
+      />
 
       {isLoading && <Spinner label={t("common.loading")} />}
 
@@ -252,7 +272,12 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
                     aria-pressed={showKey}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
                   >
-                    <span aria-hidden="true"><Icon name={showKey ? "eyeOff" : "eye"} className="w-4 h-4" /></span>
+                    <span aria-hidden="true">
+                      <Icon
+                        name={showKey ? "eyeOff" : "eye"}
+                        className="w-4 h-4"
+                      />
+                    </span>
                   </button>
                 )}
               </div>
@@ -332,10 +357,10 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
                   aria-pressed={settings.default_locale === language.value}
                   className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors disabled:opacity-50 ${
                     settings.default_locale === language.value
-                      ? "bg-accent-50 border-accent-300 text-accent-800 "
-                + "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                      : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+                      ? "bg-accent-50 border-accent-300 text-accent-800 " +
+                        "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+                      : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 " +
+                        "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
                   }`}
                 >
                   {t(language.label)}
@@ -343,6 +368,16 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
               ))}
             </div>
           </SettingsSection>
+
+          <OverdueSection
+            settings={settings}
+            isSaving={isSaving}
+            onSave={update}
+            onSendNow={overdue.send}
+            isSending={overdue.isSending}
+            sendResult={overdue.result}
+            sendError={overdue.error}
+          />
 
           {/* Admin only, and inside this block for that reason. Under a
               directory this is the only way an admin can see what an ordinary

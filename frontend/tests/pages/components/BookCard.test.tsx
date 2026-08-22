@@ -118,36 +118,146 @@ describe("BookCard", () => {
   });
 
   describe("tags", () => {
-    it("shows the first two", () => {
+    it("shows the first three", () => {
       renderCard(
         makeBook({
           tags: [
-            makeTag({ name: "Fantasy" }),
-            makeTag({ name: "Adult", category: "age" }),
-          ],
-        }),
-      );
-      expect(screen.getByText("Fantasy")).toBeInTheDocument();
-      expect(screen.getByText("Adult")).toBeInTheDocument();
-    });
-
-    it("truncates beyond two so the card keeps its height", () => {
-      renderCard(
-        makeBook({
-          tags: [
-            makeTag({ name: "Fantasy" }),
+            makeTag({ name: "Fantasy", category: "genre" }),
             makeTag({ name: "Adult", category: "age" }),
             makeTag({ name: "Fiction", category: "type" }),
           ],
         }),
       );
-      expect(screen.queryByText("Fiction")).not.toBeInTheDocument();
+      expect(screen.getByText("Fantasy")).toBeInTheDocument();
+      expect(screen.getByText("Adult")).toBeInTheDocument();
+      expect(screen.getByText("Fiction")).toBeInTheDocument();
+    });
+
+    it("prefers a genre tag to whatever the API listed first", () => {
+      // What a book *is* is the thing somebody scanning a shelf matches on. An
+      // age band arriving first used to push the genre off the card entirely.
+      renderCard(
+        makeBook({
+          tags: [
+            makeTag({ name: "Adult", category: "age" }),
+            makeTag({ name: "Fiction", category: "type" }),
+            makeTag({ name: "Reference", category: "custom" }),
+            makeTag({ name: "Fantasy", category: "genre" }),
+          ],
+        }),
+      );
+      expect(screen.getByText("Fantasy")).toBeInTheDocument();
+      expect(screen.queryByText("Reference")).not.toBeInTheDocument();
+    });
+
+    it("truncates beyond three so the card keeps its height", () => {
+      renderCard(
+        makeBook({
+          tags: [
+            makeTag({ name: "Fantasy", category: "genre" }),
+            makeTag({ name: "Adult", category: "age" }),
+            makeTag({ name: "Fiction", category: "type" }),
+            makeTag({ name: "Reference", category: "custom" }),
+          ],
+        }),
+      );
+      expect(screen.queryByText("Reference")).not.toBeInTheDocument();
     });
 
     it("handles a book with no tags", () => {
       renderCard(makeBook({ tags: [] }));
       expect(screen.getByText("Unread")).toBeInTheDocument();
     });
+  });
+});
+
+describe("BookCard fold out", () => {
+  const detailed = () =>
+    makeBook({
+      title: "Dune",
+      publisher: "Chilton",
+      year: 1965,
+      location: "Loft box 3",
+      page_count: 412,
+      purchase_source: "The Oxfam on the high street",
+    });
+
+  it("starts closed", () => {
+    renderCard(detailed());
+    expect(screen.getByRole("button", { name: /Details for Dune/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("Chilton")).not.toBeInTheDocument();
+  });
+
+  it("opens without leaving the grid", async () => {
+    renderCard(detailed());
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /Details for Dune/ }),
+    );
+
+    expect(screen.getByText("Chilton")).toBeInTheDocument();
+    expect(screen.getByText("Loft box 3")).toBeInTheDocument();
+    expect(screen.getByText("The Oxfam on the high street")).toBeInTheDocument();
+  });
+
+  it("says it is open, without pointing at an id that is not there", async () => {
+    // The panel renders only when open, so `aria-controls` would dangle on
+    // every closed card. ARIA requires the reference to resolve; `aria-expanded`
+    // plus DOM adjacency says the same thing and is always true.
+    renderCard(detailed());
+    const toggle = screen.getByRole("button", { name: /Details for Dune/ });
+    expect(toggle).not.toHaveAttribute("aria-controls");
+
+    await userEvent.setup().click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the toggle out of the link", () => {
+    // A button inside an anchor is invalid, and browsers resolve the ambiguity
+    // differently: some navigate, some fire the button.
+    renderCard(detailed());
+
+    const toggle = screen.getByRole("button", { name: /Details for Dune/ });
+
+    expect(toggle.closest("a")).toBeNull();
+  });
+
+  it("offers nothing to open on a book with no other facts", () => {
+    renderCard(makeBook({ title: "Bare", publisher: null, year: null }));
+
+    expect(screen.queryByRole("button", { name: /Details for Bare/ })).toBeNull();
+  });
+
+  it("shows the tags the face of the card left out", async () => {
+    renderCard(
+      makeBook({
+        title: "Dune",
+        tags: [
+          makeTag({ name: "Fantasy", category: "genre" }),
+          makeTag({ name: "Adult", category: "age" }),
+          makeTag({ name: "Fiction", category: "type" }),
+          makeTag({ name: "Reference", category: "custom" }),
+        ],
+      }),
+    );
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /Details for Dune/ }),
+    );
+
+    expect(screen.getByText("Reference")).toBeInTheDocument();
+  });
+
+  it("has no fold out while selecting", () => {
+    // A button inside a button is invalid for the same reason, and somebody
+    // ticking twenty boxes is not reading page counts.
+    renderSelectable(detailed());
+
+    expect(screen.queryByRole("button", { name: /Details for Dune/ })).toBeNull();
   });
 });
 
