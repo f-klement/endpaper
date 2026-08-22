@@ -631,3 +631,70 @@ describe("withPalette", () => {
     expect(readPaletteColours("light").endpaper.card).toBe("");
   });
 });
+
+// ── The documented figures ───────────────────────────────────────────────────
+
+describe("the contrast table in docs/decisions.md", () => {
+  /**
+   * Every figure in that table must match what this file computes.
+   *
+   * Two rows of it were wrong in one session and both were caught by a person
+   * re-measuring by hand: 4.19:1 was attributed to `paper-600` when it is the
+   * `paper-700` figure, and the dark row's 5.57:1 was attributed to nord when
+   * it belongs to everforest. Neither changed a conclusion, and that is the
+   * problem: a number in a table like that one is a thing the next person
+   * re-measures, and one that corresponds to nothing costs them the time to
+   * find out why.
+   *
+   * The numbers were already computed here. Nothing asserted the prose against
+   * them, so the prose drifted. This is that assertion.
+   */
+  // Read the same way this file reads the stylesheets, rather than through
+  // `node:fs`. The frontend is a browser project with no `@types/node`, and
+  // pulling that in so one test can read one file would widen the type
+  // environment of the whole package to save an import.
+  const DOCS = import.meta.glob("../../../docs/*.md", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+  const DOC = DOCS["../../../docs/decisions.md"] ?? "";
+
+  const ROW =
+    /\|\s*`paper-(\d+)`\s+on\s+`paper-(\d+)`(,\s*dark)?\s*\|\s*\*{0,2}([\d.]+):1\*{0,2}\s*\|\s*([a-z]+)/g;
+
+  const rows = [...DOC.matchAll(ROW)].map((m) => ({
+    fg: m[1],
+    bg: m[2],
+    mode: (m[3] ? "dark" : "light") as "light" | "dark",
+    stated: Number(m[4]),
+    palette: m[5],
+  }));
+
+  it("has rows this test can actually see", () => {
+    // A regex that silently matches nothing would make every assertion below
+    // vacuous, which is the failure mode of a test that reads prose.
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(rows)(
+    "paper-$fg on paper-$bg ($mode) is $stated:1 at $palette",
+    ({ fg, bg, mode, stated, palette }) => {
+      const measured = PALETTES.map((entry) => {
+        const tokens = tokensFor(entry.id, mode);
+        return {
+          id: entry.id as string,
+          ratio: contrast(
+            tokens[`--color-paper-${fg}`]!,
+            tokens[`--color-paper-${bg}`]!,
+          ),
+        };
+      }).sort((a, b) => a.ratio - b.ratio);
+
+      const worst = measured[0]!;
+      // Two decimals, because that is the precision the table is written to.
+      expect(Number(worst.ratio.toFixed(2))).toBe(stated);
+      expect(worst.id).toBe(palette);
+    },
+  );
+});

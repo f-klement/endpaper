@@ -1,6 +1,37 @@
 # Changelog
 
-## Unreleased
+## v0.5.0
+
+_2026-08-22_
+
+Also in this release, after the section below was written:
+
+**Covers are stored here rather than hotlinked.** A candidate is verified, then fetched
+and written beside the book, so a cover no longer depends on a third party being
+reachable from every reader's browser. `POST /api/books/covers/backfill` repairs a
+library that predates this, a hundred books at a time, and reports what it could not
+find. Fetching is restricted to an allowlist of hosts, which closed a server-side
+request forgery that predates this release: a member-supplied `cover_url` was fetched
+with redirects followed and no host check.
+
+**The service worker no longer pins a broken cover for a month.** It cached
+cross-origin covers `CacheFirst` with no restriction on what may be stored, and an
+opaque response cannot be told from an error, so one failed fetch blanked a cover for
+thirty days. Now `StaleWhileRevalidate`, only 200s are stored, and the cache is renamed
+so already-poisoned entries are dropped rather than inherited.
+
+**A fourth reading status, did not finish.** Started, not finished, not going back.
+Recording progress on such a book returns it to reading; nothing deletes the log.
+
+**The library can be read as a table**, nineteen columns, sortable on what the API can
+actually order by, with the choice remembered. Cards gained a fold out.
+
+**The health probe can fail.** It ran `SELECT 1`, which on an already-open SQLite handle
+is served from cache and issues no RPC, so this app stayed ready for 39 hours through a
+total storage outage. It now performs a filesystem operation with its own timeout, and
+answers 503 when storage cannot be reached. Set `timeoutSeconds` above 2 on any probe
+that calls it: the Kubernetes default of 1 makes the check inert.
+
 
 Where you are in a book, and something that chases the books that are out.
 
