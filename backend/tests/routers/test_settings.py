@@ -451,3 +451,160 @@ class TestKeyFromTheEnvironment:
         body = client.get("/api/settings", headers=admin["headers"]).json()
 
         assert body["google_books_api_key_from_env"] is False
+
+
+class TestOverdueWebhookSettings:
+    """The four settings behind the overdue digest.
+
+    The secret follows the Google key exactly: masked on the way out, absent
+    means "leave alone" on the way in. The URL deliberately does not, because a
+    destination nobody can read back is a destination nobody can proofread.
+    """
+
+    HOOK = "https://hooks.example.org/t/abc"
+
+    def test_it_starts_switched_off(self, client, admin):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["overdue_webhook_enabled"] is False
+        assert body["overdue_webhook_url"] == ""
+        assert body["overdue_reminder_days"] == 7
+
+    def test_it_stores_a_url(self, client, admin):
+        body = client.put(
+            "/api/settings",
+            json={"overdue_webhook_url": self.HOOK},
+            headers=admin["headers"],
+        ).json()
+        assert body["overdue_webhook_url"] == self.HOOK
+
+    def test_it_refuses_a_scheme_that_is_not_http(self, client, admin):
+        res = client.put(
+            "/api/settings",
+            json={"overdue_webhook_url": "file:///etc/passwd"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_an_empty_url_clears_it(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_url": self.HOOK},
+            headers=admin["headers"],
+        )
+        body = client.put(
+            "/api/settings", json={"overdue_webhook_url": ""}, headers=admin["headers"]
+        ).json()
+        assert body["overdue_webhook_url"] == ""
+
+    def test_the_secret_is_never_returned(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_secret": "a-very-secret-value"},
+            headers=admin["headers"],
+        )
+        body = client.get("/api/settings", headers=admin["headers"]).text
+        assert "a-very-secret-value" not in body
+
+    def test_the_secret_is_masked_and_flagged(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_secret": "a-very-secret-value"},
+            headers=admin["headers"],
+        )
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["has_overdue_webhook_secret"] is True
+        assert body["overdue_webhook_secret_preview"].endswith("alue")
+
+    def test_an_absent_secret_leaves_the_stored_one_alone(self, client, admin, db):
+        """A form that always submitted every field would blank it, since the
+        browser never received the real value."""
+        import settings_store
+        from enums import SettingKey
+
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_secret": "kept"},
+            headers=admin["headers"],
+        )
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_enabled": True},
+            headers=admin["headers"],
+        )
+
+        assert settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET) == "kept"
+
+    def test_an_empty_secret_clears_it(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_secret": "kept"},
+            headers=admin["headers"],
+        )
+        body = client.put(
+            "/api/settings", json={"overdue_webhook_secret": ""}, headers=admin["headers"]
+        ).json()
+        assert body["has_overdue_webhook_secret"] is False
+
+    def test_it_stores_the_reminder_interval(self, client, admin):
+        body = client.put(
+            "/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"]
+        ).json()
+        assert body["overdue_reminder_days"] == 3
+
+    def test_zero_days_is_refused(self, client, admin):
+        """Zero would mean resending the same list on every tick."""
+        res = client.put(
+            "/api/settings", json={"overdue_reminder_days": 0}, headers=admin["headers"]
+        )
+        assert res.status_code == 422
+
+    def test_a_member_may_not_read_them(self, client, member):
+        assert client.get("/api/settings", headers=member["headers"]).status_code == 403
+
+
+class TestEverySecretSettingIsMasked:
+    """`SECRET_KEYS` names the secrets; this is what makes it enforce anything.
+
+    Masking is written by hand per field in `_read_settings`, so before this
+    test the set was a list beside the code rather than a rule over it: a third
+    secret added to it would have been masked by nothing, disclosed in full to
+    every admin page load, and no test would have failed. Both members are
+    correctly masked today, which is exactly why the guard is worth having now
+    rather than after the next one is added.
+
+    It walks the set instead of naming the fields, so a key added there is
+    covered the moment it is added.
+    """
+
+    def test_no_secret_settings_value_is_returned_in_full(self, client, admin, db):
+        import settings_store
+
+        # Longer than eight characters, or `mask()` hides the value entirely
+        # and the assertion would pass without proving anything.
+        stored = {}
+        for index, key in enumerate(sorted(settings_store.SECRET_KEYS)):
+            value = f"secret-value-{index}-{key.value}"
+            settings_store.set_value(db, key, value)
+            stored[key.value] = value
+
+        body = client.get("/api/settings", headers=admin["headers"]).text
+
+        assert [name for name, value in stored.items() if value in body] == []
+
+    def test_the_walk_covers_the_secrets_that_exist(self):
+        """A guard that inspects nothing is worse than no guard. These are the
+        two the set holds; a third is what the walk above is for."""
+        import settings_store
+        from enums import SettingKey
+
+        assert set(settings_store.SECRET_KEYS) == {
+            SettingKey.GOOGLE_BOOKS_API_KEY,
+            SettingKey.OVERDUE_WEBHOOK_SECRET,
+        }
+
+    def test_a_secret_long_enough_to_be_partly_shown_still_is(self):
+        """The masking is a preview, not a deletion, and the test above must not
+        pass merely because nothing was stored."""
+        import settings_store
+
+        assert settings_store.mask("secret-value-abcd").endswith("abcd")

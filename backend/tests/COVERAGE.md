@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**1412 tests · 96% line coverage** (3851 statements, 168 missed).
+**1571 tests · 96% line coverage** (4303 statements, 186 missed).
 
 ```bash
 uv run pytest                                    # the suite
@@ -32,37 +32,39 @@ is why the helper uses regexes.
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
 | `test_config.py` | 41 | Settings resolution, the startup secret guard, upload limits |
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
-| `test_backup.py` | 34 | **The whole library out and back.** Round trip, refusing a bad archive, and zip path traversal |
+| `test_backup.py` | 56 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
 | `test_metadata.py` | 82 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
-| `test_errors.py` | 35 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
+| `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
-| `test_csv_import.py` | 54 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
-| `test_schemas.py` | 25 | Request/response contracts and their validation rules |
-| `test_google_books.py` | 24 | Volume mapping, the gap-filling merge, upstream failures |
+| `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
+| `test_schemas.py` | 46 | Request/response contracts and their validation rules |
+| `test_google_books.py` | 37 | Volume mapping, the gap-filling merge, upstream failures |
+| `test_notifications.py` | 39 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, and that a failure leaves the loan to retry |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
-| `test_auth.py` | 21 | Password hashing, JWT creation and the auth dependencies |
+| `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_models.py` | 44 | Constraints, defaults, cascades, relationships, and what may be switched into |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
-| `test_ratelimit.py` | 19 | The sliding window, and the login/registration limits |
-| `test_uploads.py` | 18 | Content-sniffed image validation and the size cap |
-| `test_middleware.py` | 16 | Security headers, CSP contents, HSTS conditions |
-| `test_main.py` | 14 | App wiring, tag seeding, the operationId guard |
-| `test_schema.py` | 13 | Alembic: create, adopt a pre-Alembic database, upgrade |
-| `test_database.py` | 6 | Engine setup and the session dependency |
-| `routers/test_books_bulk.py` | 26 | One verb applied to a selection, and the three-way count |
-| `routers/test_books_duplicates.py` | 28 | Duplicate detection and the merge, incl. the ORM cascade trap |
-| `routers/test_books_reading.py` | 22 | Ratings, and the rules for stamping reading dates |
+| `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
+| `test_uploads.py` | 24 | Content-sniffed image validation and the size cap |
+| `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
+| `test_main.py` | 28 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan |
+| `test_schema.py` | 34 | Alembic: create, adopt a pre-Alembic database, upgrade |
+| `test_database.py` | 16 | Engine setup and the session dependency |
+| `routers/test_books_bulk.py` | 27 | One verb applied to a selection, and the three-way count |
+| `routers/test_books_duplicates.py` | 31 | Duplicate detection and the merge, incl. the ORM cascade trap |
+| `routers/test_books_progress.py` | 29 | **The reading log.** One unit per entry, the promotion to reading, that a member never sees another's, and the merge that would otherwise cascade it away |
+| `routers/test_books_reading.py` | 29 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
 | `routers/test_books_google.py` | 20 | Enrichment, the chosen-edition apply, candidates, the feature gate |
 | `routers/test_books_search.py` | 31 | **Free-text search.** That it works with no API key, that all six catalogues answer, and how they merge |
-| `routers/test_books_trash.py` | 40 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
-| `routers/test_settings.py` | 30 | Feature flags, the masked API key, admin-only writes |
+| `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
+| `routers/test_settings.py` | 55 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
 | `routers/test_imports.py` | 43 | The import, the private-ISBN branch, the tag caps, the rate limit |
-| `routers/test_books_tags.py` | 21 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
+| `routers/test_books_tags.py` | 24 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
 | `routers/test_auth.py` | 74 | Registration, login, `/auth/me`, the registration switch, and switching into a test account in all three modes |
-| `routers/test_loans.py` | 19 | Lending, returning, history |
-| `routers/test_stats.py` | 18 | Every aggregation, and that each respects privacy |
+| `routers/test_loans.py` | 48 | Lending, returning, history, and who may run the overdue digest |
+| `routers/test_stats.py` | 33 | Every aggregation, and that each respects privacy |
 | `routers/test_users.py` | 33 | The member list, test accounts, and appearance: the caller's own only, never on `UserOut` |
 
 ## The parts that matter most

@@ -54,6 +54,9 @@ export const de: Messages = {
   "status.want_to_read": "Möchte ich lesen",
   "status.reading": "Lese ich gerade",
   "status.read": "Gelesen",
+  // Not a literal translation of "Did not finish". "Abgebrochen" is what a
+  // German reader says about a book they gave up on, and it fits a pill.
+  "status.did_not_finish": "Abgebrochen",
   "status.all": "Alle",
   "status.mine": "Mein Lesestatus",
 
@@ -88,6 +91,9 @@ export const de: Messages = {
     "Scanne einen Barcode, um dein erstes Buch hinzuzufügen",
   "library.couldNotLoad": "Deine Bibliothek konnte nicht geladen werden.",
   "library.select": "Auswählen",
+  "library.viewLabel": "Darstellung der Bibliothek",
+  "library.viewGrid": "Cover",
+  "library.viewTable": "Tabelle",
   "library.loaned": "Verliehen",
 
   "sort.title_asc": "Titel A bis Z",
@@ -115,6 +121,23 @@ export const de: Messages = {
   "book.noTags": "Noch keine Schlagwörter",
   "book.addTag": "+ Hinzufügen",
   "book.removeTag": "{tag} entfernen",
+
+  // ── Feldnamen ───────────────────────────────────────────────────────────
+  "field.title": "Titel",
+  "field.author": "Autor",
+  "field.publisher": "Verlag",
+  "field.year": "Erscheinungsjahr",
+  "field.language": "Sprache",
+  "field.pageCount": "Seitenzahl",
+  "field.readingStatus": "Lesestatus",
+  "field.rating": "Bewertung",
+  "field.ownership": "Besitz",
+  "field.addedBy": "Hinzugefügt von",
+  "field.addedAt": "Hinzugefügt am",
+
+  // ── Ausklappbereich der Karte ───────────────────────────────────────────
+  "card.details": "Details",
+  "card.detailsFor": "Details zu {title}",
 
   // ── Zusätzliche Angaben ─────────────────────────────────────────────────
   "enrich.button": "Weitere Angaben suchen",
@@ -230,6 +253,9 @@ export const de: Messages = {
   "stats.byCustomTag": "Nach euren Schlagwörtern",
   "stats.finishedByMonth": "Gelesen, nach Monat",
   "stats.finishedTotal": "Bücher gelesen",
+  "stats.pagesByMonth":
+    "Gelesene Seiten, nach Monat (nach Seiten erfasste Bücher)",
+
   "stats.averageRating": "Durchschnitt aus {count} Bewertungen",
   "stats.overTime": "Hinzugefügt im Zeitverlauf",
   "stats.couldNotLoad": "Die Statistik konnte nicht geladen werden.",
@@ -357,6 +383,45 @@ export const de: Messages = {
     "Zu diesem Konto konnte nicht gewechselt werden.",
   "settings.testAccountsPasswordFor": "Passwort für {name}",
 
+  // ── Erinnerungen an überfällige Bücher ──────────────────────────────────
+  "settings.overdue": "Erinnerungen an überfällige Bücher",
+  "settings.overdueEnable": "Erinnerung senden, wenn ein Buch überfällig ist",
+  "settings.overdueHint":
+    "Endpaper schaut stündlich nach und sendet eine Nachricht mit den Ausleihen, die angemahnt werden. Gibt es nichts anzumahnen, wird nichts gesendet.",
+  "settings.overduePrivacyNote":
+    "Private Bücher werden nie mitgesendet. Ein Webhook landet in einem Kanal ohne Konto dahinter, dort wäre ein privater Titel für alle lesbar. Überfällige private Bücher erscheinen weiterhin in der Ausleihliste ihrer Besitzerin oder ihres Besitzers.",
+  "settings.overdueUrl": "Webhook Adresse",
+  "settings.overdueUrlPlaceholder": "https://example.org/hooks/books",
+  "settings.overdueSecret": "Signaturgeheimnis",
+  "settings.overdueSecretPlaceholder":
+    "Neues Geheimnis einfügen, um das gespeicherte zu ersetzen",
+  "settings.overdueSecretShow": "Signaturgeheimnis anzeigen",
+  "settings.overdueSecretHide": "Signaturgeheimnis verbergen",
+  "settings.overdueSecretSet": "Ein Geheimnis ist gespeichert ({preview}).",
+  "settings.overdueSecretMissing":
+    "Kein Geheimnis gespeichert. Mit einem kann die Gegenstelle prüfen, ob die Nachricht wirklich von hier kommt.",
+  "settings.overdueSecretClear": "Gespeichertes Geheimnis entfernen",
+  "settings.overdueDays": "Tage zwischen zwei Erinnerungen zur selben Ausleihe",
+  "settings.overdueDaysHint":
+    "Eine Ausleihe wird erst wieder angemahnt, wenn so viele Tage seit der letzten Erinnerung vergangen sind.",
+  "settings.overdueUrlSave": "Adresse speichern",
+  "settings.overdueSecretSave": "Geheimnis speichern",
+  "settings.overdueDaysSave": "Abstand speichern",
+  "settings.overdueSendNow": "Jetzt senden",
+  "settings.overdueSending": "Wird gesendet...",
+  "settings.overdueSent": "Gesendet, mit {count} Ausleihen.",
+  "settings.overdueNothingSent": "Es wurde nichts gesendet.",
+  "settings.overdueNotSentDisabled":
+    "Es wurde nichts gesendet: Die Erinnerungen sind ausgeschaltet.",
+  "settings.overdueNotSentNoUrl":
+    "Es wurde nichts gesendet: Es ist keine Webhook Adresse gespeichert.",
+  "settings.overdueNotSentNothingDue":
+    "Es wurde nichts gesendet: Es ist nichts überfällig.",
+  "settings.overdueNotSentUnreachable":
+    "Der Webhook war nicht erreichbar, es wurde nichts gesendet. Die Ausleihen werden beim nächsten Versuch erneut angemahnt.",
+  "settings.overdueSkippedPrivate":
+    "{count} private Bücher wurden ausgelassen.",
+
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Goodreads Links anzeigen",
   "settings.goodreadsHint":
@@ -372,6 +437,23 @@ export const de: Messages = {
   "reading.started": "Begonnen am {date}",
   "reading.finished": "Beendet am {date}",
   "reading.finishedThisYear": "Dieses Jahr beendet",
+
+  // ── Lesefortschritt ─────────────────────────────────────────────────────
+  "progress.label": "Lesefortschritt",
+  "progress.none": "Noch nichts erfasst.",
+  "progress.onPage": "Seite {page}",
+  "progress.onPageOf": "Seite {page} von {total}",
+  "progress.atPercent": "{percent}% gelesen",
+  "progress.unit": "Seite oder Prozent erfassen",
+  "progress.unitPage": "Seite",
+  "progress.unitPercent": "Prozent",
+  "progress.pagePlaceholder": "Erreichte Seite",
+  "progress.percentPlaceholder": "Gelesene Prozent",
+  "progress.minutes": "Gelesene Minuten",
+  "progress.minutesPlaceholder": "Minuten",
+  "progress.minutesRead": "{minutes} Min.",
+  "progress.record": "Fortschritt erfassen",
+  "progress.removeEntry": "Diesen Eintrag entfernen",
 
   // ── Reihe ───────────────────────────────────────────────────────────────
   "series.label": "Reihe",
@@ -529,6 +611,19 @@ export const de: Messages = {
     "Alle Bücher, Konten und Cover dieser Bibliothek durch die Sicherung ersetzen? Das lässt sich nicht rückgängig machen.",
   "backup.restoreFailed": "Diese Sicherung konnte nicht wiederhergestellt werden.",
   "backup.restored": "{books} Bücher und {covers} Cover wiederhergestellt.",
+
+  // ── Cover ───────────────────────────────────────────────────────────────
+  "covers.title": "Cover",
+  "covers.explain":
+    "Cover werden einmal geholt und aus dieser Bibliothek ausgeliefert. Ein Buch behält sein Cover also auch dann, wenn der Bilddienst verschwindet, von dem es stammt. Bücher aus einem Import haben noch keines.",
+  "covers.backfill": "Fehlende Cover holen",
+  "covers.backfillFailed": "Die Cover konnten nicht geholt werden.",
+  "covers.result":
+    "{examined} Bücher geprüft und {stored} Cover gespeichert. Für {missing} hat kein Bilddienst eines.",
+  "covers.unreachable":
+    "Für {count} davon gibt es irgendwo ein Cover, das von hier aus nicht geladen werden konnte. Sie behalten ihren Link und werden beim nächsten Durchlauf durch die Bibliothek erneut versucht.",
+  "covers.remaining": "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
+  "covers.allDone": "Jedes Buch, das ein Cover haben kann, hat eines.",
 
   // ── Gespeicherte Ansichten ──────────────────────────────────────────────
   "saved.saveThisView": "Ansicht speichern",

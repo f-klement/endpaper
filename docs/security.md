@@ -168,6 +168,45 @@ than refusing the sign-in.
 while still looking correct in the settings screen, which is why a test pins the stored
 value directly. The 400 raised when the key is missing does not echo it either.
 
+### The overdue digest is the one path that sends catalogue content out unauthenticated
+
+Everything else in this app answers a request that carried a session. The overdue digest
+POSTs to a webhook, on a timer, with no member behind it and no session on the receiving
+end. Two things bound it.
+
+**Private books are excluded**, in the query rather than by a filter afterwards. A webhook
+lands in a channel the whole household reads, so a private title there is readable by
+everyone in it, which is exactly what `is_private` exists to prevent. The digest reports
+`skipped_private` as a count and never names one. The owner is still chased in the app,
+where the overdue view is per member and already scoped.
+
+**Nothing else is in the payload.** One entry per loan: the book's title, the borrower's
+username or free-text name, the due date and the days overdue. No ISBNs, no notes, no
+member ids beyond the borrower's name, no private books at any privacy setting.
+
+The body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a secret
+is set, over the raw bytes that go on the wire. That authenticates the sender to the
+receiver; it is not confidentiality, and an `http://` destination sends book titles in
+clear. **Redirects are not followed**, unlike the metadata lookups, because a 302 from the
+configured host would send the household's book titles somewhere nobody approved.
+
+### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
+
+An admin can point it at an address inside the cluster, and a request will be made to it
+from the app's own network position. That is real, and it is the same class of capability
+as restore, which replaces every account in the database: an admin is already trusted with
+the library.
+
+A blocklist of private ranges is deliberately **not** implemented. It would look like a
+control without being one: DNS resolves after the check, so a name that answers with
+`127.0.0.1` walks straight through it, and the check would still have to be repeated at
+connect time to mean anything. What is enforced instead is the scheme, `http` or `https`
+only, at the point the URL is saved and again before every send.
+
+The failure log names the **host** and never the URL. Slack, Discord and every "post here"
+integration put the credential in the path or the query string, so logging the destination
+is how a secret reaches a log aggregator.
+
 ## Rate limiting
 
 Five things are limited, for three different reasons:
@@ -215,6 +254,66 @@ at all could be stored as `12.png` and then served back from this app's own orig
   denial-of-service, not just an untidy file.
 - A RIFF container that is not WebP (a WAV, say) is refused rather than accepted on the
   strength of its first four bytes.
+
+## Downloaded covers
+
+A cover resolved from an image service is **fetched by the server and stored here**, and
+`cover_url` becomes `/covers/<id>.<ext>`. That is a privacy change as much as a reliability
+one.
+
+**What it stops.** A hotlinked cover made every reader's browser request an image from
+`covers.openlibrary.org`, `portal.dnb.de` or Google, once per book, on every render of the
+grid. Those requests carry the reader's address, and the URL carries the ISBN, so the image
+service learned which books the household owns and roughly when they were being looked at.
+Measured on the running deployment before the storage outage, the covers directory held zero
+files, so this described every cover in the library.
+
+The bytes are untrusted input from a third party, and are treated as such:
+
+- The extension comes from the **magic bytes**, through the same `uploads.sniff_image_extension`
+  an upload goes through. Never from the URL, which has no extension in the DNB's case anyway.
+- Capped at `MAX_UPLOAD_BYTES` and read in chunks, so a service answering with an endless body
+  is refused at the cap rather than filling the container's memory.
+- Written through `uploads.replace_image`, so a failure mid-write cannot leave a book pointing
+  at a file that is no longer there.
+- Served by the authenticated cover route, which applies `visible_to()`. Storing covers does
+  not widen who can see one.
+- Deleted when a book is purged and when a merge discards the loser's, because a cover file
+  outliving its row is not only clutter: SQLite reuses an id, so the next book to take it
+  would inherit somebody else's cover.
+
+`COVER_HOSTS` and the CSP's `img-src` are unchanged: a failed download keeps the remote URL,
+so the policy still has to permit it.
+
+### The server fetches a URL a member chose, so the host is checked
+
+`cover_url` arrives on `BookCreate` from any signed-in member, and registration is open by
+default. Adding a book makes the server fetch it. Without a host test that is an
+authenticated caller choosing which address the pod connects to, being redirected into
+private space and down to plain http, and reading an image-shaped answer back out.
+
+`covers.is_fetchable` is the gate, derived from `COVER_HOSTS`, applied in **both**
+`covers.download` and `covers._check` before every request. `follow_redirects=False` in both
+clients: redirects are walked by hand with a limit of two hops and `is_fetchable` re-run on
+each `Location`, because a client that follows them turns one allowed host into a way to
+reach any other. Refused with it: any scheme but https, any host not on the list, a
+non-default port, and a URL carrying credentials (`https://covers.openlibrary.org@evil.test/`
+reads as a listed host to a person and resolves to `evil.test` in every client).
+
+**The blind version of this was open long before covers were stored.** `covers.resolve` has
+put a supplied URL at the front of its candidate list and called `_check` on it since the
+check existed, and `_check` streamed a GET with redirects followed. Storing the bytes is what
+turned a blind request into a read primitive. Both call sites are fixed; fixing only the
+newer one would have left the older hole open and looked closed.
+
+`is_fetchable` is deliberately **not** `storable`. `storable` governs what a browser may be
+pointed at and must keep admitting any `https://` URL, because a hotlinked cover is the
+fallback when a download fails. What may be rendered and what this server may connect to are
+different questions with different answers.
+
+`POST /api/books/covers/backfill` is scoped to the books the caller can see. It is not
+admin-only, because `visible_to()` has no admin bypass and an admin-only backfill could
+therefore never repair another member's private books. It is rate limited instead.
 
 ## Response headers
 
@@ -364,6 +463,15 @@ Worth knowing before exposing this beyond a private network:
   `/auth/login` has always had.
 - **No audit log.** Deleting a book leaves no trace of who did it, and on a shared shelf
   any member can.
+- **The overdue webhook is not retried with a backoff.** A failed delivery leaves
+  `notified_at` alone and the next hourly tick tries again, so a receiver that is down for
+  a day sees one attempt an hour and no queue. There is no dead-letter and no alert: a
+  webhook that has never worked is silent in exactly the way one that has nothing to send
+  is. `POST /api/loans/overdue/notify` reports the outcome, which is the way to tell.
+- **Reading progress is not hidden by a private book's owner from themselves.** The log is
+  personal and filtered on `user_id`, so nobody sees anybody else's, but a member's own
+  entries on a book they later lose access to (a book somebody else made private) are
+  excluded from `pages_by_month` along with the book. The rows stay.
 - **`/api/users` is readable by every member**, exposing usernames and the admin flag. It
   has to be, for the "Loan to…" picker. Test accounts appear in it like any other account,
   because that is what they are; the list of which accounts are test accounts is admin only.

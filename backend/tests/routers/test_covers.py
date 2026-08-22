@@ -94,9 +94,23 @@ class TestServing:
         assert "private" in cache_control
         assert "public" not in cache_control
 
-    def test_a_missing_file_is_404(self, client, admin, covers_dir):
+    def test_a_book_with_no_stored_cover_is_404(self, client, admin, covers_dir):
+        """The same answer a missing file used to give, and for the same reason:
+        a 403 would confirm the id exists."""
         book_id = _add_book(client, admin, title="Dune", is_private=False)
         response = client.get(f"/covers/{book_id}.png", headers=admin["headers"])
+        assert response.status_code == 404
+
+    def test_an_extension_the_book_was_not_stored_under_is_404(
+        self, client, admin, covers_dir
+    ):
+        """The filename is the cache buster, so a book re-covered in another
+        format gets a new URL and the old one stops answering."""
+        book_id = _add_book(client, admin, title="Dune", is_private=False)
+        _upload_cover(client, admin, book_id)
+
+        response = client.get(f"/covers/{book_id}.jpg", headers=admin["headers"])
+
         assert response.status_code == 404
 
     def test_a_book_that_does_not_exist_is_404(self, client, admin, covers_dir):
@@ -359,6 +373,7 @@ class TestASwitchedSessionInProxyMode:
 class TestTheLoginBackground:
     """It lives in the covers directory but is not a cover.
 
+
     The login page renders before anyone holds a token, so making this
     authenticated turns the one screen every visitor sees into a broken image.
     Caught in review after the covers route first landed, hence the tests.
@@ -389,6 +404,13 @@ class TestTheLoginBackground:
         wrong for a cover."""
         url = self._set(client, admin)
         assert "public" in client.get(url).headers["cache-control"]
+
+    def test_it_is_written_where_the_route_looks_for_it(self, client, admin, covers_dir):
+        """Two modules agree on this name by writing it twice, so a test holds
+        them together."""
+        self._set(client, admin)
+
+        assert list(COVERS_DIR.glob("login_bg.*")) != []
 
     def test_an_unset_background_is_404_not_a_page(self, client, covers_dir):
         """Falling through to the SPA would answer an <img> with index.html and

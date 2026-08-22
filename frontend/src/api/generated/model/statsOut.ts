@@ -22,6 +22,7 @@ export interface StatsOut {
   by_month: MonthStat[];
   by_tag: TagStat[];
   finished_by_month?: MonthStat[];
+  pages_by_month?: MonthStat[];
   per_user: PerUserStat[];
   /** @minimum 0 */
   rated_count?: number;

@@ -192,6 +192,14 @@ def import_csv(
             continue
 
         if book is None and create_missing:
+            # No cover is fetched here, and that is deliberate. Every other add
+            # path stores one on the way in (`routers/books._store_cover`); this
+            # one runs over thousands of rows inside a single request, and a
+            # fetch per row would be thousands of round trips holding the
+            # request open until a proxy gives up on it. The books arrive
+            # without covers and `POST /api/books/covers/backfill` fills them
+            # in afterwards, concurrently and in bounded batches, which is the
+            # same work without a request waiting on it.
             book = Book(
                 title=row.title,
                 author=row.author,

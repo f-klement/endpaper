@@ -316,12 +316,13 @@ class TestTheNestedBook:
             event.remove(engine, "before_cursor_execute", record)
 
         selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
-        # Constant in the number of loans, not linear: the count, the page, the
-        # tag load, the two per-request book queries, and the caller's account.
-        # Nine rather than eight since serialisation.books_to_out repopulates
-        # the tag collection for the whole page, which replaced one lazy load
-        # per book with one query for all of them.
-        assert len(selects) <= 9, f"{len(selects)} selects for 10 loans"
+        # Constant in the number of loans, not linear. What makes up the
+        # constant is stated once, in `serialisation.books_to_out`, and
+        # deliberately not enumerated here: this repository has restated that
+        # breakdown wrongly twice, both times by editing prose rather than
+        # measuring. The number this test exists to catch is a linear one, and
+        # it was 53 for 25 loans.
+        assert len(selects) <= 10, f"{len(selects)} selects for 10 loans"
 
 
 class TestOneOpenLoanPerBook:
@@ -483,3 +484,29 @@ class TestLendingToSomeoneWithoutAnAccount:
             headers=admin["headers"],
         )
         assert items(client.get("/api/loans", headers=member["headers"])) == []
+
+
+class TestOverdueNotify:
+    """`POST /api/loans/overdue/notify`: the digest, run by hand.
+
+    The behaviour it drives is pinned in `tests/test_notifications.py`. What is
+    here is the route: who may call it, and that "overdue" is not read as a
+    loan id.
+    """
+
+    def test_a_member_may_not_run_it(self, client, member):
+        assert client.post("/api/loans/overdue/notify", headers=member["headers"]).status_code == 403
+
+    def test_it_needs_a_token(self, client):
+        assert client.post("/api/loans/overdue/notify").status_code == 401
+
+    def test_it_reports_that_nothing_is_configured(self, client, admin):
+        body = client.post("/api/loans/overdue/notify", headers=admin["headers"]).json()
+        assert body["sent"] is False
+        assert body["loans"] == 0
+
+    def test_the_literal_path_is_not_read_as_a_loan_id(self, client, admin):
+        """The route-order rule. A 422 here would mean `overdue` had been
+        matched against `{loan_id}`."""
+        res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
+        assert res.status_code == 200

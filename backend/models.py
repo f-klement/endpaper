@@ -243,6 +243,11 @@ class Book(Base):
     user_books: Mapped[list[UserBook]] = relationship(
         "UserBook", back_populates="book", cascade="all, delete-orphan"
     )
+    # Cascaded like the rest, so purging a book from the trash takes its
+    # progress with it rather than leaving rows pointing at nothing.
+    progress: Mapped[list[ReadingProgress]] = relationship(
+        "ReadingProgress", back_populates="book", cascade="all, delete-orphan"
+    )
     loans: Mapped[list[Loan]] = relationship("Loan", back_populates="book", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship("Tag", secondary=book_tags)
     notes: Mapped[list[Note]] = relationship("Note", back_populates="book", cascade="all, delete-orphan")
@@ -324,6 +329,79 @@ class UserBook(Base):
     book: Mapped[Book] = relationship("Book", back_populates="user_books")
 
 
+class ReadingProgress(Base):
+    """One moment a member recorded where they were in one book.
+
+    **Append-only.** A row is a fact about the past, so nothing updates one;
+    recording a new position inserts. That is the difference between this and a
+    `current_page` column, which answers "where am I" and destroys the answer
+    to "how much did I read in March" every time it is written.
+
+    It is also why a status change does not touch this table, while
+    `started_at` and `finished_at` are cleared on the way back to UNREAD. Those
+    two are *derived* from the current status and would otherwise claim
+    something false about now; these rows claim nothing about now, and a re-read
+    is a real thing whose earlier passes are worth keeping.
+    """
+
+    __tablename__ = "reading_progress"
+
+    # Two constraints and one index, all three load bearing.
+    #
+    # The unit rule is a CHECK rather than only a schema validator, for the
+    # same reason `ck_loans_one_borrower` is: a restore inserts through Core
+    # and never sees a Pydantic model. Exactly one unit per row means no
+    # tie-break rule is needed for a row carrying both, and no such rule can
+    # therefore be got wrong. An audiobook has no pages, and neither has a book
+    # whose `page_count` no provider supplied.
+    #
+    # The bounds clause exists because `page = 0` and `percent = 140` are both
+    # storable otherwise, and both make the derived percent nonsense.
+    #
+    # The index matches the only question asked of this table: this member,
+    # this book, in order.
+    __table_args__ = (
+        Index("ix_reading_progress_user_book_time", "user_id", "book_id", "recorded_at"),
+        CheckConstraint(
+            "(page IS NULL) <> (percent IS NULL)",
+            name="ck_reading_progress_one_unit",
+        ),
+        CheckConstraint(
+            "(page IS NULL OR page > 0) "
+            "AND (percent IS NULL OR (percent >= 0 AND percent <= 100)) "
+            "AND (minutes IS NULL OR minutes > 0)",
+            name="ck_reading_progress_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False, index=True
+    )
+    #: When the position was recorded. **Deliberately not indexed on its own.**
+    #: Nothing filters or orders on it alone: the history reads it under
+    #: `(user_id, book_id)` and the per-month statistic reads it under
+    #: `user_id`, so the composite above serves both and a second index would
+    #: be a write cost on an append-only table for no read.
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    #: The page reached, not the pages read. A position can be reconciled with
+    #: the book; a delta cannot, so a mistyped delta is uncorrectable and a
+    #: re-read looks like twice the reading.
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: 0 to 100, for anything with no page count. Never stored beside a page:
+    #: the displayed percent is derived from `page / book.page_count` when that
+    #: is known, so storing both would be the same fact twice.
+    percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: How long this sitting was. Optional, and nothing derives from it.
+    minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    user: Mapped[User] = relationship("User")
+    book: Mapped[Book] = relationship("Book", back_populates="progress")
+
+
 class Loan(Base):
     __tablename__ = "loans"
 
@@ -385,6 +463,17 @@ class Loan(Base):
     # something other than a person remembering, which is the only reason to
     # record a loan in the first place.
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # When an overdue reminder last went out for this loan, or null if none
+    # ever has. The whole state the digest keeps, and it is what makes the
+    # difference between the two ways this feature goes wrong: without it the
+    # digest either sends once and forgets a loan that is still out, or repeats
+    # the same list into the household's channel every single run.
+    #
+    # Stamped only on a delivery that succeeded. A failure leaves it alone so
+    # the next tick retries, which is why it is a timestamp on the loan rather
+    # than a "sent" flag set before the request.
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     book: Mapped[Book] = relationship("Book", back_populates="loans")
     loaned_to: Mapped[User | None] = relationship(

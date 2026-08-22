@@ -11,6 +11,7 @@ const STATUS_OPTIONS: {
   { value: ReadStatus.want_to_read, label: "status.want_to_read", icon: "bookmark" },
   { value: ReadStatus.reading, label: "status.reading", icon: "book" },
   { value: ReadStatus.read, label: "status.read", icon: "check" },
+  { value: ReadStatus.did_not_finish, label: "status.did_not_finish", icon: "ban" },
 ];
 
 interface StatusPickerProps {
@@ -31,7 +32,10 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
       <p className="text-sm font-semibold text-paper-700 mb-2 dark:text-paper-200">
         {t("status.mine")}
       </p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {/* Five options, so the wide row is a five column grid. At four it wrapped
+          the fifth onto a line of its own, which read as a different kind of
+          control rather than the last of a set. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {STATUS_OPTIONS.map((option) => (
           <button
             key={option.value}

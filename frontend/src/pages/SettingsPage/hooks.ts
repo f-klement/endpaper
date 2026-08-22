@@ -31,9 +31,13 @@ import {
   useImportCsv,
   usePreviewImport,
 } from "../../api/generated/endpoints/imports/imports";
+import { useBackfillCovers } from "../../api/generated/endpoints/books/books";
+import { useNotifyOverdue } from "../../api/generated/endpoints/loans/loans";
 import type {
+  CoverBackfillOut,
   ImportResultOut,
   ImportPreviewOut,
+  OverdueNotifyResult,
   SettingsOut,
   SettingsUpdate,
   Token,
@@ -149,6 +153,48 @@ export function useLibraryImport() {
   };
 }
 
+/**
+ * Fetching the covers of books that have none.
+ *
+ * This is the repair for a library that already exists. Storing covers as
+ * books are added only ever helps books added afterwards, and the ones that
+ * need it most arrived through a CSV import, which never resolved a cover.
+ *
+ * The run is bounded server side, so the result says how many are left and the
+ * reader presses again. Deliberately not looped here: an automatic retry would
+ * hammer two free public image services from a button nobody is watching.
+ *
+ * **The cursor is what lets pressing again make progress.** The server picks
+ * its batch by book id, and a book it could not fix is still a candidate next
+ * time, so without carrying `next_after_id` back the same unfixable hundred
+ * would be retried for ever and the counter would never move. It comes back as
+ * 0 at the end of the library, which starts the next press over and re-tries
+ * the failures, since a service that was down may not be.
+ */
+export function useCoverBackfill() {
+  const queryClient = useQueryClient();
+  const [result, setResult] = useState<CoverBackfillOut | null>(null);
+  const [cursor, setCursor] = useState(0);
+
+  const backfill = useBackfillCovers({
+    mutation: {
+      onSuccess: (data: CoverBackfillOut) => {
+        setResult(data);
+        setCursor(data.next_after_id);
+        // Every list and detail view renders a cover, so all of them are stale.
+        void queryClient.invalidateQueries();
+      },
+    },
+  });
+
+  return {
+    result,
+    // `mutate`, not `mutateAsync`: the failure is reported through `error`.
+    run: () => backfill.mutate({ params: { after_id: cursor } }),
+    isRunning: backfill.isPending,
+    error: backfill.error,
+  };
+}
 
 /**
  * Downloading the whole library, and putting one back.
@@ -195,7 +241,6 @@ export function useBackup() {
     restored: restore.data ?? null,
   };
 }
-
 
 /**
  * The accounts an admin created for testing, and the making of a new one.
@@ -263,5 +308,36 @@ export function useSwitchToTestAccount(
       mutation.mutate({ data: { username, password } }),
     isSwitching: mutation.isPending,
     switchError: mutation.error,
+  };
+}
+
+/**
+ * Running the overdue digest by hand.
+ *
+ * The whole reason the endpoint exists: a webhook that only fires on an hourly
+ * timer is a webhook nobody can tell they configured correctly. It reports
+ * what it sent rather than "done", because "nothing is overdue" and "the
+ * receiver refused it" are different answers and both look like silence.
+ *
+ * The result is held here rather than read from `mutation.data` at the call
+ * site so the count survives the button being pressed again.
+ */
+export function useOverdueDigest() {
+  const [result, setResult] = useState<OverdueNotifyResult | null>(null);
+
+  const mutation = useNotifyOverdue({
+    mutation: { onSuccess: (data: OverdueNotifyResult) => setResult(data) },
+  });
+
+  return {
+    result,
+    // `mutate`, not `mutateAsync`: nothing awaits it, and a rejected promise
+    // nobody holds is an unhandled rejection. The failure renders from `error`.
+    send: () => {
+      setResult(null);
+      mutation.mutate();
+    },
+    isSending: mutation.isPending,
+    error: mutation.error,
   };
 }

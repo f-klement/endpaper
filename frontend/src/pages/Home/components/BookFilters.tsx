@@ -1,5 +1,6 @@
 import type { LocationOut, TagOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
+import type { LibraryView } from "../../../lib/libraryView";
 import { TagPicker } from "../../components";
 import type { BookFilters as Filters } from "../types";
 import {
@@ -7,6 +8,7 @@ import {
   OWNERSHIP_FILTERS,
   SORT_OPTIONS,
   STATUS_FILTERS,
+  VIEW_OPTIONS,
 } from "../types";
 import { Icon } from "../../../components";
 
@@ -24,6 +26,8 @@ interface BookFiltersProps {
   onSortChange: (sort: Filters["sort"]) => void;
   onToggleTag: (tagId: number) => void;
   onClearTags: () => void;
+  view: LibraryView;
+  onViewChange: (view: LibraryView) => void;
 }
 
 /** The status pills, sort select and collapsible tag panel. Presentational. */
@@ -41,6 +45,8 @@ export default function BookFilters({
   onSortChange,
   onToggleTag,
   onClearTags,
+  view,
+  onViewChange,
 }: BookFiltersProps) {
   const { t } = useTranslation();
   const activeTagCount = filters.tagIds.length;
@@ -79,6 +85,31 @@ export default function BookFilters({
             </option>
           ))}
         </select>
+
+        {/* Beside the sort, because both answer "how am I looking at this",
+            rather than up with the filters, which answer "at what". */}
+        <div
+          role="group"
+          aria-label={t("library.viewLabel")}
+          className="shrink-0 flex rounded-lg border border-paper-200 dark:border-paper-700"
+        >
+          {VIEW_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onViewChange(option.value)}
+              aria-pressed={view === option.value}
+              className={`px-2.5 py-1 text-sm transition-colors first:rounded-l-md last:rounded-r-md ${
+                view === option.value
+                  ? "bg-accent-fill text-on-accent"
+                  : "bg-paper-0 text-paper-600 hover:text-accent-700 "
+                    + "dark:bg-paper-900 dark:text-paper-300 dark:hover:text-accent-300"
+              }`}
+            >
+              {t(option.label)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* A second row rather than more pills in the first: ownership and

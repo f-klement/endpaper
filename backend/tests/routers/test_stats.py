@@ -199,3 +199,75 @@ class TestReadingStats:
         )
 
         assert self.stats(client, member["headers"])["average_rating"] is None
+
+
+class TestPagesByMonth:
+    """Pages read per month, from the deltas between recorded positions.
+
+    Page-tracked books only. A percent cannot be added to a page count, so an
+    audiobook contributes nothing here rather than a converted figure that
+    would add up with the others while meaning something else.
+    """
+
+    def record(self, client, headers, book_id, **payload):
+        res = client.post(f"/api/books/{book_id}/progress", json=payload, headers=headers)
+        assert res.status_code == 201, res.text
+
+    def test_no_progress_means_no_series(self, admin, make_book, stats):
+        make_book(admin["headers"])
+        assert stats()["pages_by_month"] == []
+
+    def test_the_first_entry_counts_in_full(self, client, admin, make_book, stats):
+        """Reaching page 80 means eighty pages were read."""
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], page=80)
+
+        assert [row["count"] for row in stats()["pages_by_month"]] == [80]
+
+    def test_later_entries_count_the_difference(self, client, admin, make_book, stats):
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], page=80)
+        self.record(client, admin["headers"], book["id"], page=140)
+
+        assert [row["count"] for row in stats()["pages_by_month"]] == [140]
+
+    def test_a_backwards_step_counts_nothing(self, client, admin, make_book, stats):
+        """A correction of a typo must not be able to inflate the figure."""
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], page=400)
+        self.record(client, admin["headers"], book["id"], page=40)
+
+        assert [row["count"] for row in stats()["pages_by_month"]] == [400]
+
+    def test_two_books_are_counted_separately(self, client, admin, make_book, stats):
+        """The previous row means the previous entry on *this* book."""
+        first = make_book(admin["headers"], title="A")
+        second = make_book(admin["headers"], title="B")
+        self.record(client, admin["headers"], first["id"], page=100)
+        self.record(client, admin["headers"], second["id"], page=30)
+
+        assert [row["count"] for row in stats()["pages_by_month"]] == [130]
+
+    def test_a_percent_entry_is_excluded(self, client, admin, make_book, stats):
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], percent=40)
+
+        assert stats()["pages_by_month"] == []
+
+    def test_it_is_personal(self, client, admin, member, make_book, stats):
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], page=80)
+
+        assert stats(member["headers"])["pages_by_month"] == []
+
+    def test_a_trashed_book_drops_out(self, client, admin, make_book, stats):
+        """`visible_to` carries the trashed check as well as the privacy one,
+        and this aggregation applies it like every other. The rows are the
+        caller's own, so nothing but the predicate can exclude them."""
+        book = make_book(admin["headers"])
+        self.record(client, admin["headers"], book["id"], page=80)
+        assert [row["count"] for row in stats()["pages_by_month"]] == [80]
+
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+
+        assert stats()["pages_by_month"] == []

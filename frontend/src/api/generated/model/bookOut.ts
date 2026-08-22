@@ -31,6 +31,9 @@ export interface BookOut {
   language?: string | null;
   location?: string | null;
   my_finished_at?: string | null;
+  my_progress_page?: number | null;
+  my_progress_percent?: number | null;
+  my_progress_recorded_at?: string | null;
   my_rating?: number | null;
   my_started_at?: string | null;
   my_status?: ReadStatus;

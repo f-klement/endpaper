@@ -70,6 +70,11 @@ def library(client, admin, member, make_book, db, covers_dir):
         files={"file": ("c.jpg", JPEG_BYTES, "image/jpeg")},
         headers=admin["headers"],
     )
+    client.post(
+        f"/api/books/{book['id']}/progress",
+        json={"page": 64, "minutes": 30},
+        headers=admin["headers"],
+    )
     return {"book": book, "private": private, "tag_id": tag.id}
 
 
@@ -93,8 +98,8 @@ class TestTheArchive:
         data = client.get("/api/backup", headers=admin["headers"]).content
         tables = read_manifest(data)["tables"]
 
-        assert {"users", "tags", "books", "user_books", "loans", "notes",
-                "settings", "book_tags"} <= set(tables)
+        assert {"users", "tags", "books", "user_books", "reading_progress",
+                "loans", "notes", "settings", "book_tags"} <= set(tables)
 
     def test_holds_the_book_tag_links(self, client, admin, library):
         """No model of its own, so it is the one that gets forgotten.
@@ -108,7 +113,7 @@ class TestTheArchive:
     def test_holds_the_cover_files(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
         names = zipfile.ZipFile(BytesIO(data)).namelist()
-        assert any(name.startswith("covers/") for name in names)
+        assert f"covers/{library['book']['id']}.jpg" in names
 
     def test_holds_another_members_private_book(self, client, admin, library):
         """A backup is not filtered by visibility.
@@ -230,6 +235,31 @@ class TestRoundTrip:
 
         assert res.json()["covers"] == 1
         assert list(covers_dir.glob("*.jpg"))
+
+    def test_the_login_background_comes_back_too(
+        self, client, admin, library, covers_dir
+    ):
+        """It lives in the same directory and belongs to no book. Losing it on a
+        restore would leave the one screen every visitor sees looking wrong."""
+        from tests.helpers import PNG_BYTES
+
+        client.post(
+            "/api/settings/login-image",
+            files={"file": ("bg.png", PNG_BYTES, "image/png")},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        for image in covers_dir.glob("login_bg.*"):
+            image.unlink()
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert list(covers_dir.glob("login_bg.*"))
 
     def test_restoring_replaces_rather_than_merges(self, client, admin, library, db):
         """Merging produces a library neither the backup nor the original."""
@@ -690,3 +720,72 @@ class TestRestoreEndsLiveSessions:
                 headers=admin["headers"],
             )
         assert client.get("/auth/me", headers=admin["headers"]).status_code == 401
+
+
+class TestReadingProgressSurvives:
+    """The newest table in the archive, and the one an older archive lacks."""
+
+    def test_a_round_trip_returns_the_entries(self, client, admin, library, db):
+        from models import ReadingProgress
+
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        db.query(ReadingProgress).delete()
+        db.commit()
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert [row.page for row in db.query(ReadingProgress).all()] == [64]
+
+    def test_the_report_counts_them(self, client, admin, library):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        body = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        ).json()
+
+        assert body["reading_progress"] == 1
+        assert body["user_books"] >= 1
+
+    def test_an_archive_written_before_the_table_existed_still_restores(
+        self, client, admin, library
+    ):
+        """`FORMAT_VERSION` promises an older archive stays restorable. Making
+        every entry in `_TABLES` mandatory would have refused every backup the
+        household already holds the moment a table was added.
+        """
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        del manifest["tables"]["reading_progress"]
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["reading_progress"] == 0
+
+    def test_a_missing_baseline_table_is_still_refused(self, client, admin, library):
+        """The optional-table rule must not turn the guard off."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        del manifest["tables"]["books"]
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400
+        assert "books" in res.json()["detail"]

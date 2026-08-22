@@ -14,12 +14,15 @@ book it very likely has, so discarding a cover on that would lose it to a blip.
 
 import ast
 from pathlib import Path
+from time import monotonic
 
 import httpx
 import pytest
 import respx
 
 import covers
+from tests.conftest import REAL_RESOLVE_AND_STORE
+from tests.helpers import JPEG_BYTES, PNG_BYTES, WEBP_BYTES
 
 OPEN_LIBRARY = "https://covers.openlibrary.org/"
 DNB = "https://portal.dnb.de/opac/mvb/cover"
@@ -408,3 +411,370 @@ class TestNoOtherModuleBuildsACoverUrl:
     def test_it_reads_the_backend_at_all(self):
         # A glob that matched nothing would make both tests above pass forever.
         assert len(self.modules()) > 20
+
+
+class TestOutcomesAreCounted:
+    """Covers failed silently once: the only trace this module left was a
+    WARNING for a URL it refused, so five different failures looked identical
+    from outside. Every ending is counted now, and the counts are what a
+    backfill reports."""
+
+    async def test_a_verified_cover_counts_as_verified(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            await covers.resolve(ENGLISH)
+        assert covers.outcome_counts()[covers.CoverOutcome.VERIFIED.value] == 1
+
+    async def test_a_blip_counts_as_unverified(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(503))
+            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(503))
+            await covers.resolve(ENGLISH)
+        assert covers.outcome_counts()[covers.CoverOutcome.UNVERIFIED.value] == 1
+
+    async def test_two_404s_count_as_no_candidate(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            assert await covers.resolve(ENGLISH) is None
+        assert covers.outcome_counts()[covers.CoverOutcome.NO_CANDIDATE.value] == 1
+
+
+class TestDownloading:
+    """A hotlinked cover depends on the image service, the URL not rotting, the
+    pod's egress, every reader's browser and the CSP. Four of the five are
+    outside this app, so the bytes are fetched once and served from here."""
+
+    def test_it_returns_the_bytes_and_the_sniffed_extension(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+        assert fetched is not None
+        assert fetched[1] == "jpg"
+
+    def test_the_extension_comes_from_the_bytes_not_the_url(self):
+        """The URL is a third party's. `portal.dnb.de/opac/mvb/cover?isbn=` has
+        no extension in it at all, and a `.jpg` in a path is not evidence."""
+        png = httpx.Response(
+            200, content=PNG_BYTES, headers={"content-type": "image/jpeg"}
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=png)
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+        assert fetched is not None
+        assert fetched[1] == "png"
+
+    def test_a_body_over_the_cap_is_refused(self):
+        oversized = httpx.Response(
+            200,
+            content=b"\xff\xd8\xff" + b"\x00" * (covers.MAX_COVER_BYTES + 1),
+            headers={"content-type": "image/jpeg"},
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=oversized)
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_something_that_is_not_an_image_is_refused(self):
+        """A 200 carrying an error page is how both services report a bad day."""
+        page = httpx.Response(
+            200, content=b"<html>no cover</html>", headers={"content-type": "text/html"}
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=page)
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_a_refused_connection_is_not_an_exception(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                side_effect=httpx.ConnectError("no route")
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+
+class TestStoring:
+    def test_it_writes_the_file_and_returns_a_local_url(self, covers_dir):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            stored = covers.store(7, covers.open_library_url(ENGLISH))
+
+        assert stored == "/covers/7.jpg"
+        assert (covers_dir / "7.jpg").read_bytes().startswith(b"\xff\xd8\xff")
+        assert covers.outcome_counts()[covers.CoverOutcome.DOWNLOADED.value] == 1
+
+    def test_a_failed_download_stores_nothing_and_says_so(self, covers_dir):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            assert covers.store(7, covers.open_library_url(ENGLISH)) is None
+
+        assert list(covers_dir.iterdir()) == []
+        assert covers.outcome_counts()[covers.CoverOutcome.DOWNLOAD_FAILED.value] == 1
+
+    def test_it_replaces_a_cover_stored_in_another_format(self, covers_dir):
+        """Two formats of the same book both existing means which one is served
+        depends on lookup order. `uploads.replace_image` owns that rule."""
+        (covers_dir / "7.png").write_bytes(PNG_BYTES)
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            covers.store(7, covers.open_library_url(ENGLISH))
+
+        assert not (covers_dir / "7.png").exists()
+        assert (covers_dir / "7.jpg").exists()
+
+
+class TestWhatIsOnDisk:
+    """Files are the one thing a database row does not carry with it, so this is
+    what the rest of the app asks instead of trusting `cover_url`."""
+
+    def test_it_finds_a_stored_cover_in_any_format(self, covers_dir):
+        (covers_dir / "7.webp").write_bytes(WEBP_BYTES)
+        assert covers.stored_path(7) is not None
+        assert covers.local_url_for(7) == "/covers/7.webp"
+
+    def test_a_book_with_no_file_has_none(self, covers_dir):
+        assert covers.stored_path(7) is None
+        assert covers.local_url_for(7) is None
+
+    def test_it_lists_every_book_id_with_a_file(self, covers_dir):
+        (covers_dir / "7.jpg").write_bytes(JPEG_BYTES)
+        (covers_dir / "9.png").write_bytes(PNG_BYTES)
+
+        assert covers.stored_ids() == {7, 9}
+
+    def test_the_login_background_is_not_a_book(self, covers_dir):
+        """It lives in this directory and belongs to no book, so a scan that
+        counted it would report a cover for whichever id it parsed to."""
+        (covers_dir / "login_bg.png").write_bytes(PNG_BYTES)
+
+        assert covers.stored_ids() == set()
+
+    def test_forgetting_removes_every_format(self, covers_dir):
+        """SQLite reuses an id once the highest row goes, so a leftover file is
+        the next book's cover."""
+        (covers_dir / "7.jpg").write_bytes(JPEG_BYTES)
+        (covers_dir / "7.png").write_bytes(PNG_BYTES)
+
+        covers.forget(7)
+
+        assert covers.stored_ids() == set()
+
+    def test_adopting_moves_a_cover_to_another_book(self, covers_dir):
+        """A merge lets the keeper absorb the loser's `cover_url`, which names a
+        file about to be deleted with the loser."""
+        (covers_dir / "9.jpg").write_bytes(JPEG_BYTES)
+
+        assert covers.adopt(4, 9) == "/covers/4.jpg"
+        assert covers.stored_ids() == {4}
+
+    def test_adopting_a_cover_that_is_not_there_answers_none(self, covers_dir):
+        assert covers.adopt(4, 9) is None
+
+
+class TestResolveAndStore:
+    """The whole add path in one call. The suite stubs this out by default, so
+    these put the real one back: see `conftest.offline_covers`."""
+
+    @pytest.fixture(autouse=True)
+    def real(self, monkeypatch):
+        monkeypatch.setattr(covers, "resolve_and_store", REAL_RESOLVE_AND_STORE)
+
+    def test_a_supplied_url_is_downloaded_and_replaced_by_the_local_one(self, covers_dir):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            result = covers.resolve_and_store(3, ENGLISH, covers.open_library_url(ENGLISH))
+        assert result == "/covers/3.jpg"
+
+    def test_a_dead_download_falls_back_to_the_remote_url(self, covers_dir):
+        """Degrading to today's behaviour, not to no cover: the URL may well
+        work from the reader's browser even when it does not from the pod."""
+        supplied = covers.open_library_url(ENGLISH)
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                side_effect=httpx.ConnectError("no route")
+            )
+            assert covers.resolve_and_store(3, ENGLISH, supplied) == supplied
+
+    def test_with_no_supplied_url_it_asks_the_image_services(self, covers_dir):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            assert covers.resolve_and_store(3, ENGLISH, None) == "/covers/3.jpg"
+
+    def test_a_spent_budget_keeps_the_url_without_downloading_it(self, covers_dir):
+        """The interactive path has a person waiting. Past the budget the best
+        candidate is stored unverified and the bytes are left to the backfill,
+        which has nothing waiting on it."""
+        supplied = covers.open_library_url(ENGLISH)
+        with respx.mock:
+            result = covers.resolve_and_store(3, ENGLISH, supplied, budget=0)
+
+        assert result == supplied
+        assert list(covers_dir.iterdir()) == []
+
+    def test_without_a_budget_it_still_downloads(self, covers_dir):
+        """The backfill passes none, so nothing about the ceiling reaches it."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            assert covers.resolve_and_store(3, ENGLISH, None) == "/covers/3.jpg"
+
+    def test_a_book_with_no_isbn_and_no_url_gets_nothing(self, covers_dir):
+        with respx.mock:
+            assert covers.resolve_and_store(3, None, None) is None
+
+    def test_a_local_url_with_no_file_behind_it_re_resolves(self, covers_dir):
+        """The column and the directory can drift. Trusting the column here is
+        what would let a book claim a cover it does not have, for good."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            assert covers.resolve_and_store(3, ENGLISH, "/covers/3.jpg") == "/covers/3.jpg"
+
+        assert (covers_dir / "3.jpg").exists()
+
+
+class TestTheInteractiveBudget:
+    """Adding one book was up to three candidate checks and a download at
+    `TIMEOUT_SECONDS` each: 24 seconds when both image services blackhole rather
+    than refuse. The import path avoids that by deferring to the backfill, which
+    the interactive path cannot do, so it gets a ceiling instead."""
+
+    def test_a_spent_budget_stops_the_resolve_asking_anything(self):
+        with respx.mock:
+            assert await_resolve_with_deadline(ENGLISH, 0.0) is None
+
+    def test_each_request_is_capped_at_what_is_left(self):
+        """Otherwise the real ceiling is the budget plus one whole timeout."""
+        assert covers._time_left(None) is None
+        left = covers._time_left(monotonic() + 1.5)
+        assert left is not None and 0 < left <= 1.5
+
+    def test_the_budget_is_shorter_than_a_single_timeout_chain(self):
+        # Three checks plus a download at six seconds each is the 24 this bounds.
+        assert covers.INTERACTIVE_BUDGET_SECONDS < covers.TIMEOUT_SECONDS
+
+
+class TestWhatThisServerMayConnectTo:
+    """`is_renderable` says what a browser may load; this says what the
+    application itself may open a connection to. Different question, different
+    answer, and conflating them is the hole.
+
+    `cover_url` arrives on `BookCreate` from a member, so without this an
+    authenticated caller chooses which host the server connects to. The blind
+    half of that predates covers being stored: `resolve` has put a supplied URL
+    at the front of its candidate list and called `_check` on it since the check
+    existed. Storing the bytes turned a blind request into a read primitive.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://covers.openlibrary.org/b/isbn/x-L.jpg",
+            "https://portal.dnb.de/opac/mvb/cover?isbn=x",
+            "https://books.google.com/books/content?id=x",
+            "https://lh3.googleusercontent.com/x",
+        ],
+    )
+    def test_the_image_services_are_fetchable(self, url):
+        assert covers.is_fetchable(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://evil.test/x.jpg",
+            "http://covers.openlibrary.org/b/isbn/x-L.jpg",
+            "https://covers.openlibrary.org:8080/x.jpg",
+            # Reads as a listed host to a person and resolves to evil.test in
+            # every client.
+            "https://covers.openlibrary.org@evil.test/x.jpg",
+            # A CSP wildcard means any subdomain, not the bare domain.
+            "https://googleusercontent.com/x",
+            "https://notcovers.openlibrary.org.evil.test/x",
+            "/covers/1.jpg",
+            "",
+            # A URL that cannot be parsed. `urlsplit` raises on an unterminated
+            # IPv6 literal and `.port` raises on a port that is not a number or
+            # is out of range, and both call sites test this outside their own
+            # exception handling. One stored URL of this shape 500ed the
+            # backfill for every member, permanently.
+            "https://covers.openlibrary.org:99999/x",
+            "https://covers.openlibrary.org:abc/x",
+            "https://[::1/x",
+        ],
+    )
+    def test_everything_else_is_not(self, url):
+        assert covers.is_fetchable(url) is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://books.google.com:99999/x.jpg",
+            "https://books.google.com:abc/x.jpg",
+            "https://[::1/x.jpg",
+        ],
+    )
+    def test_an_unparseable_url_is_refused_rather_than_raising(self, url):
+        """`storable` admits these: it only tests the `https://` prefix. So they
+        reach the fetch, and a raise there is a stored, permanent denial of
+        service rather than one bad request."""
+        assert covers.is_fetchable(url) is False
+        assert covers.download(url) is None
+
+    def test_a_renderable_url_is_not_automatically_fetchable(self):
+        """`storable` has to keep admitting any https URL: that is the hotlink
+        fallback when a download fails."""
+        assert covers.storable("https://evil.test/x.jpg") == "https://evil.test/x.jpg"
+        assert covers.is_fetchable("https://evil.test/x.jpg") is False
+
+
+class TestFetchesAreRefusedBeforeTheyHappen:
+    def test_an_unlisted_host_is_never_requested(self):
+        """respx fails the test on any unmocked request, and nothing is mocked."""
+        with respx.mock:
+            assert covers.download("https://evil.test/x.jpg") is None
+
+    def test_a_supplied_url_on_an_unlisted_host_is_not_checked_either(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(404))
+            mock.get(url__startswith=DNB).mock(return_value=httpx.Response(404))
+            assert await_resolve(ENGLISH, "https://evil.test/x.jpg") is None
+
+    def test_a_redirect_off_the_list_is_refused_rather_than_followed(self):
+        """Following it is what turns one allowed host into a way to reach any
+        other, including private address space and a scheme downgrade."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(302, headers={"location": "http://10.0.0.1/x.jpg"})
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_a_redirect_within_the_list_is_followed(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(302, headers={"location": DNB + "?isbn=x"})
+            )
+            mock.get(url__startswith=DNB).mock(return_value=image())
+
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+
+        assert fetched is not None
+
+    def test_a_redirect_loop_gives_up(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    302, headers={"location": covers.open_library_url(ENGLISH)}
+                )
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+
+def await_resolve(isbn: str, supplied: str) -> str | None:
+    """`resolve` from a sync test, on its own loop."""
+    import asyncio
+
+    return asyncio.run(covers.resolve(isbn, supplied))
+
+
+def await_resolve_with_deadline(isbn: str, budget: float) -> str | None:
+    """`resolve` with an already spent budget, from a sync test."""
+    import asyncio
+
+    return asyncio.run(covers.resolve(isbn, deadline=monotonic() + budget))

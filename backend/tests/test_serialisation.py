@@ -136,3 +136,44 @@ class TestBooksToOut:
             event.remove(db.get_bind(), "before_cursor_execute", record)
 
         assert for_two == for_one
+
+
+class TestDerivedPercent:
+    """`page / page_count`, else the recorded percent, else nothing.
+
+    Derived on every read rather than stored beside the position, so a metadata
+    refresh that corrects a page count corrects every bar with it.
+    """
+
+    def test_a_page_against_a_known_count(self):
+        from serialisation import derived_percent
+
+        assert derived_percent(50, None, 200) == 25
+
+    def test_a_page_with_no_count_derives_nothing(self):
+        """Which is why an audiobook records a percent instead."""
+        from serialisation import derived_percent
+
+        assert derived_percent(50, None, None) is None
+
+    def test_a_zero_page_count_is_treated_as_unknown(self):
+        from serialisation import derived_percent
+
+        assert derived_percent(50, None, 0) is None
+
+    def test_a_recorded_percent_is_used_as_is(self):
+        from serialisation import derived_percent
+
+        assert derived_percent(None, 40, 200) == 40
+
+    def test_nothing_recorded_derives_nothing(self):
+        from serialisation import derived_percent
+
+        assert derived_percent(None, None, 200) is None
+
+    def test_a_page_past_the_count_clamps(self):
+        """Provider page counts are off by one often enough that the last page
+        computes past 100."""
+        from serialisation import derived_percent
+
+        assert derived_percent(205, None, 200) == 100

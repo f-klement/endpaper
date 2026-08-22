@@ -1,8 +1,14 @@
+import asyncio
+import contextlib
 import logging
-from collections.abc import Iterable, Iterator
+import os
+from collections.abc import AsyncIterator, Iterable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
+from typing import Final
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -10,9 +16,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 from starlette.routing import BaseRoute
 
+import notifications
 from config import (
+    DATA_DIR,
     cors_origins,
     ensure_data_dirs,
+    overdue_ticker_enabled,
     validate_auth_config,
     validate_secret_key,
 )
@@ -208,6 +217,35 @@ init_db()
 # ── App ───────────────────────────────────────────────────────────────────────
 
 
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Start the overdue ticker with the app, and stop it with the app.
+
+    One task, started here rather than from a module-level `create_task`,
+    because there is no running event loop at import time and because a task
+    nobody holds a reference to can be garbage collected mid-await.
+
+    Cancelled on shutdown and awaited. Without the await the interpreter can
+    exit while the task is between statements, which surfaces as a
+    "Task was destroyed but it is pending" on every container stop.
+
+    Off entirely when `ENABLE_OVERDUE_TICKER=false`, which is what the test
+    suite sets and what a deployment running the digest from cron sets.
+    """
+    task: asyncio.Task[None] | None = None
+    if overdue_ticker_enabled():
+        task = asyncio.create_task(notifications.ticker())
+        logger.info("Overdue reminder ticker started")
+
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def custom_operation_id(route: APIRoute) -> str:
     """Use the handler's own name as the OpenAPI operationId.
 
@@ -224,6 +262,7 @@ app = FastAPI(
     version="1.0.0",
     description="Catalogue, lend and track a household's physical book collection.",
     generate_unique_id_function=custom_operation_id,
+    lifespan=lifespan,
 )
 
 # Added first, so it sits innermost: the refusal still happens before anything
@@ -310,6 +349,59 @@ assert_unique_operation_ids()
 # ── Health ────────────────────────────────────────────────────────────────────
 
 
+#: How long the storage check waits before calling it dead.
+#:
+#: **Must stay comfortably under the deployment probe's own `timeoutSeconds`,
+#: which Kubernetes defaults to 1 and which therefore has to be set.** If this
+#: is the longer of the two, the kubelet gives up while the handler is still
+#: waiting and the pod reports a hang rather than a failure, which is the thing
+#: this whole check exists to avoid. `docs/api.md` states the numbers a deployer
+#: has to set; the chart lives in another repository.
+STORAGE_TIMEOUT_SECONDS: Final = 2
+
+#: One thread, and it is never joined. A hung NFS call blocks in uninterruptible
+#: sleep and cannot be cancelled or interrupted, so the thread that made it is
+#: gone for the life of the process. Running the stat inline instead would leak
+#: a thread from FastAPI's own pool on every probe until the app stopped
+#: answering anything at all, which is a worse failure than the one being
+#: detected. This bounds the loss at exactly one thread.
+_storage_probe = ThreadPoolExecutor(max_workers=1, thread_name_prefix="healthz-storage")
+
+_pending_stat: Future[os.stat_result] | None = None
+
+
+def storage_is_reachable() -> bool:
+    """Whether a namespace operation on the data directory comes back.
+
+    `SELECT 1` does not answer this. On an already-open SQLite handle it is
+    served from the page cache and issues no RPC, so it crosses no wire and
+    cannot fail when the wire is what is broken.
+
+    The deeper point, and the one worth keeping: **storage death can only ever
+    reach a probe as a timeout.** A hung NFS call does not return an error, it
+    does not return. So a check that never reaches the mount can never fail in
+    the mode that matters, and a check that does reach it needs its own clock.
+    """
+    global _pending_stat
+
+    if _pending_stat is not None and not _pending_stat.done():
+        # The previous stat has still not come back. That is exactly what a hung
+        # mount looks like, and re-queueing behind it would only grow a backlog
+        # of calls that will never run.
+        return False
+
+    _pending_stat = _storage_probe.submit(os.stat, DATA_DIR)
+    try:
+        _pending_stat.result(timeout=STORAGE_TIMEOUT_SECONDS)
+    except FutureTimeoutError:
+        logger.error("Data directory did not answer within %ds", STORAGE_TIMEOUT_SECONDS)
+        return False
+    except OSError as error:
+        logger.error("Data directory is unreachable: %s", error)
+        return False
+    return True
+
+
 @app.get("/api/healthz", tags=["system"])
 def healthz(db: DbSession) -> dict[str, str]:
     """Whether this container can actually serve.
@@ -320,10 +412,36 @@ def healthz(db: DbSession) -> dict[str, str]:
     Touching the database is the whole point, so this is a query rather than a
     constant.
 
+    **That was not enough, and the correction is the interesting half.**
+    Measured during a total NFS outage on 2026-08-22: `/api/healthz` answered
+    200 continuously and the pod stayed 1/1 Ready for 39 hours while the volume
+    was unresponsive to every new namespace operation. `SELECT 1` on an
+    already-open SQLite handle is served from the page cache and issues no RPC,
+    so the query crossed no wire. Readiness built on a long-lived handle
+    measures the process, not its storage: an unmounted volume would have been
+    caught, a hung one could not be, by construction.
+
+    So the query is joined by a `stat` of the data directory, which is a
+    namespace operation and therefore has to cross the wire, under its own
+    timeout. See `storage_is_reachable`.
+
+    **This is the liveness probe as well as readiness, and the consequence is
+    intended.** Once the check works, a hung mount restarts the pod, and the
+    restarted pod blocks in `init_db()` on the same mount, so it stays down and
+    visible rather than coming back. A container in `CrashLoopBackOff` reaches
+    every alert a household has; a pod that is 1/1 Ready and serving nothing
+    reaches none of them, which is what the 39 hours above were. It recovers by
+    itself when the mount does.
+
     Unauthenticated, deliberately: a probe holds no token, and the only thing
     disclosed is that the service is up, which anyone can tell by connecting.
     """
     db.execute(text("SELECT 1"))
+    if not storage_is_reachable():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Storage is not reachable",
+        )
     return {"status": "ok"}
 
 

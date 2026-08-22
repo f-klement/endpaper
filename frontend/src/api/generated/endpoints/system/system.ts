@@ -55,6 +55,27 @@ export const getHealthzUrl = () => {
  * Touching the database is the whole point, so this is a query rather than a
  * constant.
  *
+ * **That was not enough, and the correction is the interesting half.**
+ * Measured during a total NFS outage on 2026-08-22: `/api/healthz` answered
+ * 200 continuously and the pod stayed 1/1 Ready for 39 hours while the volume
+ * was unresponsive to every new namespace operation. `SELECT 1` on an
+ * already-open SQLite handle is served from the page cache and issues no RPC,
+ * so the query crossed no wire. Readiness built on a long-lived handle
+ * measures the process, not its storage: an unmounted volume would have been
+ * caught, a hung one could not be, by construction.
+ *
+ * So the query is joined by a `stat` of the data directory, which is a
+ * namespace operation and therefore has to cross the wire, under its own
+ * timeout. See `storage_is_reachable`.
+ *
+ * **This is the liveness probe as well as readiness, and the consequence is
+ * intended.** Once the check works, a hung mount restarts the pod, and the
+ * restarted pod blocks in `init_db()` on the same mount, so it stays down and
+ * visible rather than coming back. A container in `CrashLoopBackOff` reaches
+ * every alert a household has; a pod that is 1/1 Ready and serving nothing
+ * reaches none of them, which is what the 39 hours above were. It recovers by
+ * itself when the mount does.
+ *
  * Unauthenticated, deliberately: a probe holds no token, and the only thing
  * disclosed is that the service is up, which anyone can tell by connecting.
  * @summary Healthz

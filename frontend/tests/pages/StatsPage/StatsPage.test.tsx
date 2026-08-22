@@ -125,3 +125,60 @@ describe("StatsPage", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("pages read", () => {
+  it("charts the pages read each month", async () => {
+    api.on("/api/stats", {
+      body: makeStats({
+        pages_by_month: [
+          { month: "2026-02", count: 210 },
+          { month: "2026-03", count: 340 },
+        ],
+      }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    // The scope is in the heading itself: a reader who keeps audiobooks has no
+    // other way to learn why this total is lower than they expect.
+    expect(
+      await screen.findByText("Pages Read, by Month (books tracked by page)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("340")).toBeInTheDocument();
+  });
+
+  it("draws no section when nothing has been recorded", async () => {
+    // Page tracked books only, so a household that reads only audiobooks has
+    // an empty series rather than a converted one.
+    api.on("/api/stats", { body: makeStats({ total: 1, pages_by_month: [] }) });
+    renderWithProviders(<StatsPage />);
+
+    expect(await screen.findByText("1")).toBeInTheDocument();
+    expect(screen.queryByText(/Pages Read, by Month/)).not.toBeInTheDocument();
+  });
+});
+
+describe("the count column", () => {
+  it("gives a four digit page total room to sit on one line", async () => {
+    // `w-6` is 24px and four digits at text-sm is about 31px, so 900 pages in a
+    // month wrapped under its own bar. Every other section counts books, which
+    // is why nothing caught it.
+    api.on("/api/stats", {
+      body: makeStats({ pages_by_month: [{ month: "2026-03", count: 9000 }] }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    const count = await screen.findByText("9000");
+    expect(count.className).toContain("w-12");
+    expect(count.className).not.toContain("w-6");
+  });
+
+  it("leaves the book-counting sections on the narrow column", async () => {
+    api.on("/api/stats", {
+      body: makeStats({ total: 3, per_user: [{ username: "kim", count: 3 }] }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    const count = await screen.findByText("3", { selector: "span" });
+    expect(count.className).toContain("w-6");
+  });
+});

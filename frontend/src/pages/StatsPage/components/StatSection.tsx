@@ -12,6 +12,15 @@ interface StatSectionProps {
   colorClass: string;
   /** Width of the label column; month labels need less room than tag names. */
   labelWidthClass?: string;
+  /**
+   * Width of the count column. The default fits three digits, which is every
+   * section that counts books. A section counting **pages** needs more: thirty
+   * pages a day is nine hundred a month, and four digits at `text-sm` is about
+   * 31px against the 24px `w-6` allows, so the number wrapped under its own
+   * bar. `tabular-nums` belongs with it, or the months jitter against each
+   * other as the digits change width.
+   */
+  countWidthClass?: string;
 }
 
 /** One titled group of labelled bars. Used only by StatsPage. */
@@ -20,6 +29,7 @@ export default function StatSection({
   rows,
   colorClass,
   labelWidthClass = "w-36",
+  countWidthClass = "w-6",
 }: StatSectionProps) {
   if (rows.length === 0) return null;
 
@@ -41,7 +51,9 @@ export default function StatSection({
               {row.label}
             </span>
             <Bar value={row.count} max={max} colorClass={colorClass} />
-            <span className="text-sm font-medium text-paper-700 w-6 text-right dark:text-paper-200">
+            <span
+              className={`text-sm font-medium text-paper-700 text-right shrink-0 dark:text-paper-200 ${countWidthClass}`}
+            >
               {row.count}
             </span>
           </div>

@@ -9,7 +9,7 @@ The deployed artifact is a single image. FastAPI owns port 8000 and serves three
 | `/api/*`, `/auth/*` | FastAPI routers | The JSON API |
 | unmatched `/api/*`, `/auth/*` | a fallback router | JSON 404, see below |
 | `/covers/*` | a FastAPI router | Uploaded cover images, from `DATA_DIR/covers` |
-| `/api/healthz` | a FastAPI route | Liveness and readiness, runs a query |
+| `/api/healthz` | a FastAPI route | Liveness and readiness. Runs a query **and** stats the data directory under its own timeout |
 | everything else | `StaticFiles(html=True)` | The compiled React bundle |
 
 `/covers` is a **router, not a `StaticFiles` mount**, and that is a security fix rather
@@ -193,13 +193,26 @@ rather than deleted, so unsetting the variable restores it.
 ## Query cost
 
 Listing endpoints are paginated and serialise a page in a **constant** number of queries.
-`active_loan` and `my_status` are not columns: they are computed per request and depend on
-who is asking. The obvious implementation queries for each of them per book, which is what
-this used to do, and listing 25 books cost 53 SELECTs (`1 + 2N`). Both are now fetched once
-per page, so a page costs about 6 statements whether it holds 1 book or 100.
+`active_loan`, `my_status` and the reading-progress fields are not columns: they are
+computed per request and depend on who is asking. The obvious implementation queries for
+each of them per book, which is what this used to do, and listing 25 books cost 53 SELECTs
+(`1 + 2N`). Each is now fetched once per page instead.
 
-If you add another per-request field to `BookOut`, batch it the same way in
-`_books_to_out()` rather than reaching for it inside the loop.
+**`serialisation.books_to_out` holds the measured numbers**, and this page deliberately does
+not repeat them: the count has been restated wrongly here twice, both times by someone
+editing the sentence rather than measuring. The short version is that `GET /api/books` is
+flat at 5 and at 25 books, and that a caller which fetches books *without*
+`joinedload(Book.added_by)` pays one extra statement per distinct author, because
+`BookOut` reads that relationship.
+
+`_latest_progress` is the one to copy if a new field needs the *newest* row per book rather
+than one row per book. It ranks with a window function in a single statement rather than
+fetching every row and picking in Python, so a member with a long reading history costs the
+same as one with none.
+
+If you add another per-request field to `BookOut`, batch it the same way in `books_to_out()`
+rather than reaching for it inside the loop. `tests/routers/test_loans.py` holds a bound on
+the count, which is the thing that catches a regression here.
 
 ## Error responses
 

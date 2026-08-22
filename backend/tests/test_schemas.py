@@ -169,3 +169,69 @@ class TestLoanCreate:
     def test_an_overlong_name_is_rejected(self):
         with pytest.raises(ValidationError):
             LoanCreate(book_id=1, loaned_to_name="x" * 121)
+
+
+class TestProgressCreate:
+    """Exactly one unit per entry. The CHECK constraint says the same thing;
+    this layer is what turns it into a 422 naming the fields."""
+
+    def test_a_page_alone_is_valid(self):
+        from schemas import ProgressCreate
+
+        assert ProgressCreate(page=42).percent is None
+
+    def test_a_percent_alone_is_valid(self):
+        from schemas import ProgressCreate
+
+        assert ProgressCreate(percent=40).page is None
+
+    def test_both_is_rejected(self):
+        from schemas import ProgressCreate
+
+        with pytest.raises(ValidationError):
+            ProgressCreate(page=42, percent=40)
+
+    def test_neither_is_rejected(self):
+        from schemas import ProgressCreate
+
+        with pytest.raises(ValidationError):
+            ProgressCreate(minutes=30)
+
+    def test_page_zero_is_rejected(self):
+        from schemas import ProgressCreate
+
+        with pytest.raises(ValidationError):
+            ProgressCreate(page=0)
+
+    def test_a_percent_over_a_hundred_is_rejected(self):
+        from schemas import ProgressCreate
+
+        with pytest.raises(ValidationError):
+            ProgressCreate(percent=101)
+
+    def test_zero_minutes_is_rejected(self):
+        from schemas import ProgressCreate
+
+        with pytest.raises(ValidationError):
+            ProgressCreate(page=10, minutes=0)
+
+
+class TestSettingsUpdateWebhookUrl:
+    def test_https_is_accepted(self):
+        from schemas import SettingsUpdate
+
+        assert (
+            SettingsUpdate(overdue_webhook_url="https://box/hook").overdue_webhook_url
+            == "https://box/hook"
+        )
+
+    def test_a_non_http_scheme_is_rejected(self):
+        from schemas import SettingsUpdate
+
+        with pytest.raises(ValidationError):
+            SettingsUpdate(overdue_webhook_url="file:///etc/passwd")
+
+    def test_an_empty_string_is_a_deliberate_clear(self):
+        from schemas import SettingsUpdate
+
+        assert SettingsUpdate(overdue_webhook_url="").overdue_webhook_url == ""

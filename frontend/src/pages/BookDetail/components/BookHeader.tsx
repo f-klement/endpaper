@@ -75,25 +75,7 @@ export default function BookHeader({
       </div>
 
       <div>
-        <div className="flex items-start gap-2">
-          <h1 className="text-xl font-bold leading-tight flex-1">
-            {book.title}
-          </h1>
-          {showGoodreadsLink && (
-            <a
-              href={searchUrl(book.title, book.isbn)}
-              target="_blank"
-              // noreferrer as well as noopener: the target is a third party and
-              // has no business knowing which page linked to it.
-              rel="noopener noreferrer"
-              title={t("goodreads.lookup")}
-              aria-label={t("goodreads.lookup")}
-              className="shrink-0 mt-1 text-lg leading-none opacity-60 hover:opacity-100 transition-opacity"
-            >
-              <Icon name="link" className="w-3.5 h-3.5" />
-            </a>
-          )}
-        </div>
+        <h1 className="text-xl font-bold leading-tight">{book.title}</h1>
         {book.subtitle && (
           <p className="text-paper-600 mt-0.5 dark:text-paper-300">
             {book.subtitle}
@@ -151,9 +133,18 @@ export default function BookHeader({
           )}
         </div>
 
-        {/* Refreshing needs an ISBN to look anything up. */}
-        {book.isbn && (
-          <div className="mt-2">
+        {/* The page's actions, together and labelled.
+            The Goodreads link used to be a 14 pixel chain-link glyph at 60%
+            opacity wedged beside the title, with no text, and it could not be
+            found: the flag that gates it defaults to on, so the styling was the
+            whole of the problem. It is still visually secondary, because it
+            leaves this app for a third party, but secondary is not invisible.
+            `paper-600` is the muted step the palette contract already holds to
+            4.5:1 on the page, and it carries its own words. */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+          {/* Refreshing needs an ISBN to look anything up. Searching Goodreads
+              does not, so the two are gated separately. */}
+          {book.isbn && (
             <button
               onClick={onRefreshMetadata}
               disabled={isRefreshing}
@@ -161,12 +152,27 @@ export default function BookHeader({
             >
               {isRefreshing ? t("book.refreshing") : t("book.refreshMetadata")}
             </button>
-            {refreshError != null && (
-              <p className="text-xs text-danger-500 mt-1 dark:text-danger-300">
-                {errorText(refreshError, t("common.somethingWentWrong"), t)}
-              </p>
-            )}
-          </div>
+          )}
+
+          {showGoodreadsLink && (
+            <a
+              href={searchUrl(book.title, book.isbn)}
+              target="_blank"
+              // noreferrer as well as noopener: the target is a third party and
+              // has no business knowing which page linked to it.
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-paper-600 underline-offset-2 transition-colors hover:text-paper-900 hover:underline dark:text-paper-400 dark:hover:text-paper-100"
+            >
+              <Icon name="link" aria-hidden="true" className="h-3.5 w-3.5" />
+              {t("goodreads.lookup")}
+            </a>
+          )}
+        </div>
+
+        {refreshError != null && (
+          <p className="text-xs text-danger-500 mt-1 dark:text-danger-300">
+            {errorText(refreshError, t("common.somethingWentWrong"), t)}
+          </p>
         )}
       </div>
     </>

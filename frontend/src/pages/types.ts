@@ -11,7 +11,13 @@
  * generated from the OpenAPI schema into `src/api/generated/model`.
  */
 
-import { TagCategory } from "../api/generated/model";
+import {
+  BookCondition,
+  BookFormat,
+  OwnershipStatus,
+  ReadStatus,
+  TagCategory,
+} from "../api/generated/model";
 import type { TagOut } from "../api/generated/model";
 import type { MessageKey } from "../i18n";
 import type { ThemePreference } from "../theme";
@@ -38,6 +44,79 @@ export const TAG_CATEGORY_LABELS: Record<TagCategory, MessageKey> = {
   [TagCategory.age]: "tags.age",
   [TagCategory.custom]: "tags.custom",
 };
+
+/**
+ * What each reading status is called.
+ *
+ * Here rather than in the card, because the card and the table view both print
+ * it and a second copy is the one that drifts. Exhaustive by type for the same
+ * reason as the tables below: a status added to the backend enum has to be a
+ * compile error rather than a blank cell, which is how `want_to_read` was
+ * caught rather than rendering as an empty pill.
+ */
+export const STATUS_LABELS: Record<ReadStatus, MessageKey> = {
+  [ReadStatus.unread]: "status.unread",
+  [ReadStatus.want_to_read]: "status.want_to_read",
+  [ReadStatus.reading]: "status.reading",
+  [ReadStatus.read]: "status.read",
+  [ReadStatus.did_not_finish]: "status.did_not_finish",
+};
+
+/**
+ * What each ownership is called. Same reason, same shape.
+ */
+export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
+  [OwnershipStatus.owned]: "ownership.owned",
+  [OwnershipStatus.not_owned]: "ownership.not_owned",
+  [OwnershipStatus.unknown]: "ownership.unknown",
+};
+
+/**
+ * What each format and condition is called.
+ *
+ * Here rather than in the copy editor because four things name them now: the
+ * editor's dropdowns, the card's fold out, the table view and its column. Four
+ * copies of a five-key table drift, and the copy that drifts is the one nobody
+ * is looking at.
+ *
+ * `Record<...>` and not a lookup with a default, for the same reason
+ * `TAG_PILL_CLASSES` is: a value added to the backend enum has to be a compile
+ * error here rather than a blank cell nobody notices.
+ */
+export const FORMAT_LABELS: Record<BookFormat, MessageKey> = {
+  [BookFormat.hardcover]: "copy.format.hardcover",
+  [BookFormat.paperback]: "copy.format.paperback",
+  [BookFormat.ebook]: "copy.format.ebook",
+  [BookFormat.audiobook]: "copy.format.audiobook",
+  [BookFormat.other]: "copy.format.other",
+};
+
+/** The order they are offered in, coarsest first. */
+export const FORMAT_ORDER: readonly BookFormat[] = [
+  BookFormat.hardcover,
+  BookFormat.paperback,
+  BookFormat.ebook,
+  BookFormat.audiobook,
+  BookFormat.other,
+];
+
+export const CONDITION_LABELS: Record<BookCondition, MessageKey> = {
+  [BookCondition.new]: "copy.condition.new",
+  [BookCondition.good]: "copy.condition.good",
+  [BookCondition.fair]: "copy.condition.fair",
+  [BookCondition.poor]: "copy.condition.poor",
+  [BookCondition.ex_library]: "copy.condition.ex_library",
+};
+
+/** Best to worst, with the provenance category last: it is not a point on the
+ * scale, so sorting it into the middle would imply it is one. */
+export const CONDITION_ORDER: readonly BookCondition[] = [
+  BookCondition.new,
+  BookCondition.good,
+  BookCondition.fair,
+  BookCondition.poor,
+  BookCondition.ex_library,
+];
 
 /** Type, genre and age. One value, written once. */
 const CURATED_PILL = "bg-paper-100 text-paper-700";

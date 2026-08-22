@@ -1,12 +1,15 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+import notifications
+from auth import require_admin
 from dependencies import CurrentUser, DbSession, Paging
 from models import Book, Loan, User, visible_to
-from schemas import LoanCreate, LoanOut, Page
+from schemas import LoanCreate, LoanOut, OverdueNotifyResult, Page
 from serialisation import books_to_out
 
 router = APIRouter(prefix="/api/loans", tags=["loans"])
@@ -157,6 +160,30 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     db.commit()
     db.refresh(loan)
     return _loan_with_relations(loan.id, db)
+
+
+@router.post("/overdue/notify", response_model=OverdueNotifyResult)
+async def notify_overdue(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> OverdueNotifyResult:
+    """Run the overdue digest now, and report what it sent.
+
+    Declared **before** `/{loan_id}/return`, per the route-order rule: a
+    literal first segment that comes after a path parameter is a segment the
+    parameter can swallow. It does not today (the second segment differs, and
+    so does the verb), and the ordering is what keeps that true when somebody
+    adds `POST /{loan_id}/notify`.
+
+    Admin only, for the same reason the settings behind it are: it posts
+    catalogue content to a destination with no session behind it.
+
+    This is what makes the feature testable by a person, and it is the endpoint
+    an external cron would call instead of the in-process ticker. Running it by
+    hand stamps `notified_at` exactly as a tick does, so a manual run also
+    quiets the next scheduled one for the interval.
+    """
+    return OverdueNotifyResult(**await notifications.run_digest(db))
 
 
 @router.put("/{loan_id}/return", response_model=LoanOut)

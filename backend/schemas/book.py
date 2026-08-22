@@ -154,14 +154,23 @@ class BookOut(BaseModel):
     purchased_at: date | None = None
     purchase_source: str | None = None
 
-    # The two fields below are not columns. They are computed per request and
-    # depend on *who is asking*, so the same row serialises differently for
+    # Nothing below here is a column. Every one is computed per request and
+    # depends on *who is asking*, so the same row serialises differently for
     # different members. Never cache a BookOut across accounts.
     active_loan: LoanOut | None = None
     my_status: ReadStatus = ReadStatus.UNREAD
     my_rating: int | None = None
     my_started_at: datetime | None = None
     my_finished_at: datetime | None = None
+
+    # The caller's own latest recorded position, from `reading_progress`.
+    # Personal like the four above: a member never sees another member's.
+    my_progress_page: int | None = None
+    #: Derived, never stored twice: `page / page_count` when the page count is
+    #: known, else whatever percent was recorded, else null. Rounded to a whole
+    #: number, which is the precision a progress bar can show.
+    my_progress_percent: int | None = None
+    my_progress_recorded_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -362,3 +371,34 @@ class PurgeResult(BaseModel):
 
 class PrivacyUpdate(BaseModel):
     is_private: bool
+
+
+class CoverBackfillOut(BaseModel):
+    """What one run of the cover backfill managed.
+
+    Numbers rather than one, because "fixed 12" on its own cannot be acted on.
+    `examined` is how many books the run looked at, `stored` how many now have a
+    cover this app serves itself, `unreachable` how many resolved to a URL this
+    server could not download (so the remote link is kept and it is tried again
+    on the next pass through the library, not the next run, which starts past
+    it), `still_missing` how many no image service has one for, and `remaining`
+    how many are left beyond this batch.
+
+    `next_after_id` is the cursor. **Without it the backfill cannot finish a
+    library**: the batch is chosen by book id and a book that could not be fixed
+    stays in the candidate set, so it sits at the front of every subsequent run
+    for ever. About 20% of ISBNs resolve to nothing (measured across ten), so on
+    a large import the counter stops moving after a few runs, and a pod with no
+    egress produces it on run one. The client sends the value back to carry on
+    past what it has already tried.
+    """
+
+    examined: int = Field(ge=0)
+    stored: int = Field(ge=0)
+    unreachable: int = Field(ge=0)
+    still_missing: int = Field(ge=0)
+    remaining: int = Field(ge=0)
+    #: Where the next run starts. 0 when this run reached the end, which is what
+    #: makes the next press start again from the beginning rather than answering
+    #: nothing for ever.
+    next_after_id: int = Field(ge=0)

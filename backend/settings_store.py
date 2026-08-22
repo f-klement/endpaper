@@ -36,10 +36,22 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.DEFAULT_LOCALE: Locale.EN.value,
     # Every issued token carries this. See `bump_token_epoch`.
     SettingKey.TOKEN_EPOCH: "0",
+    # Off by default: this is the one path in the app that sends catalogue
+    # content somewhere with no session behind it, so it starts silent.
+    SettingKey.OVERDUE_WEBHOOK_ENABLED: "false",
+    SettingKey.OVERDUE_WEBHOOK_URL: "",
+    SettingKey.OVERDUE_WEBHOOK_SECRET: "",
+    # A week between reminders for the same loan. Weekly is the interval a
+    # borrower reads as a reminder rather than as nagging, and it is the
+    # differentiator Handy Library is known for: the timing is the household's
+    # to set, not the app's to assume.
+    SettingKey.OVERDUE_REMINDER_DAYS: "7",
 }
 
 # Settings whose value must never be sent back to a browser in full.
-SECRET_KEYS: Final[frozenset[SettingKey]] = frozenset({SettingKey.GOOGLE_BOOKS_API_KEY})
+SECRET_KEYS: Final[frozenset[SettingKey]] = frozenset(
+    {SettingKey.GOOGLE_BOOKS_API_KEY, SettingKey.OVERDUE_WEBHOOK_SECRET}
+)
 
 _TRUE_VALUES: Final = frozenset({"true", "1", "yes", "on"})
 
@@ -54,6 +66,22 @@ def get_raw(db: Session, key: SettingKey) -> str:
 
 def get_bool(db: Session, key: SettingKey) -> bool:
     return get_raw(db, key).strip().lower() in _TRUE_VALUES
+
+
+def get_int(db: Session, key: SettingKey, *, minimum: int, maximum: int) -> int:
+    """A whole number, clamped, falling back to the default rather than raising.
+
+    Same reasoning as `get_locale`: a value the current release no longer finds
+    sensible should degrade, not break every request that reads it. The bounds
+    are the caller's because they belong to the setting, not to the parser, and
+    the one caller that matters here would otherwise let a stored 0 turn a
+    reminder interval into "resend on every tick".
+    """
+    try:
+        value = int(get_raw(db, key).strip())
+    except ValueError:
+        value = int(DEFAULTS[key])
+    return max(minimum, min(maximum, value))
 
 
 def get_locale(db: Session, key: SettingKey) -> Locale:

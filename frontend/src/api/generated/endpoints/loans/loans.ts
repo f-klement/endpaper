@@ -26,6 +26,7 @@ import type {
   ListLoansParams,
   LoanCreate,
   LoanOut,
+  OverdueNotifyResult,
   PageLoanOut,
 } from "../../model";
 
@@ -290,6 +291,101 @@ export const useCreateLoan = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getCreateLoanMutationOptions(options), queryClient);
+};
+export const getNotifyOverdueUrl = () => {
+  return `/api/loans/overdue/notify`;
+};
+
+/**
+ * Run the overdue digest now, and report what it sent.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a
+ * literal first segment that comes after a path parameter is a segment the
+ * parameter can swallow. It does not today (the second segment differs, and
+ * so does the verb), and the ordering is what keeps that true when somebody
+ * adds `POST /{loan_id}/notify`.
+ *
+ * Admin only, for the same reason the settings behind it are: it posts
+ * catalogue content to a destination with no session behind it.
+ *
+ * This is what makes the feature testable by a person, and it is the endpoint
+ * an external cron would call instead of the in-process ticker. Running it by
+ * hand stamps `notified_at` exactly as a tick does, so a manual run also
+ * quiets the next scheduled one for the interval.
+ * @summary Notify Overdue
+ */
+export const notifyOverdue = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<OverdueNotifyResult> => {
+  return customFetch<OverdueNotifyResult>(getNotifyOverdueUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getNotifyOverdueMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof notifyOverdue>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof notifyOverdue>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["notifyOverdue"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof notifyOverdue>>,
+    void
+  > = () => {
+    return notifyOverdue(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type NotifyOverdueMutationResult = NonNullable<
+  Awaited<ReturnType<typeof notifyOverdue>>
+>;
+
+export type NotifyOverdueMutationError = unknown;
+
+/**
+ * @summary Notify Overdue
+ */
+export const useNotifyOverdue = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof notifyOverdue>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof notifyOverdue>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getNotifyOverdueMutationOptions(options), queryClient);
 };
 export const getReturnLoanUrl = (loanId: number) => {
   return `/api/loans/${loanId}/return`;

@@ -26,6 +26,20 @@ os.environ.setdefault("ALLOW_REGISTRATION", "true")
 # The suite exercises the startup secret guard explicitly in test_config.py;
 # everywhere else it would just be noise, so the app boots in dev posture.
 os.environ.setdefault("APP_ENV", "dev")
+# The `client` fixture enters the app's lifespan, which starts the hourly
+# overdue ticker. A background task waking on a timer inside a suite that
+# drops and recreates every table between tests is a source of failures that
+# depend on how long the run took. `notifications.run_digest` is driven
+# directly instead, and the wiring is pinned in tests/test_main.py.
+os.environ.setdefault("ENABLE_OVERDUE_TICKER", "false")
+# **Removed, not defaulted.** A key in the shell that happens to run the suite
+# wins over the stored one everywhere `google_books_api_key_from_env()` is
+# consulted, so `GET /api/settings` would report the environment's key and any
+# test asserting on the stored one would be asserting about a value it never
+# set. `TestEverySecretSettingIsMasked` passed vacuously for this key that way,
+# and this deployment really does have it set. Every test that wants it sets it
+# for itself with `monkeypatch.setenv`, which is unaffected by this.
+os.environ.pop("GOOGLE_BOOKS_API_KEY", None)
 
 # The backend is imported flat ("from models import Book"), the way uvicorn
 # imports it with backend/ as the working directory.
@@ -33,11 +47,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import covers  # noqa: E402
 import main  # noqa: E402
 import metadata  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
 from ratelimit import (  # noqa: E402
+    cover_backfill_limiter,
     import_limiter,
     login_limiter,
     metadata_limiter,
@@ -74,6 +90,7 @@ def reset_rate_limits() -> None:
     register_limiter.reset()
     import_limiter.reset()
     metadata_limiter.reset()
+    cover_backfill_limiter.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +103,48 @@ def clear_metadata_cache() -> None:
     Three lookup tests failed exactly that way when the cache was added.
     """
     metadata.clear_cache()
+
+
+#: The real `covers.resolve_and_store`, captured before the fixture below
+#: replaces it. tests/test_covers.py puts it back to exercise it for real
+#: against a mocked transport; nothing else should need it.
+REAL_RESOLVE_AND_STORE = covers.resolve_and_store
+
+
+@pytest.fixture(autouse=True)
+def offline_covers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop every book that is added from reaching out for its cover.
+
+    Adding a book now downloads its cover, and resolves one from the image
+    services when none was supplied. Left alone that is two real HTTP requests,
+    each with a six second timeout, on every one of the many tests that add a
+    book, and the suite would depend on the network being there.
+
+    The stand-in answers "no cover to be had", which leaves `cover_url` exactly
+    as the request set it. That is what this app did before covers were stored,
+    so the tests that are about something else see the behaviour they were
+    written against.
+
+    A test that is about the cover path patches this back over the top: the
+    router calls `covers.resolve_and_store` through the module, and the later
+    `monkeypatch` wins. The real function is exercised directly, against a
+    mocked transport, in tests/test_covers.py.
+    """
+    monkeypatch.setattr(
+        covers,
+        "resolve_and_store",
+        # The signature is mirrored rather than swallowed with **kwargs: a stub
+        # that accepts anything keeps passing after the real one changes shape,
+        # which is how a stub stops standing for the thing it replaces.
+        lambda book_id, isbn, supplied, budget=None: None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_cover_counts() -> None:
+    """Cover outcome tallies are process-global, so a test asserting on them
+    would otherwise read whatever earlier tests left behind."""
+    covers.reset_counts()
 
 
 # Image payloads and page-unwrapping helpers live in tests/helpers.py, which

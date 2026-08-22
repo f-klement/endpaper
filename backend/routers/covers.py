@@ -25,6 +25,11 @@ is fixed: by asking for the book, and letting `book_for_read` decide. A missing
 file and an invisible book are both 404, which is the house rule (a 403 would
 confirm the id exists).
 
+Cover files are still files, named `<book_id>.<ext>` under `COVERS_DIR`; the
+decision and what it costs are in `docs/decisions.md`. The guard is the
+dependency, not the sink, which is why moving the bytes around changes nothing
+here.
+
 ## How an image tag proves who it is
 
 An `<img src>` cannot carry an `Authorization` header. Under `AUTH_MODE=proxy`
@@ -46,6 +51,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
 
+import covers
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import BookForCover
 
@@ -66,9 +72,11 @@ _MEDIA_TYPES: Final[dict[str, str]] = {
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
 
-#: Kept in step with routers/settings.py, which writes the file. Duplicated
-#: rather than imported to avoid a circular import between the two routers.
-_LOGIN_BG_BASE: Final = "login_bg"
+#: The same constant `routers/settings.py` writes the file under, from the module
+#: that owns what the covers directory is called. It used to be a third copy,
+#: justified by a circular import between the two routers that does not exist:
+#: `covers.py` imports `config`, `isbn` and `uploads`, and no router at all.
+_LOGIN_BG_BASE: Final = covers.LOGIN_BG_BASE
 
 
 # Declared BEFORE the book route. `book_id` is typed `int`, so "login_bg" would
@@ -115,10 +123,15 @@ def get_cover(
 ) -> FileResponse:
     """The cover for a book the caller may see.
 
-    `book_id` is consumed by the `BookForRead` dependency rather than by this
+    `book_id` is consumed by the `BookForCover` dependency rather than by this
     function: declaring it as a path parameter of the route is what lets the
     dependency resolve the book and apply `visible_to()` before any of this
     runs. An invisible book raises 404 there and never reaches this body.
+
+    `FileResponse` rather than reading the bytes here, which is half the reason
+    covers are files: it can hand the file off to the kernel, where reading a
+    column would pull every image through the Python heap of a pod limited to
+    512Mi.
     """
     normalised = extension.lower()
     if normalised not in ALLOWED_IMAGE_EXTENSIONS:
@@ -127,7 +140,9 @@ def get_cover(
     # Built from the book id the router already parsed as an int, and an
     # extension constrained to letters by the route pattern, so neither half
     # can carry a separator. `resolve()` plus the containment check is belt and
-    # braces against that reasoning being wrong.
+    # braces against that reasoning being wrong: it is not the primary defence,
+    # it is the one that still holds if the primary one is changed by somebody
+    # who has not read this comment.
     path = (COVERS_DIR / f"{book.id}.{normalised}").resolve()
     try:
         path.relative_to(Path(COVERS_DIR).resolve())

@@ -1068,6 +1068,40 @@
             ],
             "title": "My Finished At"
           },
+          "my_progress_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Progress Page"
+          },
+          "my_progress_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Progress Percent"
+          },
+          "my_progress_recorded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Progress Recorded At"
+          },
           "my_rating": {
             "anyOf": [
               {
@@ -1359,6 +1393,51 @@
           "skipped"
         ],
         "title": "BulkResult",
+        "type": "object"
+      },
+      "CoverBackfillOut": {
+        "description": "What one run of the cover backfill managed.\n\nNumbers rather than one, because \"fixed 12\" on its own cannot be acted on.\n`examined` is how many books the run looked at, `stored` how many now have a\ncover this app serves itself, `unreachable` how many resolved to a URL this\nserver could not download (so the remote link is kept and it is tried again\non the next pass through the library, not the next run, which starts past\nit), `still_missing` how many no image service has one for, and `remaining`\nhow many are left beyond this batch.\n\n`next_after_id` is the cursor. **Without it the backfill cannot finish a\nlibrary**: the batch is chosen by book id and a book that could not be fixed\nstays in the candidate set, so it sits at the front of every subsequent run\nfor ever. About 20% of ISBNs resolve to nothing (measured across ten), so on\na large import the counter stops moving after a few runs, and a pod with no\negress produces it on run one. The client sends the value back to carry on\npast what it has already tried.",
+        "properties": {
+          "examined": {
+            "minimum": 0.0,
+            "title": "Examined",
+            "type": "integer"
+          },
+          "next_after_id": {
+            "minimum": 0.0,
+            "title": "Next After Id",
+            "type": "integer"
+          },
+          "remaining": {
+            "minimum": 0.0,
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "still_missing": {
+            "minimum": 0.0,
+            "title": "Still Missing",
+            "type": "integer"
+          },
+          "stored": {
+            "minimum": 0.0,
+            "title": "Stored",
+            "type": "integer"
+          },
+          "unreachable": {
+            "minimum": 0.0,
+            "title": "Unreachable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "examined",
+          "stored",
+          "unreachable",
+          "still_missing",
+          "remaining",
+          "next_after_id"
+        ],
+        "title": "CoverBackfillOut",
         "type": "object"
       },
       "DuplicateGroup": {
@@ -1929,6 +2008,62 @@
         "title": "NoteOut",
         "type": "object"
       },
+      "OverdueNotifyReason": {
+        "description": "Why the overdue digest sent nothing.\n\nA closed set rather than the prose in `detail`, because the client has to\n*render* the difference and a sentence is not something it can branch on.\nWithout it a broken webhook and a quiet week were the same string on the\nscreen, which is the exact confusion the \"send now\" button exists to clear\nup.\n\n`detail` stays beside it, and the two are not the same thing: this is what\nhappened, in a form code can test; that is a sentence for a log or an API\ncaller with no message catalogue of its own.",
+        "enum": [
+          "disabled",
+          "no_url",
+          "nothing_due",
+          "unreachable"
+        ],
+        "title": "OverdueNotifyReason",
+        "type": "string"
+      },
+      "OverdueNotifyResult": {
+        "description": "What one run of the overdue digest did.\n\nReported rather than logged, because \"send now\" exists so a person can see\nthe thing work. `skipped_private` is here for the same reason the exclusion\nexists: a household that expects five entries and gets four should be able\nto see why without reading the source.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "loans": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Loans",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverdueNotifyReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sent": {
+            "default": false,
+            "title": "Sent",
+            "type": "boolean"
+          },
+          "skipped_private": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Skipped Private",
+            "type": "integer"
+          }
+        },
+        "title": "OverdueNotifyResult",
+        "type": "object"
+      },
       "OwnershipStatus": {
         "description": "Whether a book is physically on the shelf.\n\nDeliberately separate from ReadStatus, which is about a person, not an\nobject. \"I have read this\" and \"we own a copy of this\" are independent\nclaims: a library borrowing is read but not owned, and an unread gift is\nowned but not read. Conflating them is what makes an imported reading\nhistory look like a catalogue of possessions.\n\nUNKNOWN exists because a Goodreads export cannot answer the question at\nall. Defaulting those rows to OWNED would assert something nobody checked;\ndefaulting them to NOT_OWNED would be an equally unfounded guess. So they\narrive unverified and wait to be confirmed.",
         "enum": [
@@ -2053,6 +2188,110 @@
         "title": "PrivacyUpdate",
         "type": "object"
       },
+      "ProgressCreate": {
+        "description": "A position in a book, in exactly one unit.\n\nThe database says the same thing (`ck_reading_progress_one_unit`). This\nlayer exists so the caller gets a 422 naming the fields rather than a 500\nout of a constraint violation.",
+        "properties": {
+          "minutes": {
+            "anyOf": [
+              {
+                "maximum": 1440.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          }
+        },
+        "title": "ProgressCreate",
+        "type": "object"
+      },
+      "ProgressOut": {
+        "description": "One recorded position.\n\nNo derived percentage here, deliberately. It is a function of the book's\n`page_count`, which the client already holds, and recomputing it per row on\nthe server would send the same fact twice with two chances to disagree.",
+        "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "recorded_at"
+        ],
+        "title": "ProgressOut",
+        "type": "object"
+      },
       "PurgeResult": {
         "description": "How many books emptying the trash destroyed.",
         "properties": {
@@ -2069,18 +2308,19 @@
         "type": "object"
       },
       "ReadStatus": {
-        "description": "A member's own progress through a book. Stored in `user_books.status`.\n\nWANT_TO_READ is deliberately distinct from UNREAD: \"on the shelf, not\nstarted\" and \"I intend to read this\" are different statements, and\nGoodreads exports carry the distinction (its `to-read` shelf), so\ncollapsing them would lose information on import.",
+        "description": "A member's own progress through a book. Stored in `user_books.status`.\n\nWANT_TO_READ is deliberately distinct from UNREAD: \"on the shelf, not\nstarted\" and \"I intend to read this\" are different statements, and\nGoodreads exports carry the distinction (its `to-read` shelf), so\ncollapsing them would lose information on import.\n\nDID_NOT_FINISH is started, not finished, and not going to be. Named for\nwhat the two apps that ship it call it rather than for the act: Openreads'\nfourth list is \"books you didn't finish\" and BookLogr's is \"Did not\nfinish\". Neither calls it \"abandoned\", and matching them costs nothing\nwhile a third spelling of the same shelf costs a reader a moment every\ntime. The importers accept `abandoned`, `dnf` and the German for both, so\nnothing turns on the stored spelling.\n\n**It is not a kind of READ**, and every query that counts finished books\ntests `finished_at`, which `_stamp_reading_dates` clears for it. A book\nsomebody gave up on must never appear in \"books finished this year\".\n\nNo migration: the column is a plain string, so a new member needs no DDL.",
         "enum": [
           "unread",
           "want_to_read",
           "reading",
-          "read"
+          "read",
+          "did_not_finish"
         ],
         "title": "ReadStatus",
         "type": "string"
       },
       "RestoreResult": {
-        "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.",
+        "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a household would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
         "properties": {
           "books": {
             "minimum": 0.0,
@@ -2100,6 +2340,18 @@
           "notes": {
             "minimum": 0.0,
             "title": "Notes",
+            "type": "integer"
+          },
+          "reading_progress": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reading Progress",
+            "type": "integer"
+          },
+          "user_books": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "User Books",
             "type": "integer"
           },
           "users": {
@@ -2172,6 +2424,33 @@
           "has_google_books_api_key": {
             "title": "Has Google Books Api Key",
             "type": "boolean"
+          },
+          "has_overdue_webhook_secret": {
+            "default": false,
+            "title": "Has Overdue Webhook Secret",
+            "type": "boolean"
+          },
+          "overdue_reminder_days": {
+            "default": 7,
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Overdue Reminder Days",
+            "type": "integer"
+          },
+          "overdue_webhook_enabled": {
+            "default": false,
+            "title": "Overdue Webhook Enabled",
+            "type": "boolean"
+          },
+          "overdue_webhook_secret_preview": {
+            "default": "",
+            "title": "Overdue Webhook Secret Preview",
+            "type": "string"
+          },
+          "overdue_webhook_url": {
+            "default": "",
+            "title": "Overdue Webhook Url",
+            "type": "string"
           }
         },
         "required": [
@@ -2230,6 +2509,54 @@
               }
             ],
             "title": "Google Books Enabled"
+          },
+          "overdue_reminder_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Reminder Days"
+          },
+          "overdue_webhook_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Webhook Enabled"
+          },
+          "overdue_webhook_secret": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Webhook Secret"
+          },
+          "overdue_webhook_url": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Webhook Url"
           }
         },
         "title": "SettingsUpdate",
@@ -2269,6 +2596,14 @@
               "$ref": "#/components/schemas/MonthStat"
             },
             "title": "Finished By Month",
+            "type": "array"
+          },
+          "pages_by_month": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MonthStat"
+            },
+            "title": "Pages By Month",
             "type": "array"
           },
           "per_user": {
@@ -2902,6 +3237,59 @@
           }
         ],
         "summary": "Bulk Action",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/covers/backfill": {
+      "post": {
+        "description": "Fetch and store the covers of books that are missing one.\n\nThis is what repairs a library that already exists. Storing covers on the\nway in only helps books added afterwards, and the books that need it most\nare the thousands that arrived through a CSV import, which never resolved a\ncover at all.\n\n**Scoped to the books the caller can see**, like every other query here. An\nadmin-only backfill would be worse, not better: `visible_to` has no admin\nbypass, so an admin running it could never repair another member's private\nbooks, and those books would have no way to be repaired at all. Each member\nrepairs their own shelf instead, and the privacy rule is not bent to make an\noperator action work.\n\nTargets every book with **no cover file behind its id**, which is the set\nthat needs one: a book that never had a cover, a book whose `cover_url`\npoints at a third party (that is what rots, a file on this volume is not),\nand a book whose column claims a local cover the directory does not have.\nThe last case is why this reads the directory rather than the column: they\ncan drift, files being the one thing a database row does not carry with it.\n\n**`after_id` is a cursor, and it is what lets this finish.** Without it the\nbatch is the first hundred candidates by id, and a book that cannot be fixed\nstays a candidate, so it sits at the front of every subsequent run for ever.\nMeasured across ten ISBNs, only eight resolved to an image, so roughly a\nfifth of any batch is permanently unfixable and accumulates; a pod with no\negress produces the same shape on the first run. With the cursor each run\nstarts past what the last one tried, and `next_after_id` comes back as 0\nonce the end is reached, so pressing again starts over and re-tries the ones\nthat failed, which may since have become fixable.\n\nIdempotent either way: a book with a file behind it is never a candidate, so\na second pass over the same range examines nothing it fixed.",
+        "operationId": "backfill_covers",
+        "parameters": [
+          {
+            "description": "Carry on past this book id. From the previous reply.",
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Carry on past this book id. From the previous reply.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "After Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverBackfillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Backfill Covers",
         "tags": [
           "books"
         ]
@@ -4238,6 +4626,164 @@
         ]
       }
     },
+    "/api/books/{book_id}/progress": {
+      "get": {
+        "description": "The caller's own recorded positions, newest first.\n\nNever anybody else's, even on a public book. Two members reading the same\ncopy is the ordinary case here, and the log is a diary rather than a shelf\nfact.",
+        "operationId": "list_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProgressOut"
+                  },
+                  "title": "Response List Progress",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Progress",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "Record where the caller has got to.\n\nSaying where you are in a book is the same claim the READING button makes,\narrived at from the other direction, so it promotes an unstarted book\nrather than leaving a member with a page number and a status of \"unread\".\nThe transition itself goes through `_stamp_reading_dates`, which owns those\nrules; duplicating them here is how the two would drift.\n\n**It never sets READ, whatever the page number.** `page_count` comes from a\nmetadata provider and is off by one often enough that the last page is not\na reliable finish signal, and finishing already has an explicit control.",
+        "operationId": "add_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Progress",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/progress/{progress_id}": {
+      "delete": {
+        "description": "Remove one of the caller's own entries. A mistyped page is the case.\n\n404 for somebody else's row and for one belonging to a different book, not\n403, for the same reason an invisible book is: a 403 would confirm the id\nexists. The book/entry pairing is enforced so an id from another book\ncannot be deleted through a book the caller happens to have access to,\nwhich is the rule `_note_for_edit` states for notes.\n\nThe status is left alone. Deleting the only entry does not put the book\nback to unread: somebody pressed READING, or this endpoint did on their\nbehalf, and removing a mistyped page number is not a claim about that.",
+        "operationId": "delete_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "progress_id",
+            "required": true,
+            "schema": {
+              "title": "Progress Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Progress",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/rating": {
       "patch": {
         "description": "Rate a book, or clear the rating with a null.\n\nRead access, like status, and for the same reason: a rating is one person's\nopinion and changes nothing for anyone else. It deliberately does not touch\nthe reading dates, because rating a book is not a claim about having\nfinished it just now.",
@@ -4561,7 +5107,7 @@
     },
     "/api/healthz": {
       "get": {
-        "description": "Whether this container can actually serve.\n\nThe Kubernetes probes used to request `/`, which the SPA mount answers from\ndisk: a pod whose database had gone (an unmounted volume, a corrupt file)\nstayed Ready and kept taking traffic, because index.html was still readable.\nTouching the database is the whole point, so this is a query rather than a\nconstant.\n\nUnauthenticated, deliberately: a probe holds no token, and the only thing\ndisclosed is that the service is up, which anyone can tell by connecting.",
+        "description": "Whether this container can actually serve.\n\nThe Kubernetes probes used to request `/`, which the SPA mount answers from\ndisk: a pod whose database had gone (an unmounted volume, a corrupt file)\nstayed Ready and kept taking traffic, because index.html was still readable.\nTouching the database is the whole point, so this is a query rather than a\nconstant.\n\n**That was not enough, and the correction is the interesting half.**\nMeasured during a total NFS outage on 2026-08-22: `/api/healthz` answered\n200 continuously and the pod stayed 1/1 Ready for 39 hours while the volume\nwas unresponsive to every new namespace operation. `SELECT 1` on an\nalready-open SQLite handle is served from the page cache and issues no RPC,\nso the query crossed no wire. Readiness built on a long-lived handle\nmeasures the process, not its storage: an unmounted volume would have been\ncaught, a hung one could not be, by construction.\n\nSo the query is joined by a `stat` of the data directory, which is a\nnamespace operation and therefore has to cross the wire, under its own\ntimeout. See `storage_is_reachable`.\n\n**This is the liveness probe as well as readiness, and the consequence is\nintended.** Once the check works, a hung mount restarts the pod, and the\nrestarted pod blocks in `init_db()` on the same mount, so it stays down and\nvisible rather than coming back. A container in `CrashLoopBackOff` reaches\nevery alert a household has; a pod that is 1/1 Ready and serving nothing\nreaches none of them, which is what the 39 hours above were. It recovers by\nitself when the mount does.\n\nUnauthenticated, deliberately: a probe holds no token, and the only thing\ndisclosed is that the service is up, which anyone can tell by connecting.",
         "operationId": "healthz",
         "responses": {
           "200": {
@@ -4867,6 +5413,33 @@
           }
         ],
         "summary": "Create Loan",
+        "tags": [
+          "loans"
+        ]
+      }
+    },
+    "/api/loans/overdue/notify": {
+      "post": {
+        "description": "Run the overdue digest now, and report what it sent.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a\nliteral first segment that comes after a path parameter is a segment the\nparameter can swallow. It does not today (the second segment differs, and\nso does the verb), and the ordering is what keeps that true when somebody\nadds `POST /{loan_id}/notify`.\n\nAdmin only, for the same reason the settings behind it are: it posts\ncatalogue content to a destination with no session behind it.\n\nThis is what makes the feature testable by a person, and it is the endpoint\nan external cron would call instead of the in-process ticker. Running it by\nhand stamps `notified_at` exactly as a tick does, so a manual run also\nquiets the next scheduled one for the interval.",
+        "operationId": "notify_overdue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverdueNotifyResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Notify Overdue",
         "tags": [
           "loans"
         ]
@@ -5521,7 +6094,7 @@
     },
     "/covers/{book_id}.{extension}": {
       "get": {
-        "description": "The cover for a book the caller may see.\n\n`book_id` is consumed by the `BookForRead` dependency rather than by this\nfunction: declaring it as a path parameter of the route is what lets the\ndependency resolve the book and apply `visible_to()` before any of this\nruns. An invisible book raises 404 there and never reaches this body.",
+        "description": "The cover for a book the caller may see.\n\n`book_id` is consumed by the `BookForCover` dependency rather than by this\nfunction: declaring it as a path parameter of the route is what lets the\ndependency resolve the book and apply `visible_to()` before any of this\nruns. An invisible book raises 404 there and never reaches this body.\n\n`FileResponse` rather than reading the bytes here, which is half the reason\ncovers are files: it can hand the file off to the kernel, where reading a\ncolumn would pull every image through the Python heap of a pod limited to\n512Mi.",
         "operationId": "get_cover",
         "parameters": [
           {

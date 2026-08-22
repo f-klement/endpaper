@@ -151,6 +151,20 @@ STATUS_GUESSES: Final[dict[ReadStatus, tuple[str, ...]]] = {
         "plan to read",
         "moechte ich lesen",
     ),
+    # Goodreads and StoryGraph both express this, as a custom shelf and as a
+    # status respectively, and the shelf name people actually type is
+    # "abandoned" at least as often as "did not finish". All the spellings map
+    # onto one member, so the stored name is not a compatibility surface.
+    ReadStatus.DID_NOT_FINISH: (
+        "did not finish",
+        "dnf",
+        "abandoned",
+        "gave up",
+        "unfinished",
+        "stopped reading",
+        "abgebrochen",
+        "nicht beendet",
+    ),
 }
 
 #: Their edition vocabularies. Endpaper's `format` column is new, and an export

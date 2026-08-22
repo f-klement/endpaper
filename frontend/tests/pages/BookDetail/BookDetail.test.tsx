@@ -24,6 +24,7 @@ import {
   makeBook,
   makeLoan,
   makeNote,
+  makeProgress,
   makeTagSet,
   resetIds,
 } from "../../factories";
@@ -60,12 +61,14 @@ beforeEach(() => {
 function stubLoad({
   book = makeBook({ id: 1, added_by: OWNER }),
   notes = [] as ReturnType<typeof makeNote>[],
+  progress = [] as ReturnType<typeof makeProgress>[],
   tags = makeTagSet(),
   users = [OWNER, OTHER],
   googleBooks = false,
   goodreads = false,
 } = {}) {
   api.on("/api/books/1/notes", { body: notes });
+  api.on("/api/books/1/progress", { body: progress });
   api.on("/api/books/tags", { body: tags });
   api.on("/api/users", { body: users });
   api.on("/api/settings/features", {
@@ -348,7 +351,10 @@ describe("BookDetail", () => {
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
-      await user.type(screen.getByLabelText("Borrower's name"), "the neighbour");
+      await user.type(
+        screen.getByLabelText("Borrower's name"),
+        "the neighbour",
+      );
       await user.click(screen.getByRole("button", { name: "Loan" }));
 
       await waitFor(() =>
@@ -366,7 +372,9 @@ describe("BookDetail", () => {
       stubLoad();
       renderDetail(OWNER);
 
-      await userEvent.setup().click(await screen.findByLabelText("Someone else"));
+      await userEvent
+        .setup()
+        .click(await screen.findByLabelText("Someone else"));
 
       expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
     });
@@ -703,9 +711,10 @@ describe("BookDetail ownership", () => {
     });
     renderDetail();
 
-    expect(
-      await screen.findByRole("button", { name: "Read" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("button", { name: "Read" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByRole("button", { name: "Not owned" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -941,5 +950,85 @@ describe("BookDetail lending with a due date", () => {
 
     await screen.findByRole("heading", { name: "Dune" });
     expect(screen.queryByLabelText("Due back")).not.toBeInTheDocument();
+  });
+});
+
+describe("BookDetail reading progress", () => {
+  it("records a page against the book being viewed", async () => {
+    const user = userEvent.setup();
+    stubLoad({ book: makeBook({ id: 1, added_by: OWNER, page_count: 412 }) });
+    api.on(
+      "/api/books/1/progress",
+      { status: 201, body: makeProgress() },
+      "POST",
+    );
+    renderDetail(OWNER);
+
+    await screen.findByRole("heading", { name: "Dune" });
+    await user.type(screen.getByRole("spinbutton", { name: "Page" }), "64");
+    await user.click(screen.getByRole("button", { name: "Record progress" }));
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/1/progress", "POST")?.body).toEqual({
+        page: 64,
+      }),
+    );
+  });
+
+  it("shows the history the server returns", async () => {
+    stubLoad({
+      book: makeBook({ id: 1, added_by: OWNER, page_count: 412 }),
+      progress: [makeProgress({ page: 120 })],
+    });
+    renderDetail(OWNER);
+
+    expect(await screen.findByText(/Page 120/)).toBeInTheDocument();
+  });
+
+  it("deletes one entry", async () => {
+    const user = userEvent.setup();
+    const entry = makeProgress({ page: 120 });
+    stubLoad({
+      book: makeBook({ id: 1, added_by: OWNER, page_count: 412 }),
+      progress: [entry],
+    });
+    api.on(`/api/books/1/progress/${entry.id}`, { status: 204 }, "DELETE");
+    renderDetail(OWNER);
+
+    await screen.findByText(/Page 120/);
+    await user.click(screen.getByRole("button", { name: "Remove this entry" }));
+
+    await waitFor(() =>
+      expect(
+        api.lastCall(`/api/books/1/progress/${entry.id}`, "DELETE"),
+      ).toBeDefined(),
+    );
+  });
+
+  it("re-reads the book after recording, because the status may have moved", async () => {
+    // The first entry on an unstarted book promotes it to reading, and that
+    // change is on the book payload rather than in the response.
+    const user = userEvent.setup();
+    stubLoad({ book: makeBook({ id: 1, added_by: OWNER, page_count: 412 }) });
+    api.on(
+      "/api/books/1/progress",
+      { status: 201, body: makeProgress() },
+      "POST",
+    );
+    renderDetail(OWNER);
+
+    await screen.findByRole("heading", { name: "Dune" });
+    const before = api.calls.filter((call) =>
+      /\/api\/books\/1$/.test(call.url),
+    ).length;
+
+    await user.type(screen.getByRole("spinbutton", { name: "Page" }), "64");
+    await user.click(screen.getByRole("button", { name: "Record progress" }));
+
+    await waitFor(() =>
+      expect(
+        api.calls.filter((call) => /\/api\/books\/1$/.test(call.url)).length,
+      ).toBeGreaterThan(before),
+    );
   });
 });

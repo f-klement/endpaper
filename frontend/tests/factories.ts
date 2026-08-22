@@ -13,6 +13,7 @@ import {
   type LoanOut,
   type NoteOut,
   type PageBookOut,
+  type ProgressOut,
   type PageLoanOut,
   type StatsOut,
   type TagOut,
@@ -106,6 +107,22 @@ export function makeNote(overrides: Partial<NoteOut> = {}): NoteOut {
 
 export function makeStats(overrides: Partial<StatsOut> = {}): StatsOut {
   return { total: 0, per_user: [], by_tag: [], by_month: [], ...overrides };
+}
+
+/** One recorded reading position. Page unit by default; pass `percent` for the
+ * other, never both: the API accepts exactly one. */
+export function makeProgress(
+  overrides: Partial<ProgressOut> = {},
+): ProgressOut {
+  return {
+    id: id(),
+    book_id: 1,
+    recorded_at: "2026-03-02T10:00:00",
+    page: 64,
+    percent: null,
+    minutes: null,
+    ...overrides,
+  };
 }
 
 /** Wrap rows in the pagination envelope the listing endpoints return. */

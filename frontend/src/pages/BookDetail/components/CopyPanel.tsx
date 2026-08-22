@@ -9,6 +9,12 @@ import {
 import { Button } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { formatMinor, parseMinor } from "../../../lib/money";
+import {
+  CONDITION_LABELS,
+  CONDITION_ORDER,
+  FORMAT_LABELS,
+  FORMAT_ORDER,
+} from "../../types";
 
 interface CopyPanelProps {
   book: BookOut;
@@ -16,21 +22,15 @@ interface CopyPanelProps {
   onSave: (fields: BookDetailsUpdate) => void;
 }
 
-const FORMATS: { value: BookFormat; label: MessageKey }[] = [
-  { value: BookFormat.hardcover, label: "copy.format.hardcover" },
-  { value: BookFormat.paperback, label: "copy.format.paperback" },
-  { value: BookFormat.ebook, label: "copy.format.ebook" },
-  { value: BookFormat.audiobook, label: "copy.format.audiobook" },
-  { value: BookFormat.other, label: "copy.format.other" },
-];
+// Built from the shared tables in `pages/types.ts` rather than restated, so the
+// card's fold out and the table view cannot end up calling a format something
+// this editor does not.
+const FORMATS: { value: BookFormat; label: MessageKey }[] = FORMAT_ORDER.map(
+  (value) => ({ value, label: FORMAT_LABELS[value] }),
+);
 
-const CONDITIONS: { value: BookCondition; label: MessageKey }[] = [
-  { value: BookCondition.new, label: "copy.condition.new" },
-  { value: BookCondition.good, label: "copy.condition.good" },
-  { value: BookCondition.fair, label: "copy.condition.fair" },
-  { value: BookCondition.poor, label: "copy.condition.poor" },
-  { value: BookCondition.ex_library, label: "copy.condition.ex_library" },
-];
+const CONDITIONS: { value: BookCondition; label: MessageKey }[] =
+  CONDITION_ORDER.map((value) => ({ value, label: CONDITION_LABELS[value] }));
 
 /**
  * Facts about the object on the shelf, rather than about the work.

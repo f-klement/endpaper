@@ -1,5 +1,148 @@
 # Changelog
 
+## Unreleased
+
+Where you are in a book, and something that chases the books that are out.
+
+**Two migrations run on start**, in this order: `f7c2a1e50b93` creates the
+`reading_progress` table, and `a3e94c0d15f8` adds `loans.notified_at`. Both are
+additive, both have a working downgrade, and neither touches an existing row's
+data. The second drops and recreates the partial unique index on open loans
+around its batch step, because batch mode rebuilds a SQLite table by reflecting
+it and that index coming back as a plain unique one would forbid ever lending a
+book twice.
+
+### Added
+
+**Reading progress.** Record the page you reached, or a percentage for an
+audiobook or anything with no page count, as often as you like. It is an
+append-only log rather than one editable number, which is what lets it answer
+"how much did I read in March" as well as "where am I". Each entry can carry how
+long the sitting was. The first entry on an unstarted book moves it to reading
+and stamps the date, because saying where you are is the same claim the status
+button makes; nothing ever moves a book to read on a page number, since page
+counts come from catalogues and are off by one often enough that the last page
+proves nothing.
+
+A member's log is theirs. Two people reading the same copy see their own
+positions and never each other's, on a shared shelf as much as a private book.
+
+**Pages read, by month**, on the stats page. Computed from the differences
+between consecutive positions, and covering page-tracked books only: an
+audiobook records a percentage, and turning that into a page count would produce
+a figure that adds up with the others while meaning something else.
+
+**Overdue reminders, by webhook.** Endpaper can POST a digest of every overdue
+loan to an address you choose, hourly, signed with HMAC-SHA256 so the receiver
+can check it really came from here. How many days pass before the same loan is
+chased again is yours to set. A generic webhook rather than email or one chat
+service, because a self-hosted app should not carry an integration with
+something only one household runs.
+
+**Private books are never in it.** A webhook has no account behind it and lands
+in a channel everyone reads, so a private title there would be readable by all
+of them. The digest says how many it left out without naming one, and the owner
+is still chased in the app, where the overdue view is per member. The settings
+screen says this in words rather than leaving it to the documentation.
+
+There is a **Send now** button beside the settings, which runs the digest
+immediately and says what happened: sent, and to how many loans; or which of the
+four reasons it sent nothing, because a switched-off toggle, a missing address, a
+quiet week and a webhook that refused the request are four different problems and
+only one of them is not a problem. That is what makes the feature checkable by a
+person, and it is the endpoint to point an external cron at:
+`ENABLE_OVERDUE_TICKER=false` turns the in-process timer off.
+
+### Fixed
+
+**A backup taken before this release still restores.** Adding a table to the
+archive would have made every older backup fail with "the backup is missing:
+reading_progress", because the restore required every table it knew about to be
+present. A table added after format version 1 is now optional and restores as
+empty, while a truncated archive missing `books` is refused as before.
+
+**A restore now reports the reading statuses it put back.** `user_books` was
+absent from the report, so a restore that dropped every member's entire reading
+history read as a clean one. It is counted now, along with the progress log.
+
+**Covers are downloaded and served from here, not linked to somebody else's
+server.** A hotlinked cover needed five things to keep working: the image
+service being up, the URL not rotting, this app being able to reach it, your
+browser being able to reach it, and the content policy permitting it. Four of
+those five are outside this application, so a shelf could go blank for a reason
+nothing here could see or fix. Measured on the running deployment, the covers
+directory held **zero** files, so that described every cover in the library. It
+also stops your browser telling `covers.openlibrary.org` which books the
+household owns, once per book, every time the grid draws.
+
+Every way a book gets added now resolves a cover, including **the CSV import,
+which never did**: a library that arrived that way showed the placeholder on
+every single book and nothing in any log said why. The import itself does not
+fetch, because a fetch per row over thousands of rows would hold the request
+open until a proxy gave up on it. **Settings has a Covers section** that fetches
+the ones that are missing, a hundred at a time, six at a time within that, and
+tells you how many it stored, how many had a cover that could not be downloaded
+from here, how many no service has one for, and how many are left. Each press
+carries on from where the last one stopped, so a book that cannot be fixed does
+not block the ones behind it, and reaching the end starts over. It is safe to
+press twice. If a download fails the remote link is kept, so
+the worst case is what the app did before.
+
+**A cover URL nobody could parse used to break the repair button for everybody.** A URL
+with an impossible port, like `:99999`, was accepted onto a book and then crashed every
+attempt to fetch it, for every member, permanently, because one bad row is enough. It is
+refused up front now, and a cover failure of any kind can no longer fail the request that
+provoked it: adding a book always saves the book.
+
+**Covers must come from one of the four image services this app knows about.**
+`cover_url` can be typed by anybody with an account, and adding a book makes the
+server fetch it, so without a host check that was an account holder choosing
+which address this server connects to. Redirects are followed by hand, two hops
+at most, and every hop is checked. The blind version of that predates covers
+being stored at all.
+
+**A fourth reading status: Did not finish.** Started, not going to be finished.
+The date you started is kept, because that happened; the finish date is cleared,
+so a book you gave up on is never counted in "books finished this year", and the
+record of how far you got is left exactly where it is. Recording a new position
+puts the book back to reading, because that is what picking it up again is.
+Goodreads and StoryGraph shelves called `abandoned`, `dnf` or `did-not-finish`
+all import onto it.
+
+**Library cards fold out.** Title, author and up to three tags with the genre
+first; press Details for the series, year, publisher, shelf, format, condition,
+page count, the remaining tags and what the copy cost, without leaving the grid.
+
+**A table view for the library**, toggled beside the sort control and remembered
+in your browser. Nineteen columns of metadata, sortable on the ones the server
+can order by, scrolling inside its own box so the page never slides sideways.
+
+### Fixed, in the app
+
+**Covers that had gone are back, and the cause was in your browser.** This is the fault
+that was reported, and nothing on the server was wrong: the library had a cover URL on
+every book, three of the four answered with a real image when fetched from the server, the
+content policy allowed the host and DNS resolved it. The offline cache was storing cover
+images with `CacheFirst` and no check on the response. A cross-origin image request cannot
+tell a 404 from a picture, so a failed cover was cached as though it were one, and
+`CacheFirst` then served it for **thirty days** without ever asking again. Covers are now
+revalidated in the background, an error is never stored, and the cache has been renamed and
+the poisoned one deleted, so the fix reaches browsers that already have the bad entries. It
+also now covers all four image services rather than Open Library alone.
+
+**The Goodreads lookup can be found.** It was a 14 pixel chain-link icon at 60%
+opacity beside the title, with no label. It has moved down to the actions, with
+its own words, at a contrast the rest of the app holds to.
+
+**The health probe now detects the failure it was written to detect.** During a
+total storage outage on 2026-08-22, `/api/healthz` answered 200 continuously and
+the pod stayed ready for **39 hours**. `SELECT 1` on an already-open SQLite
+handle is served from memory and never reaches the disk, so it could not fail in
+the mode that mattered. It now also stats the data directory, which has to cross
+the wire, under a timeout of its own so a hung mount is a failed check rather
+than a handler that never answers.
+
+
 ## v0.4.0
 
 Seven palettes, ten wallpapers, and a screen to choose them on.

@@ -19,4 +19,8 @@ export interface SettingsUpdate {
   goodreads_lookup_enabled?: boolean | null;
   google_books_api_key?: string | null;
   google_books_enabled?: boolean | null;
+  overdue_reminder_days?: number | null;
+  overdue_webhook_enabled?: boolean | null;
+  overdue_webhook_secret?: string | null;
+  overdue_webhook_url?: string | null;
 }

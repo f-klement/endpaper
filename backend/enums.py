@@ -17,12 +17,27 @@ class ReadStatus(StrEnum):
     started" and "I intend to read this" are different statements, and
     Goodreads exports carry the distinction (its `to-read` shelf), so
     collapsing them would lose information on import.
+
+    DID_NOT_FINISH is started, not finished, and not going to be. Named for
+    what the two apps that ship it call it rather than for the act: Openreads'
+    fourth list is "books you didn't finish" and BookLogr's is "Did not
+    finish". Neither calls it "abandoned", and matching them costs nothing
+    while a third spelling of the same shelf costs a reader a moment every
+    time. The importers accept `abandoned`, `dnf` and the German for both, so
+    nothing turns on the stored spelling.
+
+    **It is not a kind of READ**, and every query that counts finished books
+    tests `finished_at`, which `_stamp_reading_dates` clears for it. A book
+    somebody gave up on must never appear in "books finished this year".
+
+    No migration: the column is a plain string, so a new member needs no DDL.
     """
 
     UNREAD = "unread"
     WANT_TO_READ = "want_to_read"
     READING = "reading"
     READ = "read"
+    DID_NOT_FINISH = "did_not_finish"
 
 
 class OwnershipStatus(StrEnum):
@@ -161,6 +176,39 @@ class SettingKey(StrEnum):
     GOODREADS_LOOKUP_ENABLED = "goodreads_lookup_enabled"
     DEFAULT_LOCALE = "default_locale"
     TOKEN_EPOCH = "token_epoch"
+
+    # Where overdue reminders go, and how often. Settings rather than
+    # environment variables because the household changes them: which channel
+    # gets chased, and how much nagging it tolerates, are decisions made after
+    # the container is running.
+    OVERDUE_WEBHOOK_ENABLED = "overdue_webhook_enabled"
+    OVERDUE_WEBHOOK_URL = "overdue_webhook_url"
+    OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"
+    OVERDUE_REMINDER_DAYS = "overdue_reminder_days"
+
+
+class OverdueNotifyReason(StrEnum):
+    """Why the overdue digest sent nothing.
+
+    A closed set rather than the prose in `detail`, because the client has to
+    *render* the difference and a sentence is not something it can branch on.
+    Without it a broken webhook and a quiet week were the same string on the
+    screen, which is the exact confusion the "send now" button exists to clear
+    up.
+
+    `detail` stays beside it, and the two are not the same thing: this is what
+    happened, in a form code can test; that is a sentence for a log or an API
+    caller with no message catalogue of its own.
+    """
+
+    #: The toggle is off.
+    DISABLED = "disabled"
+    #: No webhook address is stored, or the stored one is not http(s).
+    NO_URL = "no_url"
+    #: Nothing is overdue, or everything overdue was chased recently enough.
+    NOTHING_DUE = "nothing_due"
+    #: The request was made and failed. The loans are left to be retried.
+    UNREACHABLE = "unreachable"
 
 
 class Locale(StrEnum):

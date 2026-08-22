@@ -93,4 +93,6 @@ async def restore_backup(
         notes=restored.get("notes", 0),
         loans=restored.get("loans", 0),
         covers=restored.get("covers", 0),
+        user_books=restored.get("user_books", 0),
+        reading_progress=restored.get("reading_progress", 0),
     )

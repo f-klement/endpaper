@@ -11,6 +11,7 @@ name the caller sent.
 """
 
 import os
+import threading
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -74,15 +75,29 @@ def replace_image(directory: Path, base: str, extension: str, data: bytes) -> Pa
 
     So the new file is written beside its destination and moved into place with
     `os.replace`, which is atomic within a filesystem: either the old image is
-    still there or the new one is, never neither. The leftovers in other
+    still there or the new one is, never neither. The temporary name carries the
+    pid and the thread id, because this is called from a thread pool as well as
+    from a request handler; see the comment on it. The leftovers in other
     formats are removed only once that has succeeded, because two formats of
     the same base both existing means which one is served depends on lookup
     order.
     """
     destination = directory / f"{base}.{extension}"
-    # A leading dot and the pid so a concurrent upload of the same book cannot
-    # land on the same temporary name, and so a leftover is recognisable.
-    temporary = directory / f".{base}.{os.getpid()}.tmp"
+    # A leading dot so a leftover is recognisable, and the pid **and thread id**
+    # so two writes of the same book cannot land on the same temporary name.
+    #
+    # The pid alone was enough while the only concurrency here was separate
+    # processes. It is not any more: the cover backfill fans out across a
+    # ThreadPoolExecutor **inside one process**, so two overlapping requests for
+    # the same book id built an identical temp path. Two members repairing a
+    # shared book does it, and so does one member inside their own rate limit.
+    # Observed: both threads wrote `.9.31.tmp`, one `os.replace` won and the
+    # other failed with ENOENT and was counted as a failed download.
+    #
+    # The failure that is not merely untidy: a body large enough to need more
+    # than one write could be promoted half written, and `covers.stored_ids`
+    # would then never revisit that book, because a file is there.
+    temporary = directory / f".{base}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         temporary.write_bytes(data)
         os.replace(temporary, destination)

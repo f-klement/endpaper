@@ -17,4 +17,13 @@ export interface SettingsOut {
   google_books_api_key_preview: string;
   google_books_enabled: boolean;
   has_google_books_api_key: boolean;
+  has_overdue_webhook_secret?: boolean;
+  /**
+   * @minimum 1
+   * @maximum 365
+   */
+  overdue_reminder_days?: number;
+  overdue_webhook_enabled?: boolean;
+  overdue_webhook_secret_preview?: string;
+  overdue_webhook_url?: string;
 }

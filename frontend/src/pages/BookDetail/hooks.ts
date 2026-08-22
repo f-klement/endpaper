@@ -1,10 +1,10 @@
 /**
  * Everything BookDetail needs from the API.
  *
- * Split into three hooks by concern (the book itself, its notes, its loan)
- * rather than one that returns thirty fields. Every mutation
- * invalidates what it actually changed, so the page never patches the cache by
- * hand and never re-reads stale data.
+ * Split by concern (the book itself, its notes, its loan, its reading log)
+ * rather than one hook that returns thirty fields. Every mutation invalidates
+ * what it actually changed, so the page never patches the cache by hand and
+ * never re-reads stale data.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,7 +13,11 @@ import { useState } from "react";
 import {
   getGetBookQueryKey,
   getGetNotesQueryKey,
+  getListProgressQueryKey,
   useAddBookTag,
+  useAddProgress,
+  useDeleteProgress,
+  useListProgress,
   useAddNote,
   useApplyEnrichment,
   useDeleteBook,
@@ -54,6 +58,8 @@ import type {
   BookOut,
   NoteOut,
   OwnershipStatus,
+  ProgressCreate,
+  ProgressOut,
   ReadStatus,
   TagOut,
   UserOut,
@@ -207,7 +213,14 @@ export function useBookActions(
       // Household-wide and not undoable, unlike deleting a book. The count is
       // in the message because "delete this tag" and "take this off 214 books"
       // are different decisions.
-      if (confirm(t("tags.deleteConfirm", { name: tag.name, count: tag.book_count ?? 0 })))
+      if (
+        confirm(
+          t("tags.deleteConfirm", {
+            name: tag.name,
+            count: tag.book_count ?? 0,
+          }),
+        )
+      )
         deleteTag.mutate({ tagId: tag.id });
     },
     removeTag: (tagId) => removeTag.mutate({ bookId, tagId }),
@@ -400,4 +413,52 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
 export function useGoodreadsLookup(): boolean {
   const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
   return flags.data?.goodreads_lookup_enabled ?? false;
+}
+
+export interface UseBookProgressResult {
+  entries: ProgressOut[];
+  /** Record a position. Exactly one of `page` and `percent`. */
+  record: (entry: ProgressCreate) => void;
+  remove: (progressId: number) => void;
+  isRecording: boolean;
+  error: unknown;
+}
+
+/**
+ * The reading log for one book.
+ *
+ * Its own hook rather than another field on `useBookActions`, because both
+ * writes invalidate two things rather than one: the log itself, and the book,
+ * whose payload carries the newest position and whose status the first entry
+ * promotes to reading.
+ */
+export function useBookProgress(bookId: number): UseBookProgressResult {
+  const queryClient = useQueryClient();
+  const invalidateBook = useInvalidateBook(bookId);
+  const entries = useListProgress(bookId);
+
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListProgressQueryKey(bookId),
+      });
+      // Recording a position moves `my_progress_*` on the book, and the first
+      // one moves `my_status` with it.
+      invalidateBook();
+    },
+  };
+
+  const record = useAddProgress({ mutation });
+  const remove = useDeleteProgress({ mutation });
+
+  return {
+    entries: entries.data ?? [],
+    // `mutate`, not `mutateAsync`: nothing awaits these, and mutateAsync
+    // rejects, leaving an unhandled rejection on every failure. The failure is
+    // rendered from `error`.
+    record: (entry) => record.mutate({ bookId, data: entry }),
+    remove: (progressId) => remove.mutate({ bookId, progressId }),
+    isRecording: record.isPending,
+    error: entries.error ?? record.error ?? remove.error,
+  };
 }

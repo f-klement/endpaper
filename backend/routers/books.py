@@ -1,7 +1,10 @@
+import asyncio
 import csv
 import io
+import logging
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
 
@@ -11,6 +14,7 @@ from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.sql.elements import UnaryExpression
 
+import covers
 import google_books
 import isbn as isbn_utils
 import metadata
@@ -41,6 +45,7 @@ from models import (
     Book,
     Loan,
     Note,
+    ReadingProgress,
     Tag,
     User,
     UserBook,
@@ -48,7 +53,7 @@ from models import (
     in_trash_for,
     visible_to,
 )
-from ratelimit import metadata_limiter
+from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
     BookCreate,
     BookDetailsUpdate,
@@ -60,6 +65,7 @@ from schemas import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
+    CoverBackfillOut,
     DuplicateGroup,
     LocationOut,
     MergeRequest,
@@ -68,6 +74,8 @@ from schemas import (
     OwnershipUpdate,
     Page,
     PrivacyUpdate,
+    ProgressCreate,
+    ProgressOut,
     PurgeResult,
     SeriesOut,
     TagCreate,
@@ -75,6 +83,8 @@ from schemas import (
 )
 from serialisation import book_to_out, books_to_out, match_subjects_to_tags
 from uploads import read_image_upload, replace_image
+
+logger = logging.getLogger("endpaper.books")
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -557,6 +567,38 @@ def list_books(
 # ── Creating ──────────────────────────────────────────────────────────────────
 
 
+def _store_cover(book: Book) -> bool:
+    """Give this book the best cover available, held here where possible.
+
+    True when something changed and the caller must commit.
+
+    Every path that puts a book in the catalogue calls this, which is the point:
+    the CSV import never resolved a cover at all, so a library that arrived by
+    import showed the placeholder on every single book and no log line said why.
+
+    Blocking, deliberately: see the note above `covers.download`. Bounded, too:
+    without a ceiling a single add is up to three candidate checks and a
+    download at `covers.TIMEOUT_SECONDS` each, which is 24 seconds of a spinner
+    when both image services blackhole rather than refuse.
+    """
+    # Already held here: the URL points at this app and there is a file behind
+    # it. The file test is not paranoia, it is what stops the column and the
+    # directory drifting apart without anybody noticing.
+    if covers.is_local(book.cover_url) and covers.stored_path(book.id) is not None:
+        return False
+
+    # Budgeted, because every caller of this is a request with a person waiting
+    # at the end of it. The backfill does not come through here and passes none:
+    # nothing is waiting on it and it is bounded by its batch size instead.
+    resolved = covers.resolve_and_store(
+        book.id, book.isbn, book.cover_url, budget=covers.INTERACTIVE_BUDGET_SECONDS
+    )
+    if resolved is None or resolved == book.cover_url:
+        return False
+    book.cover_url = resolved
+    return True
+
+
 def _create_book(payload: BookCreate, current_user: User, db: Session, conflict: str) -> BookOut:
     # payload.isbn is already canonical ISBN-13 (see BookCreate's validator),
     # but rows written before canonicalisation may hold the ISBN-10, so both
@@ -582,6 +624,12 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     db.add(book)
     db.commit()
     db.refresh(book)
+    # After the commit, because the cover is stored under the book's id and the
+    # id does not exist until the row does. A failed fetch is not a failed add:
+    # `store_cover` returns the remote URL, or leaves the book without one.
+    if _store_cover(book):
+        db.commit()
+        db.refresh(book)
     return book_to_out(book, current_user, db)
 
 
@@ -1029,6 +1077,14 @@ def merge_books(
     db.flush()
 
     for loser in losers:
+        # The keeper may have absorbed the loser's `cover_url`, which names a
+        # file about to be deleted with it. Moving the file is what keeps that
+        # cover working; everything else the loser held is dead bytes.
+        if keeper.cover_url == covers.local_url_for(loser.id):
+            adopted = covers.adopt(keeper.id, loser.id)
+            keeper.cover_url = adopted if adopted else None
+        covers.forget(loser.id)
+
         # Expire before deleting. The repointing above moved rows out from
         # under the loser, but its loaded relationship collections still list
         # them, and the delete cascade walks those collections rather than the
@@ -1116,6 +1172,16 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     for loan in still_open[1:]:
         loan.returned_at = datetime.now(UTC).replace(tzinfo=None)
 
+    # Progress moves wholesale. It carries no uniqueness of its own, so
+    # unlike the statuses below there is nothing to resolve: two members'
+    # readings of what turned out to be one book are two histories of one book.
+    # Left out, the losers' rows would be cascade-deleted with them, silently
+    # throwing away reading history the merge was never asked to touch.
+    for entry in db.query(ReadingProgress).filter(
+        ReadingProgress.book_id.in_(loser_ids)
+    ):
+        entry.book_id = keeper.id
+
     # Statuses cannot simply move: (user_id, book_id) is unique, so a member
     # holding a status on two of the merged rows would violate it. The
     # survivor's own row wins and the duplicate is dropped.
@@ -1129,6 +1195,147 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
         else:
             user_book.book_id = keeper.id
             already_rated.add(user_book.user_id)
+
+
+# ── Covers ────────────────────────────────────────────────────────────────────
+
+#: Books one backfill run repairs. The run is bounded rather than open ended
+#: because it holds an HTTP request open while it fetches: at six at a time and
+#: a six second timeout, a hundred books is the most that reliably finishes
+#: inside a proxy's read timeout. The response says how many are left, and the
+#: caller presses again.
+MAX_BACKFILL_BOOKS: Final = 100
+
+
+@router.post("/covers/backfill", response_model=CoverBackfillOut)
+def backfill_covers(
+    db: DbSession,
+    current_user: CurrentUser,
+    after_id: Annotated[
+        int,
+        Query(
+            ge=0,
+            # Bounded above as well as below, and the upper bound is not
+            # decoration. A Python int has no ceiling and SQLite's does, so
+            # without this a bigint passes validation, reaches the driver and
+            # raises `OverflowError` from inside the query: a 500 out of the
+            # unhandled-exception handler, which classes a bad request as a bug
+            # in our own code. Every other numeric query parameter here is
+            # bounded at both ends for the same reason.
+            le=2**63 - 1,
+            description="Carry on past this book id. From the previous reply.",
+        ),
+    ] = 0,
+) -> CoverBackfillOut:
+    """Fetch and store the covers of books that are missing one.
+
+    This is what repairs a library that already exists. Storing covers on the
+    way in only helps books added afterwards, and the books that need it most
+    are the thousands that arrived through a CSV import, which never resolved a
+    cover at all.
+
+    **Scoped to the books the caller can see**, like every other query here. An
+    admin-only backfill would be worse, not better: `visible_to` has no admin
+    bypass, so an admin running it could never repair another member's private
+    books, and those books would have no way to be repaired at all. Each member
+    repairs their own shelf instead, and the privacy rule is not bent to make an
+    operator action work.
+
+    Targets every book with **no cover file behind its id**, which is the set
+    that needs one: a book that never had a cover, a book whose `cover_url`
+    points at a third party (that is what rots, a file on this volume is not),
+    and a book whose column claims a local cover the directory does not have.
+    The last case is why this reads the directory rather than the column: they
+    can drift, files being the one thing a database row does not carry with it.
+
+    **`after_id` is a cursor, and it is what lets this finish.** Without it the
+    batch is the first hundred candidates by id, and a book that cannot be fixed
+    stays a candidate, so it sits at the front of every subsequent run for ever.
+    Measured across ten ISBNs, only eight resolved to an image, so roughly a
+    fifth of any batch is permanently unfixable and accumulates; a pod with no
+    egress produces the same shape on the first run. With the cursor each run
+    starts past what the last one tried, and `next_after_id` comes back as 0
+    once the end is reached, so pressing again starts over and re-tries the ones
+    that failed, which may since have become fixable.
+
+    Idempotent either way: a book with a file behind it is never a candidate, so
+    a second pass over the same range examines nothing it fixed.
+    """
+    cover_backfill_limiter.check(current_user.username)
+
+    # One directory read for the whole library, rather than a `stat` per book.
+    # A book "has a cover here" when there is a file behind its id, not when its
+    # `cover_url` says so: trusting the column is what would let the database
+    # and the directory drift apart quietly, and it is also what would stop this
+    # being safe to run twice.
+    on_disk = covers.stored_ids()
+    catalogue = (
+        db.query(Book)
+        .filter(visible_to(current_user.id), Book.id > after_id)
+        .order_by(Book.id)
+        .all()
+    )
+    candidates = [book for book in catalogue if book.id not in on_disk]
+    batch = candidates[:MAX_BACKFILL_BOOKS]
+
+    # Concurrent, because serial would be one round trip per book: a thousand
+    # books at even half a second each is eight minutes of waiting. Bounded,
+    # because the other end is two free public services and this deployment has
+    # one address at them.
+    #
+    # Only the fetch runs in the pool. The Session is not thread safe, so the
+    # assignment happens back here, in one thread. `pool.map` yields results in
+    # the order it was given the inputs, which is what makes the positional zip
+    # below correct.
+    with ThreadPoolExecutor(max_workers=covers.MAX_CONCURRENT_FETCHES) as pool:
+        resolved = list(
+            pool.map(
+                lambda book: covers.resolve_and_store(book.id, book.isbn, book.cover_url),
+                batch,
+            )
+        )
+
+    stored = 0
+    unreachable = 0
+    still_missing = 0
+    for book, url in zip(batch, resolved, strict=True):
+        if url is None:
+            still_missing += 1
+            continue
+        if url != book.cover_url:
+            book.cover_url = url
+        if covers.is_local(url):
+            stored += 1
+        else:
+            # Resolved to a remote URL this server could not download. Counted
+            # separately from "no image service has one": with no egress every
+            # book lands here, and folding it into either of the other two would
+            # report a clean no-op in exactly the situation this exists for.
+            unreachable += 1
+    db.commit()
+
+    remaining = len(candidates) - len(batch)
+    logger.info(
+        "Cover backfill for %s: examined %d, stored %d, unreachable %d, "
+        "none found for %d, %d left. Totals: %s",
+        current_user.username,
+        len(batch),
+        stored,
+        unreachable,
+        still_missing,
+        remaining,
+        covers.outcome_counts(),
+    )
+    return CoverBackfillOut(
+        examined=len(batch),
+        stored=stored,
+        unreachable=unreachable,
+        still_missing=still_missing,
+        remaining=remaining,
+        # 0 at the end, so the next press starts over rather than answering
+        # nothing for ever.
+        next_after_id=batch[-1].id if remaining > 0 else 0,
+    )
 
 
 # ── Trash ─────────────────────────────────────────────────────────────────────
@@ -1165,18 +1372,18 @@ def _trash(book: Book, db: Session) -> None:
 def _purge(book: Book, db: Session) -> None:
     """Delete a trashed book for good, and its cover file with it.
 
-    The cover is the part a soft delete leaves behind. Files are named by book
-    id, so the next book to take that id inherits somebody else's cover, and
-    since ids are reused by SQLite after the highest row goes, that is not a
-    remote possibility.
+    The cover is the part a soft delete leaves behind, and it is the standing
+    cost of holding covers on disk rather than in the row. Files are named by
+    book id, so the next book to take that id inherits somebody else's cover,
+    and since ids are reused by SQLite after the highest row goes, that is not a
+    remote possibility. `_trash` deliberately does **not** do this: a trashed
+    book can be restored, and restoring one to a placeholder would be a delete
+    that half happened.
 
     **Does not commit**, for the same reason as `_trash`: emptying a trash of
     500 books was 3801 statements and 3.6 seconds of re-selecting.
     """
-    for extension in ("jpg", "jpeg", "png", "webp"):
-        path = COVERS_DIR / f"{book.id}.{extension}"
-        if path.exists():
-            path.unlink()
+    covers.forget(book.id)
     db.delete(book)
 
 
@@ -1326,10 +1533,24 @@ def _stamp_reading_dates(user_book: UserBook, new_status: ReadStatus) -> None:
     * Moving *back* to an earlier status clears the later date. Marking a book
       unread again and leaving a finish date behind would leave it counted in
       "books finished this year" forever.
+
+    DID_NOT_FINISH needed no fourth rule, and that is worth stating rather than
+    leaving to be rediscovered. It is a claim that reading **started**, so it
+    stamps `started_at` alongside READING and READ, and it is not a finish, so
+    the `else` below already clears `finished_at` for it. What it must never do
+    is fall into the last branch: clearing `started_at` would erase the fact
+    that the book was ever picked up, which is the one thing this status is for.
+
+    It also touches no `reading_progress` row. How far somebody got before
+    giving up is exactly the interesting part, and nothing here deletes it.
     """
     now = datetime.now(UTC).replace(tzinfo=None)
 
-    started = new_status in (ReadStatus.READING, ReadStatus.READ)
+    started = new_status in (
+        ReadStatus.READING,
+        ReadStatus.READ,
+        ReadStatus.DID_NOT_FINISH,
+    )
     if started and user_book.started_at is None:
         user_book.started_at = now
 
@@ -1338,10 +1559,153 @@ def _stamp_reading_dates(user_book: UserBook, new_status: ReadStatus) -> None:
             user_book.finished_at = now
     else:
         # Anything other than READ means it is not finished, whatever it was.
+        # DID_NOT_FINISH included, and deliberately: a book somebody gave up on
+        # must not be counted in "books finished this year".
         user_book.finished_at = None
 
     if new_status in (ReadStatus.UNREAD, ReadStatus.WANT_TO_READ):
         user_book.started_at = None
+
+
+# ── Reading progress ──────────────────────────────────────────────────────────
+#
+# Declared here, beside the status endpoint they cooperate with, rather than up
+# with `/export` and `/search`. The route-order gotcha does not reach these:
+# it is about a **literal** first segment losing to `/{book_id}`, and
+# `/{book_id}/progress` shares no shape with `/{book_id}` to lose to. See
+# `docs/decisions.md`.
+#
+# All three take `BookForRead`. Progress is personal and changes nothing for
+# anybody else, exactly like status and rating, so read access is the right
+# gate. Every query filters on `user_id` **as well**: the book being visible
+# says nothing about whose reading of it the caller may see.
+
+
+@router.get("/{book_id}/progress", response_model=list[ProgressOut])
+def list_progress(
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[ReadingProgress]:
+    """The caller's own recorded positions, newest first.
+
+    Never anybody else's, even on a public book. Two members reading the same
+    copy is the ordinary case here, and the log is a diary rather than a shelf
+    fact.
+    """
+    return (
+        db.query(ReadingProgress)
+        .filter(
+            ReadingProgress.book_id == book.id,
+            ReadingProgress.user_id == current_user.id,
+        )
+        .order_by(ReadingProgress.recorded_at.desc(), ReadingProgress.id.desc())
+        .all()
+    )
+
+
+@router.post(
+    "/{book_id}/progress",
+    response_model=ProgressOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_progress(
+    payload: ProgressCreate,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ReadingProgress:
+    """Record where the caller has got to.
+
+    Saying where you are in a book is the same claim the READING button makes,
+    arrived at from the other direction, so it promotes an unstarted book
+    rather than leaving a member with a page number and a status of "unread".
+    The transition itself goes through `_stamp_reading_dates`, which owns those
+    rules; duplicating them here is how the two would drift.
+
+    **It never sets READ, whatever the page number.** `page_count` comes from a
+    metadata provider and is off by one often enough that the last page is not
+    a reliable finish signal, and finishing already has an explicit control.
+    """
+    entry = ReadingProgress(
+        user_id=current_user.id,
+        book_id=book.id,
+        page=payload.page,
+        percent=payload.percent,
+        minutes=payload.minutes,
+    )
+    db.add(entry)
+
+    user_book = (
+        db.query(UserBook)
+        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
+        .first()
+    )
+    if user_book is None:
+        user_book = UserBook(user_id=current_user.id, book_id=book.id)
+        db.add(user_book)
+
+    # Only from a standing start. A book already READING needs no change, and
+    # one already READ is being re-read, which is a thing the log records and
+    # the status has no way to say.
+    #
+    # **DID_NOT_FINISH promotes**, unlike READ. It is a claim about the past,
+    # and a new position contradicts it: leaving it alone would have the shelf
+    # say "gave up on this" while the log says "reached page 240 this morning".
+    # Picking an abandoned book back up is the case the status exists for. The
+    # earlier progress rows are untouched, and `finished_at` is already null for
+    # such a book and stays null, because READING is not READ.
+    #
+    # `or UNREAD` because a row added in this request has not been flushed, so
+    # the column default has not been applied and `status` is still None. That
+    # is the whole first-progress-on-a-new-book case, so without it the
+    # promotion never fired at all.
+    current = user_book.status or ReadStatus.UNREAD
+    if current in (
+        ReadStatus.UNREAD,
+        ReadStatus.WANT_TO_READ,
+        ReadStatus.DID_NOT_FINISH,
+    ):
+        _stamp_reading_dates(user_book, ReadStatus.READING)
+        user_book.status = ReadStatus.READING
+
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@router.delete("/{book_id}/progress/{progress_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_progress(
+    progress_id: int,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    """Remove one of the caller's own entries. A mistyped page is the case.
+
+    404 for somebody else's row and for one belonging to a different book, not
+    403, for the same reason an invisible book is: a 403 would confirm the id
+    exists. The book/entry pairing is enforced so an id from another book
+    cannot be deleted through a book the caller happens to have access to,
+    which is the rule `_note_for_edit` states for notes.
+
+    The status is left alone. Deleting the only entry does not put the book
+    back to unread: somebody pressed READING, or this endpoint did on their
+    behalf, and removing a mistyped page number is not a claim about that.
+    """
+    entry = (
+        db.query(ReadingProgress)
+        .filter(
+            ReadingProgress.id == progress_id,
+            ReadingProgress.book_id == book.id,
+            ReadingProgress.user_id == current_user.id,
+        )
+        .first()
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Progress entry not found")
+    db.delete(entry)
+    db.commit()
 
 
 # ── Tagging ───────────────────────────────────────────────────────────────────
@@ -1396,7 +1760,7 @@ async def upload_cover(
     # old order deleted first, so a failed write left the book with no cover at
     # all. See uploads.replace_image.
     replace_image(COVERS_DIR, str(book.id), extension, data)
-    book.cover_url = f"/covers/{book.id}.{extension}"
+    book.cover_url = covers.local_url(book.id, extension)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -1432,8 +1796,11 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     book.page_count = data.get("page_count") or book.page_count
 
     # A cover the member uploaded outranks whatever the source offers.
-    if not (book.cover_url and book.cover_url.startswith("/covers/")):
+    if not covers.is_local(book.cover_url):
         book.cover_url = data.get("cover_url")
+        # `to_thread` rather than a direct call: this handler is a coroutine, and
+        # `resolve_and_store` runs its own event loop.
+        await asyncio.to_thread(_store_cover, book)
 
     db.commit()
     db.refresh(book)
@@ -1564,6 +1931,8 @@ async def enrich_book(
 
     updated = google_books.merge_into(book, fields, overwrite=overwrite)
     if updated:
+        # `to_thread` because this handler is a coroutine. See refresh_metadata.
+        await asyncio.to_thread(_store_cover, book)
         db.commit()
         db.refresh(book)
 
@@ -1612,6 +1981,7 @@ def apply_enrichment(
         overwrite=overwrite,
     )
     if updated:
+        _store_cover(book)
         db.commit()
         db.refresh(book)
 

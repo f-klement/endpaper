@@ -23,6 +23,7 @@ from schemas.book import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
+    CoverBackfillOut,
     DuplicateGroup,
     LocationOut,
     MergeRequest,
@@ -35,9 +36,11 @@ from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
 from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.loan import LoanCreate, LoanOut
 from schemas.note import NoteCreate, NoteOut
+from schemas.progress import ProgressCreate, ProgressOut
 from schemas.settings import (
     FeatureFlagsOut,
     LoginImageOut,
+    OverdueNotifyResult,
     RestoreResult,
     SettingsOut,
     SettingsUpdate,
@@ -73,6 +76,7 @@ __all__ = [
     "BookStatusUpdate",
     "BulkRequest",
     "BulkResult",
+    "CoverBackfillOut",
     "DuplicateGroup",
     "ImportResultOut",
     "ImportPreviewOut",
@@ -92,10 +96,13 @@ __all__ = [
     "MonthStat",
     "NoteCreate",
     "NoteOut",
+    "OverdueNotifyResult",
     "OwnershipUpdate",
     "Page",
     "PerUserStat",
     "PrivacyUpdate",
+    "ProgressCreate",
+    "ProgressOut",
     "PurgeResult",
     "StatsOut",
     "TagCreate",

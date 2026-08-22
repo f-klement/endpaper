@@ -5,6 +5,7 @@ import {
   ReadStatus,
 } from "../../api/generated/model";
 import type { MessageKey } from "../../i18n";
+import type { LibraryView } from "../../lib/libraryView";
 
 /** The filter state the grid is driven by. Local to this page. */
 export interface BookFilters {
@@ -69,7 +70,20 @@ export const STATUS_FILTERS: { label: MessageKey; value: ReadStatus | null }[] =
     { label: "status.want_to_read", value: ReadStatus.want_to_read },
     { label: "status.reading", value: ReadStatus.reading },
     { label: "status.read", value: ReadStatus.read },
+    { label: "status.did_not_finish", value: ReadStatus.did_not_finish },
   ];
+
+/**
+ * Covers or metadata.
+ *
+ * Two whole words rather than two icons: a grid glyph and a table glyph are
+ * near enough identical at 16 pixels that the label is what actually says
+ * which is which, and there are only two of them.
+ */
+export const VIEW_OPTIONS: { label: MessageKey; value: LibraryView }[] = [
+  { label: "library.viewGrid", value: "grid" },
+  { label: "library.viewTable", value: "table" },
+];
 
 export const OWNERSHIP_FILTERS: {
   label: MessageKey;

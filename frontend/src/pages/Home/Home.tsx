@@ -7,6 +7,7 @@ import { Page, PageCount, PageHeader } from "../components";
 import { useTranslation } from "../../i18n";
 import BookFilters from "./components/BookFilters";
 import BookGrid from "./components/BookGrid";
+import BookTable from "./components/BookTable";
 import SavedSearches from "./components/SavedSearches";
 import SearchBar from "./components/SearchBar";
 import SelectionBar from "./components/SelectionBar";
@@ -85,6 +86,8 @@ export default function Home() {
         onSortChange={library.setSort}
         onToggleTag={library.toggleTag}
         onClearTags={library.clearTags}
+        view={library.view}
+        onViewChange={library.setView}
       />
 
       <SavedSearches
@@ -125,16 +128,32 @@ export default function Home() {
             }
             aria-busy={library.isStale}
           >
-            <BookGrid
-              books={library.books}
-              isLoading={library.isLoading}
-              hasMore={library.hasMore}
-              isLoadingMore={library.isLoadingMore}
-              onLoadMore={library.loadMore}
-              isSelecting={selection.isSelecting}
-              isSelected={selection.isSelected}
-              onToggleSelect={selection.toggle}
-            />
+            {/* Selecting forces the grid: the checkbox lives on a card, and
+                a table of nineteen columns is not where somebody ticks twenty
+                books off. Starting a selection therefore shows the covers
+                again, rather than offering a selection that does nothing. */}
+            {library.view === "table" && !selection.isSelecting ? (
+              <BookTable
+                books={library.books}
+                sort={library.filters.sort}
+                onSortChange={library.setSort}
+                isLoading={library.isLoading}
+                hasMore={library.hasMore}
+                isLoadingMore={library.isLoadingMore}
+                onLoadMore={library.loadMore}
+              />
+            ) : (
+              <BookGrid
+                books={library.books}
+                isLoading={library.isLoading}
+                hasMore={library.hasMore}
+                isLoadingMore={library.isLoadingMore}
+                onLoadMore={library.loadMore}
+                isSelecting={selection.isSelecting}
+                isSelected={selection.isSelected}
+                onToggleSelect={selection.toggle}
+              />
+            )}
           </div>
         )}
       </div>

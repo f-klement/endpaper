@@ -18,6 +18,11 @@ import {
   useListTags,
 } from "../../api/generated/endpoints/books/books";
 import {
+  readLibraryView,
+  writeLibraryView,
+  type LibraryView,
+} from "../../lib/libraryView";
+import {
   BookFormat,
   BulkAction,
   OwnershipStatus,
@@ -77,6 +82,10 @@ export interface UseLibraryResult {
   setSort: (sort: BookFilters["sort"]) => void;
   toggleTag: (tagId: number) => void;
   clearTags: () => void;
+
+  /** Covers or metadata. Remembered in this browser, not on the account. */
+  view: LibraryView;
+  setView: (view: LibraryView) => void;
 
   books: BookOut[];
   total: number;
@@ -148,6 +157,10 @@ export function useLibrary(): UseLibraryResult {
     readSavedSearches<BookFilters>(),
   );
 
+  // Same reasoning, and the same failure posture: storage that refuses to
+  // answer gives the grid rather than an error.
+  const [view, setViewState] = useState<LibraryView>(() => readLibraryView());
+
   const params = toParams(filters);
 
   const books = useListBooksInfinite(params, {
@@ -211,6 +224,12 @@ export function useLibrary(): UseLibraryResult {
           : [...current.tagIds, tagId],
       })),
     clearTags: () => setFilters((current) => ({ ...current, tagIds: [] })),
+
+    view,
+    setView: (next) => {
+      setViewState(next);
+      writeLibraryView(next);
+    },
 
     books: flatBooks,
     total,
