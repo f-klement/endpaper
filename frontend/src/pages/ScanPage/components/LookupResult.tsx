@@ -30,6 +30,9 @@ interface LookupResultProps {
   onFormatChange: (format: BookFormat | "") => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Record it as another copy of the book the 409 named. */
+  onAddCopy: () => void;
+  isAddingCopy: boolean;
 }
 
 /**
@@ -67,6 +70,8 @@ export default function LookupResult({
   onFormatChange,
   onConfirm,
   onCancel,
+  onAddCopy,
+  isAddingCopy,
 }: LookupResultProps) {
   const { t } = useTranslation();
   return (
@@ -237,12 +242,33 @@ export default function LookupResult({
                 press, and has to go and find it to check it is the same
                 edition. */}
             {error instanceof ApiError && error.bookId != null && (
-              <Link
-                to={`/book/${error.bookId}`}
-                className="inline-block text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
-              >
-                {t("scan.openTheOneWeHave")}
-              </Link>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Link
+                  to={`/book/${error.bookId}`}
+                  className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+                >
+                  {t("scan.openTheOneWeHave")}
+                </Link>
+                {/* Second, and deliberately not the primary action. The
+                    overwhelmingly common reason for this 409 is a second pass
+                    through the same bookcase, so the mis-scan keeps the first
+                    position and a real second copy costs one more press. */}
+                <button
+                  onClick={onAddCopy}
+                  disabled={isAddingCopy}
+                  className="text-sm font-medium text-paper-700 underline hover:no-underline disabled:text-paper-600 dark:text-paper-200"
+                >
+                  {isAddingCopy ? t("copies.adding") : t("copies.add")}
+                </button>
+                {/* Said before the press, not discovered after it. The tags
+                    picked on this draft and any cover uploaded to it are not
+                    carried over: a copy takes both from the book already here,
+                    which is the one thing about this action that would
+                    otherwise look like it lost work. */}
+                <p className="basis-full text-xs text-paper-600 dark:text-paper-300">
+                  {t("copies.fromScanHint")}
+                </p>
+              </div>
             )}
           </div>
         )}

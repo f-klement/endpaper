@@ -32,6 +32,7 @@ export * from "./bookStatusUpdate.ts";
 export * from "./bulkAction.ts";
 export * from "./bulkRequest.ts";
 export * from "./bulkResult.ts";
+export * from "./copyCreate.ts";
 export * from "./coverBackfillOut.ts";
 export * from "./duplicateGroup.ts";
 export * from "./enrichBookParams.ts";

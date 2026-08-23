@@ -7,7 +7,7 @@
  */
 
 import { act, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BookMatch } from "../../../src/api/generated/model";
 import {
@@ -362,6 +362,89 @@ describe("useRapidIntake", () => {
     expect(result.current.entries.map((e) => e.isbn)).toEqual([
       "9780262033848",
     ]);
+  });
+});
+
+describe("useScanFlow and a book already on the shelf", () => {
+  const LOOKUP = {
+    isbn: "9780441013593",
+    title: "Dune",
+    author: "Frank Herbert",
+    suggested_tag_ids: [],
+  };
+
+  const CONFLICT = {
+    status: 409,
+    body: { detail: { message: "Book with this ISBN already in catalog", book_id: 7 } },
+  };
+
+  async function scanADuplicate(onAdded: (bookId: number) => void = () => {}) {
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", CONFLICT);
+    const rendered = renderHookWithProviders(() => useScanFlow(onAdded));
+
+    act(() => rendered.result.current.lookup("9780441013593"));
+    await waitFor(() => expect(rendered.result.current.draft).not.toBeNull());
+    act(() => rendered.result.current.confirm());
+    await waitFor(() =>
+      expect(rendered.result.current.error).not.toBeNull(),
+    );
+    return rendered;
+  }
+
+  it("does nothing when there was no conflict to copy from", async () => {
+    // The id comes off the 409, so with no 409 there is no book to copy.
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+
+    act(() => result.current.addCopy());
+
+    await waitFor(() => expect(result.current.isAddingCopy).toBe(false));
+    expect(api.lastCall("/copies", "POST")).toBeUndefined();
+  });
+
+  it("adds a copy of the book that already holds the ISBN", async () => {
+    // The deliberate half of the collision. The mis-scan keeps its own answer,
+    // which is the link to the book already here.
+    const { result } = await scanADuplicate();
+    act(() => result.current.setLocation("Loft"));
+    api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
+
+    act(() => result.current.addCopy());
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/7/copies", "POST")).toBeDefined(),
+    );
+    expect(api.lastCall("/api/books/7/copies", "POST")?.body).toMatchObject({
+      location: "Loft",
+    });
+  });
+
+  it("opens the new copy once it exists", async () => {
+    const onAdded = vi.fn();
+    const { result } = await scanADuplicate(onAdded);
+    api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
+
+    act(() => result.current.addCopy());
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalledWith(99));
+  });
+
+  it("sends nothing about the work, only about the copy", async () => {
+    // A payload that can restate the title is a payload that can disagree with
+    // it, and two rows claiming to be copies of each other while naming
+    // different books is a state nothing can render.
+    const { result } = await scanADuplicate();
+    api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
+
+    act(() => result.current.addCopy());
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/7/copies", "POST")).toBeDefined(),
+    );
+    const sent = api.lastCall("/api/books/7/copies", "POST")?.body as object;
+    expect(sent).not.toHaveProperty("title");
+    expect(sent).not.toHaveProperty("isbn");
+    expect(sent).not.toHaveProperty("is_private");
   });
 });
 

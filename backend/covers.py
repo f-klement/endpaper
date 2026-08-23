@@ -584,6 +584,37 @@ def forget(book_id: int) -> None:
         (Path(COVERS_DIR) / f"{book_id}.{extension}").unlink(missing_ok=True)
 
 
+def adoption_url(book_id: int, from_book_id: int) -> str | None:
+    """The URL `adopt` will produce, worked out before any bytes move.
+
+    Its whole reason for existing is that the two halves of an adoption belong
+    on opposite sides of a commit. The URL goes into the row, so it has to be
+    known first; moving the file is a filesystem write no transaction rolls
+    back, so it has to happen last. Splitting them is what lets a merge commit
+    the right `cover_url` and touch nothing on disk until that commit has
+    landed.
+
+    **The extension is read here and read again by `adopt`**, from the same
+    `stored_path`, so the filesystem stays the one source of truth and neither
+    half caches an answer the other could contradict. What that does not close
+    is the gap between the two reads: an upload that replaces the loser's cover
+    while the merge is committing leaves a row naming `.png` and a file written
+    as `.jpg`. It needs a concurrent `upload_cover` on a book being merged away,
+    and the outcome is a broken image with the keeper's bytes on disk under the
+    keeper's own id, so re-uploading or renaming restores it. The backfill only
+    helps if the cover came from a metadata provider; it has nothing to
+    re-fetch for a hand-uploaded one. Carrying the extension across instead
+    would trade that for a row naming a file that was never written.
+
+    None when there is no file to adopt, which the caller stores as "no cover"
+    rather than as a promise it cannot keep.
+    """
+    source = stored_path(from_book_id)
+    if source is None:
+        return None
+    return local_url(book_id, source.suffix.lstrip(".").lower())
+
+
 def adopt(book_id: int, from_book_id: int) -> str | None:
     """Move a cover file from one book's id to another's. The new URL, or None.
 
@@ -592,6 +623,16 @@ def adopt(book_id: int, from_book_id: int) -> str | None:
     the loser. Renaming it is what keeps the keeper's cover working, and it is
     the second thing files cost that a column would not: the pointer and the
     bytes are two facts that have to be kept in step by hand.
+
+    **Called after the transaction commits**, with the URL already written by
+    `adoption_url`, and the return value is **load bearing rather than
+    informational**. It is the only signal that the move did not happen, and
+    `replace_image` is atomic: on `OSError` it removes its own temporary file
+    and re-raises, so the source is still there and None means "these bytes are
+    the only copy, do not sweep them". A caller that discards this answer and
+    then forgets the source id destroys a hand-uploaded cover for good, since
+    nothing remote exists for the backfill to re-fetch. `merge_books` is the
+    only caller and does exactly that check.
     """
     source = stored_path(from_book_id)
     if source is None:
@@ -605,6 +646,30 @@ def adopt(book_id: int, from_book_id: int) -> str | None:
         logger.warning("Could not move a cover from book %d: %s", from_book_id, error)
         return None
     source.unlink(missing_ok=True)
+    return local_url(book_id, extension)
+
+
+def duplicate(book_id: int, from_book_id: int) -> str | None:
+    """Copy a cover file from one book's id to another's. The new URL, or None.
+
+    `adopt` without the delete, for adding a second copy of a title. The two
+    rows must not share a file: files are named by book id and `forget` deletes
+    by id, so purging either copy would blank the other's cover while leaving a
+    `cover_url` pointing at nothing.
+
+    Only worth doing for a cover this app already holds. A remote URL is
+    inherited by assignment and a book with neither is resolved from its ISBN
+    like any other new row, both of which cost no bytes on disk.
+    """
+    source = stored_path(from_book_id)
+    if source is None:
+        return None
+    extension = source.suffix.lstrip(".").lower()
+    try:
+        replace_image(Path(COVERS_DIR), str(book_id), extension, source.read_bytes())
+    except OSError as error:
+        logger.warning("Could not copy a cover from book %d: %s", from_book_id, error)
+        return None
     return local_url(book_id, extension)
 
 

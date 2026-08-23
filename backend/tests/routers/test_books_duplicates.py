@@ -1,9 +1,11 @@
 """Finding duplicate entries and folding them together.
 
-The unique ISBN already makes exact repeats impossible, so the case worth
-catching is the one it cannot see: a hardback and a paperback are the same book
-and two legitimately different ISBNs. Detection is therefore deliberately
-lossy, and merge is a thing a person confirms rather than something automatic.
+An accidental exact repeat is already refused by `uq_books_isbn_single_copy`,
+so the case worth catching is the one it cannot see: a hardback and a paperback
+are the same book and two legitimately different ISBNs. Deliberate copies of one
+title are neither, and `tests/routers/test_books_copies.py` holds that line.
+Detection is therefore deliberately lossy, and merge is a thing a person
+confirms rather than something automatic.
 """
 
 

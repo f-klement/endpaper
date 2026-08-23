@@ -40,6 +40,7 @@ import type {
   BookStatusUpdate,
   BulkRequest,
   BulkResult,
+  CopyCreate,
   CoverBackfillOut,
   DuplicateGroup,
   EnrichBookParams,
@@ -745,10 +746,18 @@ export const getListDuplicatesUrl = () => {
 /**
  * Books that look like the same work under different ids.
  *
- * Matched on normalised title plus author, NOT on ISBN. The unique ISBN
- * already makes exact repeats impossible, so the case left to catch is the
- * one it cannot see: a hardback and a paperback are the same book and two
- * legitimately different ISBNs.
+ * Matched on normalised title plus author, NOT on ISBN. An accidental exact
+ * repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+ * to catch is the one it cannot see: a hardback and a paperback are the same
+ * book and two legitimately different ISBNs.
+ *
+ * **A deliberate copy is not a duplicate, and this is where the two are told
+ * apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+ * and would otherwise be the strongest match this endpoint can produce: same
+ * title, same author, same everything. Offering them for merge would invite
+ * somebody to destroy a book they own, so each group is collapsed to one row
+ * before the grouping runs. What survives is what the collapse could not
+ * explain, which is exactly the accidental case.
  *
  * Grouping happens in Python rather than SQL because the normalisation
  * (casefold, strip punctuation, drop a leading article) is not something
@@ -2745,6 +2754,266 @@ export const useUpdateBookDetails = <
   TContext
 > => {
   return useMutation(getUpdateBookDetailsMutationOptions(options), queryClient);
+};
+export const getListCopiesUrl = (bookId: number) => {
+  return `/api/books/${bookId}/copies`;
+};
+
+/**
+ * Every copy of this title the caller may see, this one included.
+ *
+ * A one-element list for almost every book in the catalogue, and that is the
+ * honest answer rather than an empty one: the book in hand is a copy, it is
+ * just the only one.
+ *
+ * Ordered by id, which is the order they were added. There is no first copy
+ * in the data model and this does not invent one; it is the order that stays
+ * the same between two reads.
+ * @summary List Copies
+ */
+export const listCopies = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut[]> => {
+  return customFetch<BookOut[]>(getListCopiesUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCopiesQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/copies`] as const;
+};
+
+export const getListCopiesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCopies>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listCopies>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListCopiesQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listCopies>>> = ({
+    signal,
+  }) => listCopies(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCopies>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListCopiesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCopies>>
+>;
+export type ListCopiesQueryError = HTTPValidationError;
+
+export function useListCopies<
+  TData = Awaited<ReturnType<typeof listCopies>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listCopies>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCopies>>,
+          TError,
+          Awaited<ReturnType<typeof listCopies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListCopies<
+  TData = Awaited<ReturnType<typeof listCopies>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listCopies>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCopies>>,
+          TError,
+          Awaited<ReturnType<typeof listCopies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListCopies<
+  TData = Awaited<ReturnType<typeof listCopies>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listCopies>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Copies
+ */
+
+export function useListCopies<
+  TData = Awaited<ReturnType<typeof listCopies>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listCopies>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListCopiesQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAddCopyUrl = (bookId: number) => {
+  return `/api/books/${bookId}/copies`;
+};
+
+/**
+ * Record that the household owns another copy of this book.
+ *
+ * The deliberate half of the ISBN collision. Scanning a book already on the
+ * shelf answers 409 exactly as it always has, because the overwhelmingly
+ * common reason for it is a second pass through the same bookcase; this
+ * endpoint is the other reason, and it is reached by pressing something that
+ * says so rather than by the app guessing.
+ *
+ * **`is_private` is inherited, never chosen here.** A copy of a private book
+ * that came back public would disclose the book. The caller added the copy,
+ * so they are its owner and `PATCH /{id}/privacy` can change it afterwards.
+ *
+ * **Reading state is not copied.** Status, rating, progress, notes and loans
+ * all belong to a person and an object, and the new object is one nobody has
+ * read yet. Tags are copied: they describe the work, and re-picking six of
+ * them for a second paperback is exactly the friction this feature exists to
+ * remove.
+ * @summary Add Copy
+ */
+export const addCopy = async (
+  bookId: number,
+  copyCreate: CopyCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getAddCopyUrl(bookId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(copyCreate),
+  });
+};
+
+export const getAddCopyMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addCopy>>,
+    TError,
+    { bookId: number; data: CopyCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addCopy>>,
+  TError,
+  { bookId: number; data: CopyCreate },
+  TContext
+> => {
+  const mutationKey = ["addCopy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addCopy>>,
+    { bookId: number; data: CopyCreate }
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return addCopy(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddCopyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addCopy>>
+>;
+export type AddCopyMutationBody = CopyCreate;
+export type AddCopyMutationError = HTTPValidationError;
+
+/**
+ * @summary Add Copy
+ */
+export const useAddCopy = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof addCopy>>,
+      TError,
+      { bookId: number; data: CopyCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof addCopy>>,
+  TError,
+  { bookId: number; data: CopyCreate },
+  TContext
+> => {
+  return useMutation(getAddCopyMutationOptions(options), queryClient);
 };
 export const getUploadCoverUrl = (bookId: number) => {
   return `/api/books/${bookId}/cover`;

@@ -323,6 +323,37 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         assert covers.stored_ids() == {keeper["id"]}
         assert res.json()["cover_url"] == f"/covers/{keeper['id']}.jpg"
 
+    def test_a_failed_adoption_keeps_the_bytes_and_the_row_honest(
+        self, client, admin, make_book, covers_dir, db, monkeypatch
+    ):
+        """A merge moves the kept cover after it commits, so the move can fail
+        on its own with the row already saved.
+
+        `replace_image` is atomic and re-raises having removed only its own
+        temporary file, so the loser's cover is still there. Sweeping the
+        loser's id anyway destroys the only copy: a hand-uploaded cover has no
+        remote source, so the backfill cannot put it back. And the row must not
+        be left claiming a cover the move never produced.
+        """
+        keeper = make_book(admin["headers"], title="Dune")
+        loser = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, loser["id"])
+
+        def full_disk(directory, base, extension, data):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(covers, "replace_image", full_disk)
+
+        res = client.post(
+            "/api/books/merge",
+            json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert covers.stored_ids() == {loser["id"]}
+        assert res.json()["cover_url"] is None
+
     def test_merging_deletes_a_cover_it_did_not_keep(
         self, client, admin, make_book, covers_dir, db
     ):

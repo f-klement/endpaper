@@ -262,9 +262,16 @@ class _CatalogueIndex:
     row and is 25,000 statements for a Goodreads export.
 
     `taken_isbns` covers **every** book, invisible ones included, because
-    `books.isbn` is unique across the whole table. That is the check that keeps
+    `books.isbn` is unique across the whole table for any row nobody has
+    declared a copy. That is the check that keeps
     a row whose ISBN belongs to somebody else's private book from raising on
     the index and taking the whole import with it.
+
+    It stays that broad now that deliberate copies suspend the unique index for
+    their ISBN, and the reason has changed rather than gone away: an export
+    listing a book twice must not silently mint a second copy. A copy is
+    something a person adds on purpose, one press at a time, never something a
+    CSV file decides a household owns.
     """
 
     by_isbn: dict[str, int]
@@ -275,9 +282,18 @@ class _CatalogueIndex:
 
     @classmethod
     def build(cls, db: DbSession, user_id: int) -> _CatalogueIndex:
-        visible = db.query(Book.id, Book.isbn, Book.title).filter(visible_to(user_id)).all()
+        visible = (
+            db.query(Book.id, Book.isbn, Book.title)
+            .filter(visible_to(user_id))
+            .order_by(Book.id)
+            .all()
+        )
         return cls(
-            by_isbn={isbn: book_id for book_id, isbn, _title in visible if isbn},
+            # First wins, and ordered so "first" means something. Copies made
+            # two visible rows able to share an ISBN, and an import row that
+            # matches one must attach its status and its notes to the same copy
+            # on every run, not to whichever the query happened to return.
+            by_isbn=_first_wins((isbn, book_id) for book_id, isbn, _title in visible if isbn),
             # First wins, matching the old `.first()`: two editions of one
             # title collide, which is acceptable for a status and would not be
             # for anything destructive.

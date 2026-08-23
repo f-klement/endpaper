@@ -83,7 +83,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `location`, `unrated`, `tags`, `sort` |
-| POST | `/api/books` | user | **409** on a duplicate ISBN |
+| POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the household's own |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
@@ -114,6 +114,8 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | PATCH | `/api/books/{id}/discuss` | read | Offer to talk about this book, or withdraw the offer |
 | POST | `/api/books/{id}/enrich` | write | Fill gaps from Google Books |
 | GET | `/api/books/{id}/enrich/candidates` | read | Other editions, for picking the right one |
+| GET | `/api/books/{id}/copies` | read | Every copy of this title the caller may see, this one included |
+| POST | `/api/books/{id}/copies` | write | Record another copy of it. **201** |
 
 "read" and "write" are the access rules in [security.md](security.md): read means the book
 is public or yours; write additionally means public books are a shared shelf any member may
@@ -224,10 +226,16 @@ view exists to answer. Only gaps **below the highest number held** are reported:
 with no known length has no meaningful missing past the end, and reporting one would invent
 a book nobody said exists.
 
-`GET /duplicates` matches on normalised title plus first author, **not** on ISBN. The
-unique ISBN already makes exact repeats impossible, so the case left to catch is the one it
-cannot see: a hardback and a paperback are the same book and two legitimately different
-ISBNs. Matching is deliberately lossy, because this is a suggestion a person confirms.
+`GET /duplicates` matches on normalised title plus first author, **not** on ISBN. An
+accidental exact repeat is already refused by the partial unique index, so the case left to
+catch is the one it cannot see: a hardback and a paperback are the same book and two
+legitimately different ISBNs. Matching is deliberately lossy, because this is a suggestion a
+person confirms.
+
+**Deliberate copies never appear here.** Each `copy_group` is collapsed to one row before
+the matching runs, so two paperbacks of one title are not offered for merge. They would
+otherwise be the strongest match this endpoint can produce, and merging them destroys a
+book the household owns.
 
 `POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled
 out rather than inferred so a mistyped request fails instead of silently keeping whichever
@@ -235,6 +243,54 @@ row sorted first. The survivor absorbs only what it is missing, and tags, notes,
 statuses are repointed rather than dropped. Where the same member holds a status on two of
 the merged rows, the survivor's own row wins: deleting somebody's reading history to
 satisfy a unique index is not an acceptable resolution.
+
+Merging two rows that were copies of each other is a member saying they were never two
+objects, and it works: the survivor is left an ordinary book with no `copy_group`.
+
+### Multiple copies of one title
+
+A household that owns two paperbacks of one title owns two objects, and every per-object
+fact in the catalogue (location, condition, what was paid, who has it) is already recorded
+per book. So a copy is a **second book row**, joined to the first by a shared `copy_group`.
+
+`POST /api/books/{id}/copies` is the only way to make one. It takes the per-copy fields and
+nothing else:
+
+```json
+{ "location": "Loft", "condition": "good", "format": "paperback" }
+```
+
+Everything about the work (title, author, ISBN, cover, series, description) and the tags are
+taken from the book being copied. Nothing personal is: status, rating, progress, notes and
+loans belong to a person and an object, and the copy is an object nobody has read yet.
+`is_private` is **inherited and cannot be set here**, because a public copy of a private
+book discloses the book. The caller owns the copy, so `PATCH /{id}/privacy` can change it
+afterwards.
+
+Three consequences worth knowing before relying on any of them.
+
+**Scanning a book already on the shelf still answers 409**, whether or not copies exist. The
+overwhelmingly common reason for that scan is a second pass through the same bookcase, so a
+copy is something a person asks for by pressing a button that says so, never something the
+app infers. The 409 body carries `book_id` when the holder is visible, which is what lets a
+client offer both actions: open the one we have, or add another copy.
+
+**Each copy lends separately.** One open loan per book row, and a copy is a book row, so
+"one is out and one is on the shelf" is expressible without any change to the loan rules.
+
+**The library lists every copy**, and `copy_count` on every book payload says how many the
+caller can see. Counting only visible copies matters: a member who makes their own copy
+private does not thereby announce it on everybody else's card. Statistics count **items,
+not titles**, so a household with a spare paperback has a total one higher than its number
+of distinct works.
+
+**A CSV round trip collapses them.** `/export` writes one row per copy, which is correct,
+but re-importing that file creates one book: the importer matches by ISBN and, where the
+ISBN belongs to a book it cannot see, refuses rather than inserting. Both halves are
+deliberate. A copy is something a person says they own, one press at a time, and an export
+listing a book three times is an artefact of the export rather than evidence of three
+paperbacks. Restore the whole library from `/api/backup` instead, which carries `copy_group`
+with the rows and reproduces the groups exactly.
 
 ### Bulk actions
 
@@ -294,7 +350,8 @@ and a catalogue will happily return the other one.
 `POST /enrich` keeps the automatic behaviour for a caller that wants it. Both share the
 merge rule, and it is the server's rather than the client's: only empty fields are filled
 unless `overwrite=true`, so a publisher somebody typed by hand is never quietly replaced.
-Neither ever takes the ISBN: it is unique, and a chosen printing's ISBN is not this copy's.
+Neither ever takes the ISBN: a chosen printing's ISBN is not this copy's, and the column is
+unique among uncopied rows so writing one could collide with a book already here.
 
 The candidates endpoint deliberately carries no `suggested_tag_ids`: that book already has
 tags, and they are somebody's deliberate choice.
@@ -420,7 +477,7 @@ backwards shows every deleted book in the library.
 
 Two consequences worth knowing:
 
-* **A trashed row still holds its ISBN**, which is unique. Deleting a book and
+* **A trashed row still holds its ISBN**, and still holds its claim on it. Deleting a book and
   re-scanning it would otherwise report "already exists" for a book nobody can
   see, and mis-scan, delete, re-scan is the most common delete in this app. So
   creating a book whose ISBN is held by a **trashed row the caller could see**

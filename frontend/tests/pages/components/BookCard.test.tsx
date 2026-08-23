@@ -344,6 +344,22 @@ describe("BookCard lending willingness", () => {
   });
 });
 
+describe("BookCard and multiple copies", () => {
+  it("says so when the household holds more than one", () => {
+    // Two copies are two rows and the grid draws both, so without this the
+    // shelf looks like a catalogue that has double-added something.
+    renderCard(makeBook({ title: "Dune", copy_count: 2 }));
+
+    expect(screen.getByText("2 copies")).toBeInTheDocument();
+  });
+
+  it("says nothing about a book with one copy", () => {
+    renderCard(makeBook({ title: "Dune", copy_count: 1 }));
+
+    expect(screen.queryByText(/copies/)).not.toBeInTheDocument();
+  });
+});
+
 describe("BookCard while selecting", () => {
   it("becomes a checkbox rather than a link", () => {
     // A link whose navigation is suppressed announces as a link and behaves

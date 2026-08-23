@@ -120,6 +120,39 @@ class BookCreate(BaseModel):
         return canonical
 
 
+class CopyCreate(BaseModel):
+    """Another copy of a book already in the catalogue.
+
+    Carries only what differs between two copies of one title. Everything about
+    the *work* (title, author, ISBN, cover, series, description) is taken from
+    the book being copied rather than accepted here, because a payload that
+    could restate them is a payload that can disagree with them, and two rows
+    claiming to be copies of each other while naming different books is a state
+    nothing else in this app knows how to render.
+
+    `is_private` is absent for a sharper reason: it is inherited from the
+    source. A copy of somebody's private book that came back public would
+    disclose the book, and this is the one field where the caller getting their
+    way is a privacy leak rather than a preference. The copy belongs to whoever
+    added it, so `PATCH /api/books/{id}/privacy` can change it afterwards.
+    """
+
+    location: str | None = Field(default=None, max_length=120)
+    format: BookFormat | None = None
+    condition: BookCondition | None = None
+    lending: LendingWillingness | None = None
+    purchase_price_minor: int | None = Field(default=None, ge=0, le=MAX_PRICE_MINOR)
+    purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    purchased_at: date | None = None
+    purchase_source: str | None = Field(default=None, max_length=120)
+
+    @field_validator("purchase_currency")
+    @classmethod
+    def upper_case_currency(cls, value: str | None) -> str | None:
+        """`eur` and `EUR` are the same currency and must not sort apart."""
+        return value.upper() if value else value
+
+
 class BookOut(BaseModel):
     id: int
     isbn: str | None
@@ -162,6 +195,18 @@ class BookOut(BaseModel):
     purchase_currency: str | None = None
     purchased_at: date | None = None
     purchase_source: str | None = None
+
+    #: How many copies of this title the household holds, counting this row.
+    #:
+    #: 1 for almost every book. Served on every payload rather than only on the
+    #: detail page, because two copies are two rows and the library grid shows
+    #: both: without a number on the card, a shelf with a spare paperback looks
+    #: like a catalogue that has double-added something.
+    #:
+    #: Counts only the copies the caller may see, like everything else here. A
+    #: member who made their own copy private does not thereby tell the rest of
+    #: the household that a third copy exists.
+    copy_count: int = 1
 
     # Nothing below here is a column. Every one is computed per request and
     # depends on *who is asking*, so the same row serialises differently for
@@ -343,9 +388,14 @@ class LocationOut(BaseModel):
 class DuplicateGroup(BaseModel):
     """Books that look like the same work.
 
-    Matched on normalised title plus author rather than ISBN: the unique ISBN
-    already prevents exact repeats, and the case worth catching is a hardback
-    and a paperback, which are legitimately two different ISBNs.
+    Matched on normalised title plus author rather than ISBN: an accidental
+    exact repeat is already refused by `uq_books_isbn_single_copy`, and the
+    case worth catching is a hardback and a paperback, which are legitimately
+    two different ISBNs.
+
+    **Deliberate copies are not duplicates and never appear here.** They share
+    a `copy_group`, and the endpoint collapses each group to one row before
+    deciding whether anything is left over.
     """
 
     key: str

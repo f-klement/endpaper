@@ -36,9 +36,15 @@ join to every read plus a row that both shadow-account paths in `auth_backends.p
 have to remember to create. They are deliberately absent from `UserOut`; see
 [theming.md](theming.md).
 
-**`books`.** The catalogue. `isbn` is unique **but nullable**, which is deliberate: SQL
-treats NULLs as distinct, so any number of manually-added books can coexist without an
-ISBN while genuine duplicates are still rejected. `added_by_user_id` is nullable so
+**`books`.** The catalogue, one row per **object on the shelf** rather than per title.
+Everything in it that is not the work is already per copy: `location`, `condition`,
+`format`, `lending`, `ownership` and the four purchase columns.
+
+`isbn` is nullable, which is deliberate: SQL treats NULLs as distinct, so any number of
+manually-added books can coexist without an ISBN. It is unique through
+`uq_books_isbn_single_copy`, a **partial** index over the rows whose `copy_group` is null,
+which is what lets a household own two paperbacks of one title while a re-scan of a book
+already on the shelf is still refused. See *Copies* below. `added_by_user_id` is nullable so
 deleting an account does not cascade away its books.
 
 Every ISBN is canonicalised to **ISBN-13 on the way in** (`backend/isbn.py`), so the same
@@ -237,6 +243,43 @@ own shelf taxonomy before they start, and a wrong vocabulary imposed up front is
 a slightly untidy one that grows. `GET /api/books/locations` returns what is in use, which
 the UI offers as suggestions rather than as a closed list.
 
+## Copies
+
+A household that genuinely owns two paperbacks of one title has two objects, and the whole
+of the previous paragraph is per object. So a copy is a **second row**, and `copy_group` is
+what joins it to the first.
+
+**The token is the difference between a copy and a duplicate**, and that distinction is the
+feature. Two rows with no group naming the same book are an accident: the partial unique
+index refuses the second one, and `/duplicates` offers whatever slipped past it for merge.
+Two rows sharing a group are a deliberate statement by somebody who pressed "add another
+copy", and neither the index nor the duplicate finder touches them.
+
+| | Accidental duplicate | Deliberate copy |
+|---|---|---|
+| How it arises | A re-scan, a CSV import, a hand entry | `POST /api/books/{id}/copies`, one press |
+| `copy_group` | null on both rows | the same token on every row |
+| The unique index | refuses it | does not apply |
+| `/duplicates` | offers it for merge | collapses the group to one row and never reports it |
+| Merging them | the point | allowed, and means "they were never two objects" |
+
+An **opaque shared label, not a self-referencing foreign key.** "Is a copy of" is symmetric:
+two paperbacks are peers and neither is the original. A self-FK would invent a distinguished
+row, and a distinguished row needs a rule for what happens when it is purged, which five
+delete paths would each have to remember. A shared label needs no such rule. It is not a
+foreign key either, so nothing dangles when a member of the group is destroyed.
+
+**Cleared when a group shrinks to one row, and only on a purge.** The token is what suspends
+the unique index for that ISBN, so a group of one should be exclusive again. Never on a
+trash: a trashed copy can be restored, and clearing the token underneath it would leave two
+formerly grouped rows with one ISBN and no token, which is exactly what the index refuses.
+The restore would then fail on a button that has nothing to do with copies.
+
+**Loans needed no change.** `uq_loans_one_open_per_book` is one open loan per book row, and
+a copy is a book row, so "one is lent out and one is on the shelf" is already expressible. A
+copy **count** column could not have said that, which is why this is rows: see
+[decisions.md](decisions.md).
+
 ## Three axes, not one
 
 `ownership`, `lending` and `user_books.status` answer different questions, and conflating
@@ -342,6 +385,9 @@ columns:
   point of the flag rather than an oversight. See *What `user_books` carries* above.
 - `my_progress_page`, `my_progress_percent`, `my_progress_recorded_at`: the caller's newest
   row from `reading_progress`. The percentage is the derived one.
+- `copy_count`: how many copies of this title the caller may see, this row included. 1 for
+  almost every book, and it counts only visible rows for the same reason everything else
+  here does.
 
 All of them are filled in one query each for the whole page, not one per book.
 `serialisation.books_to_out` carries the measured statement counts; they are not repeated
@@ -383,6 +429,14 @@ member, this book, in order. `recorded_at` deliberately has **no** index of its 
 per-month statistic reads it under `user_id` and the history reads it under
 `(user_id, book_id)`, so the composite serves both, and a second index on an append-only
 table would be a write cost with no read behind it.
+
+**One ISBN per uncopied book** (migration `b1e7c94a2d05`). `uq_books_isbn_single_copy`, a
+partial unique index on `books(isbn) WHERE copy_group IS NULL`, which replaced the plain
+UNIQUE the column used to carry. `ix_books_isbn` survives it, rebuilt non-unique, because
+the scan flow still looks an ISBN up on every add: the index is the lookup, the partial one
+is the rule. `deleted_at` is deliberately **not** in the predicate. A trashed row keeps its
+claim on the ISBN, which is the trap `_create_book` frees the holders to resolve, and excluding
+trashed rows here would move that trap rather than remove it.
 
 **Lending willingness** (migration `d1a7f36b9c58`). `ix_books_lending`, for the same reason
 `ix_books_format` exists: "what could we lend the book club" is a filter over the whole

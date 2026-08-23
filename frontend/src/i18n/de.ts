@@ -562,6 +562,22 @@ export const de: Messages = {
   "copy.purchaseSource": "Gekauft bei",
   "copy.save": "Angaben zum Exemplar speichern",
   "copy.purchaseSourcePlaceholder": "Der Buchladen um die Ecke",
+
+  // ── Mehrere Exemplare desselben Buchs ───────────────────────────────────
+  "copies.title": "Exemplare",
+  "copies.count": "{count} Exemplare dieses Buchs",
+  "copies.hint": "Ein zweites Exemplar ist ein zweiter Gegenstand: eigenes Regal, eigener Zustand, eigene Ausleihe.",
+  "copies.thisOne": "Dieses hier",
+  "copies.open": "Öffnen",
+  "copies.noShelf": "Kein Regal erfasst",
+  "copies.onLoan": "Verliehen",
+  "copies.add": "Weiteres Exemplar hinzufügen",
+  "copies.adding": "Wird hinzugefügt...",
+  "copies.fromScanHint":
+    "Ein Exemplar übernimmt Schlagwörter und Titelbild von dem Buch, das schon da ist.",
+  "copies.addFailed": "Dieses Exemplar konnte nicht hinzugefügt werden.",
+  "copies.loadFailed": "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
+  "copies.badge": "{count} Exemplare",
   "format.filterAll": "Jede Ausgabe",
 
   // ── Herborgen und drüber reden ──────────────────────────────────────────

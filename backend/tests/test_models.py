@@ -400,7 +400,14 @@ class TestEveryBookQueryIsFiltered:
     books.
 
     A statement may opt out with a `# visible_to exempt:` comment giving the
-    reason. There is one, and it is about the UNIQUE constraint on ISBN.
+    reason. There are four, in two groups, and `test_the_exemptions_are_still_the_known_ones`
+    counts them so the list cannot grow quietly:
+
+    * three about **uniqueness**, which is a table-wide rule. A clash with a
+      book the caller cannot see is still a clash, so filtering the check would
+      turn a 409 into a 500.
+    * one in `serialisation`, which re-reads rows a caller already filtered in
+      order to populate a relationship on the objects in hand.
     """
 
     EXEMPTION = "visible_to exempt:"
@@ -464,6 +471,33 @@ class TestEveryBookQueryIsFiltered:
             "These statements query Book without visible_to() or in_trash_for(): "
             + ", ".join(offenders)
         )
+
+    def test_the_exemptions_are_still_the_known_ones(self):
+        """A count, because an exemption is how the rule is opted out of.
+
+        The docstring above says how many there are and what they are for, and
+        a number written in prose is a number that goes stale. Adding one is
+        allowed; adding one without saying why in both places is not.
+        """
+        backend = Path(__file__).resolve().parent.parent
+        exempt: list[str] = []
+
+        for path in backend.rglob("*.py"):
+            relative = path.relative_to(backend)
+            if relative.parts[0] in {"tests", "migrations", ".venv"}:
+                continue
+            for line in path.read_text().splitlines():
+                if self.EXEMPTION in line:
+                    exempt.append(str(relative))
+
+        # By file rather than by line: a line number here would fail on any
+        # edit above the exemption, which is a test that cries wolf.
+        assert sorted(exempt) == [
+            "routers/books.py",
+            "routers/books.py",
+            "routers/books.py",
+            "serialisation.py",
+        ], exempt
 
     def test_the_guard_would_notice_an_unfiltered_query(self, tmp_path):
         """A guard that cannot fail is not a guard. This pins that the shape it

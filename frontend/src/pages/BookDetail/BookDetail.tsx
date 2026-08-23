@@ -18,6 +18,7 @@ import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
 import ProgressPanel from "./components/ProgressPanel";
+import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
@@ -28,6 +29,7 @@ import { useGoBack } from "../hooks";
 import {
   useBook,
   useBookActions,
+  useBookCopies,
   useBookEnrichment,
   useBookLoan,
   useBookNotes,
@@ -55,6 +57,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const loan = useBookLoan(bookId);
   const progress = useBookProgress(bookId);
   const enrichment = useBookEnrichment(bookId);
+  const copies = useBookCopies(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   const [showEnrichHelp, setShowEnrichHelp] = useState(false);
 
@@ -170,6 +173,17 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           book={book}
           isSaving={actions.isSavingDetails}
           onSave={actions.updateDetails}
+        />
+
+        {/* After the details of this copy, because it only means anything once
+            the reader has seen that those details are per object. */}
+        <CopiesPanel
+          book={book}
+          copies={copies.copies}
+          isAdding={copies.isAdding}
+          error={copies.error}
+          listError={copies.listError}
+          onAdd={copies.add}
         />
 
         <LoanPanel

@@ -229,6 +229,20 @@ export default function BookCard({
           >
             {t(STATUS_LABELS[status])}
           </span>
+          {/* Only when there is more than one, and on the face rather than in
+              the fold out. Two copies are two rows and the grid draws both, so
+              without this the shelf looks like a catalogue that has
+              double-added something, which is the one reading this feature
+              must not produce. The paper ramp, not a semantic colour: owning a
+              spare paperback is neither a warning nor an achievement.
+              `paper-800` on `paper-200`, the pair the `did_not_finish` pill
+              already uses and the only one of that ramp measured over 4.5:1 on
+              every palette. */}
+          {(book.copy_count ?? 1) > 1 && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200">
+              {t("copies.badge", { count: book.copy_count ?? 1 })}
+            </span>
+          )}
           {shown.map((tag) => (
             <span
               key={tag.id}

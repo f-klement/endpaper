@@ -51,6 +51,7 @@ from models import (
     User,
     UserBook,
     book_tags,
+    copy_group_token,
     in_trash_for,
     visible_to,
 )
@@ -67,6 +68,7 @@ from schemas import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
+    CopyCreate,
     CoverBackfillOut,
     DuplicateGroup,
     LocationOut,
@@ -633,23 +635,68 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # This query deliberately does NOT apply `visible_to`: the ISBN is unique
     # across the whole table, so a clash with somebody else's private book is
     # still a clash. That also means it sees **trashed** rows, which is the
-    # trap soft deletion introduces and `_free_the_isbn` exists to resolve.
+    # trap soft deletion introduces and `_freeable` exists to resolve.
+    freed: list[int] = []
     if payload.isbn:
         forms = isbn_utils.equivalent_forms(payload.isbn)
         if forms:
-            # visible_to exempt: the ISBN is UNIQUE across the whole table,
+            # visible_to exempt: the ISBN is unique across the whole table,
             # invisible rows included, so a filtered check would miss the row
             # that is actually going to collide and turn a 409 into a 500.
-            holder = db.query(Book).filter(Book.isbn.in_(forms)).first()
-            if holder is not None and not _free_the_isbn(holder, current_user, db):
+            #
+            # **Every holder, not the first one.** Copies made it possible for
+            # several rows to hold one ISBN, and freeing only the first was
+            # wrong in two different ways, both measured through the API: a
+            # trashed group of two answered **500** (`IntegrityError: UNIQUE
+            # constraint failed: books.isbn`, because the survivor's token was
+            # cleared as the group shrank and it re-entered the partial index
+            # just as the insert reclaimed the ISBN), and a trashed group of
+            # three answered **201**, purging one row and adding a stray fourth
+            # beside the two that still held the ISBN.
+            #
+            # Ordered live-first so the row named in a 409 is the one on the
+            # shelf rather than one in the trash.
+            holders = (
+                db.query(Book)
+                .filter(Book.isbn.in_(forms))
+                .order_by(Book.deleted_at.isnot(None), Book.id)
+                .all()
+            )
+            # Decided in full before anything is destroyed. `_purge` is not
+            # undoable by the request failing: it used to unlink the cover file
+            # itself, so a 409 raised half way through a group left a member
+            # holding a book whose cover was gone. That unlink now happens
+            # after the commit, and this loop is what makes sure there is
+            # nothing to undo in the first place.
+            blocker = next(
+                (holder for holder in holders if not _freeable(holder, current_user)),
+                None,
+            )
+            if blocker is not None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=_conflict_detail(conflict, holder, current_user),
+                    detail=_conflict_detail(conflict, blocker, current_user),
                 )
+            freed = [_purge(holder, db) for holder in holders]
+            if freed:
+                # Flushed, not committed: this function owns the transaction
+                # and commits once. Without this the DELETEs are still pending
+                # when the INSERT runs and the unique ISBN index rejects it,
+                # which is the whole thing this avoids.
+                db.flush()
+
     book = Book(**payload.model_dump(), added_by_user_id=current_user.id)
     db.add(book)
     db.commit()
     db.refresh(book)
+
+    # After the commit, and before the new book's own cover is stored. SQLite
+    # reuses the id of a deleted row, so the book just inserted may well have
+    # taken one of these: forgetting here is what stops it inheriting somebody
+    # else's cover, and doing it after `_store_cover` would delete its own.
+    for book_id in freed:
+        covers.forget(book_id)
+
     # After the commit, because the cover is stored under the book's id and the
     # id does not exist until the row does. A failed fetch is not a failed add:
     # `store_cover` returns the remote URL, or leaves the book without one.
@@ -677,11 +724,16 @@ def _conflict_detail(message: str, holder: Book, current_user: User) -> str | di
     """
     if holder.is_private and holder.added_by_user_id != current_user.id:
         return message
+    # `book_id` is what the client offers two actions on: opening the book it
+    # already has (a mis-scan, the common case) and adding another copy of it
+    # (`POST /api/books/{book_id}/copies`). Both need the id and neither may
+    # have it when the holder is somebody else's private book.
     return {"message": message, "book_id": holder.id}
 
 
-def _free_the_isbn(holder: Book, current_user: User, db: Session) -> bool:
-    """Clear a trashed row out of the way of a book being added again.
+def _freeable(holder: Book, current_user: User) -> bool:
+    """Whether a trashed row may be cleared out of the way of a book being
+    added again.
 
     Without this, deleting a book and re-scanning it reports "already exists"
     for a book the member cannot see anywhere, which is a worse bug than the
@@ -700,18 +752,15 @@ def _free_the_isbn(holder: Book, current_user: User, db: Session) -> bool:
     somebody else's trashed private book because their ISBN happened to match
     would destroy data they never offered up, and would confirm the book
     existed. That case keeps the 409.
+
+    **A predicate and nothing else**, deliberately. It used to purge as well,
+    which meant the caller could only ask about one row at a time without
+    destroying it: see the note at the call site for what that cost once one
+    ISBN could be held by several rows.
     """
     if holder.deleted_at is None:
         return False
-    visible = not holder.is_private or holder.added_by_user_id == current_user.id
-    if not visible:
-        return False
-    _purge(holder, db)
-    # Flushed, not committed: `_create_book` owns the transaction and commits
-    # once. Without this the DELETE is still pending when the INSERT runs and
-    # the unique ISBN index rejects it, which is the whole thing this avoids.
-    db.flush()
-    return True
+    return not holder.is_private or holder.added_by_user_id == current_user.id
 
 
 @router.post("", response_model=BookOut, status_code=status.HTTP_201_CREATED)
@@ -976,10 +1025,18 @@ def list_locations(db: DbSession, current_user: CurrentUser) -> list[LocationOut
 def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateGroup]:
     """Books that look like the same work under different ids.
 
-    Matched on normalised title plus author, NOT on ISBN. The unique ISBN
-    already makes exact repeats impossible, so the case left to catch is the
-    one it cannot see: a hardback and a paperback are the same book and two
-    legitimately different ISBNs.
+    Matched on normalised title plus author, NOT on ISBN. An accidental exact
+    repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+    to catch is the one it cannot see: a hardback and a paperback are the same
+    book and two legitimately different ISBNs.
+
+    **A deliberate copy is not a duplicate, and this is where the two are told
+    apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+    and would otherwise be the strongest match this endpoint can produce: same
+    title, same author, same everything. Offering them for merge would invite
+    somebody to destroy a book they own, so each group is collapsed to one row
+    before the grouping runs. What survives is what the collapse could not
+    explain, which is exactly the accidental case.
 
     Grouping happens in Python rather than SQL because the normalisation
     (casefold, strip punctuation, drop a leading article) is not something
@@ -998,7 +1055,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
     )
 
     groups: dict[str, list[Book]] = {}
-    for book in books:
+    for book in _one_per_copy_group(books):
         groups.setdefault(_duplicate_key(book), []).append(book)
 
     duplicated = {key: members for key, members in groups.items() if len(members) > 1}
@@ -1015,6 +1072,26 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
         DuplicateGroup(key=key, books=[serialised[book.id] for book in members])
         for key, members in sorted(duplicated.items())
     ]
+
+
+def _one_per_copy_group(books: list[Book]) -> list[Book]:
+    """One row per set of deliberate copies, and every ungrouped row as it is.
+
+    The representative is the lowest id in the group, which is stable between
+    two reads of the same shelf. Nothing else depends on which one it is: a
+    group that survives the collapse alone is dropped from the result, and a
+    group that lands beside a genuine duplicate is being offered as a book, not
+    as a copy.
+    """
+    seen: set[str] = set()
+    kept: list[Book] = []
+    for book in sorted(books, key=lambda row: row.id):
+        if book.copy_group is not None:
+            if book.copy_group in seen:
+                continue
+            seen.add(book.copy_group)
+        kept.append(book)
+    return kept
 
 
 _ARTICLES = ("the ", "a ", "an ", "der ", "die ", "das ", "ein ", "eine ")
@@ -1102,14 +1179,31 @@ def merge_books(
     _repoint_relations(db, keeper, losers)
     db.flush()
 
+    # Read before the loop: `db.expire(loser)` below would make each of these
+    # a fresh SELECT, and after the delete there is nothing left to read them
+    # from at all.
+    shrinking_groups = {loser.copy_group for loser in losers} - {None}
+
+    orphaned_covers: list[int] = []
+    adoptions: list[int] = []
     for loser in losers:
         # The keeper may have absorbed the loser's `cover_url`, which names a
         # file about to be deleted with it. Moving the file is what keeps that
         # cover working; everything else the loser held is dead bytes.
+        #
+        # Decided here, performed after the commit. The URL has to be known now
+        # because it goes into the row, and `covers.adoption_url` answers that
+        # from the source file's extension without moving anything. Doing the
+        # move here as well would put a filesystem write no rollback undoes
+        # inside the transaction: a raise between this loop and the commit,
+        # which `_normalise_copy_group`'s flush makes reachable, would leave the
+        # keeper's row naming a file that had already moved somewhere else.
         if keeper.cover_url == covers.local_url_for(loser.id):
-            adopted = covers.adopt(keeper.id, loser.id)
-            keeper.cover_url = adopted if adopted else None
-        covers.forget(loser.id)
+            planned = covers.adoption_url(keeper.id, loser.id)
+            keeper.cover_url = planned
+            if planned is not None:
+                adoptions.append(loser.id)
+        orphaned_covers.append(loser.id)
 
         # Expire before deleting. The repointing above moved rows out from
         # under the loser, but its loaded relationship collections still list
@@ -1118,7 +1212,45 @@ def merge_books(
         # keeper is deleted along with the row they came from.
         db.expire(loser)
         db.delete(loser)
+
+    # Merging two rows that were copies of each other is a member saying they
+    # were never two objects. That can leave one row wearing a group token,
+    # which would keep its ISBN out of the unique index for no reason. Flushed
+    # first, or the rows being counted still include the ones just deleted.
+    if shrinking_groups:
+        db.flush()
+        for token in shrinking_groups:
+            _normalise_copy_group(token, db)
+
     db.commit()
+    # After the commit, for the reason in `_purge`: a file **moved or unlinked**
+    # before it is a loss no rollback undoes. Writing a new one is the other way
+    # round on purpose, everywhere in this module; see docs/decisions.md.
+    #
+    # Adoptions first, and **their outcome decides the sweep**. `adopt` answers
+    # None when the move failed, and `uploads.replace_image` is atomic and
+    # re-raises having removed only its own temporary file, so on that answer
+    # the loser's cover is still sitting under the loser's id. Sweeping it
+    # anyway destroys the only copy there is, which for a hand-uploaded cover
+    # means destroying it for good: there is no remote source, so the backfill
+    # has nothing to re-fetch and cannot repair it.
+    kept = {
+        from_book_id
+        for from_book_id in adoptions
+        if covers.adopt(keeper.id, from_book_id) is None
+    }
+    for book_id in orphaned_covers:
+        if book_id not in kept:
+            covers.forget(book_id)
+
+    # The row promised a cover the move did not produce, so it is corrected
+    # rather than left naming a file nobody wrote. This is what the old
+    # pre-commit ordering did with `adopted if adopted else None`, and losing it
+    # was the one thing deferring the move made worse rather than better.
+    if kept:
+        keeper.cover_url = None
+        db.commit()
+
     db.refresh(keeper)
     return book_to_out(keeper, current_user, db)
 
@@ -1126,6 +1258,11 @@ def merge_books(
 _MERGEABLE_FIELDS = (
     # `isbn` is absent deliberately: it is unique and handled separately, ahead
     # of everything here. See _absorb_fields.
+    #
+    # `copy_group` is absent for a different reason, and absorbing it would be
+    # a real bug rather than a missed field: it would make the survivor a copy
+    # of the loser's siblings, which nobody asked for and which the survivor's
+    # own owner never agreed to.
     "subtitle", "author", "publisher", "year", "description", "cover_url",
     "page_count", "language", "categories", "google_books_id",
     "series_name", "series_index", "location",
@@ -1395,8 +1532,9 @@ def _trash(book: Book, db: Session) -> None:
         loan.returned_at = now
 
 
-def _purge(book: Book, db: Session) -> None:
-    """Delete a trashed book for good, and its cover file with it.
+def _purge(book: Book, db: Session) -> int:
+    """Delete a trashed book for good. Returns the id whose cover files the
+    caller must forget **after the commit**.
 
     The cover is the part a soft delete leaves behind, and it is the standing
     cost of holding covers on disk rather than in the row. Files are named by
@@ -1406,11 +1544,32 @@ def _purge(book: Book, db: Session) -> None:
     book can be restored, and restoring one to a placeholder would be a delete
     that half happened.
 
-    **Does not commit**, for the same reason as `_trash`: emptying a trash of
-    500 books was 3801 statements and 3.6 seconds of re-selecting.
+    **The unlink is the caller's, and it belongs after the commit.** This
+    function used to do it itself, first thing, which made a file loss
+    unrecoverable by any failure after it: the transaction rolls the DELETE
+    back, so the member still has the book, and its `cover_url` now points at
+    a file that no longer exists. Nothing logged it. Adding copies made that
+    reachable through the ordinary scan flow, because one ISBN could be held by
+    several trashed rows and freeing them could raise part way through. A
+    `finally` would not have helped and neither would reordering: only a commit
+    settles whether the row is gone, and flushing per book to get closer would
+    put back the 3801 statements the "does not commit" note below exists to
+    avoid.
+
+    **Does not commit**, for that reason: emptying a trash of 500 books was
+    3801 statements and 3.6 seconds of re-selecting.
     """
-    covers.forget(book.id)
+    book_id = book.id
+    token = book.copy_group
     db.delete(book)
+
+    # Only when this row was one of several copies, which almost none are. The
+    # flush is what makes the count in `_normalise_copy_group` see the delete,
+    # and paying for it on every purge would put those 3801 statements back.
+    if token is not None:
+        db.flush()
+        _normalise_copy_group(token, db)
+    return book_id
 
 
 @router.get("/trash", response_model=Page[BookOut])
@@ -1456,10 +1615,13 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     than on any schedule anybody chose.
     """
     books = db.query(Book).filter(in_trash_for(current_user.id)).all()
-    for book in books:
-        _purge(book, db)
+    purged = [_purge(book, db) for book in books]
     db.commit()
-    return PurgeResult(purged=len(books))
+    # After the commit. See `_purge`: an unlink before it is a file loss no
+    # rollback undoes.
+    for book_id in purged:
+        covers.forget(book_id)
+    return PurgeResult(purged=len(purged))
 
 
 # ── Single book ───────────────────────────────────────────────────────────────
@@ -1468,6 +1630,170 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
 @router.get("/{book_id}", response_model=BookOut)
 def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> BookOut:
     return book_to_out(book, current_user, db)
+
+
+# ── Copies ────────────────────────────────────────────────────────────────────
+#
+# A household that owns two paperbacks of one title owns two objects, and every
+# per-object fact in `books` (location, condition, what was paid, who has it)
+# is already written per row. So a copy is a second row, joined to the first by
+# a shared `copy_group`.
+#
+# That token is the whole distinction between a copy and a duplicate. Two rows
+# with no group that name the same book are an accident, refused by
+# `uq_books_isbn_single_copy` and offered to `/duplicates` to merge. Two rows
+# sharing a group are a deliberate statement by somebody who pressed a button
+# that said "add another copy", and neither the index nor the duplicate finder
+# touches them.
+
+#: Facts about the **work**, which every copy of it shares. Taken from the book
+#: being copied rather than accepted from the caller: a payload that can restate
+#: them is a payload that can disagree with them, and two rows claiming to be
+#: copies of each other while naming different books is a state nothing else in
+#: this app knows how to render.
+#:
+#: `cover_url` is absent and handled separately, because a cover this app holds
+#: is a file named by book id: see the note in the handler.
+_WORK_FIELDS: Final = (
+    "isbn", "title", "subtitle", "author", "publisher", "year", "description",
+    "page_count", "language", "categories", "google_books_id",
+    "series_name", "series_index",
+)
+
+
+@router.get("/{book_id}/copies", response_model=list[BookOut])
+def list_copies(book: BookForRead, db: DbSession, current_user: CurrentUser) -> list[BookOut]:
+    """Every copy of this title the caller may see, this one included.
+
+    A one-element list for almost every book in the catalogue, and that is the
+    honest answer rather than an empty one: the book in hand is a copy, it is
+    just the only one.
+
+    Ordered by id, which is the order they were added. There is no first copy
+    in the data model and this does not invent one; it is the order that stays
+    the same between two reads.
+    """
+    if book.copy_group is None:
+        return [book_to_out(book, current_user, db)]
+
+    copies = (
+        db.query(Book)
+        .options(joinedload(Book.added_by), selectinload(Book.tags))
+        .filter(Book.copy_group == book.copy_group, visible_to(current_user.id))
+        .order_by(Book.id)
+        .all()
+    )
+    return books_to_out(copies, current_user, db)
+
+
+@router.post(
+    "/{book_id}/copies", response_model=BookOut, status_code=status.HTTP_201_CREATED
+)
+def add_copy(
+    payload: CopyCreate,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """Record that the household owns another copy of this book.
+
+    The deliberate half of the ISBN collision. Scanning a book already on the
+    shelf answers 409 exactly as it always has, because the overwhelmingly
+    common reason for it is a second pass through the same bookcase; this
+    endpoint is the other reason, and it is reached by pressing something that
+    says so rather than by the app guessing.
+
+    **`is_private` is inherited, never chosen here.** A copy of a private book
+    that came back public would disclose the book. The caller added the copy,
+    so they are its owner and `PATCH /{id}/privacy` can change it afterwards.
+
+    **Reading state is not copied.** Status, rating, progress, notes and loans
+    all belong to a person and an object, and the new object is one nobody has
+    read yet. Tags are copied: they describe the work, and re-picking six of
+    them for a second paperback is exactly the friction this feature exists to
+    remove.
+    """
+    if book.copy_group is None:
+        book.copy_group = copy_group_token()
+
+    copy = Book(
+        **{field: getattr(book, field) for field in _WORK_FIELDS},
+        **payload.model_dump(),
+        copy_group=book.copy_group,
+        is_private=book.is_private,
+        added_by_user_id=current_user.id,
+        # Somebody adding a copy is holding it, which is the same reason
+        # `ownership` defaults to OWNED on a scan.
+        ownership=OwnershipStatus.OWNED,
+    )
+    copy.tags = list(book.tags)
+    db.add(copy)
+    db.commit()
+    db.refresh(copy)
+
+    # After the insert, because a stored cover is a file named by the book's
+    # id and the id does not exist until the row does. The file is **copied,
+    # not shared**: `covers.forget` deletes by id, so two rows pointing at one
+    # file would mean purging either copy blanks the other's cover.
+    if covers.is_local(book.cover_url):
+        copied = covers.duplicate(copy.id, book.id)
+        if copied is not None:
+            copy.cover_url = copied
+            db.commit()
+            db.refresh(copy)
+    else:
+        # A remote URL, or none at all. Either way this is the same work every
+        # other add path does: resolve the best cover available and hold it.
+        copy.cover_url = book.cover_url
+        if _store_cover(copy):
+            db.commit()
+            db.refresh(copy)
+
+    return book_to_out(copy, current_user, db)
+
+
+def _normalise_copy_group(token: str | None, db: Session) -> None:
+    """Clear a copy group that has shrunk back to a single row.
+
+    Called after rows are destroyed, never after they are trashed: a trashed
+    copy can be restored, and a group cleared underneath it would leave two
+    rows that used to be copies of each other with no token and the same ISBN,
+    which is precisely what `uq_books_isbn_single_copy` refuses. The restore
+    would fail, on a button that has nothing to do with copies.
+
+    Clearing matters because the token is what suspends the unique index for
+    that ISBN. A group of one is a book like any other and should be exclusive
+    again.
+
+    **Refuses to clear when another ungrouped row already holds the ISBN.**
+    Nothing in the app can produce that state (`_create_book` answers 409 on
+    any row with the ISBN, grouped or not), but a hand-edited or restored
+    database can, and the cost of being wrong is an IntegrityError raised from
+    inside somebody's delete.
+    """
+    if token is None:
+        return
+    # visible_to exempt: this is the uniqueness rule, which spans the whole
+    # table. A group counted per member would clear a token another member's
+    # private copy still needs, and the index does not care who can see a row.
+    remaining = db.query(Book).filter(Book.copy_group == token).all()
+    if len(remaining) != 1:
+        return
+    survivor = remaining[0]
+    if survivor.isbn is not None:
+        # visible_to exempt: same rule, same reason as above.
+        clash = (
+            db.query(Book.id)
+            .filter(
+                Book.isbn == survivor.isbn,
+                Book.copy_group.is_(None),
+                Book.id != survivor.id,
+            )
+            .first()
+        )
+        if clash is not None:
+            return
+    survivor.copy_group = None
 
 
 @router.patch("/{book_id}/privacy", response_model=BookOut)
@@ -1516,8 +1842,10 @@ def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) ->
 @router.delete("/{book_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
 def purge_book(book: BookInTrash, db: DbSession) -> None:
     """Delete one trashed book for good."""
-    _purge(book, db)
+    purged = _purge(book, db)
     db.commit()
+    # After the commit. See `_purge`.
+    covers.forget(purged)
 
 
 @router.put("/{book_id}/status", response_model=BookOut)

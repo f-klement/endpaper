@@ -1,4 +1,5 @@
 import logging
+import secrets
 from datetime import date, datetime
 from typing import TypeGuard
 
@@ -137,8 +138,33 @@ class User(Base):
 class Book(Base):
     __tablename__ = "books"
 
+    # The ISBN is unique **only among rows that are not copies of each other**.
+    #
+    # A household that owns two paperbacks of one title has two objects, and
+    # every per-object fact in this table (location, condition, what was paid,
+    # who has it) is already written per row. So a second copy is a second row,
+    # and a plain UNIQUE on `isbn` is what made that impossible.
+    #
+    # Partial rather than dropped, because the constraint was doing real work:
+    # it is what turns a re-scan of a book already on the shelf into a 409
+    # instead of a silent second row, and that is the commonest mistake in this
+    # app. Rows carrying a `copy_group` have been declared deliberate copies by
+    # a member pressing a button that says so; rows without one have not, and
+    # stay exclusive. `deleted_at` is deliberately NOT in the predicate: a
+    # trashed row keeps its claim on the ISBN, which is the trap
+    # `_create_book` frees the holders to resolve, and excluding trashed rows would
+    # move that trap rather than remove it.
+    __table_args__ = (
+        Index(
+            "uq_books_isbn_single_copy",
+            "isbn",
+            unique=True,
+            sqlite_where=text("copy_group IS NULL"),
+        ),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    isbn: Mapped[str | None] = mapped_column(String(20), unique=True, index=True, nullable=True)
+    isbn: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)
     # Indexed because it is the default sort for every listing and export.
     title: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     subtitle: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -228,6 +254,25 @@ class Book(Base):
     # Cowley Road" is a real answer and no vocabulary chosen up front contains
     # it.
     purchase_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # Which set of deliberate copies this row belongs to, or null while the
+    # household owns one of it.
+    #
+    # An opaque shared token rather than a self-referencing foreign key, and
+    # that is the whole design. "Is a copy of" is **symmetric**: two paperbacks
+    # of one title are peers and neither is the original. A self-FK would
+    # invent a distinguished row, and every distinguished row needs a rule for
+    # what happens when it is purged, which is a promote-a-sibling step that
+    # five delete paths would each have to remember. A shared label has no such
+    # row and therefore needs no such rule: purging any member leaves the rest
+    # exactly as they were.
+    #
+    # Not a foreign key for the same reason, so nothing dangles when a member
+    # of the group is destroyed. `copy_group_token()` makes them.
+    #
+    # Indexed because "the other copies of this one" is the only question ever
+    # asked of it, and it is asked on every book detail page.
+    copy_group: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     added_by_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, index=True
@@ -629,6 +674,18 @@ def switch_targets() -> ColumnElement[bool]:
         User.password_hash.is_not(None),
         User.password_hash != "",
     )
+
+
+def copy_group_token() -> str:
+    """A fresh label joining two book rows as deliberate copies of one title.
+
+    Random rather than derived from a row id, so no member of the group is its
+    owner and purging any of them leaves the label meaningful. Sixteen hex
+    characters: this is a household-local label, never a secret and never
+    guessed at, and it only has to not collide with the handful of others in
+    one database.
+    """
+    return secrets.token_hex(8)
 
 
 def visible_to(user_id: int) -> ColumnElement[bool]:

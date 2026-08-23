@@ -13,8 +13,11 @@ import { useState } from "react";
 import {
   getGetBookQueryKey,
   getGetNotesQueryKey,
+  getListCopiesQueryKey,
   getListProgressQueryKey,
   useAddBookTag,
+  useAddCopy,
+  useListCopies,
   useAddProgress,
   useDeleteProgress,
   useListProgress,
@@ -332,6 +335,58 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
     markReturned: (loanId) => complete.mutate({ loanId }),
     isBusy: create.isPending || complete.isPending,
     error: create.error ?? complete.error,
+  };
+}
+
+export interface UseBookCopiesResult {
+  /** Every copy of this title the caller may see, this one included. */
+  copies: BookOut[];
+  /** Record another copy. Nothing is offered to fill in: the new row is opened. */
+  add: () => void;
+  isAdding: boolean;
+  /** Why the add failed, or why the list could not be read. Distinct, because
+   * they need different sentences: one is a write that did not happen, the
+   * other is a panel that would otherwise quietly claim there is one copy. */
+  error: unknown;
+  listError: unknown;
+}
+
+/**
+ * The other objects on the shelf that are this same book.
+ *
+ * Fetched even for the overwhelming majority of books that have exactly one
+ * copy, because the answer is a one-element list rather than an empty one and
+ * the panel offers the add action either way. It is one request against a
+ * page that already makes six.
+ */
+export function useBookCopies(bookId: number): UseBookCopiesResult {
+  const queryClient = useQueryClient();
+  const invalidateBook = useInvalidateBook(bookId);
+  const copies = useListCopies(bookId);
+
+  const add = useAddCopy({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getListCopiesQueryKey(bookId),
+        });
+        // The book itself, because `copy_count` has just changed on it.
+        invalidateBook();
+      },
+    },
+  });
+
+  return {
+    copies: copies.data ?? [],
+    // An empty body rather than the scan form's fields. The person is standing
+    // at the shelf with the second copy in hand, and asking them to fill a form
+    // before the row exists is friction in front of the one press this whole
+    // feature is. Everything on it is editable afterwards, on the copy's own
+    // page.
+    add: () => add.mutate({ bookId, data: {} }),
+    isAdding: add.isPending,
+    error: add.error,
+    listError: copies.error,
   };
 }
 

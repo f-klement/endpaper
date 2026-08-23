@@ -250,6 +250,8 @@ export default function ScanPage() {
           onFormatChange={scan.setFormat}
           onConfirm={scan.confirm}
           onCancel={handleCancel}
+          onAddCopy={scan.addCopy}
+          isAddingCopy={scan.isAddingCopy}
         />
       )}
     </div>

@@ -10,9 +10,14 @@ import type { BookOut } from "./bookOut.ts";
 /**
  * Books that look like the same work.
  *
- * Matched on normalised title plus author rather than ISBN: the unique ISBN
- * already prevents exact repeats, and the case worth catching is a hardback
- * and a paperback, which are legitimately two different ISBNs.
+ * Matched on normalised title plus author rather than ISBN: an accidental
+ * exact repeat is already refused by `uq_books_isbn_single_copy`, and the
+ * case worth catching is a hardback and a paperback, which are legitimately
+ * two different ISBNs.
+ *
+ * **Deliberate copies are not duplicates and never appear here.** They share
+ * a `copy_group`, and the endpoint collapses each group to one row before
+ * deciding whether anything is left over.
  */
 export interface DuplicateGroup {
   books: BookOut[];

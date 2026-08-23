@@ -580,6 +580,34 @@ class TestWhatIsOnDisk:
     def test_adopting_a_cover_that_is_not_there_answers_none(self, covers_dir):
         assert covers.adopt(4, 9) is None
 
+    def test_the_adoption_url_is_known_before_anything_moves(self, covers_dir):
+        """The half a merge needs before it commits. It has to answer what the
+        row will say without writing the file the row will name, or the move
+        sits inside a transaction that can still roll back."""
+        (covers_dir / "9.jpg").write_bytes(JPEG_BYTES)
+
+        assert covers.adoption_url(4, 9) == "/covers/4.jpg"
+        assert covers.stored_ids() == {9}
+
+    def test_the_adoption_url_agrees_with_what_adopting_produces(self, covers_dir):
+        """Two spellings of one answer, which is a thing that drifts. A merge
+        commits the first and performs the second, so a disagreement is a row
+        pointing at a file nobody wrote.
+
+        Pins the code paths at one instant, and deliberately not the gap
+        between the two reads: a cover replaced on the loser mid-merge is a
+        real, narrow window that `adoption_url`'s docstring states and the
+        backfill repairs. A test cannot close it and should not imply it has.
+        """
+        (covers_dir / "9.png").write_bytes(PNG_BYTES)
+
+        planned = covers.adoption_url(4, 9)
+
+        assert planned == covers.adopt(4, 9)
+
+    def test_there_is_no_adoption_url_without_a_file(self, covers_dir):
+        assert covers.adoption_url(4, 9) is None
+
 
 class TestResolveAndStore:
     """The whole add path in one call. The suite stubs this out by default, so

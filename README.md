@@ -58,6 +58,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   often as you like. It is a log, not one number, so it can say how much you read in March
   as well as where you are now. Recording a page starts the book for you
 - **On the shelf or not**: what you own, tracked separately from what you have read
+- **More than one copy**: two paperbacks of the same title are two objects, each with its
+  own shelf, condition, price and loan. Scanning a book you already own still asks before
+  it adds anything, so a mis-scan is caught and a real second copy is one more press
 - **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
   The borrower does not need an account: lend to a neighbour by typing their name
 - **Overdue reminders**: Endpaper can POST a digest of every overdue loan to a webhook you

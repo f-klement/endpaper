@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
 from enums import ReadStatus
-from models import Book, Loan, ReadingProgress, Tag, User, UserBook
+from models import Book, Loan, ReadingProgress, Tag, User, UserBook, visible_to
 from schemas import BookOut, LoanOut, UserOut
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
@@ -157,6 +157,35 @@ def _discussers(book_ids: list[int], db: Session) -> dict[int, list[UserOut]]:
     return grouped
 
 
+def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str, int]:
+    """How many copies each of these books' groups holds, in one statement.
+
+    Keyed on the group token rather than on the book id, because that is what
+    the rows already share: every member of a group gets the same answer, so a
+    page showing both copies of one title costs one row of this result, not
+    two.
+
+    **`visible_to` applies**, and it is not a formality here. A member who made
+    their own copy private would otherwise be announced to the whole household
+    by the number on everybody else's card. It also excludes trashed rows, so
+    deleting one of two copies leaves the other reading "1" rather than
+    claiming a copy that is in the bin.
+
+    Books with no group are absent from the result and read 1 from the default
+    on `BookOut`, which is the same answer without a row to carry it.
+    """
+    groups = {book.copy_group for book in books if book.copy_group is not None}
+    if not groups:
+        return {}
+    rows = (
+        db.query(Book.copy_group, func.count(Book.id))
+        .filter(Book.copy_group.in_(groups), visible_to(current_user.id))
+        .group_by(Book.copy_group)
+        .all()
+    )
+    return {token: count for token, count in rows if token is not None}
+
+
 def books_to_out(books: list[Book], current_user: User, db: Session) -> list[BookOut]:
     """Serialise a page of books, adding the per-request fields.
 
@@ -172,6 +201,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     populate their tags, the tag load itself, the loans, the statuses, the
     progress, and the members offering to talk about each book. Measured at 1,
     5 and 25 books, unchanged.
+
+    **Seven when the page holds a copy.** `_copy_counts` issues its statement
+    only when some book on the page carries a `copy_group`, which almost none
+    do, and it is one statement for the whole page whatever it finds.
 
     **Plus one per distinct `added_by` author the session has not already
     loaded**, and that one is not this function's: `BookOut.model_validate`
@@ -237,10 +270,15 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     latest_progress = _latest_progress(book_ids, current_user, db)
     discussers = _discussers(book_ids, db)
+    # Only when something on the page is a copy, so the ordinary library pays
+    # nothing for a feature almost no book uses.
+    copy_counts = _copy_counts(books, current_user, db)
 
     results: list[BookOut] = []
     for book in books:
         out = BookOut.model_validate(book)
+        if book.copy_group is not None:
+            out.copy_count = copy_counts.get(book.copy_group, 1)
         loan = active_loans.get(book.id)
         out.active_loan = loan_summary(loan) if loan else None
 

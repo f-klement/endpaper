@@ -564,6 +564,22 @@ export const en = {
   "copy.purchaseSource": "Bought from",
   "copy.save": "Save copy details",
   "copy.purchaseSourcePlaceholder": "The Oxfam on the high street",
+
+  // ── More than one copy of the same book ─────────────────────────────────
+  "copies.title": "Copies",
+  "copies.count": "{count} copies of this book",
+  "copies.hint": "A second copy is a second object: its own shelf, its own condition, its own loan.",
+  "copies.thisOne": "This one",
+  "copies.open": "Open",
+  "copies.noShelf": "No shelf recorded",
+  "copies.onLoan": "Out on loan",
+  "copies.add": "Add another copy",
+  "copies.adding": "Adding...",
+  "copies.fromScanHint":
+    "A copy takes its tags and its cover from the book already here.",
+  "copies.addFailed": "That copy could not be added.",
+  "copies.loadFailed": "The other copies of this book could not be loaded.",
+  "copies.badge": "{count} copies",
   "format.filterAll": "Any format",
 
   // ── Willing to lend, and willing to talk ────────────────────────────────

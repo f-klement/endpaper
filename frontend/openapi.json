@@ -983,6 +983,11 @@
               }
             ]
           },
+          "copy_count": {
+            "default": 1,
+            "title": "Copy Count",
+            "type": "integer"
+          },
           "cover_url": {
             "anyOf": [
               {
@@ -1442,6 +1447,105 @@
         "title": "BulkResult",
         "type": "object"
       },
+      "CopyCreate": {
+        "description": "Another copy of a book already in the catalogue.\n\nCarries only what differs between two copies of one title. Everything about\nthe *work* (title, author, ISBN, cover, series, description) is taken from\nthe book being copied rather than accepted here, because a payload that\ncould restate them is a payload that can disagree with them, and two rows\nclaiming to be copies of each other while naming different books is a state\nnothing else in this app knows how to render.\n\n`is_private` is absent for a sharper reason: it is inherited from the\nsource. A copy of somebody's private book that came back public would\ndisclose the book, and this is the one field where the caller getting their\nway is a privacy leak rather than a preference. The copy belongs to whoever\nadded it, so `PATCH /api/books/{id}/privacy` can change it afterwards.",
+        "properties": {
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LendingWillingness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "location": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "purchase_currency": {
+            "anyOf": [
+              {
+                "maxLength": 3,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Currency"
+          },
+          "purchase_price_minor": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Price Minor"
+          },
+          "purchase_source": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Source"
+          },
+          "purchased_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased At"
+          }
+        },
+        "title": "CopyCreate",
+        "type": "object"
+      },
       "CoverBackfillOut": {
         "description": "What one run of the cover backfill managed.\n\nNumbers rather than one, because \"fixed 12\" on its own cannot be acted on.\n`examined` is how many books the run looked at, `stored` how many now have a\ncover this app serves itself, `unreachable` how many resolved to a URL this\nserver could not download (so the remote link is kept and it is tried again\non the next pass through the library, not the next run, which starts past\nit), `still_missing` how many no image service has one for, and `remaining`\nhow many are left beyond this batch.\n\n`next_after_id` is the cursor. **Without it the backfill cannot finish a\nlibrary**: the batch is chosen by book id and a book that could not be fixed\nstays in the candidate set, so it sits at the front of every subsequent run\nfor ever. About 20% of ISBNs resolve to nothing (measured across ten), so on\na large import the counter stops moving after a few runs, and a pod with no\negress produces it on run one. The client sends the value back to carry on\npast what it has already tried.",
         "properties": {
@@ -1488,7 +1592,7 @@
         "type": "object"
       },
       "DuplicateGroup": {
-        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: the unique ISBN\nalready prevents exact repeats, and the case worth catching is a hardback\nand a paperback, which are legitimately two different ISBNs.",
+        "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.",
         "properties": {
           "books": {
             "items": {
@@ -3388,7 +3492,7 @@
     },
     "/api/books/duplicates": {
       "get": {
-        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. The unique ISBN\nalready makes exact repeats impossible, so the case left to catch is the\none it cannot see: a hardback and a paperback are the same book and two\nlegitimately different ISBNs.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.",
+        "description": "Books that look like the same work under different ids.\n\nMatched on normalised title plus author, NOT on ISBN. An accidental exact\nrepeat is already refused by `uq_books_isbn_single_copy`, so the case left\nto catch is the one it cannot see: a hardback and a paperback are the same\nbook and two legitimately different ISBNs.\n\n**A deliberate copy is not a duplicate, and this is where the two are told\napart.** Two paperbacks of one title are two rows sharing a `copy_group`\nand would otherwise be the strongest match this endpoint can produce: same\ntitle, same author, same everything. Offering them for merge would invite\nsomebody to destroy a book they own, so each group is collapsed to one row\nbefore the grouping runs. What survives is what the collapse could not\nexplain, which is exactly the accidental case.\n\nGrouping happens in Python rather than SQL because the normalisation\n(casefold, strip punctuation, drop a leading article) is not something\nSQLite can express, and the catalogue is small enough that scanning it is\ncheaper than maintaining a normalised column.",
         "operationId": "list_duplicates",
         "responses": {
           "200": {
@@ -4099,6 +4203,114 @@
           }
         ],
         "summary": "Update Book Details",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/copies": {
+      "get": {
+        "description": "Every copy of this title the caller may see, this one included.\n\nA one-element list for almost every book in the catalogue, and that is the\nhonest answer rather than an empty one: the book in hand is a copy, it is\njust the only one.\n\nOrdered by id, which is the order they were added. There is no first copy\nin the data model and this does not invent one; it is the order that stays\nthe same between two reads.",
+        "operationId": "list_copies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BookOut"
+                  },
+                  "title": "Response List Copies",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Copies",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "Record that the household owns another copy of this book.\n\nThe deliberate half of the ISBN collision. Scanning a book already on the\nshelf answers 409 exactly as it always has, because the overwhelmingly\ncommon reason for it is a second pass through the same bookcase; this\nendpoint is the other reason, and it is reached by pressing something that\nsays so rather than by the app guessing.\n\n**`is_private` is inherited, never chosen here.** A copy of a private book\nthat came back public would disclose the book. The caller added the copy,\nso they are its owner and `PATCH /{id}/privacy` can change it afterwards.\n\n**Reading state is not copied.** Status, rating, progress, notes and loans\nall belong to a person and an object, and the new object is one nobody has\nread yet. Tags are copied: they describe the work, and re-picking six of\nthem for a second paperback is exactly the friction this feature exists to\nremove.",
+        "operationId": "add_copy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Copy",
         "tags": [
           "books"
         ]

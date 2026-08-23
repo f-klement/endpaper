@@ -868,10 +868,195 @@ is worse than a slightly untidy one that grows. `GET /api/books/locations` retur
 actually in use, which the UI offers as suggestions, because free text with *no*
 suggestions becomes six spellings of "living room" inside a week.
 
+### A copy is a row, not a count column
+
+`books.isbn` was `unique=True`, so a household that owned two paperbacks of one title could
+not say so. Three models were on the table.
+
+**A `copies` count column.** One integer, no query multiplied, the constraint untouched.
+This is what Libib does, and Librarika's "2000 items including copies" implies something
+similar. **Refused**, and for a specific sentence rather than on principle: a count cannot
+say *one is lent out and one is on the shelf*. Nor which one is in the loft, nor that the
+battered one cost 2 euro at a jumble sale. Every one of those facts is already a column on
+`books`, written per object, and a count would have been a second, weaker way of describing
+the same objects. The loan rule is the sharper half: `uq_loans_one_open_per_book` would have
+had to become "at most `books.copies` open loans", which is a cross-row aggregate SQLite
+cannot express as a CHECK. It would have moved a rule the database enforces into application
+code, in an app where that rule is an index precisely because three code paths had to agree
+on it and one of them did not.
+
+**A separate `copies` table.** The textbook normalisation: `books` becomes the work,
+`copies` the objects. **Refused** on cost and on fit. `location`, `condition`, `format`,
+`lending`, `ownership` and the four purchase columns would all have had to move, which is
+every filter, sort, export, statistic, bulk action and CSV column in the app, plus the whole
+frontend, to express something the existing shape already expresses. The model comments in
+`models.py` have said "this copy" about those columns since they were written: a `Book` row
+already **is** a copy.
+
+**A copy is a second row, joined by a shared `copy_group` token.** Adopted. Every existing
+query keeps working because a copy is a book; the loan rule needed no change at all because
+one open loan per row already means one per copy; and the four call sites the feature
+investigation warned about (the scan flow, the duplicate detector, the merge logic, the CSV
+importer) are exactly the four that changed, which is what "high blast radius" meant.
+
+What it cost, stated so nobody has to rediscover it: the unique ISBN became **partial**,
+over the rows whose `copy_group` is null. Those are the rows nobody has declared a copy, so
+a re-scan still collides and still answers 409, which is the mistake that constraint has
+always been catching. Dropping it outright would have turned the commonest mistake in this
+app into a silent second row.
+
+### Deliberate copies and accidental duplicates are told apart by a token
+
+They are otherwise indistinguishable, and getting it wrong in either direction is bad: a
+duplicate finder that offers two copies for merge invites somebody to destroy a book they
+own, and a scan flow that quietly adds a copy on a mis-scan is the bug the unique ISBN was
+put there to prevent.
+
+The token is written by exactly one endpoint, `POST /api/books/{id}/copies`, reached by
+pressing something that says "add another copy". Nothing infers it. In particular the CSV
+importer never mints one: an export listing a book twice is an artefact of the export, and a
+copy is a thing a person says they own, one press at a time.
+
+Three places read it. `uq_books_isbn_single_copy` skips grouped rows. `/duplicates` collapses
+each group to one row before matching, so a group can never be reported against itself.
+`_MERGEABLE_FIELDS` deliberately omits it: absorbing a loser's group would make the survivor
+a copy of the loser's siblings, which the survivor's owner never agreed to.
+
+### The copy group is a shared label, not a self-referencing foreign key
+
+"Is a copy of" is symmetric. Two paperbacks of one title are peers and neither is the
+original, so a `copy_of_id` would have invented a distinguished row. Every distinguished row
+needs a rule for what happens when it is destroyed, which here is a promote-a-sibling step
+that `_purge`, `_create_book`, emptying the trash, merging and any future delete path
+would each have to remember, and it has to run in the right order against the unique index
+or the promotion is what raises. A shared label has no such row and therefore no such rule.
+
+It is deliberately not a foreign key either, so purging any member of a group leaves the
+rest exactly as they were rather than dangling.
+
+The one piece of housekeeping it does need is `_normalise_copy_group`: a group that shrinks
+to a single row has its token cleared, because the token is what suspends the unique index
+for that ISBN and a group of one should be exclusive again. It runs on a **purge**, never on
+a trash, and that is not a detail. A trashed copy can be restored, and clearing the token
+underneath it would leave two formerly grouped rows with the same ISBN and no token, which
+is precisely what the index refuses. The restore would fail on a button that has nothing to
+do with copies.
+
+### The copy's cover file is copied, not shared
+
+Covers are files named by book id, and `covers.forget` deletes by id. Two rows pointing at
+one file would mean purging either copy blanks the other's cover while leaving a `cover_url`
+pointing at nothing. `covers.duplicate` is `adopt` without the delete, used only for a cover
+this app already holds; a remote URL is inherited by assignment, and a book with neither is
+resolved from its ISBN like any other new row.
+
+### `_create_book` frees every holder of the ISBN, not the first one
+
+That query returned one arbitrary row, which was correct while `books.isbn` was unique and
+stopped being correct the moment several rows could hold one ISBN. Both failures were
+measured through the API rather than reasoned about, and they differ by group size, which is
+why the smaller-looking fix was refused:
+
+| Set-up | Then scanning the ISBN | Why |
+|---|---|---|
+| Two copies, **both trashed** | **500**, `IntegrityError: UNIQUE constraint failed: books.isbn` | One row purged, the group shrank to one, `_normalise_copy_group` cleared the survivor's token, and that trashed survivor re-entered the partial index just as the insert reclaimed the ISBN |
+| Three copies, **all trashed** | **201**, and a stray fourth row | One row purged, the group still had two members so nothing was normalised, and the insert simply succeeded against rows that still held the ISBN |
+
+Guarding `_normalise_copy_group` against a trashed survivor fixes the first row of that table
+and does nothing at all for the second, so the fix is at the cause: fetch **all** holders in
+the same live-first order, refuse on the first one that cannot be freed, and free the rest
+only if none refused.
+
+Live-first is what decides which row a 409 names: the one on the shelf, not one in the
+trash. Deciding in full before destroying anything is the other half, and it is not
+tidiness. `_purge` is not undone by the request failing, so a 409 raised part way through a
+group used to leave a member holding a book whose cover file had been unlinked.
+
+### A cover file is unlinked after the commit, never before it
+
+`_purge` used to call `covers.forget` first thing. A rollback after that point undoes the
+DELETE and not the unlink, so the member still has the book and its `cover_url` now names a
+file that does not exist. Nothing logged it.
+
+It predates copies and copies made it reachable, through the ordinary scan flow, for the
+reason above. `_purge` therefore returns the id and the caller unlinks after its commit:
+`purge_book`, `empty_trash` and `_create_book` all do. Reordering inside `_purge` would have
+bought nothing, because `db.delete` only marks the row in the session, and flushing per book
+to get closer would put back the 3801 statements the "does not commit" note exists to avoid.
+
+In `_create_book` the unlink sits **after the commit and before `_store_cover`**. SQLite
+reuses the id of a deleted row, so the new book may well have taken one of the purged ids:
+unlinking later would delete its own cover, and not unlinking at all would hand it somebody
+else's.
+
+That window is three lines wide and pinned by
+`test_a_reused_id_keeps_the_new_book_s_own_cover`, because a comment saying so is what this
+codebase had the first time a cover unlink was ordered wrong. Moving the loop below
+`_store_cover` passes all thirty-six other tests in that file: the refusal path never runs
+it, so only a test that forces the id reuse and stores a real cover can tell the two orders
+apart.
+
+**No instance is left, including the one that looked forced.** A merge lets the keeper
+absorb the loser's `cover_url`, so it needs the new URL before it commits, and the first
+version of this entry claimed that meant the file had to move before the commit too. It does
+not: the URL is `local_url(keeper.id, extension)` and the extension is readable off the
+source file without touching a byte. `covers.adoption_url` answers it, `covers.adopt` still
+performs the move, and the merge does one on each side of the commit.
+
+Which failure that chooses is the point. Moving first, a raise between the loop and the
+commit, which `_normalise_copy_group`'s flush makes reachable and which is the exact shape of
+the bug above, left the keeper's row naming a file that had already moved somewhere else.
+Deferred, the same raise leaves every file where it was.
+
+**Deferring moved the failure rather than removing it, and the first version of this got the
+new one wrong.** With the move after the commit, `covers.adopt` can fail on its own with the
+row already saved. That code discarded its answer and swept the loser's id anyway, which
+destroyed the bytes and committed a `cover_url` naming a file nobody wrote: strictly worse
+than the pre-commit ordering it replaced, which at least stored an honest "no cover". So
+`adopt`'s return is **load bearing**. It answers None only when `replace_image` re-raised,
+and that function is atomic and removes nothing but its own temporary file, so None means the
+source is still the only copy and must not be swept. The row is corrected to "no cover" in
+the same breath.
+
+The backfill is **not** the escape hatch here, and leaning on it was the mistake underneath
+the mistake: a hand-uploaded cover has no remote source, so `resolve_and_store` has nothing
+to re-fetch. It repairs a cover that came from a metadata provider and cannot repair the
+files a household cared enough about to upload.
+
+The invariant is therefore worth stating on its own, in the half where it holds: **no cover
+file is moved or unlinked before the transaction has committed.** Creation is deliberately
+the other way round, in all five paths that write one (`upload_cover`, `_create_book`, both
+in `add_copy`, and the backfill), and two things hold that up rather than one.
+
+The asymmetry: a committed `cover_url` with no file behind it is a broken image every reader
+sees, while an orphan file is bytes no row references. **An orphan is not harmless, though,
+and an earlier draft of this entry said it was.** Nothing sweeps them: `backfill_covers` reads
+`stored_ids()` only to skip books that already have a file, and deletes nothing anywhere. So a
+file sitting under an id makes that id a permanent non-candidate, and a book landing on it
+would show a placeholder the backfill can never repair.
+
+What actually makes creating early safe is narrower and is the sentence to keep: **no path
+writes a cover for a row that has not committed.** `_store_cover` and `covers.duplicate` both
+run after the insert's own commit and refresh, and `upload_cover` writes for a row that
+already exists. An orphan under an id with no row is therefore unreachable, which is why the
+window between the write and the commit costs nothing here.
+`upload_cover` makes the same trade one level down, writing before it deletes the book's
+other formats, because the old order left a book with no cover at all when the write failed.
+Do not "fix" either of them to match the moving half.
+
+Two places unlink outside all of this, and neither falsifies the rule. `uploads.replace_image`
+removes the base's **other** formats once the atomic replace has landed, before the upload
+route commits: a genuine exception, and a narrow one, since what it can lose is a stale
+duplicate format of the same book rather than its cover. `backup.restore` clears the covers
+directory, but only after its own commit, and by then there is no transaction left to roll
+back: it is destroying the previous library on purpose, which is what a restore is.
+
 ### Duplicate detection matches on title and author, not ISBN
 
-The unique ISBN already makes exact repeats impossible. The case left to catch is a
-hardback and a paperback, which are the same book and two legitimately different ISBNs.
+An accidental exact repeat is already refused by `uq_books_isbn_single_copy`. The case left
+to catch is a hardback and a paperback, which are the same book and two legitimately
+different ISBNs. Deliberate copies are collapsed out first: see *Deliberate copies and
+accidental duplicates* above.
 Matching is deliberately lossy because it is a suggestion a person confirms, not an
 automatic merge.
 

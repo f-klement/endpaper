@@ -69,6 +69,9 @@ function stubLoad({
 } = {}) {
   api.on("/api/books/1/notes", { body: notes });
   api.on("/api/books/1/progress", { body: progress });
+  // One element rather than none: a book with one copy is a copy, it is just
+  // the only one, and that is what the endpoint answers.
+  api.on("/api/books/1/copies", { body: [book] });
   api.on("/api/books/tags", { body: tags });
   api.on("/api/users", { body: users });
   api.on("/api/settings/features", {

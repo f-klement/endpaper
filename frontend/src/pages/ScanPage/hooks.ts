@@ -10,12 +10,14 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { errorText } from "../../components/ErrorState";
+import { ApiError } from "../../api/mutator";
 
 import {
   getLookupIsbnQueryKey,
   lookupIsbn,
   getListTagsQueryKey,
   useAddBookTag,
+  useAddCopy,
   useCreateTag,
   useListLocations,
   useListTags,
@@ -101,6 +103,17 @@ export interface UseScanFlowResult {
   isAdding: boolean;
   error: unknown;
   reset: () => void;
+
+  /**
+   * Record the scanned book as a second copy of the one already here.
+   *
+   * Reads the id off the 409 itself rather than taking one, so there is one
+   * place that knows which book the conflict was about. Does nothing when
+   * there was no conflict, or when the holder is somebody else's private book
+   * and its id was withheld.
+   */
+  addCopy: () => void;
+  isAddingCopy: boolean;
 }
 
 export function useScanFlow(
@@ -146,6 +159,7 @@ export function useScanFlow(
   }
 
   const scanAdd = useScanAdd();
+  const addAnotherCopy = useAddCopy();
   const uploadCover = useUploadCover();
   const addTag = useAddBookTag();
 
@@ -220,6 +234,39 @@ export function useScanFlow(
     }
   }
 
+  /**
+   * Add the scanned book as another copy of the one already in the catalogue.
+   *
+   * **The draft's tags and uploaded cover are not carried over**, unlike
+   * `confirm()`, which applies both. Neither belongs to the copy: the tags come
+   * from the book being copied, which already has them, and a cover uploaded
+   * here would be a photo of the same edition. Both are editable on the new
+   * copy's own page, and the UI says so before the press.
+   */
+  async function addCopy() {
+    const holder = addError instanceof ApiError ? addError.bookId : undefined;
+    // Nothing to copy: either there was no conflict, or the book that holds
+    // the ISBN is somebody else's private one and its id was withheld.
+    if (holder === undefined) return;
+
+    const shelf = normaliseLocation(location);
+    setAddError(null);
+    try {
+      // Only the per-copy fields. The work is taken from the book being
+      // copied, which is what stops two rows claiming to be copies of each
+      // other while naming different books.
+      const copy = await addAnotherCopy.mutateAsync({
+        bookId: holder,
+        data: { location: shelf || null, format: format || null },
+      });
+      rememberLastLocation(shelf);
+      void queryClient.invalidateQueries();
+      onAdded(copy.id);
+    } catch (error) {
+      setAddError(error);
+    }
+  }
+
   function chooseMatch(match: BookMatch) {
     const next = draftFromMatch(match);
     setAddError(null);
@@ -270,6 +317,9 @@ export function useScanFlow(
     isAdding: scanAdd.isPending,
     error: addError,
     reset,
+
+    addCopy: () => void addCopy(),
+    isAddingCopy: addAnotherCopy.isPending,
   };
 }
 

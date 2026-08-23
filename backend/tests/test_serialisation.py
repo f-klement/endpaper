@@ -138,6 +138,73 @@ class TestBooksToOut:
         assert for_two == for_one
 
 
+class TestCopyCount:
+    """`copy_count` is 1 for almost every book, and the number is what stops the
+    grid looking like it has double-added something."""
+
+    def test_a_book_with_no_group_reads_one(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        assert book_to_out(two_books[0], user, db).copy_count == 1
+
+    def test_two_rows_sharing_a_group_read_two(self, db, admin, two_books):
+        for book in two_books:
+            book.copy_group = "abc123"
+        db.commit()
+        user = db.get(User, admin["user"]["id"])
+
+        assert book_to_out(two_books[0], user, db).copy_count == 2
+
+    def test_it_counts_only_what_the_caller_may_see(self, db, admin, member, two_books):
+        """A member who makes their own copy private does not thereby announce
+        it on everybody else's card."""
+        for book in two_books:
+            book.copy_group = "abc123"
+        two_books[1].is_private = True
+        two_books[1].added_by_user_id = admin["user"]["id"]
+        db.commit()
+        them = db.get(User, member["user"]["id"])
+
+        assert book_to_out(two_books[0], them, db).copy_count == 1
+
+    def test_it_costs_exactly_one_extra_statement(self, db, admin, two_books):
+        """The measurement behind the count in `books_to_out`'s docstring.
+
+        Six statements for a page of ordinary books, seven when something on it
+        is a copy, and nothing at all for the overwhelming majority of pages
+        where no book carries a group. A per-book query here would be the exact
+        N+1 that module exists to avoid.
+
+        Both pages are prepared before either is measured, and nothing commits
+        in between. A commit inside the measured window makes the session open
+        a fresh savepoint on its next statement, and that savepoint is counted
+        as a query by the listener: the first version of this test read the
+        difference as two.
+        """
+        pair = [Book(title="Dune", copy_group="abc123"), Book(title="Dune", copy_group="abc123")]
+        db.add_all(pair)
+        db.commit()
+        user = db.get(User, admin["user"]["id"])
+        for book in [*two_books, *pair]:
+            _ = book.title
+
+        statements: list[str] = []
+
+        @event.listens_for(db.get_bind(), "before_cursor_execute")
+        def record(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        try:
+            books_to_out(two_books, user, db)
+            without = len(statements)
+            statements.clear()
+            books_to_out(pair, user, db)
+            with_copies = len(statements)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", record)
+
+        assert with_copies == without + 1
+
+
 class TestWhoWantsToBeAsked:
     """`discuss_with` is the one per-member field on this payload that is not
     scoped to the caller, and the reason is the whole feature: a marker only

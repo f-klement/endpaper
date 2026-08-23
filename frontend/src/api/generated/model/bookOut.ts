@@ -21,6 +21,7 @@ export interface BookOut {
   author: string | null;
   categories?: string[];
   condition?: BookCondition | null;
+  copy_count?: number;
   cover_url: string | null;
   deleted_at?: string | null;
   description: string | null;
