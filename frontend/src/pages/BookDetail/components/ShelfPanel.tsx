@@ -76,9 +76,12 @@ export default function ShelfPanel({
 
   return (
     <form onSubmit={submit} className="space-y-3">
-      <h2 className="text-sm font-semibold text-paper-900 dark:text-paper-100">
+      {/* h3, not h2: the section handle that folds this panel away is the
+          h2 above it, so a flat h2 here would show a reader's heading list a
+          page with no grouping in it at all. */}
+      <h3 className="text-sm font-semibold text-paper-900 dark:text-paper-100">
         {t("series.label")}
-      </h2>
+      </h3>
       <div className="flex gap-2">
         <input
           type="text"
@@ -100,9 +103,9 @@ export default function ShelfPanel({
         />
       </div>
 
-      <h2 className="text-sm font-semibold text-paper-900 pt-1 dark:text-paper-100">
+      <h3 className="text-sm font-semibold text-paper-900 pt-1 dark:text-paper-100">
         {t("location.label")}
-      </h2>
+      </h3>
       <input
         type="text"
         list="known-locations"

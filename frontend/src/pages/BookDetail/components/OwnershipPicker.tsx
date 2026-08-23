@@ -30,9 +30,12 @@ export default function OwnershipPicker({
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-paper-900 mb-2 dark:text-paper-100">
+      {/* h3, not h2: the section handle that folds this panel away is the
+          h2 above it, so a flat h2 here would show a reader's heading list a
+          page with no grouping in it at all. */}
+      <h3 className="text-sm font-semibold text-paper-900 mb-2 dark:text-paper-100">
         {t("ownership.label")}
-      </h2>
+      </h3>
       <div
         className="flex gap-2"
         role="group"

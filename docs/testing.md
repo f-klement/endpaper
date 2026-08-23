@@ -33,8 +33,8 @@ work in them.
 ## Running
 
 ```bash
-cd backend  && uv run pytest        # 1808 tests
-cd frontend && bun run test         # 1254 tests
+cd backend  && uv run pytest        # 2048 tests
+cd frontend && bun run test         # 1405 tests, in 95 files
 ```
 
 | Command | Purpose |

@@ -1,6 +1,8 @@
 """Tests for backend/main.py: app wiring, seeding and the ad-hoc migration."""
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -292,3 +294,188 @@ class TestTheOverdueTicker:
         import notifications
 
         assert notifications.TICK_SECONDS == 3600
+
+
+SHELL_MARKER = "<title>Endpaper</title>"
+
+# A browser navigating, and a script or a fetch asking for the same URL. The
+# difference between them is what decides whether an unmatched path is answered
+# with the shell, so both are named rather than written inline.
+NAVIGATION = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+SCRIPT_LOAD = {"Accept": "*/*"}
+
+
+@pytest.fixture
+def spa(tmp_path) -> TestClient:
+    """A directory shaped like a `vite build`: hashed assets, stable rest.
+
+    Mounted through `main.mount_spa`, not a mount of our own: the point is to
+    measure the wiring production uses, so swapping the class back for a plain
+    StaticFiles fails here rather than passing against a private copy.
+    """
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-Bx7Kd2p9.js").write_text("console.log(1)")
+    (tmp_path / "index.html").write_text(f"<!doctype html>{SHELL_MARKER}")
+    (tmp_path / "manifest.json").write_text("{}")
+    (tmp_path / "sw.js").write_text("// service worker")
+    (tmp_path / "registerSW.js").write_text("// registration")
+
+    app = FastAPI()
+    main.mount_spa(app, tmp_path)
+    return TestClient(app)
+
+
+class TestStaticCachePolicy:
+    """What the built files say about being reused, measured on the wire.
+
+    A real mount over a real directory, driven through a real client, rather
+    than calling `cache_control_for` and trusting the wiring. Starlette answers
+    some of these requests with a 304 built inside `file_response`, and a test
+    of the function alone would never see one.
+    """
+
+    def test_the_shell_must_be_revalidated(self, spa):
+        """The one that matters. With no policy the browser reuses the shell on
+        a heuristic, and yesterday's shell names asset hashes this deploy has
+        deleted: a 404 on `assets/index-<hash>.js` and a blank page after a
+        release."""
+        res = spa.get("/")
+        assert res.status_code == 200
+        assert res.headers["cache-control"] == "no-cache"
+
+    def test_the_shell_is_the_same_by_its_own_name(self, spa):
+        """`/` and `/index.html` are one file and must not disagree."""
+        assert spa.get("/index.html").headers["cache-control"] == "no-cache"
+
+    def test_the_shell_is_kept_rather_than_discarded(self, spa):
+        """`no-cache`, not `no-store`. The difference is a 304 instead of a
+        re-download: the copy stays, and only its freshness is asked about."""
+        assert "no-store" not in spa.get("/").headers["cache-control"]
+
+    def test_a_revalidated_file_answers_304_and_keeps_its_policy(self, spa):
+        """Starlette builds the 304 itself, and copies only a fixed set of
+        headers onto it. A 304 that dropped the policy would leave the next
+        request reading from a cache entry with nothing on it."""
+        first = spa.get("/index.html")
+        second = spa.get("/index.html", headers={"If-None-Match": first.headers["etag"]})
+        assert second.status_code == 304
+        assert second.headers["cache-control"] == "no-cache"
+
+    def test_a_hashed_asset_keeps_its_year(self, spa):
+        """The regression that would be invisible until somebody said the app
+        got slow. These names carry a content hash, so a changed file is a
+        changed URL and nothing can be stale."""
+        res = spa.get("/assets/index-Bx7Kd2p9.js")
+        assert res.status_code == 200
+        assert res.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+    @pytest.mark.parametrize("path", ["/manifest.json", "/sw.js", "/registerSW.js"])
+    def test_a_stable_name_outside_assets_is_revalidated(self, spa, path):
+        """These change their bytes every build and keep their names, exactly
+        like index.html. sw.js has browser rules of its own on top, which are a
+        second belt rather than a substitute for this one."""
+        res = spa.get(path)
+        assert res.status_code == 200
+        assert res.headers["cache-control"] == "no-cache"
+
+
+class TestTheShellServesClientRoutes:
+    """A deep link, a refresh and a bookmark, measured on the wire.
+
+    `html=True` does not do this on its own, and for as long as it was assumed
+    to, every client route but `/` answered 404 in production: measured in the
+    running container at `/book/12`, `/settings` and `/quotes`, with a valid
+    session. `docs/architecture.md` had been promising the opposite in the
+    published documentation the whole time.
+    """
+
+    @pytest.mark.parametrize("path", ["/book/12", "/settings", "/quotes"])
+    def test_a_client_route_gets_the_shell(self, spa, path):
+        res = spa.get(path, headers=NAVIGATION)
+        assert res.status_code == 200
+        assert SHELL_MARKER in res.text
+
+    def test_the_shell_carries_its_no_cache_wherever_it_is_served(self, spa):
+        """Or a deep link caches the shell under its own URL, and the reader
+        gets yesterday's bundle at `/book/12` and today's at `/`."""
+        assert spa.get("/book/12", headers=NAVIGATION).headers["cache-control"] == "no-cache"
+
+    def test_the_login_route_gets_the_shell(self, spa):
+        """Called out because it is the recovery path from every ordinary 401:
+        `endSession()` in the frontend sets `location.href = "/login"`. Without
+        this, a token expiry in local or ldap mode, which is what the published
+        image runs, lands the reader on a 404 error page instead of the form."""
+        res = spa.get("/login", headers=NAVIGATION)
+        assert res.status_code == 200
+        assert SHELL_MARKER in res.text
+
+    def test_a_client_route_may_contain_dots(self, spa):
+        """So this cannot be keyed on the path looking like a filename, which
+        is the usual shortcut: `/authors/J.R.R. Tolkien` is a real route."""
+        res = spa.get("/authors/J.R.R. Tolkien", headers=NAVIGATION)
+        assert res.status_code == 200
+        assert SHELL_MARKER in res.text
+
+    def test_a_fetch_for_an_unknown_path_still_gets_a_404(self, spa):
+        """The same content negotiation the `Accept` header taught us, applied
+        in the other direction: code asking for a path that is not there must
+        be told so, not handed a page."""
+        res = spa.get("/book/12", headers={"Accept": "application/json"})
+        assert res.status_code == 404
+        assert SHELL_MARKER not in res.text
+
+    def test_an_api_path_is_refused_the_shell_by_this_mount_too(self, spa):
+        """Belt and braces, and the braces are what is asserted here. `_fallback`
+        claims `/api/*` and `/auth/*` before the mount ever sees them, so this
+        cannot happen through the real app; `wants_html` refuses them anyway, so
+        a future change to router order cannot turn an API typo into a 200 with
+        HTML in it."""
+        res = spa.get("/api/nope", headers=NAVIGATION)
+        assert res.status_code == 404
+        assert SHELL_MARKER not in res.text
+
+    @pytest.mark.parametrize("headers", [SCRIPT_LOAD, NAVIGATION])
+    def test_a_missing_asset_is_never_the_shell(self, spa, headers):
+        """The failure this must not reintroduce. Asset names are content
+        addressed, so a request for one that is missing means the client is
+        holding a stale shell; answering it with HTML turns a clean 404 into a
+        parse error inside a script tag. Asserted for a navigation as well as a
+        script load, because the `Accept` test alone would rest on a header
+        nobody here controls."""
+        res = spa.get("/assets/missing.js", headers=headers)
+        assert res.status_code == 404
+        assert SHELL_MARKER not in res.text
+
+    def test_a_write_to_a_client_route_is_not_the_shell(self, spa):
+        """405 rather than 404, which is Starlette's answer for any method the
+        mount does not serve and predates this: `get_response` raises it before
+        the fallback runs, and the `except` re-raises anything that is not a
+        404, so a write never reaches the shell branch at all.
+
+        It *is* a page, and the docstring here used to say it was not. Behind
+        the real error handlers a browser gets 405 with `content-type:
+        text/html` and this app's error template, because the mount raises
+        inside `ExceptionMiddleware` and `wants_html` renders it. What matters,
+        and what is asserted, is that the page is not the shell: a write to a
+        path that does not exist must not boot the app."""
+        res = spa.post("/book/12", headers=NAVIGATION)
+        assert res.status_code == 405
+        assert SHELL_MARKER not in res.text
+
+    def test_a_head_matches_the_get(self, spa):
+        assert spa.head("/book/12", headers=NAVIGATION).status_code == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/%2e%2e%2fmain.py", "/....//main.py", "/assets/%2e%2e%2f%2e%2e%2fmain.py"],
+    )
+    def test_an_escape_attempt_gets_the_shell_and_never_a_file(self, spa, path):
+        """The containment check in `lookup_path` runs first, so an escaped path
+        is simply not found, and a navigation to one then gets the shell like
+        any other unmatched path. Recorded because the answer changed: before
+        the fallback these were a 404, and what matters is that neither answer
+        contains the file."""
+        res = spa.get(path, headers=NAVIGATION)
+        assert "CachePolicyStaticFiles" not in res.text
+        assert res.status_code == 200
+        assert SHELL_MARKER in res.text

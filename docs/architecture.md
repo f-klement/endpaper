@@ -18,16 +18,28 @@ authorizes it, and cover filenames are the book id: any member could read anothe
 member's private book cover by counting. `routers/covers.py` applies the same
 `visible_to()` rule the rest of the API does. Do not turn it back into a mount.
 
-Mount order in `main.py` is load-bearing. The SPA is mounted at `/` with `html=True`,
-making it a catch-all that returns `index.html` for any unmatched path. That is what lets
-client-side routes like `/book/12` survive a refresh, and why it must be mounted **last**.
-The covers router is registered before it, or cover requests would be answered with the
-HTML shell.
+Mount order in `main.py` is load-bearing. The SPA is mounted **last**, at `/`, so every
+router wins over it.
 
-Routers are registered before either mount, so they win over both. Between them sits a
-fallback router matching `/api/{rest:path}` and `/auth/{rest:path}`, returning a JSON 404.
-Without it an unknown API path falls through to the SPA mount and answers `index.html` with
-a **200**, so a typo in a `fetch()` call looks like a successful request that returned HTML.
+**`html=True` alone does not make it a catch-all**, and believing it did was a real bug:
+Starlette serves `index.html` for `/` and for a directory, and answers anything else 404.
+Measured in the running container, with a valid session, `/book/12`, `/settings` and
+`/quotes` were all 404, so a bookmark, a refresh anywhere but home, and a shared link to a
+book were all broken. `CachePolicyStaticFiles.get_response` is what actually serves the
+shell for an unmatched path, under three conditions: not an API path, a request that
+accepts `text/html` (a navigation, not a `fetch`), and not under `assets/`. The last two
+are why a missing hashed chunk still fails cleanly as a 404 instead of arriving as HTML
+inside a script tag.
+
+The covers router is registered before the mount, or cover requests would be answered with
+the shell.
+
+Between the routers and the mount sits a fallback matching `/api/{rest:path}` and
+`/auth/{rest:path}`, returning a JSON 404. Its job is the **body**, not the status: without
+it an unknown API path reaches the SPA mount, which refuses it the shell (`wants_html`
+excludes API prefixes) and 404s, but a `fetch()` would then get this app's HTML error page
+rather than the JSON every other failure returns. It is also the second of the two guards
+that stop an API typo becoming a 200 with HTML in it, which is what it was written for.
 
 Serving the API and the bundle from one origin means the browser never makes a cross-origin
 request in production, which is why CORS is **off** by default. Vite proxies rather than

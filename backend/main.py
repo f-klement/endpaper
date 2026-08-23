@@ -8,13 +8,18 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from typing import Final
 
+import anyio.to_thread
 from fastapi import APIRouter, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import BaseRoute
+from starlette.types import Scope
 
 import notifications
 from config import (
@@ -28,7 +33,7 @@ from config import (
 from database import engine
 from dependencies import DbSession
 from enums import TagCategory
-from errors import register_error_handlers
+from errors import register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import Tag
 
@@ -468,9 +473,17 @@ _fallback = APIRouter(include_in_schema=False)
 async def api_not_found(rest: str) -> None:
     """Unknown API paths must answer JSON 404.
 
-    Without this they fall through to the SPA mount below and receive
-    index.html with a 200, so a typo in a fetch() call looks like a
-    successful request returning HTML, which is a genuinely confusing bug.
+    The job is the **body**, not the status. Without this the request reaches
+    the SPA mount, which refuses it the shell (`wants_html` excludes the API
+    prefixes) and 404s, but a `fetch()` would then be handed this app's HTML
+    error page rather than the JSON every other failure returns.
+
+    It is also the first of the two guards against the bug it was written for, a
+    typo in a `fetch()` call answering **200 with HTML** and so looking like a
+    success. That is no longer what happens if this router is removed, and the
+    reason is that `CachePolicyStaticFiles` refuses API paths as well. Two
+    independent guards on one rule, kept deliberately: this one is the one a
+    reader of the route table can see.
     """
     raise HTTPException(status_code=404, detail="Endpoint not found")
 
@@ -481,15 +494,203 @@ app.include_router(_fallback)
 # security fix rather than a refactor: a mount has no dependencies, so nothing
 # authenticated or authorized that path, and cover filenames are the book id.
 # Any member could read another member's private book cover by counting. See
-# routers/covers.py. Registered before the SPA catch-all, which would otherwise
-# swallow these paths.
+# routers/covers.py. Registered before the SPA mount, which would otherwise
+# answer a missing cover with the shell: see `CachePolicyStaticFiles`.
 app.include_router(covers.router)
 
-# The compiled PWA. `html=True` makes it a catch-all returning index.html for
-# unmatched paths, which is what lets client-side routes survive a refresh.
-# including the frontend's own 404 page.
+# Vite's `build.assetsDir`. Every filename it emits there carries a content
+# hash, so the name changes whenever the bytes do.
+HASHED_ASSET_DIR: Final = "assets"
+
+# A year, and `immutable` so a reload does not even send a conditional request.
+# Safe only because the name is content addressed: a changed file is a changed
+# URL, so nothing can be stale.
+CACHE_IMMUTABLE: Final = "public, max-age=31536000, immutable"
+
+# Not `no-store`. `no-cache` means "ask before reusing", not "do not keep": the
+# copy stays in the cache and the ETag turns the next request into a 304 with no
+# body. `no-store` would throw that away and re-download the file every time for
+# no gain.
+CACHE_REVALIDATE: Final = "no-cache"
+
+
+def cache_control_for(full_path: str | os.PathLike[str]) -> str:
+    """How long a built file may be reused without asking.
+
+    One rule: **a name that changes with its content may be cached, and a name
+    that does not must be revalidated.** Only `assets/` is content addressed, so
+    everything else revalidates: index.html, manifest.json, sw.js, registerSW.js
+    and the icons all keep their names across builds while their bytes change.
+
+    Getting index.html wrong breaks a release, and the mechanism is worth
+    stating because the obvious reason is the wrong one. With no `Cache-Control`
+    at all a browser applies *heuristic* freshness: it may reuse the shell for a
+    while without asking. That shell names its scripts by content hash, and a
+    deploy deletes the hashes it no longer builds, so a reader holding
+    yesterday's index.html requests `assets/index-<hash>.js` and gets a 404. A
+    blank page after a release, with nothing wrong on the server.
+
+    Not an authentication fix, and the difference matters. A heuristically fresh
+    shell cannot re-create the endless-spinner bug on its own, because both
+    recovery paths already reach the network: signing out navigates to `/login`,
+    a URL no cache entry answers, and a reload navigation is fetched with cache
+    mode "reload", which skips the freshness check by specification. The service
+    worker fault was worse precisely because the precache answered the reload
+    too. That is fixed in `frontend/vite.config.ts`; this is about deploys.
+
+    Keyed on the directory rather than on the shape of the filename, because
+    the directory is what Vite guarantees and a "does this look hashed" regex is
+    a guess. If `assetsDir` is ever renamed, files fall out of the fast case
+    into the safe one, which costs a conditional request and cannot serve
+    anything stale.
+    """
+    return (
+        CACHE_IMMUTABLE
+        if Path(full_path).parent.name == HASHED_ASSET_DIR
+        else CACHE_REVALIDATE
+    )
+
+
+SHELL = "index.html"
+
+
+class CachePolicyStaticFiles(StaticFiles):
+    """`StaticFiles` that states a cache lifetime per file, and serves the shell.
+
+    Starlette sends an ETag and a Last-Modified and no `Cache-Control` at all,
+    which leaves every file to the browser's *heuristic* freshness: reuse it
+    without asking for some fraction of its age. Heuristics are the wrong thing
+    to leave the app shell to, hence this.
+
+    A subclass rather than middleware, and that is the point of it: middleware
+    on this app would see every response, including the API's, and would have to
+    re-derive which ones came off the disk. This can only ever run for a file
+    this mount served.
+
+    Both status codes are covered. `file_response` returns either a 200 or the
+    304 Starlette builds when the request's validator still matches, and setting
+    the header on whichever came back keeps the two consistent: a 304 that
+    dropped the policy would answer the next request from a cache with no policy
+    on it.
+    """
+
+    def file_response(
+        self,
+        full_path: str | os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers["Cache-Control"] = cache_control_for(full_path)
+        return response
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        """Answer a browser navigating to a client route with the shell.
+
+        **`html=True` does not do this**, which is the whole reason for the
+        override. It serves index.html for `/` and for a directory, and nothing
+        else: an unmatched path falls to its `404.html` branch and then to a
+        404. Measured on the running container, with a valid session:
+        `/` and `/index.html` 200, `/book/12`, `/settings` and `/quotes` all
+        **404**. So a bookmark, a refresh anywhere but home, and a shared link
+        to a book were all broken, and `docs/architecture.md` had been
+        promising the opposite since the mount was written.
+
+        Three conditions, and each one is a way this could go wrong:
+
+        * **Not a path the API owns.** The gate is `is_api_path`, and its list
+          is all six of `errors.API_PREFIXES`: `/api/`, `/auth/`, `/covers/`,
+          `/openapi.json`, `/docs`, `/redoc`. Not `_fallback`, which claims only
+          the first two: the covers router and FastAPI's own routes claim the
+          rest, and `wants_html` refuses all six here regardless. An API typo
+          must stay a JSON 404 rather than becoming a 200 with HTML in it, which
+          is the confusing bug `_fallback` was written for.
+
+          Worth knowing before adding a route: `_fallback` claims `/auth/*` for
+          all seven methods ahead of this mount, so a **client** route under
+          `/auth` would JSON-404 rather than render, which is the shape an OIDC
+          callback at `/auth/callback` would take.
+        * **A navigation, not a fetch.** `wants_html` is the same predicate the
+          error pages use: a browser navigation sends `text/html`, a `fetch`
+          sends a wildcard. So an unknown path requested by code still 404s.
+          Only GET and HEAD arrive here at all; `StaticFiles.get_response`
+          answers anything else 405 before this runs.
+        * **Never under the assets directory.** Content-addressed names, so a
+          request for one that is missing means the client is holding a stale
+          shell. Answering that with HTML turns a clean failure into a parse
+          error inside a script tag. The `Accept` test alone would cover the
+          browser's own loads, which send a wildcard; this makes it true of a
+          typed URL as well, rather than resting on a header nobody here
+          controls.
+
+        Deliberately not keyed on the path having a file extension, which is the
+        usual shortcut: `/authors/J.R.R. Tolkien` is a real client route.
+        """
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or not self._serves_the_shell(path, scope):
+                raise
+        else:
+            # A 404 can be *returned* rather than raised: Starlette's `html=True`
+            # serves a `404.html` if the build has one, and it builds that
+            # response with `FileResponse` directly rather than through
+            # `file_response`, so it would carry no `Cache-Control` either. This
+            # branch means a navigation gets the shell whichever way the 404
+            # arrived. The build emits no `404.html` today, so it is unreachable
+            # rather than dormant, and it stays that way: a 404.html for a
+            # missing *asset* would still be answered without the policy.
+            if response.status_code != 404 or not self._serves_the_shell(path, scope):
+                return response
+
+        full_path, stat_result = await anyio.to_thread.run_sync(self.lookup_path, SHELL)
+        if stat_result is None:
+            raise StarletteHTTPException(status_code=404)
+
+        # Through `file_response`, so the shell carries the same `no-cache` it
+        # carries at `/`. A deep link served without it would be cached under
+        # its own URL, which is the staleness this class exists to prevent.
+        return self.file_response(full_path, stat_result, scope)
+
+    # **This branch cannot serve a requested path, by construction.** The lookup
+    # above is `lookup_path(SHELL)`, and SHELL is a module constant: `path`
+    # reaches this method only to be tested for the `assets/` prefix, and is
+    # never looked up, joined or opened. So a total failure of the containment
+    # check in `lookup_path` would still not turn this into a file read. That is
+    # the guarantee worth knowing, because the obvious argument, that
+    # `lookup_path` refuses an escape, is the weaker one: it is true (verified
+    # on the real mount with twelve escape shapes and three symlinks pointing
+    # out of the tree, all fifteen answering the shell and none the planted
+    # sentinel) and it depends on Starlette continuing to behave that way, where
+    # this does not depend on anything outside these six lines.
+
+    def _serves_the_shell(self, path: str, scope: Scope) -> bool:
+        """Whether a missing `path` should be answered with the shell."""
+        if path.split("/", 1)[0] == HASHED_ASSET_DIR:
+            return False
+        return wants_html(Request(scope))
+
+
+def mount_spa(app: FastAPI, directory: Path) -> None:
+    """Serve the compiled PWA from `directory`.
+
+    A function so the suite can mount a directory shaped like a build and drive
+    it, rather than restating this line and then testing its own copy. Swapping
+    the class back for a plain `StaticFiles` has to fail a test, and it only
+    does if there is one mount and the tests use it.
+
+    `html=True` serves index.html for a request to `/` itself and for nothing
+    else. What makes a client route survive a refresh is
+    `CachePolicyStaticFiles.get_response`, which is where that is explained.
+    """
+    app.mount(
+        "/", CachePolicyStaticFiles(directory=str(directory), html=True), name="static"
+    )
+
+
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+    mount_spa(app, static_dir)
 else:
     logger.info("No ./static directory, running API-only (frontend served by Vite).")

@@ -20,6 +20,7 @@ import {
   type UserOut,
 } from "../../../src/api/generated/model";
 import BookDetail from "../../../src/pages/BookDetail";
+import { BOOK_SECTIONS } from "../../../src/pages/BookDetail/hooks";
 import {
   makeBook,
   makeLoan,
@@ -102,6 +103,19 @@ function renderDetail(currentUser: UserOut = OWNER) {
     </Routes>,
     { route: "/book/1" },
   );
+}
+
+/**
+ * Open one of the page's collapsible groups.
+ *
+ * Most of them arrive closed here, because the book a test stubs has no loan,
+ * no second copy, no notes and no blurb. A no-op on a section the book itself
+ * opened, so a test does not have to know which of the two it got.
+ */
+async function openSection(name: string): Promise<void> {
+  const handle = await screen.findByRole("button", { name });
+  if (handle.getAttribute("aria-expanded") === "true") return;
+  await userEvent.setup().click(handle);
 }
 
 describe("BookDetail", () => {
@@ -318,6 +332,7 @@ describe("BookDetail", () => {
     it("offers the other members as borrowers", async () => {
       stubLoad();
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       const select = await screen.findByLabelText("Loan to");
       expect(
@@ -333,6 +348,7 @@ describe("BookDetail", () => {
       stubLoad();
       api.on(/\/api\/loans$/, { body: makeLoan() });
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       const user = userEvent.setup();
       await user.selectOptions(
@@ -371,6 +387,7 @@ describe("BookDetail", () => {
       stubLoad();
       api.on(/\/api\/loans$/, { body: makeLoan() });
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
@@ -401,6 +418,7 @@ describe("BookDetail", () => {
     it("keeps the Loan button disabled until a name is typed", async () => {
       stubLoad();
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       await userEvent
         .setup()
@@ -412,6 +430,7 @@ describe("BookDetail", () => {
     it("will not lend to a name that is only whitespace", async () => {
       stubLoad();
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
@@ -434,6 +453,7 @@ describe("BookDetail", () => {
         }),
       });
       renderDetail();
+      await openSection("Lending this copy");
 
       expect(
         await screen.findByText(/the neighbour, who has no account/),
@@ -443,6 +463,7 @@ describe("BookDetail", () => {
     it("keeps the Loan button disabled until a borrower is picked", async () => {
       stubLoad();
       renderDetail(OWNER);
+      await openSection("Lending this copy");
       expect(
         await screen.findByRole("button", { name: "Loan" }),
       ).toBeDisabled();
@@ -457,6 +478,7 @@ describe("BookDetail", () => {
         }),
       });
       renderDetail();
+      await openSection("Lending this copy");
 
       expect(
         await screen.findByRole("button", { name: "Mark as Returned" }),
@@ -473,6 +495,7 @@ describe("BookDetail", () => {
       });
       api.on("/api/loans/9/return", { body: makeLoan({ id: 9 }) });
       renderDetail();
+      await openSection("Lending this copy");
 
       await userEvent
         .setup()
@@ -490,6 +513,7 @@ describe("BookDetail", () => {
         body: { detail: "Book is already loaned out" },
       });
       renderDetail(OWNER);
+      await openSection("Lending this copy");
 
       const user = userEvent.setup();
       await user.selectOptions(
@@ -545,6 +569,7 @@ describe("BookDetail", () => {
     it("says when there are none", async () => {
       stubLoad({ quotes: [] });
       renderDetail();
+      await openSection("Notes and quotes");
 
       expect(await screen.findByText("No quotes yet")).toBeInTheDocument();
     });
@@ -554,6 +579,7 @@ describe("BookDetail", () => {
         quotes: [makeQuote({ text: "Fear is the mind-killer", page: 214 })],
       });
       renderDetail();
+      await openSection("Notes and quotes");
 
       expect(
         await screen.findByText("Fear is the mind-killer"),
@@ -565,6 +591,7 @@ describe("BookDetail", () => {
       stubLoad({ quotes: [] });
       api.on("/api/books/1/quotes", { body: makeQuote() }, "POST");
       renderDetail();
+      await openSection("Notes and quotes");
       await screen.findByText("No quotes yet");
 
       await userEvent.type(screen.getByLabelText("The passage"), "A passage");
@@ -588,12 +615,14 @@ describe("BookDetail", () => {
     it("says so when there are none", async () => {
       stubLoad({ notes: [] });
       renderDetail();
+      await openSection("Notes and quotes");
       expect(await screen.findByText("No notes yet")).toBeInTheDocument();
     });
 
     it("lists existing notes", async () => {
       stubLoad({ notes: [makeNote({ content: "Loved the ending" })] });
       renderDetail();
+      await openSection("Notes and quotes");
       expect(await screen.findByText("Loved the ending")).toBeInTheDocument();
     });
 
@@ -605,6 +634,7 @@ describe("BookDetail", () => {
         "POST",
       );
       renderDetail();
+      await openSection("Notes and quotes");
 
       const user = userEvent.setup();
       fireEvent.change(await screen.findByLabelText("Add a note"), { target: { value: "  padded  " } });
@@ -620,6 +650,7 @@ describe("BookDetail", () => {
     it("keeps Add disabled for an empty note", async () => {
       stubLoad();
       renderDetail();
+      await openSection("Notes and quotes");
       await screen.findByLabelText("Add a note");
       expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     });
@@ -632,6 +663,7 @@ describe("BookDetail", () => {
         body: makeNote({ id: 5, content: "v2" }),
       });
       renderDetail(OWNER);
+      await openSection("Notes and quotes");
 
       const user = userEvent.setup();
       await user.click(await screen.findByRole("button", { name: "Edit" }));
@@ -650,6 +682,7 @@ describe("BookDetail", () => {
     it("hides Edit on someone else's note", async () => {
       stubLoad({ notes: [makeNote({ user_id: OTHER.id })] });
       renderDetail(OWNER);
+      await openSection("Notes and quotes");
 
       await screen.findByText("A note");
       expect(
@@ -660,6 +693,7 @@ describe("BookDetail", () => {
     it("hides Delete from a non-author, non-admin", async () => {
       stubLoad({ notes: [makeNote({ user_id: OTHER.id })] });
       renderDetail(OWNER);
+      await openSection("Notes and quotes");
 
       await screen.findByText("A note");
       expect(
@@ -673,6 +707,7 @@ describe("BookDetail", () => {
         users: [OWNER, OTHER, ADMIN],
       });
       renderDetail(ADMIN);
+      await openSection("Notes and quotes");
 
       expect(
         await screen.findByRole("button", { name: "Delete" }),
@@ -981,7 +1016,9 @@ describe("BookDetail enrichment fields", () => {
 
     expect(await screen.findByText("412 pages")).toBeInTheDocument();
     expect(screen.getByText("en")).toBeInTheDocument();
-    expect(screen.getByText("Science Fiction")).toBeInTheDocument();
+    // Visible, not merely present: "About this book" holds the categories and
+    // arrives open on a book that has some.
+    expect(screen.getByText("Science Fiction")).toBeVisible();
   });
 
   it("leaves the sections out when there is nothing to show", async () => {
@@ -989,6 +1026,11 @@ describe("BookDetail enrichment fields", () => {
     renderDetail();
     await screen.findByRole("heading", { name: "Dune" });
     expect(screen.queryByText("Categories")).not.toBeInTheDocument();
+    // Nor a handle onto an empty group: with no blurb and no categories the
+    // section offers nothing to do and is not drawn.
+    expect(
+      screen.queryByRole("button", { name: "About this book" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -999,6 +1041,7 @@ describe("BookDetail lending with a due date", () => {
     stubLoad();
     api.on(/\/api\/loans$/, { body: makeLoan() });
     renderDetail(OWNER);
+    await openSection("Lending this copy");
 
     const user = userEvent.setup();
     await user.selectOptions(
@@ -1020,6 +1063,7 @@ describe("BookDetail lending with a due date", () => {
       book: makeBook({ id: 1, added_by: OWNER, active_loan: makeLoan() }),
     });
     renderDetail(OWNER);
+    await openSection("Lending this copy");
 
     await screen.findByRole("heading", { name: "Dune" });
     expect(screen.queryByLabelText("Due back")).not.toBeInTheDocument();
@@ -1103,5 +1147,239 @@ describe("BookDetail reading progress", () => {
         api.calls.filter((call) => /\/api\/books\/1$/.test(call.url)).length,
       ).toBeGreaterThan(before),
     );
+  });
+});
+
+// ── The collapsible groups ───────────────────────────────────────────────────
+
+const SECTION_TITLES = [
+  "Your reading",
+  "Filing this copy",
+  "Your copies",
+  "Lending this copy",
+  "Notes and quotes",
+  "About this book",
+];
+
+/**
+ * A book with something in every group.
+ *
+ * Five of the six are drawn whatever the book says, but `about` is not: it
+ * offers no action of its own, so with no blurb and no categories it is left
+ * out entirely. Any test that walks all six needs one of these.
+ */
+const fullBook = () =>
+  makeBook({
+    id: 1,
+    added_by: OWNER,
+    description: "Spice.",
+    categories: ["Fiction"],
+    copy_count: 2,
+  });
+
+describe("BookDetail sections", () => {
+  it("puts every group behind a labelled handle", async () => {
+    stubLoad({ book: fullBook() });
+    renderDetail();
+
+    await screen.findByRole("heading", { name: "Dune" });
+    for (const title of SECTION_TITLES) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+        "aria-expanded",
+      );
+    }
+  });
+
+  it("draws no about section on a book the catalogue knows nothing about", async () => {
+    // The one thing this arrangement takes off the page rather than folding
+    // it. A handle onto an empty group would be worse than no handle, and the
+    // button that fills the group in is outside every fold, so it survives.
+    stubLoad({ book: makeBook({ id: 1, added_by: OWNER, categories: [] }) });
+    renderDetail();
+
+    await screen.findByRole("heading", { name: "Dune" });
+    expect(
+      screen.queryByRole("button", { name: "About this book" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Find more details" }),
+    ).toBeVisible();
+  });
+
+  it("draws the groups in the order the page declares them", async () => {
+    // BOOK_SECTIONS says it is the drawing order. Nothing else made that true.
+    stubLoad({ book: fullBook() });
+    renderDetail();
+    await screen.findByRole("heading", { name: "Dune" });
+
+    const handles = [
+      ...document.querySelectorAll("button[id$='-handle']"),
+    ].map((handle) => handle.id);
+    expect(handles).toEqual(BOOK_SECTIONS.map((id) => `${id}-handle`));
+  });
+
+  it("gives each handle a name no other control answers to", async () => {
+    // The quotes round found two accessible name collisions on this page. A
+    // handle sharing a name with something inside it is the same defect, so
+    // every section is opened before this counts.
+    stubLoad({ book: fullBook() });
+    renderDetail();
+
+    for (const title of SECTION_TITLES) await openSection(title);
+
+    for (const title of SECTION_TITLES) {
+      expect(screen.getAllByRole("button", { name: title })).toHaveLength(1);
+    }
+  });
+
+  it("keeps the book's identity out of every fold", async () => {
+    // The cover, the loan badge, the privacy control, the delete button and
+    // the enrichment button. A control over who can see a book must not be
+    // somewhere you have to go looking for; a destructive action hidden in a
+    // fold is a worse surprise than a long page; and enrichment is what a
+    // book with no blurb needs, which is the book that has no "About this
+    // book" section to hold it.
+    stubLoad({
+      book: { ...fullBook(), active_loan: makeLoan({ id: 9 }) },
+    });
+    renderDetail(OWNER);
+
+    const title = await screen.findByRole("heading", { name: "Dune" });
+    const outside = [
+      title,
+      screen.getByRole("checkbox", { name: /Private/ }),
+      screen.getByRole("button", { name: "Move to Trash" }),
+      screen.getByText(/borrower/),
+      screen.getByRole("button", { name: "Find more details" }),
+    ];
+    for (const id of BOOK_SECTIONS) {
+      const panel = document.getElementById(`${id}-panel`)!;
+      for (const element of outside) expect(panel).not.toContainElement(element);
+    }
+  });
+
+  it("arrives showing the loan on a book somebody has", async () => {
+    stubLoad({
+      book: makeBook({
+        id: 1,
+        added_by: OWNER,
+        active_loan: makeLoan({ id: 9 }),
+      }),
+    });
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Lending this copy" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("arrives with the loan folded away on a book nobody has", async () => {
+    stubLoad();
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Lending this copy" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("arrives showing the copies of a book there are two of", async () => {
+    stubLoad({ book: makeBook({ id: 1, added_by: OWNER, copy_count: 2 }) });
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Your copies" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("remembers what a reader closed, against what the book would do", async () => {
+    // The whole point of storing three states. The book says open, the reader
+    // says closed, and the reader wins on the next visit.
+    stubLoad({
+      book: makeBook({
+        id: 1,
+        added_by: OWNER,
+        active_loan: makeLoan({ id: 9 }),
+      }),
+    });
+    const first = renderDetail();
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Lending this copy" }));
+    first.unmount();
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Lending this copy" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("remembers what a reader opened, against what the book would do", async () => {
+    stubLoad();
+    const first = renderDetail();
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Notes and quotes" }));
+    first.unmount();
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Notes and quotes" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("gives the next book its own defaults, not the last one's", async () => {
+    // The route is rendered with no key, so walking from one copy to another
+    // reuses this component instance. Book 1 is out, book 2 is not.
+    const lent = makeBook({
+      id: 1,
+      added_by: OWNER,
+      copy_count: 2,
+      active_loan: makeLoan({ id: 9 }),
+    });
+    const sibling = makeBook({ id: 2, added_by: OWNER, copy_count: 2 });
+    stubLoad({ book: lent });
+    api.on("/api/books/1/copies", { body: [lent, sibling] });
+    api.on("/api/books/2/notes", { body: [] });
+    api.on("/api/books/2/quotes", { body: [] });
+    api.on("/api/books/2/progress", { body: [] });
+    api.on("/api/books/2/copies", { body: [lent, sibling] });
+    api.on(/\/api\/books\/2$/, { body: sibling });
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Lending this copy" }),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.setup().click(await screen.findByRole("link", { name: "Open" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Lending this copy" }),
+      ).toHaveAttribute("aria-expanded", "false"),
+    );
+  });
+
+  it("draws a book the same way when storage has nothing to say", async () => {
+    // A private window, or a browser set to block site data. The defaults are
+    // the book's, and nothing on the page depends on a stored value existing.
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    stubLoad({
+      book: makeBook({
+        id: 1,
+        added_by: OWNER,
+        active_loan: makeLoan({ id: 9 }),
+      }),
+    });
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Lending this copy" }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 });

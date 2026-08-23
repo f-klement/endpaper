@@ -159,40 +159,156 @@ function endSession(): void {
 }
 
 /**
+ * Fired when the session ended and reloading cannot fix it.
+ *
+ * An event rather than state read by the shell: the only consumer is one
+ * component, and module state holding "the session is over" would outlive the
+ * mount that read it, so a remount would start out already dead. That is the
+ * opposite of `reloadRequested` below, which is module state precisely because
+ * it must last exactly as long as the document.
+ */
+const SESSION_ENDED_EVENT = "endpaper:session-ended";
+
+/** Subscribe to that event. Returns the unsubscribe. */
+export function onSessionEnded(listener: () => void): () => void {
+  window.addEventListener(SESSION_ENDED_EVENT, listener);
+  return () => window.removeEventListener(SESSION_ENDED_EVENT, listener);
+}
+
+/**
+ * When the last automatic reload happened, per tab.
+ *
+ * `sessionStorage`, not `localStorage`: this is about one tab's own reload, and
+ * it should die with the tab rather than teach the next one about a session
+ * that ended yesterday.
+ */
+const RELOAD_MARKER_KEY = "endpaper.edge-reload";
+
+/**
+ * How recently a reload has to have happened for the next edge sign-out to
+ * count as a loop rather than as an unrelated second expiry.
+ *
+ * Long enough to cover a reload plus a boot plus the first requests, short
+ * enough that somebody who signed in again and read for a minute gets the
+ * ordinary reload rather than the dead-end screen.
+ */
+const RELOAD_WINDOW_MS = 30_000;
+
+/** The marker, or null if there is none and if storage cannot be read. */
+function lastReloadAt(): number | null {
+  try {
+    const stored = sessionStorage.getItem(RELOAD_MARKER_KEY);
+    const at = stored === null ? NaN : Number(stored);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    // A private window or blocked site data. Not an error: see below for what
+    // is done about being unable to count.
+    return null;
+  }
+}
+
+/**
+ * Whether this page load has already asked for a reload.
+ *
+ * Module state, and its lifetime is the point: it dies with the document, which
+ * is exactly the boundary being drawn. Without it the guard counts *calls*
+ * rather than page loads, and an ordinary expiry is misreported. Six queries
+ * are in flight on the library screen: four in `useLibrary` (the books, the
+ * tags, the locations, the collections), the `useListBooks` inside
+ * `useUnconfirmedCount`, which `Home.tsx` calls with no `enabled` gate, and the
+ * auth config. Seven under proxy auth, where `useMe` is enabled too. So an
+ * expiry resolves six opaque redirects in one batch: the first writes the
+ * marker and reloads, and the rest then read a marker aged about zero
+ * milliseconds, conclude they are looping, and put up a screen saying reloading
+ * did not help while the reload is still in flight. The guard handles any
+ * number of them; the number is here because it is what makes the batch real
+ * rather than theoretical.
+ */
+let reloadRequested = false;
+
+/** Record a reload. False means it was not recorded and cannot be counted. */
+function recordReload(): boolean {
+  try {
+    sessionStorage.setItem(RELOAD_MARKER_KEY, String(Date.now()));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The session ended at the reverse proxy rather than in this app.
  *
- * Endpaper sits behind a forward-auth portal on a different hostname. When its
- * cookie expires the proxy answers every request, XHR included, with a 302 to
- * that hostname. Three things follow, and together they were the whole of the
- * "endless spinner" bug:
+ * Endpaper can sit behind a forward-auth portal on a different hostname. When
+ * its cookie expires the proxy answers requests itself, and whether that answer
+ * is a 401 or a redirect to the portal depends on the request's `Accept`
+ * header: Authelia redirects anything that accepts `text/html`, which a browser
+ * `fetch` with no `Accept` does, because it sends a wildcard. `customFetch` now
+ * asks for `application/json`, so against that portal this path is not the
+ * ordinary way a session ends any more. It is kept because the header is a
+ * request this app makes and not a promise the proxy gives back: nginx's
+ * `auth_request` and oauth2-proxy both redirect regardless of `Accept`.
  *
- * 1. `fetch` follows the redirect, the cross-origin response carries no CORS
- *    header, and the promise rejects with a bare `TypeError: NetworkError`.
- *    There is no status to read, so the 401 path below never runs.
- * 2. Nothing redirects the reader anywhere, because the app never learns it is
- *    signed out.
- * 3. React Query retries, forever, behind a spinner.
+ * Under `redirect: "manual"` that redirect arrives as an `opaqueredirect`
+ * response rather than being followed, so there is no status and no body to
+ * read: only the fact of it. (An earlier version of this comment described
+ * `fetch` following the redirect and rejecting with a bare `TypeError`. That
+ * was true before `redirect: "manual"`, which was added in the same commit,
+ * 4d9aa1e, tagged v0.2.0. The description of the behaviour it replaced was
+ * still here at v0.5.0.)
  *
  * Sending the browser to `/login` would not help: that is this app's own login
- * route, and the proxy sits in front of it too. The only thing that resolves
- * it is a **top-level navigation**, which is the one request the browser will
+ * route, and the proxy sits in front of it too. The only thing that resolves it
+ * is a **top-level navigation**, which is the one request the browser will
  * follow across origins and render. Hence `reload` rather than a router push.
+ *
+ * **The reload is counted, and that is the point of the marker.** A reload that
+ * comes back to the same expired session reloads again, and that is an endless
+ * spinner with a refreshing page behind it: reported live, with two tabs open,
+ * against a build whose service worker answered `/` from the precache so the
+ * portal never saw the navigation at all. The two faults that produced it are
+ * fixed; this exists so the next one degrades to a sentence somebody can act
+ * on instead of to a loop.
+ *
+ * Not being able to record the marker is treated as "do not reload", not as
+ * "reload blindly": an uncountable reload is exactly the loop this guards.
  */
 function reauthenticateAtEdge(): void {
   clearSession();
+
+  // The rest of a failing batch is the same event, not a new one: the
+  // navigation is already in flight and has not had its chance yet.
+  if (reloadRequested) return;
+
+  const previous = lastReloadAt();
+  const looping = previous !== null && Date.now() - previous < RELOAD_WINDOW_MS;
+  if (looping || !recordReload()) {
+    window.dispatchEvent(new Event(SESSION_ENDED_EVENT));
+    return;
+  }
+
+  reloadRequested = true;
   window.location.reload();
 }
 
 /**
  * Did the request get redirected rather than answered?
  *
- * Under `redirect: "manual"` a redirect arrives as an opaque placeholder: the
- * body is unreadable and the status reads 0. Both are checked because the two
- * are not reported identically everywhere, and a false negative here puts the
- * spinner back.
+ * `opaqueredirect` only, and the narrowing is deliberate. It used to accept
+ * `status === 0` as well, on the grounds that a false negative put the spinner
+ * back; a false *positive* costs `clearSession()` plus a page reload, which is
+ * the most destructive thing this client does, so the trade is not the one that
+ * comment was written against.
+ *
+ * Under `redirect: "manual"` and the default request mode there is no other
+ * resolved response with status 0. The spec gives an opaque-redirect filtered
+ * response `type: "opaqueredirect"` and `status: 0` together; the only other
+ * zero-status response is an opaque one, which needs `mode: "no-cors"`, and
+ * nothing here sets it. A transport failure does not resolve at all, it rejects,
+ * and is a `NetworkError` above.
  */
 export function isRedirect(response: Response): boolean {
-  return response.type === "opaqueredirect" || response.status === 0;
+  return response.type === "opaqueredirect";
 }
 
 /**
@@ -215,6 +331,28 @@ export const customFetch = async <T>(
   if (!isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  // `Accept`, and it is not decoration. A browser `fetch` sends `*/*` when
+  // nothing sets it, and a forward-auth portal reads exactly that header to
+  // decide whether an unauthenticated request gets a 401 or a 302 to its login
+  // page: Authelia redirects anything that accepts `text/html`, which `*/*`
+  // does. Measured against the deployment, same URL, same expired cookie:
+  //
+  //     Accept: application/json   ->  401
+  //     Accept: */*                ->  302
+  //     Accept: <absent>           ->  401
+  //
+  // The third row is the portal being consistent, not a third case to design
+  // for: a browser `fetch` never sends no Accept at all, it sends `*/*`, which
+  // is row two. It is in the table because the first measurement of it was
+  // taken with curl, which sends `*/*` unless told otherwise, so the wildcard
+  // was measured twice and one of the two was written down as "absent".
+  //
+  // A 401 is the answer this file can act on. The 302 is what the endless
+  // spinner was built out of. Asking for JSON is also simply true: every
+  // operation in the schema declares a JSON response, and the blob fallback
+  // below exists for a proxy's own error page rather than for an endpoint of
+  // ours.
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
 
   // `redirect: "manual"` is what makes an edge sign-out detectable. Following
   // it instead, which is the default, turns the proxy's 302 into an opaque
@@ -262,6 +400,19 @@ export const customFetch = async <T>(
 };
 
 /**
+ * What a download is willing to receive, and deliberately not a wildcard.
+ *
+ * The three types are the ones this app actually downloads: a CSV or JSON
+ * export, and a ZIP backup, plus `application/json` for the error body FastAPI
+ * sends when the download is refused. `customFetch`'s plain
+ * `Accept: application/json` would be a lie here, and a wildcard would put this
+ * request back on the wrong side of the portal's content negotiation, which is
+ * the whole reason any of these requests carry an `Accept` at all.
+ */
+const DOWNLOAD_ACCEPT =
+  "application/octet-stream, application/zip, text/csv, application/json";
+
+/**
  * Fetch a file and hand it to the browser as a download.
  *
  * Not expressible through a generated hook: a plain `<a href>` cannot carry
@@ -275,10 +426,9 @@ export async function downloadFile(
   fallbackName = "export",
 ): Promise<void> {
   const token = getToken();
-  const response = await request(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    redirect: "manual",
-  });
+  const headers = new Headers({ Accept: DOWNLOAD_ACCEPT });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await request(url, { headers, redirect: "manual" });
 
   // Same edge sign-out as in `customFetch`. Without this an expired portal
   // session saves the proxy's redirect page to disk under the export's name.

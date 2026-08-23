@@ -122,6 +122,14 @@ export const de: Messages = {
   "book.addTag": "+ Hinzufügen",
   "book.removeTag": "{tag} entfernen",
 
+  // ── Abschnitte der Buchdetails ──────────────────────────────────────────
+  "section.reading": "Deine Lektüre",
+  "section.filing": "Dieses Exemplar einordnen",
+  "section.copies": "Deine Exemplare",
+  "section.lending": "Dieses Exemplar verleihen",
+  "section.writing": "Notizen und Zitate",
+  "section.about": "Über dieses Buch",
+
   // ── Feldnamen ───────────────────────────────────────────────────────────
   "field.title": "Titel",
   "field.author": "Autor",
@@ -823,6 +831,11 @@ export const de: Messages = {
   "error.500.title": "Da ist etwas kaputt",
   "error.500.message":
     "Das liegt an uns, nicht an dir. Ein Neuladen behebt es meistens.",
+  "error.sessionEnded.code": "Fehler 401",
+  "error.sessionEnded.title": "Deine Sitzung ist beendet",
+  "error.sessionEnded.message":
+    "Das Anmeldeportal hat diese Sitzung beendet, und ein Neuladen hat sie nicht zurückgebracht. Melde dich bitte erneut an.",
+  "error.sessionEnded.action": "Erneut anmelden",
   "error.backToLibrary": "Zurück zur Bibliothek",
   "error.reload": "Seite neu laden",
 };

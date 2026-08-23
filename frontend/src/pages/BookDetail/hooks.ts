@@ -2,13 +2,23 @@
  * Everything BookDetail needs from the API.
  *
  * Split by concern (the book itself, its notes, its loan, its reading log)
- * rather than one hook that returns thirty fields. Every mutation invalidates
- * what it actually changed, so the page never patches the cache by hand and
- * never re-reads stale data.
+ * rather than one hook that returns thirty fields. `useBookSections` is the one
+ * exception to the title: it holds no server state, only which parts of the
+ * page this device has folded away.
+ *
+ * Every mutation invalidates what it actually changed, so the page never
+ * patches the cache by hand and never re-reads stale data.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import {
+  readSectionChoices,
+  resolveOpen,
+  writeSectionChoice,
+  type SectionChoices,
+} from "../../lib/sectionState";
 
 import {
   getGetBookQueryKey,
@@ -623,5 +633,137 @@ export function useBookProgress(bookId: number): UseBookProgressResult {
     remove: (progressId) => remove.mutate({ bookId, progressId }),
     isRecording: record.isPending,
     error: entries.error ?? record.error ?? remove.error,
+  };
+}
+
+/**
+ * The collapsible groups, in the order they are drawn.
+ *
+ * The ids are what reaches storage, so renaming one forgets what readers said
+ * about it. `sectionState` keeps the orphaned entry rather than choking on it.
+ */
+export const BOOK_SECTIONS = [
+  "reading",
+  "filing",
+  "copies",
+  "lending",
+  "writing",
+  "about",
+] as const;
+
+export type BookSection = (typeof BOOK_SECTIONS)[number];
+
+export interface UseBookSectionsResult {
+  isOpen: (section: BookSection) => boolean;
+  toggle: (section: BookSection) => void;
+}
+
+/**
+ * Which sections a book opens with, before anybody has said otherwise.
+ *
+ * Every condition here is answered by the book the page already holds, so a
+ * section decides its own default at first paint instead of flickering open
+ * when a second request lands. That constraint is what picked the conditions:
+ *
+ * | Section | Default | Why |
+ * |---|---|---|
+ * | reading | open | What a reader came to the page for. |
+ * | filing | open | The same, and the controls a household edits most. |
+ * | copies | `copy_count > 1` | One copy needs no list of copies. |
+ * | lending | the book is out | A book somebody has does not hide who. |
+ * | writing | closed | See below. |
+ * | about | open | It is drawn only when there is something in it. |
+ *
+ * **Writing is the one fixed default with data behind it, and it is fixed
+ * because the data is not here.** `BookOut` carries no note or quote count:
+ * the counts arrive from `/notes` and `/quotes`, which are separate requests,
+ * so a conditional default could only open the section after they land, which
+ * is the flicker. Closed is also the honest guess, because notes and quotes
+ * are empty on most books in a household catalogue. Put a count on `BookOut`
+ * and this becomes conditional like the rest.
+ *
+ * `about` is fixed for the opposite reason: `hasAbout()` decides whether it is
+ * drawn at all, so by the time this answers, there is a blurb or a category to
+ * show. It still collapses, because a blurb is long and somebody who never
+ * reads them should be able to fold it away once and for good.
+ */
+export function sectionDefaults(book: BookOut): Record<BookSection, boolean> {
+  return {
+    reading: true,
+    filing: true,
+    copies: (book.copy_count ?? 1) > 1,
+    lending: book.active_loan != null,
+    writing: false,
+    about: true,
+  };
+}
+
+/**
+ * Whether the `about` section has anything to draw.
+ *
+ * A handle that opens onto nothing is worse than no handle. The lending
+ * section keeps its handle on a book nobody borrowed because it still offers
+ * the act of lending; `about` offers no action at all, it is what the
+ * catalogue happens to know, so on a hand typed book it is not drawn.
+ */
+export function hasAbout(book: BookOut): boolean {
+  return (
+    Boolean(book.description) ||
+    (book.categories != null && book.categories.length > 0)
+  );
+}
+
+/**
+ * Open or closed, per section, remembered per device.
+ *
+ * The only hook here that talks to storage rather than the API. Takes the
+ * defaults the *book* implies and lets a stored choice override them, which is
+ * the three state rule `resolveOpen()` holds: a section nobody has touched
+ * follows the book, and a section somebody has touched follows them.
+ *
+ * `null` means the book has not arrived. A `Record` over every section rather
+ * than a partial, so adding a section without deciding its default is a
+ * compile error rather than a silently closed panel.
+ */
+export function useBookSections(
+  bookId: number,
+  defaults: Record<BookSection, boolean> | null,
+): UseBookSectionsResult {
+  // Read once, on mount: storage is a starting point, and re-reading it on
+  // every render would fight the state this component already holds.
+  const [choices, setChoices] = useState<SectionChoices>(() =>
+    readSectionChoices(),
+  );
+
+  // Frozen per book, because the defaults describe the book *on arrival*. Left
+  // live, marking a loan returned would flip the lending default to closed and
+  // fold the section away under the hand that just used it.
+  //
+  // Keyed on the book id, not on the ref being empty. `routes.tsx` renders
+  // this route with no `key`, so walking from one book to another (the copies
+  // section links straight to a sibling copy) reuses the component instance:
+  // a ref that only ever arms once would hand the second book the first one's
+  // loan, its copy count and its blurb.
+  const arrival = useRef<{
+    bookId: number;
+    defaults: Record<BookSection, boolean>;
+  } | null>(null);
+  if (defaults !== null && arrival.current?.bookId !== bookId)
+    arrival.current = { bookId, defaults };
+  const onArrival = arrival.current?.defaults;
+
+  const isOpen = (section: BookSection) =>
+    resolveOpen(choices[section], onArrival?.[section] ?? false);
+
+  return {
+    isOpen,
+    toggle: (section: BookSection) => {
+      const next = !isOpen(section);
+      writeSectionChoice(section, next);
+      setChoices((current) => ({
+        ...current,
+        [section]: next ? "open" : "closed",
+      }));
+    },
   };
 }

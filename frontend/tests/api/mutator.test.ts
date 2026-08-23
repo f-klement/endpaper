@@ -85,6 +85,28 @@ describe("request headers", () => {
     const headers = api.fetch.mock.calls[0]![1].headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer abc123");
   });
+
+  it("asks for JSON, which is what the portal negotiates on", async () => {
+    // Not decoration. A forward-auth portal decides between answering 401 and
+    // redirecting to its own login page on this header alone: Authelia
+    // redirects anything that accepts text/html, and a browser fetch with no
+    // Accept sends a wildcard, which does. Measured against the live
+    // deployment, same URL and same expired cookie: application/json got 401
+    // and a wildcard got 302. That 302 is the first half of the endless-spinner
+    // loop. There is no third case to test: a browser never sends no Accept at
+    // all.
+    const api = mockApi().on("/api/books", { body: [] });
+    await customFetch("/api/books");
+    const headers = api.fetch.mock.calls[0]![1].headers as Headers;
+    expect(headers.get("Accept")).toBe("application/json");
+  });
+
+  it("lets a caller override Accept", async () => {
+    const api = mockApi().on("/api/books", { body: [] });
+    await customFetch("/api/books", { headers: { Accept: "text/plain" } });
+    const headers = api.fetch.mock.calls[0]![1].headers as Headers;
+    expect(headers.get("Accept")).toBe("text/plain");
+  });
 });
 
 describe("responses", () => {
@@ -210,6 +232,20 @@ describe("a request that never got an answer", () => {
   });
 });
 
+/**
+ * A fresh copy of the module, standing in for a fresh document.
+ *
+ * `mutator.ts` remembers whether this page load has already asked for a reload,
+ * in module state, deliberately: its lifetime is meant to be the document's. A
+ * test that wants its own page load therefore has to have its own module, and
+ * re-importing is the only thing that is one. Without this, the first test to
+ * trigger a reload silences every later one in the file.
+ */
+async function freshPageLoad() {
+  vi.resetModules();
+  return await import("../../src/api/mutator");
+}
+
 describe("an edge sign-out", () => {
   // The reverse proxy in front of this app answers an expired session with a
   // 302 to a login portal on another hostname, XHR requests included. Followed,
@@ -225,16 +261,18 @@ describe("an edge sign-out", () => {
   });
 
   it("treats an opaque redirect as an expired session", async () => {
+    const mutator = await freshPageLoad();
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(customFetch("/api/books")).rejects.toThrow(
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow(
       "session has expired",
     );
   });
 
   it("requests the redirect rather than following it", async () => {
     // Following it is what loses the status. Nothing else can detect this.
+    const mutator = await freshPageLoad();
     const api = mockApi().on("/api/books", { body: [] });
-    await customFetch("/api/books");
+    await mutator.customFetch("/api/books");
     expect(api.fetch.mock.calls[0]![1].redirect).toBe("manual");
   });
 
@@ -242,25 +280,139 @@ describe("an edge sign-out", () => {
     // /login is this app's own route and the proxy sits in front of it too, so
     // a router push would be redirected again. Only a top-level navigation is
     // followed across origins.
+    const mutator = await freshPageLoad();
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(customFetch("/api/books")).rejects.toThrow();
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
     expect(window.location.reload).toHaveBeenCalled();
   });
 
   it("clears the stored session on the way out", async () => {
-    setSession("stale", makeUser());
+    const mutator = await freshPageLoad();
+    mutator.setSession("stale", makeUser());
     mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
-    await expect(customFetch("/api/books")).rejects.toThrow();
+    await expect(mutator.customFetch("/api/books")).rejects.toThrow();
     expect(localStorage.getItem("token")).toBeNull();
   });
 
   it("does not save the portal's page as a download", async () => {
     // Otherwise an expired session writes the proxy's redirect page to disk
     // under the export's filename.
+    const mutator = await freshPageLoad();
     mockApi().on("/api/books/export", { status: 0, type: "opaqueredirect" });
-    await expect(downloadFile("/api/books/export")).rejects.toThrow(
+    await expect(mutator.downloadFile("/api/books/export")).rejects.toThrow(
       "session has expired",
     );
+  });
+
+  it("leaves a zero status that is not an opaque redirect alone", async () => {
+    // The narrowing, pinned. `status === 0` used to be accepted as a redirect
+    // too, on the grounds that a missed one put the spinner back. The cost of
+    // a false positive is not a wrong message: it is clearSession() plus a
+    // page reload, which is the most destructive thing this client does.
+    const mutator = await freshPageLoad();
+    mutator.setSession("still-valid", makeUser());
+    mockApi().on("/api/books", { status: 0 });
+
+    await expect(mutator.customFetch("/api/books")).rejects.toBeInstanceOf(
+      mutator.ApiError,
+    );
+
+    expect(mutator.getToken()).toBe("still-valid");
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("the reload an edge sign-out triggers is counted", () => {
+  // An unguarded reload is a loop waiting for its next trigger, and this one
+  // had one: the reloaded page was answered from the service worker's
+  // precache, so it booted looking signed in, made a request, was redirected,
+  // and reloaded again. Reported live as a page that never stopped
+  // refreshing behind a spinner.
+  //
+  // Two scenarios with two different right answers, and conflating them was a
+  // bug of its own: several requests failing together in ONE page load is one
+  // sign-out and gets one reload, while a marker left by a PREVIOUS page load
+  // means the reload has already been tried and gets the dead-end screen.
+
+  /** The key `mutator.ts` records the reload under, per tab. */
+  const MARKER = "endpaper.edge-reload";
+
+  beforeEach(() => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { href: "/", pathname: "/", reload: vi.fn() },
+    });
+  });
+
+  /** Answer one request the way an expired portal session does. */
+  async function expiredAtTheEdge(fetcher: typeof customFetch): Promise<void> {
+    mockApi().on("/api/books", { status: 0, type: "opaqueredirect" });
+    await expect(fetcher("/api/books")).rejects.toThrow();
+  }
+
+  it("reloads the first time", async () => {
+    const mutator = await freshPageLoad();
+    await expiredAtTheEdge(mutator.customFetch);
+    expect(window.location.reload).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(MARKER)).not.toBeNull();
+  });
+
+  it("reloads once for a whole batch of requests failing together", async () => {
+    // The library screen has six requests in flight, so an expiry resolves six
+    // opaque redirects in one batch. Counting calls rather than page loads made
+    // the other five believe they were looping.
+    const mutator = await freshPageLoad();
+    const ended = vi.fn();
+    const stop = mutator.onSessionEnded(ended);
+
+    for (let n = 0; n < 5; n += 1) await expiredAtTheEdge(mutator.customFetch);
+
+    stop();
+    expect(window.location.reload).toHaveBeenCalledTimes(1);
+    // And says nothing about having tried, because it has not tried yet.
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it("says so rather than reloading again, when a previous page load did", async () => {
+    // The marker is what survives the reload, so a marker plus a fresh module
+    // is exactly the state a reloaded tab boots into.
+    sessionStorage.setItem(MARKER, String(Date.now() - 1000));
+    const mutator = await freshPageLoad();
+    const ended = vi.fn();
+    const stop = mutator.onSessionEnded(ended);
+
+    await expiredAtTheEdge(mutator.customFetch);
+
+    stop();
+    expect(window.location.reload).not.toHaveBeenCalled();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("reloads again once the reload is old enough to be unrelated", async () => {
+    // A session that expires an hour later is not the loop, and reloading is
+    // still the right answer to it.
+    sessionStorage.setItem(MARKER, String(Date.now() - 60 * 60 * 1000));
+    const mutator = await freshPageLoad();
+    await expiredAtTheEdge(mutator.customFetch);
+    expect(window.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload when it cannot record that it did", async () => {
+    // A private window, or site data blocked. A reload nothing can count is
+    // exactly the unbounded loop this guard exists for, so the dead-end screen
+    // is the safe answer rather than the fallback.
+    const mutator = await freshPageLoad();
+    const ended = vi.fn();
+    const stop = mutator.onSessionEnded(ended);
+    vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+
+    await expiredAtTheEdge(mutator.customFetch);
+
+    stop();
+    expect(window.location.reload).not.toHaveBeenCalled();
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -390,6 +542,23 @@ describe("downloadFile", () => {
     URL.revokeObjectURL = vi.fn();
   });
 
+  it("asks for the types a download can actually be", async () => {
+    // Not `application/json`, which is what `customFetch` sends and would be a
+    // lie about a CSV or a ZIP, and not a wildcard, which is what puts a
+    // request back on the redirecting side of the portal's content
+    // negotiation. Those are the two mistakes available here, so both are
+    // named.
+    const api = mockApi().on("/api/books/export", { body: "Title,Author" });
+    await downloadFile("/api/books/export");
+    const accept = (api.fetch.mock.calls[0]![1].headers as Headers).get(
+      "Accept",
+    )!;
+    expect(accept).toContain("text/csv");
+    expect(accept).toContain("application/zip");
+    expect(accept).not.toContain("text/html");
+    expect(accept).not.toContain("*/*");
+  });
+
   /** Capture the synthetic anchor the download clicks. */
   function captureAnchor(): HTMLAnchorElement[] {
     const created: HTMLAnchorElement[] = [];
@@ -453,11 +622,8 @@ describe("downloadFile", () => {
 
     await downloadFile("/api/books/export");
 
-    const headers = api.fetch.mock.calls[0]![1].headers as Record<
-      string,
-      string
-    >;
-    expect(headers.Authorization).toBe("Bearer abc123");
+    const headers = api.fetch.mock.calls[0]![1].headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer abc123");
   });
 
   it("throws on a failed download", async () => {

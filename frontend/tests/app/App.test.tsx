@@ -1,7 +1,7 @@
 /** Tests for src/app/App.tsx: the session gate and route table. */
 
-import { render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthMode } from "../../src/api/generated/model";
 import App from "../../src/app/App";
@@ -163,5 +163,142 @@ describe("App under proxy auth", () => {
     expect(
       screen.queryByRole("button", { name: "Sign In" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("a session that ended at the reverse proxy", () => {
+  // The bug this describes was reported live: a page that reloaded for ever
+  // behind a spinner, with two tabs open. Two faults composed to make it, and
+  // neither was wrong on its own, which is why a header assertion and a config
+  // assertion would both have passed while the app looped. So it is asserted
+  // as behaviour: given the answer an expired portal session gives, the app
+  // must end up somewhere a person can act on, having reloaded at most once.
+  //
+  // Fault 1 was the request: with no Accept header the browser sends a
+  // wildcard, and Authelia redirects anything that accepts text/html rather
+  // than answering 401. Fault 2 was the reload: the service worker precached
+  // index.html, so `/` was served from cache and the portal never saw the
+  // navigation that would have let it sign the reader back in.
+
+  /** The key `mutator.ts` records its reload under, per tab. */
+  const MARKER = "endpaper.edge-reload";
+
+  beforeEach(() => {
+    // Replaced wholesale rather than spied on, because a reload in a test
+    // environment is not a reload. `search` and `hash` are part of the stub
+    // because App owns a real BrowserRouter, which reads all three to build
+    // its first entry: without them the initial path is "/undefinedundefined".
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        href: "http://localhost/",
+        origin: "http://localhost",
+        pathname: "/",
+        search: "",
+        hash: "",
+        reload: vi.fn(),
+      },
+    });
+  });
+
+  /**
+   * Mount a fresh copy of the app, standing in for a fresh document.
+   *
+   * `mutator.ts` remembers in module state whether this page load has already
+   * asked for a reload, because its lifetime is meant to be the document's. A
+   * second test is a second page load, so it needs a second module.
+   */
+  async function renderFreshApp(queryClient = createTestQueryClient()) {
+    vi.resetModules();
+    const { default: FreshApp } = await import("../../src/app/App");
+    return render(<FreshApp queryClient={queryClient} />);
+  }
+
+  /** What an expired portal cookie does to every request, not just the API. */
+  function expireEverything() {
+    // Under `redirect: "manual"` the 302 arrives as an opaque redirect.
+    // Registered last, so it wins over the stubs in the outer beforeEach.
+    api.on(/./, { status: 0, type: "opaqueredirect" });
+  }
+
+  it("reloads once for the whole batch, and claims nothing yet", async () => {
+    // Six requests are in flight on this screen, so an expiry resolves six
+    // opaque redirects together. Counting calls rather than page loads made
+    // five of them believe they were looping, and put up a screen saying
+    // reloading had not helped before the reload had even happened.
+    signIn(makeUser({ username: "kim" }));
+    expireEverything();
+
+    await renderFreshApp();
+
+    await waitFor(() =>
+      expect(window.location.reload).toHaveBeenCalledTimes(1),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Your session ended" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says so instead of reloading again, once a page load already has", async () => {
+    // The marker is what survives a reload, so a marker plus a fresh module is
+    // the state a reloaded tab boots into. This is the loop, broken: the
+    // reader gets a sentence and a button rather than another reload.
+    sessionStorage.setItem(MARKER, String(Date.now() - 1000));
+    signIn(makeUser({ username: "kim" }));
+    expireEverything();
+
+    await renderFreshApp();
+
+    expect(
+      await screen.findByRole("heading", { name: "Your session ended" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sign in again" }),
+    ).toBeInTheDocument();
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("does not leave the reader on the spinner", async () => {
+    // The reported symptom, and the reason this screen exists at all. The
+    // shell was showing "Signing you in" when the requests started being
+    // redirected, and nothing ever replaced it.
+    sessionStorage.setItem(MARKER, String(Date.now() - 1000));
+    signIn(makeUser({ username: "kim" }));
+    expireEverything();
+
+    await renderFreshApp();
+
+    await screen.findByRole("heading", { name: "Your session ended" });
+    expect(screen.queryByText("Signing you in")).not.toBeInTheDocument();
+  });
+
+  it("does not keep the library in memory behind the dead end", async () => {
+    // This branch neither reloads nor navigates, so it is the only way a
+    // session ends while the document lives on. Without emptying the cache the
+    // QueryClient goes on holding every book the reader fetched, behind a
+    // screen telling them their session is over.
+    sessionStorage.setItem(MARKER, String(Date.now() - 1000));
+    signIn(makeUser({ username: "kim" }));
+    const client = createTestQueryClient();
+
+    await renderFreshApp(client);
+    await screen.findByRole("heading", { name: /Library/ });
+    const fetched = () =>
+      client
+        .getQueryCache()
+        .getAll()
+        .filter((query) => query.state.data !== undefined);
+    // Or the assertion below is true of an empty cache and proves nothing.
+    expect(fetched().length).toBeGreaterThan(0);
+
+    expireEverything();
+    // Inside act: the refetch is driven from the test rather than from a user
+    // event, and its rejection is what flips the shell to the dead end.
+    await act(async () => {
+      await client.refetchQueries();
+    });
+
+    await screen.findByRole("heading", { name: "Your session ended" });
+    expect(fetched()).toEqual([]);
   });
 });

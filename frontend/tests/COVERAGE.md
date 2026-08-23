@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,331 tests**, in 91 files.
+**1,405 tests**, in 95 files.
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
@@ -53,17 +53,18 @@ readers as a side effect.
 
 | File                                  | Tests | Covers                                                      |
 | ------------------------------------- | ----: | ----------------------------------------------------------- |
-| `houseRules.test.ts`                  |    10 | Rules that hold across the whole tree: the generated client behind hooks, retired text tiers, one focus ring, one session writer, stated dark hover states, no dashes |
-| `api/mutator.test.ts`                 |    39 | Token attachment, 401 handling, error flattening, downloads |
+| `houseRules.test.ts`                  |    12 | Rules that hold across the whole tree: the generated client behind hooks, retired text tiers, one focus ring, one session writer, stated dark hover states, no dashes, nothing hand-written under `assets/` |
+| `api/mutator.test.ts`                 |    48 | Token attachment, the Accept header the portal negotiates on, 401 handling, error flattening, downloads, and the counted reload an edge sign-out triggers |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
-| `app/*`                               |    52 | The session gate, the top bar (incl. the way back from a switched session), the library export, appearance sync |
-| `components/*.test.tsx`               |    28 | The general dumb components, incl. the star rating and the toast |
+| `app/*`                               |    56 | The session gate, the top bar (incl. the way back from a switched session), the library export, appearance sync, and the portal sign-out that must reload once and then say so |
+| `components/*.test.tsx`               |    57 | The general dumb components, incl. the star rating, the toast, and the collapsible section's disclosure contract |
 | `i18n/index.test.tsx`                 |    34 | Language detection, interpolation, catalogue parity         |
 | `lib/isbn.test.ts`                    |    31 | Check digits, ISBN-10 to ISBN-13, normalisation             |
 | `lib/goodreads.test.ts`               |     7 | Search URLs, mirroring the backend's own tests              |
 | `lib/lastLocation.test.ts`            |    10 | Shelf carry-over, clearing, storage refusing to work        |
 | `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
 | `lib/libraryView.test.ts`             |     5 | Covers or table, remembered locally, and storage refusing to answer |
+| `lib/sectionState.test.ts`            |    14 | Which sections a reader folded away: three states, an id no section answers to, corrupt and refused storage |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
 | `pages/hooks.test.ts`                 |    33 | Session state, auth modes, corrupt storage, switching into a test account under proxy, and dropping the cache whenever the identity changes |
 | `pages/types.test.ts`                 |    16 | Tag grouping, the style tables, the lending answers, and the light and dark modes |
@@ -72,7 +73,7 @@ readers as a side effect.
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
 | `pages/Home/*`                        |   162 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, and the table view |
-| `pages/BookDetail/*`                  |   167 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, quotes and their page numbers, enrichment, the reading log and its two units, and the credit line whose names are links |
+| `pages/BookDetail/*`                  |   199 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, quotes and their page numbers, enrichment, the reading log and its two units, the credit line whose names are links, and the six collapsible groups: their defaults, what stays outside them, and what a reader's own choice overrides |
 | `pages/ScanPage/*`                    |   124 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
 | `pages/SettingsPage/*`                |   100 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
 | `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |
@@ -84,7 +85,7 @@ readers as a side effect.
 | `pages/CollectionsPage/*`             |    14 | Naming parts of the shelf: creating, renaming, the delete that names its count, and the link into the filtered library |
 | `pages/AuthorsPage/*`                 |    29 | The index and its browser-side search, the suggestion card's checkboxes, selecting two names no rule joins, renaming one, the count in the confirmation, the rename wording when one name is selected, the note when a merge lands under a third name (and its silence when it did not), and undoing one merge |
 | `pages/DuplicatesPage/*`              |     8 | Suspected duplicates and confirming a merge                 |
-| `pages/errors/*`                      |     9 | 404, 403 and the render-crash boundary                      |
+| `pages/errors/*`                      |    13 | 404, 403, the render-crash boundary, and the session that ended at the proxy |
 | `theme/index.test.tsx`                |    31 | Mode resolution, the palette on the document, more contrast, and a wallpaper turned off |
 | `theme/appearance.test.ts`            |    16 | The per account cache, unknown values, corrupt storage, the front door |
 | `theme/palettes.test.ts`              |    91 | Every palette and mode, measured against the rung contract, with and without more contrast, plus the catalogue and the swatch read |

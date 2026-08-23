@@ -122,6 +122,27 @@ export const en = {
   "book.addTag": "+ Add",
   "book.removeTag": "Remove {tag}",
 
+  // ── Book detail sections ────────────────────────────────────────────────
+  // Names for the collapsible groups. Two rules held while naming them.
+  //
+  // Each is deliberately different from every heading and control inside it: a
+  // handle and the panel it opens must not answer to the same name, which is
+  // why this is not "On the shelf" or "Lending", both of which are already
+  // buttons in the sections that would have carried them. A test counts each
+  // name and requires exactly one button to answer to it.
+  //
+  // Four of the six name an errand rather than a category of data, because a
+  // handle is read by somebody looking for something to do. The other two do
+  // not, and are named here rather than left as silent exceptions: "Notes and
+  // quotes" and "About this book" are read for what is in them, and no verb
+  // describes either better than its nouns do.
+  "section.reading": "Your reading",
+  "section.filing": "Filing this copy",
+  "section.copies": "Your copies",
+  "section.lending": "Lending this copy",
+  "section.writing": "Notes and quotes",
+  "section.about": "About this book",
+
   // ── Field names ─────────────────────────────────────────────────────────
   //
   // Shared by the card's fold out and the table view. Whole phrases, because
@@ -827,6 +848,11 @@ export const en = {
   "error.500.title": "Something broke",
   "error.500.message":
     "That is our fault, not yours. Reloading usually clears it.",
+  "error.sessionEnded.code": "Error 401",
+  "error.sessionEnded.title": "Your session ended",
+  "error.sessionEnded.message":
+    "The sign-in portal ended this session, and reloading did not bring it back. Sign in again to carry on.",
+  "error.sessionEnded.action": "Sign in again",
   "error.backToLibrary": "Back to the library",
   "error.reload": "Reload the page",
 } as const;

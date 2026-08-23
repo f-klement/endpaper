@@ -21,23 +21,42 @@ export default defineConfig({
       // The manifest is hand-maintained in public/manifest.json.
       manifest: false,
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        // No navigation fallback, and that is the fix for a real bug rather
-        // than a lost feature.
+        // **No `html`, and that omission is load bearing.** Precaching
+        // `index.html` is what let the app boot from cache while signed out;
+        // `navigateFallback` below is the other half of the same fix.
         //
-        // The plugin defaults this to "index.html", which registers a
-        // NavigationRoute answering EVERY navigation from the precache without
-        // touching the network. Endpaper sits behind a forward-auth portal, so
-        // when the portal cookie expires the shell was still served from cache,
-        // the app booted looking signed in, and every request it then made was
-        // redirected to a login page it could not reach. The result was an
-        // endless spinner and a console full of network errors.
+        // Workbox's precache route does not only answer the exact URLs in the
+        // manifest. `precacheAndRoute` takes a `directoryIndex` that defaults
+        // to `"index.html"` (workbox-precaching's `generateURLVariations`, and
+        // the built sw.js passes no override), so a request for `/` becomes
+        // `/index.html`, matches the manifest entry, and is answered from the
+        // cache without the network being touched. Endpaper can sit behind a
+        // forward-auth portal, and that portal only ever sees a top-level
+        // navigation: answering `/` from cache means it never sees one.
         //
-        // An offline shell cannot be honest here anyway: everything on every
-        // screen comes from the API, and the API is behind the same portal. So
-        // navigations go to the network, where the portal can redirect them,
-        // and the precache keeps doing the part it is good at, which is
-        // serving the assets instantly once you are through.
+        // Removing the entry rather than setting `directoryIndex: null` is the
+        // difference between fixing the instance and removing the class. With
+        // no HTML in the precache there is no cached shell for any route,
+        // rewritten or exact, to serve.
+        //
+        // The cost is stated plainly: there is no offline app any more. There
+        // never usefully was. Every screen's content comes from the API, and
+        // the API is behind the same portal, so an offline shell could only
+        // ever render a spinner over data it could not fetch, which is what
+        // was reported. Assets still precache, which is the part that is worth
+        // having: once a navigation is through the portal, the page paints from
+        // cache.
+        globPatterns: ["**/*.{js,css,ico,png,svg,woff2}"],
+        // The other half, and it stays. The plugin defaults this to
+        // "index.html", which registers a NavigationRoute answering EVERY
+        // navigation from the precache. That default was removed when this bug
+        // was first diagnosed; the diagnosis was incomplete, because it left
+        // the precache route above still answering `/`.
+        //
+        // It is also now a hard requirement rather than a preference: Workbox
+        // builds a navigate fallback with `createHandlerBoundToURL`, which
+        // throws `non-precached-url` for a URL it has no cache key for. With no
+        // HTML precached, setting this would break the worker outright.
         navigateFallback: undefined,
         // Drop precaches from earlier builds instead of letting them accumulate.
         //

@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**2025 tests**, in 49 files. Line coverage was last measured at **96%** (4303 statements,
+**2048 tests**, in 49 files. Line coverage was last measured at **96%** (4303 statements,
 186 missed) when the suite held 1571, which is 454 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
@@ -51,7 +51,7 @@ is why the helper uses regexes.
 | `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
-| `test_main.py` | 28 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan |
+| `test_main.py` | 51 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, and the shell that has to answer a client route |
 | `test_house_rules.py` | 29 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed |
 | `test_serialisation.py` | 28 | Assembling `BookOut`: the per-request fields, and that the copy count and the collection name each cost one statement for a page rather than one per book |
 | `test_schema.py` | 40 | Alembic: create, adopt a pre-Alembic database, upgrade, and that two table rewrites left their partial unique indexes partial |

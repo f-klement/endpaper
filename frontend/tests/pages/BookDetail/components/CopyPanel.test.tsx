@@ -97,7 +97,25 @@ describe("CopyPanel", () => {
     expect(screen.getByLabelText("Price paid")).toHaveValue("12.99");
   });
 
-  it("opens itself when the book already has details to show", () => {
+  it("names itself with a heading, since it lost the summary that announced it", () => {
+    // The <summary> it used to have was focusable and announced. A bold <p>
+    // is announced as nothing, which would leave "Your copies" the one
+    // section with no heading inside it at all.
+    renderLocalised(
+      <CopyPanel book={makeBook()} isSaving={false} onSave={vi.fn()} />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "This copy" }),
+    ).toBeInTheDocument();
+  });
+
+  it("carries no disclosure of its own", () => {
+    // It had a <details> that opened itself on a copy with something already
+    // recorded. The "Your copies" section folds this panel away now, and two
+    // disclosures nested inside each other put these fields two clicks deep.
+    // Whether the panel is worth showing at all is now the section's default,
+    // which is tested in pages/BookDetail/hooks.test.tsx.
     const { container } = renderLocalised(
       <CopyPanel
         book={makeBook({ format: "hardcover" })}
@@ -105,13 +123,8 @@ describe("CopyPanel", () => {
         onSave={vi.fn()}
       />,
     );
-    expect(container.querySelector("details")).toHaveAttribute("open");
-  });
 
-  it("stays closed on a book with none, so the page is not longer for nothing", () => {
-    const { container } = renderLocalised(
-      <CopyPanel book={makeBook()} isSaving={false} onSave={vi.fn()} />,
-    );
-    expect(container.querySelector("details")).not.toHaveAttribute("open");
+    expect(container.querySelector("details")).toBeNull();
+    expect(screen.getByLabelText("Format")).toBeVisible();
   });
 });

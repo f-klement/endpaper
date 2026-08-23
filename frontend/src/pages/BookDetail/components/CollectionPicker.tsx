@@ -43,9 +43,12 @@ export default function CollectionPicker({
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-paper-900 mb-2 dark:text-paper-100">
+      {/* h3, not h2: the section handle that folds this panel away is the
+          h2 above it, so a flat h2 here would show a reader's heading list a
+          page with no grouping in it at all. */}
+      <h3 className="text-sm font-semibold text-paper-900 mb-2 dark:text-paper-100">
         {t("collections.label")}
-      </h2>
+      </h3>
       <select
         value={book.collection_id === null ? "" : String(book.collection_id)}
         disabled={isSaving}

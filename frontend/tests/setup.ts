@@ -133,6 +133,11 @@ beforeEach(() => {
   // wrong as a jsdom one doing it.
   if (typeof document !== "undefined") {
     localStorage.clear();
+    // `sessionStorage` too, because `api/mutator.ts` records its edge-sign-out
+    // reload marker there. A marker left behind by one test makes the next one
+    // take the "we have already reloaded once" branch, which is the difference
+    // between reloading and rendering a dead end.
+    sessionStorage.clear();
     for (const [token, value] of Object.entries(paletteTokensOnce())) {
       document.documentElement.style.setProperty(token, value);
     }

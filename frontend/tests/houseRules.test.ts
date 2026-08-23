@@ -52,6 +52,35 @@ describe("the generated client stays behind hooks.ts", () => {
   });
 });
 
+describe("nothing hand-written lives under the assets directory", () => {
+  // The invariant behind the backend's cache policy, which gives everything in
+  // `assets/` a year with `immutable` and everything else `no-cache`. That is
+  // safe only because Vite emits `assets/` and every name in it carries a
+  // content hash. Vite also copies `public/` into the build verbatim, so a file
+  // at `public/assets/anything` would land there unhashed and be pinned in
+  // every reader's browser for a year, with no way to bust it short of a
+  // rename: the exact failure the header exists to prevent, inverted.
+  //
+  // Asserted rather than commented, because the rule is about a directory
+  // nobody has a reason to create and would therefore be created by somebody
+  // who never read the comment. Backend side: `main.cache_control_for`.
+  // Lazy and untyped on purpose: only the keys are wanted, and an eager raw
+  // glob would inline every icon in `public/` into this test file as a string.
+  const PUBLIC = import.meta.glob("../public/**/*");
+
+  it("has no public/assets", () => {
+    const offenders = Object.keys(PUBLIC).filter((path) =>
+      path.startsWith("../public/assets/"),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("reads public/ at all", () => {
+    // A glob that matched nothing would make the test above pass for ever.
+    expect(Object.keys(PUBLIC).length).toBeGreaterThan(0);
+  });
+});
+
 describe("paper-400 and paper-500 are not text in light mode", () => {
   it("appears nowhere in the source", () => {
     // Measured against the card they sit on: 2.35:1 and 3.83:1, where AA wants

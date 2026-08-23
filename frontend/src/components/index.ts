@@ -9,6 +9,7 @@
 
 export { default as Button } from "./Button";
 export type { ButtonSize, ButtonVariant } from "./Button";
+export { default as CollapsibleSection } from "./CollapsibleSection";
 export { default as EmptyState } from "./EmptyState";
 export { default as ErrorState, errorText } from "./ErrorState";
 export { default as HelpButton } from "./HelpButton";

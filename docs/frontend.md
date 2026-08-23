@@ -231,12 +231,22 @@ the backend never returns a traceback.
 build without prompting. The manifest is hand-maintained in `public/manifest.json`
 (`manifest: false` in the plugin config), so icon and name changes go there.
 
-Open Library covers are cached `CacheFirst` for 30 days: immutable content addressed by
-ISBN.
+Remote covers are cached `StaleWhileRevalidate` for 30 days, and only on a 200. It was
+`CacheFirst` with no response check, which pinned an opaque 404 as a book's cover for a
+month; see *The covers that "stopped appearing" were a service worker cache, not the
+server* in `decisions.md`.
 
-The usual service-worker trap applies: the precache holds hashed asset names, so a client
-can hold a stale bundle after a deploy. `autoUpdate` resolves it on the next visit; a
-client stuck on old assets needs the worker unregistered.
+**The precache holds no HTML.** `workbox.globPatterns` lists assets only, so every
+navigation reaches the network. That is not a preference: a precached `index.html` is
+served for `/` by the precache route's `directoryIndex`, which takes the navigation away
+from the forward-auth portal Endpaper can sit behind, and the app then boots signed out
+believing it is signed in. `frontend/scripts/check-build.ts` builds the app and
+asserts it, because the same bug once survived a fix that changed the config without
+changing the build. Run it with `bun run check:build`; CI runs it on every push.
+
+The usual service-worker trap still applies to assets: the precache holds hashed asset
+names, so a client can hold a stale bundle after a deploy. `autoUpdate` resolves it on the
+next visit; a client stuck on old assets needs the worker unregistered.
 
 ## Three ways to add a book
 
@@ -371,3 +381,34 @@ phone's camera indicator stays lit after navigating away.
 
 The camera requires a **secure context**: HTTPS or `localhost`. On a plain-HTTP LAN address
 it fails with a permission error no matter what the member taps.
+
+## The book detail page folds
+
+Six collapsible groups (`reading`, `filing`, `copies`, `lending`, `writing`, `about`)
+under an identity block that never collapses: cover, title, author, the loan badge, the
+privacy control, the enrichment button, and the delete button at the foot.
+
+`CollapsibleSection` in `src/components/` is the disclosure itself: a `<button>` with
+`aria-expanded` and `aria-controls`, wrapped in an `<h2>` so the page has an outline to
+skim. The panel headings inside a section are `h3` for that reason, and each says so in a
+comment. **The panel is hidden with the `hidden` attribute rather than unmounted**, so
+`aria-controls` points at something real and a half typed note survives a collapse. It is
+the page's only disclosure idiom: `CopyPanel` had a `<details>` of its own and lost it.
+
+Five of the six are drawn on every book, because an empty group still offers its act.
+`about` is drawn only when `hasAbout()` is true, since it offers no act at all and its
+handle would otherwise open onto nothing.
+
+Which sections arrive open depends on the book. `sectionDefaults()` in the page's
+`hooks.ts` holds the table and every condition it tests is answered by the book already on
+screen, so no section flickers open when a second request lands. Those defaults are frozen
+per book id, not once: the route has no `key`, so walking to a sibling copy reuses the
+component. `writing` is fixed closed, because note and quote counts are not on `BookOut`.
+
+**The stored state is three values, not two.** `lib/sectionState.ts` keeps a map from
+section id to `open` or `closed` in `localStorage`, per device and per section, and an
+absent id means "nobody has said, use the book". `resolveOpen()` is the only place that
+rule lives. Without the third state, closing the loan section on a borrowed book would
+last exactly until the next visit. The entries are per section and not per book, so a
+reader's first tap on a section ends its conditional default on every book on that
+device.

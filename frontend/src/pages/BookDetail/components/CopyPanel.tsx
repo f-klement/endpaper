@@ -35,9 +35,10 @@ const CONDITIONS: { value: BookCondition; label: MessageKey }[] =
 /**
  * Facts about the object on the shelf, rather than about the work.
  *
- * Behind a disclosure on purpose. Nothing here is ever filled in by a lookup
- * and most books will never have any of it, so putting six more inputs in
- * front of everybody to serve the few who care would make the ordinary page
+ * Behind a disclosure on purpose, and that disclosure is now the "Your copies"
+ * section rather than a <details> of its own. Nothing here is ever filled in by
+ * a lookup and most books will never have any of it, so putting six more inputs
+ * in front of everybody to serve the few who care would make the ordinary page
  * worse. Goodreads is criticised in review after review for having nowhere to
  * record condition; this is that, plus what the copy cost.
  */
@@ -77,15 +78,6 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
     purchasedAt !== (book.purchased_at ?? "") ||
     source !== (book.purchase_source ?? "");
 
-  /** Anything already recorded, so the panel opens on a book that has some. */
-  const hasDetails = Boolean(
-    book.format ??
-      book.condition ??
-      book.purchase_price_minor ??
-      book.purchased_at ??
-      book.purchase_source,
-  );
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const minor = parseMinor(price);
@@ -108,11 +100,21 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
     });
   }
 
+  // No <details> of its own any more. It had one, opened on a copy with
+  // something already recorded, and the collapsible section around this panel
+  // now does that job: two disclosures nested inside each other put these
+  // fields two clicks deep and swallowed the inner one's signal entirely.
+  //
+  // The label is an h3 and not the bold <p> six other panels use, because it
+  // was a <summary> before that removal: focusable and announced. A <p> is
+  // announced as nothing, so dropping the wrapper would have traded a
+  // redundant disclosure for a lost landmark, and "Your copies" would have
+  // been the one section holding no heading at all.
   return (
-    <details open={hasDetails} className="mt-4">
-      <summary className="cursor-pointer select-none text-sm font-medium text-paper-700 dark:text-paper-200">
+    <div>
+      <h3 className="text-sm font-medium text-paper-700 dark:text-paper-200">
         {t("copy.title")}
-      </summary>
+      </h3>
       <p className="text-xs text-paper-600 mt-1 mb-3 dark:text-paper-400">
         {t("copy.hint")}
       </p>
@@ -229,6 +231,6 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
           {t("common.save")}
         </Button>
       </form>
-    </details>
+    </div>
   );
 }

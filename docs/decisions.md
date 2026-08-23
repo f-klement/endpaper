@@ -169,6 +169,103 @@ pill's colour is one decision across five values, and a change that owns one of 
 not quietly restyle the other four. Recorded here so it is a known debt rather than something
 to be rediscovered, and the test added with `did_not_finish` pins that pill only.
 
+### The built files state a cache lifetime, and only hashed names get a long one
+
+Starlette's `StaticFiles` sends an ETag and a Last-Modified and no `Cache-Control` at all
+(measured: every path, shell and asset alike). That leaves each file to the browser's
+*heuristic* freshness, which is a guess, and it is the wrong thing to leave the app shell
+to.
+
+`main.CachePolicyStaticFiles` sets one header per file, on one rule: **a name that changes
+with its content may be cached, and a name that does not must be revalidated.** Only
+Vite's `assets/` is content addressed, so it gets `public, max-age=31536000, immutable`
+and everything else gets `no-cache`: index.html, manifest.json, sw.js, registerSW.js and
+the icons all keep their names across builds while their bytes change.
+
+The reason for the shell is a deploy, not a session. A heuristically fresh index.html
+names its scripts by content hash, and a deploy deletes the hashes it no longer builds, so
+a reader holding yesterday's shell requests `assets/index-<hash>.js` and gets a 404: a
+blank page after a release with nothing wrong on the server. It is **not** a second
+instance of the endless-spinner bug, and claiming it would be would not survive scrutiny:
+both recovery paths there already reach the network, since signing out navigates to
+`/login`, a URL no cache entry answers, and a reload navigation is fetched with cache mode
+`"reload"`, which skips the freshness check by specification. The service worker fault was
+worse precisely because the precache answered the reload as well.
+
+`no-cache`, not `no-store`. `no-cache` means "ask before reusing", not "do not keep": the
+copy stays and the ETag turns the next request into a 304 with no body. `no-store` would
+throw a working conditional request away for nothing.
+
+Three details worth keeping. The policy is set on whatever `file_response` returns, so the
+304 carries it too; Starlette copies only a fixed set of headers onto a 304, and one that
+dropped the policy would leave the next request reading a cache entry with nothing on it.
+It is a `StaticFiles` subclass rather than middleware, because middleware on this app would
+see every response including the API's and would have to re-derive which came off the disk.
+And the mount goes through `mount_spa()` so the suite drives the wiring production uses:
+swapping the class back for a plain `StaticFiles` has to fail a test, and it only does if
+there is one mount.
+
+### The mount serves the shell for a client route, because `html=True` does not
+
+`html=True` answers `/` and a directory with `index.html`, and answers everything else 404.
+It was taken for `main.py`'s comment, `docs/architecture.md` and this file all to say the
+mount was a catch-all, and it never was. Measured in the running container with a valid
+session: `/` and `/index.html` 200, `/book/12`, `/settings` and `/quotes` **404**. A
+bookmark, a refresh anywhere but home, and a shared link to a book were all broken, and the
+published documentation promised they worked.
+
+`CachePolicyStaticFiles.get_response` answers an unmatched path with the shell under three
+conditions, each of which is a way this could have gone wrong:
+
+| Condition | What it prevents |
+|---|---|
+| Not `/api/*` or `/auth/*` (`wants_html` refuses them) | An API typo answering 200 with HTML, which is what `_fallback` was written for |
+| The request accepts `text/html` | Code asking for a missing path being handed a page instead of a 404 |
+| Not under `assets/` | A stale shell's missing chunk arriving as HTML inside a script tag, which is a parse error rather than a clean failure |
+
+The shell goes out through `file_response`, so a deep link carries the same `no-cache` that
+`/` does; without that it would be cached under its own URL.
+
+Not keyed on the path having a file extension, which is the usual shortcut for this:
+`/authors/J.R.R. Tolkien` is a real client route.
+
+**The fallback cannot serve a requested path, by construction**, and that is a better
+guarantee than the obvious one. It looks up `SHELL`, a module constant; the requested
+`path` reaches the method only to be tested for the `assets/` prefix, and is never looked
+up, joined or opened. So even a total failure of `lookup_path`'s containment check could
+not turn this branch into a file read. The containment argument is true as well, verified
+on the real mount with twelve escape shapes and three symlinks pointing out of the tree,
+all fifteen answering the shell and none the planted sentinel, and the symlinks are the
+sharper half of it because `realpath` plus `commonpath` reject a file that genuinely
+exists. But it depends on Starlette continuing to behave that way, and the structural
+argument depends on nothing outside the six lines.
+
+Three consequences worth writing down.
+
+A `POST` to an unmatched path is **405**, not 404: Starlette's answer for any method the
+mount does not serve, which predates this and which the `except` re-raises, so a write
+never reaches the shell branch. Behind the real error handlers that 405 *is* an HTML page,
+this app's error template. What matters is that it is not the shell.
+
+A path that tries to escape the root (`/%2e%2e%2fmain.py`) now answers 200 with the shell
+where it used to answer 404. It is an unmatched path like any other, and the standard SPA
+trade.
+
+**Every probe now answers 200 where it used to answer 404**, so the status differential a
+scanner reads is gone for this host, and so is the 404 burst a rate-based detector keys on:
+CrowdSec will stop seeing them from this app. That is detection, not containment, and it is
+inherent to serving an SPA fallback rather than anything specific to this one. Recorded so
+that nobody reads the silence as quiet.
+
+Two smallest-fixes were held rather than taken, because they treated the symptom of this
+one. `endSession()` sends the browser to `/login`, which was a 404 in `local` and `ldap`
+mode, the default and what the published image runs (behind a forward-auth portal the
+portal answers `/login` first, which is why it never showed up in the deployment this was
+diagnosed against); `LOGIN_PATH = "/"` would have worked, since the signed-out shell
+renders the login page for `path="*"`. And `reauthenticateAtEdge`'s `reload()` would have
+had to become `assign("/")` for the same reason. Both are unnecessary now, and `reload()`
+is better than `assign("/")` because the reader lands back where they were.
+
 ### The health probe touches the database, and that was not enough
 
 The original reasoning stands and is left here because it is right as far as it goes. The
@@ -1769,6 +1866,138 @@ first run of the settings test, not predicted.
 The browser must set it itself to include the multipart boundary. Adding it by hand
 produces a request the server cannot parse.
 
+### Every request declares `Accept`, and a download declares something else
+
+A browser `fetch` with no `Accept` sends a wildcard, and a forward-auth portal reads
+exactly that header to decide whether an unauthenticated request gets an answer it can
+handle or a redirect to a login page. Measured against the live deployment, same URL and
+same expired cookie:
+
+| Request `Accept` | Portal answer |
+|---|---|
+| `application/json` | 401 |
+| `*/*` | 302 |
+| absent | 401 |
+
+The third row is the portal being consistent rather than a third case to design
+for: a browser `fetch` never sends no `Accept`, it sends `*/*`, which is row two.
+It is written down because the first measurement of it was taken with curl, which
+sends `*/*` unless told otherwise, so the wildcard was measured twice and one of
+the two was recorded as "absent". Re-measured with the header genuinely removed:
+401.
+
+`customFetch` therefore sends `application/json`, which is also simply true: every
+operation in the schema declares a JSON response.
+
+`downloadFile` sends `application/octet-stream, application/zip, text/csv,
+application/json` instead. Its two callers fetch a CSV or JSON export and a ZIP backup, so
+`application/json` would be a lie, and a wildcard would put the request back on the
+redirecting side of the same negotiation.
+
+### The endless spinner was two faults, and neither was wrong on its own
+
+Reported by the owner, reproduced against the deployment: a page that reloaded for ever
+behind a spinner. The mechanism needed both halves.
+
+1. The request had no `Accept`, so an expired portal session arrived as a **302**, not a
+   401. Under `redirect: "manual"` that is an opaque redirect, which `mutator.ts` handles
+   by clearing the session and reloading, because only a top-level navigation is followed
+   across origins.
+2. The reload could not reach the portal. `workbox.globPatterns` included `html`, so
+   `index.html` was in the precache, and `precacheAndRoute` applies a `directoryIndex`
+   that defaults to `"index.html"`: a request for `/` was rewritten, matched, and answered
+   from the cache with no network involved. The app booted looking signed in, made a
+   request, was redirected, and reloaded again.
+
+Both are fixed. The second is fixed by dropping `html` from the glob rather than by
+setting `directoryIndex: null`, which removes the class instead of the instance: with no
+HTML precached there is no cached shell for any route, rewritten or exact, to serve. The
+cost is that there is no offline app, and there never usefully was one, because every
+screen's content comes from an API behind the same portal.
+
+**A client that already has the bug cannot be fixed by deploying this**, and the way out
+follows from the mechanism above. Such a browser is served `/` from its old precache, so
+it never makes a navigation the portal can answer, and `registration.update()` fetches
+`/sw.js` with redirect mode `"error"` by specification, so the portal's 302 fails the
+update: the old worker and the old bundle both stay. The escape is that only `/` and
+`/index.html` are rewritten by `directoryIndex`. **Any other path** (`/settings`,
+`/book/1`) misses the precache, reaches the network, and gets the portal, after which the
+worker updates normally. That escape only became true with the SPA fallback below: until
+then those paths reached the network and were answered **404** by the server, so the
+reader got an error page rather than the portal.
+
+The trap worth remembering is the previous fix. `navigateFallback: undefined` was added
+for this exact bug and its comment described it as solved. It removed the NavigationRoute
+and left the precache route, and the config kept saying "fixed" from v0.2.0 to v0.5.0
+while the build kept shipping it. Hence `frontend/scripts/check-build.ts`, which
+builds the app and reads `dist/sw.js`: the config was never the thing that was wrong.
+
+### `isRedirect()` is `opaqueredirect` only
+
+It also accepted `status === 0`, on the grounds that missing a redirect put the spinner
+back. That was the wrong trade to make: a false positive here is not a wrong message, it
+is `clearSession()` plus a page reload, which is the most destructive thing this client
+does.
+
+Under `redirect: "manual"` and the default request mode there is no other resolved
+response with status 0. The spec gives an opaque-redirect filtered response
+`type: "opaqueredirect"` and `status: 0` together, the only other zero-status response is
+an opaque one, which needs `mode: "no-cors"` and nothing here sets it, and a transport
+failure rejects rather than resolving, which is the `NetworkError` path.
+
+### The reload is counted, and an uncountable one is not taken
+
+`window.location.reload()` with no guard is a loop waiting for its next trigger, and this
+one had one. `mutator.ts` records a timestamp in `sessionStorage` before reloading, and a
+second edge sign-out within 30 seconds dispatches an event instead: the shell swaps in
+`SessionEndedPage`, which says what happened and offers the same navigation as a button.
+An infinite loop degrades to a sentence rather than to a spinner.
+
+**The guard counts page loads, not calls, and the distinction is a bug that was in it.**
+The library screen has six requests in flight (four in `useLibrary`, the `useListBooks`
+inside `useUnconfirmedCount`, and the auth config; seven under proxy auth), so an expiry
+resolves six opaque redirects in one batch. Counting calls, the first reloaded and the
+other five read a marker aged about zero milliseconds, concluded they were looping, and
+put up a screen saying reloading had not helped before the reload had happened at all. A module-level
+`reloadRequested` closes it: the rest of a batch is the same event, and module state dies
+with the document, which is the boundary wanted.
+
+**What bounds the 30 second window**, since the next reader will be tempted to tune it:
+it must exceed one loop cycle, which is a cache-served navigation plus a boot plus the
+first request, so seconds; and it must fall short of a person signing in again at the
+portal and coming back. Nothing in between distinguishes them. A slow portal makes the
+window *safer* rather than riskier: no script of ours runs during the navigation, so a
+slower round trip lengthens the measured interval and makes the loop branch less likely
+to fire.
+
+`sessionStorage`, not `localStorage`: this is one tab's own reload and should die with the
+tab. Storage access is wrapped, because a private window or blocked site data can throw,
+and failing to *record* the marker is treated as "do not reload" rather than as "reload
+blindly", since a reload nothing can count is exactly the loop being guarded.
+
+### The dead-end branch is the one place that must empty the query cache
+
+Every other way a session ends leaves the document, and memory dies with it: `signOut`
+clears the client itself, and `endSession` navigates to `/login`. The edge branch does
+neither, so it is the only path that ends a session while the tab lives on. Without
+`queryClient.clear()` in `useSessionEndedAtEdge` the client would go on holding every
+book, loan, quote and setting the reader had fetched, behind a screen telling them their
+session is over.
+
+### `clearSession()` leaves the saved searches and the last location behind, and that is accepted
+
+It removes `token` and `user`. A reader's saved searches and their last shelf position
+(`lib/savedSearches.ts`, `lib/lastLocation.ts`) survive in `localStorage`, and `signOut()`
+does not clear them either, so on a shared browser profile the next person to sign in
+inherits both. What that discloses is what somebody searched for and one book id, never a
+book's contents, and every read still goes through `visible_to()`.
+
+Accepted rather than fixed, because it is per device by design: these exist so that a
+browser remembers where you were, and clearing them on sign-out would also clear them for
+the one person on their own laptop who is the common case. The cost is stated so the next
+reader can weigh it rather than discover it. If it is ever fixed, both stores have to be
+cleared in `clearSession()`, not in `signOut()`, or the edge path will keep them.
+
 ### `--color-paper-0` exists, and its value is `#ffffff`
 
 A token whose value is plain white looks like a token for the sake of one. It is
@@ -2264,6 +2493,137 @@ switches the form. The labels say "Switch to sign in" / "Switch to registration"
 ### Debounce tests use `fireEvent`, not `user-event`
 
 `user-event` deadlocks against fake timers. See [testing.md](testing.md).
+
+### The book detail page is six collapsible groups under an identity block
+
+Seventeen panels in one column, three of them free text forms. Nothing caused it and
+every feature added one panel, which is how a page becomes a form. The groups are
+`reading`, `filing`, `copies`, `lending`, `writing` and `about`, and they collapse.
+
+Collapse rather than tabs: a tab hides that content exists at all, while a collapsed
+section keeps a labelled handle visible, which is the whole point for a panel that is
+empty on most books. What stays outside every group is chosen as deliberately as what
+goes in: the cover, title and author; the loan badge, which is the one thing a member
+scans a shelf for; the privacy control, because a control over who can see a book must
+not be somewhere you go looking for; the delete button, because a destructive action
+hidden in a fold is a worse surprise than a long page; and `EnrichPanel`, for the reason
+below.
+
+`DiscussToggle` sits in `reading` rather than in `lending`, against the grouping first
+proposed. Its own docstring is the argument: it is a fact about a reader, not about
+where the object is.
+
+**The four handles that can name an errand do; the two that hold content name the
+content.** "Your reading", "Filing this copy", "Your copies" and "Lending this copy" say
+what you came to do. "Notes and quotes" and "About this book" do not, and the exception is
+written down rather than left for a reader to notice: both are read for what is in them,
+and no verb describes either better than its nouns do. An earlier draft called the second
+one "Organisation", which is a label over a drawer rather than something a person arrives
+wanting to do, and the third "Copies and condition", which is two errands joined by "and"
+and stopped being two the moment `CopyPanel` lost its own disclosure. No title may repeat
+a heading or control inside its own section, which is why this is not "On the shelf" (an
+ownership button) or "Lending" (the willingness label): a test counts each name and
+requires exactly one button.
+
+**`about` is the one group that is not always drawn.** The other five keep their handle
+on a book that has nothing in them, because an empty group still offers its act: lending
+a book nobody has borrowed is the reason the lending section exists. `about` offers no
+act at all, so with no blurb and no categories its handle would open onto nothing and it
+is left out.
+
+**`EnrichPanel` is outside every section**, at the foot with the two dialogues it raises.
+It was briefly inside `about`, which is exactly wrong: `about` is drawn only when the
+catalogue already knows something, so the button that fetches what the catalogue knows
+would have been hidden on precisely the books that need it. That is the same fault as the
+bug its own comment records, reached by a different route.
+
+**Five panel headings dropped from `h2` to `h3`.** `ReadingPanel`, `ProgressPanel`,
+`OwnershipPicker`, `ShelfPanel` (twice) and `CollectionPicker`. Flat `h2`s were correct
+on a flat page; inserting a section heading above them is what made them wrong, and a
+heading list that shows twelve `h2`s in a row shows no grouping at all. This is the one
+place the "no panel changes" scope rule bent, and it bent because that rule exists to
+keep a diff reviewable, not to preserve a heading level whose meaning the change removed.
+Each site carries a comment saying why, or the next reader repairs it back.
+
+Six panels label themselves with a bold `<p>` rather than a heading at all
+(`StatusPicker`, `TagEditor`, `LoanPanel`, `NoteList`, `QuoteList`, `CopiesPanel`), so
+they appear in no outline either way. That predates this change and is left alone here:
+promoting them is a separate pass with its own reasons, and doing it in this diff would
+have hidden the six demotions among a dozen edits. `CopyPanel` was the seventh and is not
+left alone, for the reason below: its label is the one this change itself demoted, from a
+`<summary>`.
+
+**`CopyPanel` lost its own `<details>`.** It opened itself on a copy with a condition or
+a price recorded. Nested inside the `copies` section that signal was swallowed (on a
+single copy book the section arrives closed) and the fields sat two clicks deep. One
+disclosure idiom per page.
+
+Its label became an `h3` rather than the bold `<p>` six other panels use, and that is not
+cosmetic: it was a `<summary>`, which is focusable and announced, and a `<p>` is announced
+as nothing. Dropping the wrapper without this would have traded a redundant disclosure for
+a lost landmark and left "Your copies" the one section with no heading inside it.
+
+### A section's stored state is three values, and absence is one of them
+
+Which sections open is conditional on the book (`sectionDefaults` in
+`pages/BookDetail/hooks.ts`), so "closed" and "nobody has said" cannot be the same
+stored value. If they were, closing the loan section on a borrowed book would last until
+the next visit, when the condition would win again and open it. Absence therefore means
+"use the book", and `resolveOpen()` in `lib/sectionState.ts` is the only place that rule
+lives.
+
+The defaults are frozen per book, not once. Left live, marking a loan returned would flip
+the lending default to closed and fold the section away under the hand that had just used
+it. Keyed on the book id rather than on the ref being empty, because `routes.tsx` renders
+`/book/:id` with no `key` and the copies section links straight to a sibling copy: a
+freeze that armed once would hand the second book the first one's loan, copy count and
+blurb, and it is one click away from the section this change added.
+
+### Section state is per device and per section
+
+`localStorage`, like `libraryView` and the saved searches, and for the same reasons: a
+habit rather than household data, no endpoint, no schema, no migration, and the cost of
+getting it wrong is one tap. Per member would be a settings round trip and a backend
+change for a preference that differs between a phone and a laptop anyway.
+
+Per section rather than one state for the page, because a single flag could only ever
+mean "collapse everything", which throws the conditional defaults away. One entry per
+section id, and an id no section answers to any more is kept rather than pruned: nothing
+renders it, and a section that comes back finds what the reader last said. Only a value
+that is neither `open` nor `closed` is dropped. Every read and write is wrapped, and a
+page with no stored value at all is the conditional default, which is the state the whole
+design is written for.
+
+**The consequence of those two decisions together, and it is load bearing: an entry is
+per section and not per book, so the first tap on a section ends its book-conditional
+default for every book on that device, permanently.** Somebody who folds the loan section
+away on one borrowed book will not see it open itself on the next one. That is the
+intended reading of "a reader's own choice wins", the alternative being a page that
+re-opens what they closed, but it does mean the conditional defaults are a first-visit
+behaviour rather than a permanent one. Clearing site data is the only way back.
+
+### `writing` is fixed closed because the data to decide it is not on the page
+
+`BookOut` carries `active_loan` and `copy_count`, so lending and copies decide their own
+default from the book the page already has. It carries no note or quote count: those
+arrive from `/notes` and `/quotes`, which are separate requests, so a conditional default
+there could only open the section after they landed. That is a flicker, and a fixed
+default is better than one. Closed is also the honest guess, because notes and quotes are
+empty on most books in a household catalogue. Put a count on `BookOut` and this becomes
+conditional like the rest.
+
+`about` is fixed too, open, for the opposite reason: it is drawn only when it has a blurb
+or a category, so by the time the default is asked for, the answer cannot be no. It still
+collapses, because a blurb is long and somebody who never reads them should be able to
+fold it away once and for good.
+
+### A collapsed section is hidden, not unmounted
+
+`aria-controls` has to point at an element that exists, or the relationship it names is a
+dangling id. Unmounting would also throw away whatever is half typed inside the section,
+so collapsing by accident would lose a note. The `hidden` attribute keeps the panel out of
+the accessibility tree and out of the tab order, which is the part that matters, and the
+page holds no more DOM than the flat column it replaced.
 
 ## Tooling
 

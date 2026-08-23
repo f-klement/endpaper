@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "check:build": "bun run scripts/check-build.ts",
     "api:schema": "uv --directory ../backend run python scripts/dump_openapi.py > openapi.json",
     "api:generate": "bun run api:schema && orval",
     "format": "prettier --write src tests"

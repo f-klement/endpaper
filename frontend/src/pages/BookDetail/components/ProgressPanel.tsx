@@ -92,9 +92,12 @@ export default function ProgressPanel({
 
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-paper-900 dark:text-paper-100">
+      {/* h3, not h2: the section handle that folds this panel away is the
+          h2 above it, so a flat h2 here would show a reader's heading list a
+          page with no grouping in it at all. */}
+      <h3 className="text-sm font-semibold text-paper-900 dark:text-paper-100">
         {t("progress.label")}
-      </h2>
+      </h3>
 
       {book.my_progress_page != null || book.my_progress_percent != null ? (
         <div className="space-y-1.5">
