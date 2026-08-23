@@ -54,6 +54,14 @@ book_tags = Table(
 #: already the wrong name.
 COLLECTION_NAME_MAX = 80
 
+#: The highest page a book is allowed to have, in the database's own words.
+#:
+#: The same number `schemas/progress.py` calls `MAX_PAGE` and `BookCreate`
+#: bounds `page_count` by. It lives here because `ck_quotes_page_bounds`
+#: interpolates it into SQL, and a CHECK constraint that disagreed with the
+#: schema would turn a 422 into a 500 for exactly the values in between.
+MAX_PAGE_NUMBER_IN_A_BOOK = 100_000
+
 
 class Collection(Base):
     """A named part of the household's shelf.
@@ -495,6 +503,11 @@ class Book(Base):
     loans: Mapped[list[Loan]] = relationship("Loan", back_populates="book", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship("Tag", secondary=book_tags)
     notes: Mapped[list[Note]] = relationship("Note", back_populates="book", cascade="all, delete-orphan")
+    # Cascaded like the notes beside them: purging a book from the trash takes
+    # the passages copied out of it, which have no meaning without it.
+    quotes: Mapped[list[Quote]] = relationship(
+        "Quote", back_populates="book", cascade="all, delete-orphan"
+    )
 
     @validates("cover_url")
     def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:
@@ -757,6 +770,120 @@ class Note(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     book: Mapped[Book] = relationship("Book", back_populates="notes")
+    author: Mapped[User] = relationship("User")
+
+
+#: A quote is a **verbatim excerpt of somebody else's copyrighted words**, so
+#: the ceiling is lower than `MAX_NOTE_LENGTH` (10,000) on purpose and is the
+#: one place that concern has a mechanical consequence. 2,000 characters is
+#: roughly 300 words of prose, about one printed page: enough for the longest
+#: passage anybody copies out by hand, and short enough that the table cannot
+#: be used to hold a chapter. It is also the stored-denial-of-service bound,
+#: which is why an unbounded Text column is not the answer. Enforced by
+#: `ck_quotes_text_bounds`, not by the column width: SQLite ignores that.
+QUOTE_TEXT_MAX = 2_000
+
+#: What the member wants to say *about* the passage. Half the excerpt's
+#: ceiling, because a remark longer than the thing it remarks on is a note, and
+#: notes already exist.
+QUOTE_NOTE_MAX = 1_000
+
+
+class Quote(Base):
+    """A passage a member copied out of a book, and optionally why.
+
+    Shaped after `Note`, which is the closest thing here: the same book and
+    author columns, the same edit rule, the same visibility. Three things
+    differ, and each was decided rather than inherited.
+
+    **`text` is verbatim and `note` is not.** BookWyrm keeps the excerpt and
+    the commentary in separate columns for this reason and it is the right
+    call: fold them together and the one field that is supposed to be a
+    faithful transcription is where people put their own words. BookLogr takes
+    the other route, a `quote_page` column on its notes table, and pays for it:
+    nothing there can tell a quote from a note that happened to remember a
+    page.
+
+    The two length ceilings are enforced by `ck_quotes_text_bounds` rather than
+    by the `String(n)` widths, because SQLite ignores VARCHAR width: the widths
+    generate the DDL and document the intent, the CHECK is the rule.
+
+    **`page` is an integer, not free text.** BookWyrm stores a position as text
+    because it also carries percentages and ebook locations. This app has no
+    reader and no percentage mode, and an integer is what lets the list come
+    back in reading order. The cost is real and accepted: a passage from a
+    roman-numbered preface has no page here, and goes in unpaged.
+
+    **It hangs off the book row, not off `copy_group`.** A page number is a
+    fact about an edition: page 214 of the paperback is not page 214 of the
+    hardback. Everything else per copy already lives this way (notes, loans,
+    progress), and `_repoint_relations` moves these across on a merge exactly
+    as it moves notes.
+
+    Deliberately absent, each because a reference implementation has one and
+    this app has no use for it: an end position and a position mode (BookWyrm
+    needs both for percentages and federated rendering), a per-row visibility
+    (BookLogr needs it for its public profile; nothing here is public), a
+    favourite flag, and a title.
+    """
+
+    __tablename__ = "quotes"
+
+    __table_args__ = (
+        # Both questions asked of this table start with the book: the book page
+        # reads its quotes in page order, and the cross-book listing joins on
+        # `book_id`. So this is the **only** index on the pair, and `book_id`
+        # deliberately carries no `index=True` of its own: a composite leading
+        # with the same column already serves every lookup a standalone one
+        # would, and shipping both is a second B-tree written on every insert
+        # for nothing. `reading_progress`, `user_books` and `loans` each keep a
+        # standalone `book_id` index because their composite leads with a
+        # different column or is partial; none of those reasons applies here.
+        #
+        # The listing's own ordering is by `created_at` and is deliberately not
+        # indexed: it sorts one page of a household's quotes.
+        Index("ix_quotes_book_page", "book_id", "page"),
+        # Mirrors `ck_reading_progress_bounds`. The schema bounds `page` too,
+        # and both are needed: a restore inserts through Core and never sees a
+        # Pydantic model.
+        CheckConstraint(
+            f"page IS NULL OR (page > 0 AND page <= {MAX_PAGE_NUMBER_IN_A_BOOK})",
+            name="ck_quotes_page_bounds",
+        ),
+        # **`String(n)` is not a bound in SQLite**, which ignores VARCHAR width
+        # entirely: a Core insert of 50,000 characters into `text` stores
+        # 50,000, measured. So the length rule is stated the only way the
+        # database will actually enforce it, beside the page rule and for the
+        # same reason. Without this, "the ceiling is in the database" was a
+        # false claim about the one column whose ceiling is the argument for
+        # the whole table existing separately.
+        CheckConstraint(
+            f"length(text) <= {QUOTE_TEXT_MAX} "
+            f"AND (note IS NULL OR length(note) <= {QUOTE_NOTE_MAX})",
+            name="ck_quotes_text_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `ix_quotes_book_page` leads with this column. See above.
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # `String(n)` documents the intent and generates the DDL; `ck_quotes_text_bounds`
+    # is what actually refuses an over-long value. See the constraint.
+    text: Mapped[str] = mapped_column(String(QUOTE_TEXT_MAX), nullable=False)
+    # Null is "I did not note the page", which is the ordinary case for
+    # somebody typing a line they liked from memory. It is not zero: a book has
+    # no page zero, and the CHECK says so.
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(QUOTE_NOTE_MAX), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    book: Mapped[Book] = relationship("Book", back_populates="quotes")
     author: Mapped[User] = relationship("User")
 
 

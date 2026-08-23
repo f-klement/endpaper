@@ -57,6 +57,7 @@ from models import (
     Collection,
     Loan,
     Note,
+    Quote,
     ReadingProgress,
     Tag,
     User,
@@ -98,6 +99,9 @@ from schemas import (
     ProgressCreate,
     ProgressOut,
     PurgeResult,
+    QuoteCreate,
+    QuoteOut,
+    QuoteWithBookOut,
     SeriesOut,
     TagCreate,
     TagOut,
@@ -1585,10 +1589,10 @@ def merge_books(
     ISBN, a page count. It never overwrites a value it already holds, on the
     same principle as enrichment, since the kept row is the one a person chose.
 
-    Tags, notes, loans and reading statuses are repointed rather than dropped.
-    A status collision (both rows read by the same person) keeps the one on the
-    survivor, because deleting somebody's reading history to satisfy a unique
-    index is not an acceptable way to resolve it.
+    Tags, notes, quotes, loans and reading statuses are repointed rather than
+    dropped. A status collision (both rows read by the same person) keeps the
+    one on the survivor, because deleting somebody's reading history to
+    satisfy a unique index is not an acceptable way to resolve it.
     """
     if payload.keep_id not in payload.book_ids:
         raise HTTPException(status_code=422, detail="keep_id must be one of book_ids")
@@ -1657,8 +1661,8 @@ def merge_books(
         # Expire before deleting. The repointing above moved rows out from
         # under the loser, but its loaded relationship collections still list
         # them, and the delete cascade walks those collections rather than the
-        # database. Without this, every note, loan and status just moved to the
-        # keeper is deleted along with the row they came from.
+        # database. Without this, every note, quote, loan and status just
+        # moved to the keeper is deleted along with the row they came from.
         db.expire(loser)
         db.delete(loser)
 
@@ -1763,6 +1767,14 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     # and the delete that follows would cascade straight through them.
     for note in db.query(Note).filter(Note.book_id.in_(loser_ids)).all():
         note.book_id = keeper.id
+
+    # Quotes move with the notes. Without this the cascade on the loser's
+    # deletion would take them, and a merge would silently destroy passages
+    # somebody typed out by hand. The page numbers travel unchanged and may now
+    # describe a different printing, which is the standing cost of merging two
+    # rows that were two editions: the alternative is refusing the merge.
+    for quote in db.query(Quote).filter(Quote.book_id.in_(loser_ids)).all():
+        quote.book_id = keeper.id
 
     moved = db.query(Loan).filter(Loan.book_id.in_(loser_ids)).all()
     for loan in moved:
@@ -2059,6 +2071,75 @@ def list_trash(
     )
 
 
+@router.get("/quotes", response_model=Page[QuoteWithBookOut])
+def list_quotes(
+    db: DbSession,
+    current_user: CurrentUser,
+    paging: Paging,
+) -> Page[QuoteWithBookOut]:
+    """Every passage the caller may see, from every book.
+
+    Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+    in declaration order, so the reverse would make this a request for the book
+    with id "quotes".
+
+    **This is a book query wearing a different hat**, and `visible_to` is on
+    both halves of it. Without it a quote from somebody else's private book
+    would be listed here with its title and cover, which discloses the book,
+    the passage and that the member owns it, in one 200. The count is filtered
+    for the same reason: an unfiltered total announces how many are hidden.
+
+    Newest first. A book's own quotes come back in reading order because a book
+    has one; a list spanning the shelf does not, and the interesting end of it
+    is the one somebody just added.
+
+    Joined to the book rather than fetching one per row: a hundred quotes over
+    ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+    exists to avoid.
+    """
+    # `count(Book.id)`, not `count(Quote.id)`, and that is not a preference.
+    # The two are identical here (an inner join, and `Book.id` is a primary key
+    # that is never null), but `TestEveryBookQueryIsFiltered` recognises a book
+    # query by the arguments to `query()`, so the `Quote.id` spelling put this
+    # statement outside the net entirely: dropping the filter from it was
+    # measured to produce **no** offender, while dropping it from the rows
+    # below correctly reported this file. A count of visible books is what this
+    # is, so it is spelled that way and the rule can see it.
+    total = (
+        db.query(func.count(Book.id))
+        .join(Quote, Quote.book_id == Book.id)
+        .filter(visible_to(current_user.id))
+        .scalar()
+        or 0
+    )
+
+    rows = (
+        db.query(Quote, Book.title, Book.author, Book.cover_url)
+        .join(Book, Book.id == Quote.book_id)
+        .options(joinedload(Quote.author))
+        .filter(visible_to(current_user.id))
+        .order_by(Quote.created_at.desc(), Quote.id.desc())
+        .offset(paging.offset)
+        .limit(paging.limit)
+        .all()
+    )
+
+    return Page[QuoteWithBookOut](
+        items=[
+            QuoteWithBookOut(
+                **QuoteOut.model_validate(quote).model_dump(),
+                book_title=title,
+                book_author=author,
+                book_cover_url=cover_url,
+            )
+            for quote, title, author, cover_url in rows
+        ],
+        total=total,
+        page=paging.page,
+        page_size=paging.page_size,
+    )
+
+
 @router.delete("/trash", response_model=PurgeResult)
 def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     """Delete everything in the caller's trash for good.
@@ -2161,11 +2242,11 @@ def add_copy(
     that came back public would disclose the book. The caller added the copy,
     so they are its owner and `PATCH /{id}/privacy` can change it afterwards.
 
-    **Reading state is not copied.** Status, rating, progress, notes and loans
-    all belong to a person and an object, and the new object is one nobody has
-    read yet. Tags are copied: they describe the work, and re-picking six of
-    them for a second paperback is exactly the friction this feature exists to
-    remove.
+    **Reading state is not copied.** Status, rating, progress, notes, quotes
+    and loans all belong to a person and an object, and the new object is one
+    nobody has read yet. Tags are copied: they describe the work, and
+    re-picking six of them for a second paperback is exactly the friction this
+    feature exists to remove.
     """
     _checked_collection(db, payload.collection_id)
 
@@ -2309,9 +2390,10 @@ def delete_book(book: BookForWrite, db: DbSession) -> None:
 def restore_book(book: BookInTrash, db: DbSession, current_user: CurrentUser) -> BookOut:
     """Put a trashed book back on the shelf.
 
-    Everything comes back with it: tags, notes, loans and every member's
-    reading status, because none of it ever left. That is the difference
-    between this and re-adding the book by hand, and it is the whole point.
+    Everything comes back with it: tags, notes, quotes, loans and every
+    member's reading status, because none of it ever left. That is the
+    difference between this and re-adding the book by hand, and it is the whole
+    point.
     """
     book.deleted_at = None
     db.commit()
@@ -2707,6 +2789,105 @@ def delete_note(
     current_user: CurrentUser,
 ) -> None:
     db.delete(_note_for_edit(note_id, book, current_user, db))
+    db.commit()
+
+
+# ── Quotes ────────────────────────────────────────────────────────────────────
+#
+# The same access rules as notes, and deliberately so. A quote is visible to
+# whoever can see the book it came from: the shelf is shared, and a passage one
+# member copied out of a book the household owns is the household's to read.
+# It is not treated like `list_progress`, which returns only the caller's own
+# rows, because a reading log is a diary about a person and a quote is about
+# the book. `docs/decisions.md` records the choice.
+
+
+def _quotes_for(book: Book, db: Session) -> list[Quote]:
+    """One book's quotes, in reading order.
+
+    Ordered by page rather than by when they were typed, which is where notes
+    and quotes part company: notes are a conversation and read in the order
+    they were said, quotes are a book read front to back. `nullslast` keeps the
+    unpaged ones together at the end instead of wherever SQLite puts NULL.
+    """
+    return (
+        db.query(Quote)
+        .options(joinedload(Quote.author))
+        .filter(Quote.book_id == book.id)
+        .order_by(nullslast(Quote.page.asc()), Quote.created_at, Quote.id)
+        .all()
+    )
+
+
+@router.get("/{book_id}/quotes", response_model=list[QuoteOut])
+def get_quotes(book: BookForRead, db: DbSession) -> list[Quote]:
+    """Requires read access to the book, exactly as the notes route does.
+
+    `BookForRead` is the whole privacy check here: it answers 404 for a book
+    the caller may not see, so there is no path to the quotes on one.
+    """
+    return _quotes_for(book, db)
+
+
+@router.post("/{book_id}/quotes", response_model=QuoteOut, status_code=status.HTTP_201_CREATED)
+def add_quote(
+    payload: QuoteCreate,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Quote | None:
+    quote = Quote(
+        book_id=book.id,
+        user_id=current_user.id,
+        text=payload.text,
+        page=payload.page,
+        note=payload.note,
+    )
+    db.add(quote)
+    db.commit()
+    db.refresh(quote)
+    return db.query(Quote).options(joinedload(Quote.author)).filter(Quote.id == quote.id).first()
+
+
+def _quote_for_edit(quote_id: int, book: Book, current_user: User, db: Session) -> Quote:
+    """A quote belonging to this book, which the caller may change.
+
+    The book/quote pairing is enforced so a quote id from another book cannot
+    be edited through a book the caller happens to have access to. Same rule,
+    same reason, as `_note_for_edit`.
+    """
+    quote = db.query(Quote).filter(Quote.id == quote_id, Quote.book_id == book.id).first()
+    if quote is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    if quote.user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Not allowed to change this quote")
+    return quote
+
+
+@router.put("/{book_id}/quotes/{quote_id}", response_model=QuoteOut)
+def edit_quote(
+    quote_id: RowId,
+    payload: QuoteCreate,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Quote | None:
+    quote = _quote_for_edit(quote_id, book, current_user, db)
+    quote.text = payload.text
+    quote.page = payload.page
+    quote.note = payload.note
+    db.commit()
+    return db.query(Quote).options(joinedload(Quote.author)).filter(Quote.id == quote.id).first()
+
+
+@router.delete("/{book_id}/quotes/{quote_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_quote(
+    quote_id: RowId,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    db.delete(_quote_for_edit(quote_id, book, current_user, db))
     db.commit()
 
 

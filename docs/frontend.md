@@ -51,6 +51,9 @@ src/
 │   ├── LoginPage/          index.ts · LoginPage.tsx · hooks.ts · components/
 │   ├── SeriesPage/         index.ts · SeriesPage.tsx · hooks.ts · components/
 │   ├── AuthorsPage/        index.ts · AuthorsPage.tsx · hooks.ts · components/
+│   ├── CollectionsPage/    index.ts · CollectionsPage.tsx · hooks.ts · components/
+│   ├── QuotesPage/         index.ts · QuotesPage.tsx · hooks.ts · components/
+│   ├── TrashPage/          index.ts · TrashPage.tsx · hooks.ts · components/
 │   ├── DuplicatesPage/     index.ts · DuplicatesPage.tsx · hooks.ts · components/
 │   ├── SettingsPage/       index.ts · SettingsPage.tsx · hooks.ts · components/
 │   ├── StatsPage/          index.ts · StatsPage.tsx · hooks.ts · components/

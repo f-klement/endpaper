@@ -7,6 +7,7 @@ again".
 """
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -449,8 +450,16 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: 54 models under `schemas/`, 22 of them
-    reachable from a request.
+    Measured on the tree as it stands: **61** models under `schemas/`, **24** of
+    them reachable from a request.
+
+    Those two numbers are read back out of this paragraph by
+    `test_the_stated_model_counts_are_the_measured_ones`, because the previous
+    pair (54 and 22) was stale by the time anybody noticed: it had drifted
+    silently through at least two features before a reviewer recomputed it. A
+    number in prose that nothing checks is a number that is eventually wrong,
+    and this file exists precisely to stop a defect being found a third time by
+    a person.
     """
 
     def _model_bases(self, node: ast.ClassDef) -> set[str]:
@@ -577,6 +586,32 @@ class TestEveryRequestBodyRowIdIsBounded:
                         f"{path.relative_to(BACKEND)}:{statement.lineno} ({node.name}.{label})"
                     )
         return sorted(offenders)
+
+    def test_the_stated_model_counts_are_the_measured_ones(self) -> None:
+        """The docstring's two numbers, recomputed.
+
+        Modelled on `test_models.py::test_the_exemptions_are_still_the_known_ones`,
+        which parses its count out of its own docstring for the same reason.
+        Growing either number is fine; growing it without updating the sentence
+        a reader believes is not.
+        """
+        sources = {path: path.read_text() for path in _python_sources()}
+        models = self._schema_models(sources)
+        in_scope = self._body_models(sources, models)
+
+        stated = re.search(
+            r"\*\*(\d+)\*\* models under `schemas/`, \*\*(\d+)\*\* of\s+them reachable",
+            self.__doc__ or "",
+        )
+        assert stated is not None, "the class docstring no longer states both counts"
+        assert (int(stated.group(1)), int(stated.group(2))) == (
+            len(models),
+            len(in_scope),
+        ), (
+            f"the docstring says {stated.group(1)} models and "
+            f"{stated.group(2)} reachable; the tree has "
+            f"{len(models)} and {len(in_scope)}"
+        )
 
     def test_every_int_a_request_body_carries_is_bounded(self) -> None:
         offenders = self._offenders(

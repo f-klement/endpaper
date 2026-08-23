@@ -24,6 +24,7 @@ import {
   makeBook,
   makeLoan,
   makeNote,
+  makeQuote,
   makeProgress,
   makeTagSet,
   resetIds,
@@ -61,6 +62,7 @@ beforeEach(() => {
 function stubLoad({
   book = makeBook({ id: 1, added_by: OWNER }),
   notes = [] as ReturnType<typeof makeNote>[],
+  quotes = [] as ReturnType<typeof makeQuote>[],
   progress = [] as ReturnType<typeof makeProgress>[],
   tags = makeTagSet(),
   users = [OWNER, OTHER],
@@ -68,6 +70,7 @@ function stubLoad({
   goodreads = false,
 } = {}) {
   api.on("/api/books/1/notes", { body: notes });
+  api.on("/api/books/1/quotes", { body: quotes });
   api.on("/api/books/1/progress", { body: progress });
   // One element rather than none: a book with one copy is a copy, it is just
   // the only one, and that is what the endpoint answers.
@@ -127,6 +130,7 @@ describe("BookDetail", () => {
 
   it("reports a book that could not be loaded", async () => {
     api.on("/api/books/1/notes", { body: [] });
+    api.on("/api/books/1/quotes", { body: [] });
     api.on("/api/books/tags", { body: [] });
     api.on("/api/users", { body: [] });
     api.on(/\/api\/books\/1$/, {
@@ -534,6 +538,49 @@ describe("BookDetail", () => {
         .click(await screen.findByRole("button", { name: "Refresh Metadata" }));
 
       expect(await screen.findByText("No metadata found")).toBeInTheDocument();
+    });
+  });
+
+  describe("quotes", () => {
+    it("says when there are none", async () => {
+      stubLoad({ quotes: [] });
+      renderDetail();
+
+      expect(await screen.findByText("No quotes yet")).toBeInTheDocument();
+    });
+
+    it("lists existing quotes with their page", async () => {
+      stubLoad({
+        quotes: [makeQuote({ text: "Fear is the mind-killer", page: 214 })],
+      });
+      renderDetail();
+
+      expect(
+        await screen.findByText("Fear is the mind-killer"),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/p\. 214/)).toBeInTheDocument();
+    });
+
+    it("saves a passage against the book being viewed", async () => {
+      stubLoad({ quotes: [] });
+      api.on("/api/books/1/quotes", { body: makeQuote() }, "POST");
+      renderDetail();
+      await screen.findByText("No quotes yet");
+
+      await userEvent.type(screen.getByLabelText("The passage"), "A passage");
+      await userEvent.type(
+        screen.getByLabelText("Page the quote is on"),
+        "214",
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: "Add quote" }),
+      );
+
+      expect(api.lastCall("/api/books/1/quotes", "POST")?.body).toEqual({
+        text: "A passage",
+        page: 214,
+        note: null,
+      });
     });
   });
 

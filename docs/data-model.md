@@ -1,7 +1,8 @@
 # Data model
 
-Ten tables in `backend/models.py`. Eight entities, one association table, and one key/value
-store for runtime settings.
+Twelve tables in `backend/models.py`, counted off `Base.metadata`: ten entities, one
+association table (`book_tags`), and one key/value store for runtime settings
+(`settings`).
 
 ```
       User ──────┬──── added_by ────────► Book ◄──── book_tags ────► Tag
@@ -12,7 +13,10 @@ store for runtime settings.
                  │     (where you are)     │  │
                  ├──── Loan ───────────────┤  │
                  │     (to / by)           │  │
-                 └──── Note ───────────────┘  │
+                 ├──── Note ───────────────┤  │
+                 │     (what you thought)  │  │
+                 └──── Quote ──────────────┘  │
+                       (what it said)         │
                                               └── active loan = the Loan with returned_at IS NULL
 
       Collection ◄──── collection_id ───── Book       (one collection, or none)
@@ -135,6 +139,30 @@ Lending **from** an external, a book the household has borrowed rather than lent
 deliberately not a loan. See [decisions.md](decisions.md).
 
 **`notes`.** Free text, attached to a book and authored by a user.
+
+**`quotes`.** A passage copied out of a book: `text`, an optional `page`, and an optional
+`note` about it. Three columns rather than one, and each of the three is a decision:
+
+* `text` and `note` are separate because `text` is meant to be a **faithful
+  transcription** and `note` is the member's own words. Fold them together and the one
+  field in this schema that is supposed to be verbatim is where people write their
+  opinions. BookWyrm, which is the best worked example of this feature anywhere, keeps
+  them apart for the same reason; BookLogr instead hangs a `quote_page` off its notes
+  table, and nothing there can then tell a quote from a note that remembered a page.
+* `text` is `String(2000)` where `notes.content` is unbounded `Text`. A quote is an
+  excerpt of somebody else's copyrighted words, and 2,000 characters is about one printed
+  page. The bound is also the stored-denial-of-service guard, which is why it is in the
+  database and not only in `QuoteCreate`. **The width is not what enforces it**: SQLite
+  ignores VARCHAR width, measured at 50,000 characters stored in a `String(2000)` column
+  through Core, so `ck_quotes_text_bounds` is the rule and it covers `note` too.
+* `page` is an integer, bounded 1 to 100,000 by `ck_quotes_page_bounds` as well as by the
+  schema, so the list can come back in reading order. The cost is accepted rather than
+  worked around: a passage from a roman-numbered preface has no page here and goes in
+  unpaged.
+
+A quote hangs off the **book row**, not off `copy_group`, because a page number is a fact
+about an edition. It is visible to whoever can see the book, like a note and unlike
+reading progress. Both choices are argued in [decisions.md](decisions.md).
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the

@@ -15,11 +15,13 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
+from database import Base
 from models import (
     Book,
     Collection,
     Loan,
     Note,
+    Quote,
     Tag,
     User,
     UserBook,
@@ -162,6 +164,104 @@ class TestIsSwitchTarget:
         }
 
         assert by_query == in_python == {"target"}
+
+
+class TestQuote:
+    """A passage copied out of a book. Shaped after `Note`, plus a page."""
+
+    def test_a_quote_needs_no_page(self, db, user, book):
+        """The ordinary case for a line somebody remembers rather than looks up."""
+        db.add(Quote(book_id=book.id, user_id=user.id, text="A line"))
+        db.commit()
+        assert db.query(Quote).one().page is None
+
+    def test_page_zero_is_refused_by_the_database(self, db, user, book):
+        """`ck_quotes_page_bounds`, not only `QuoteCreate`. A restore inserts
+        through Core and never sees a Pydantic model, which is the same reason
+        `ck_reading_progress_bounds` exists."""
+        db.add(Quote(book_id=book.id, user_id=user.id, text="A line", page=0))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_page_past_the_ceiling_is_refused_by_the_database(self, db, user, book):
+        db.add(Quote(book_id=book.id, user_id=user.id, text="A line", page=100_001))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_the_ceiling_is_the_one_the_schema_uses(self):
+        """Two spellings of one number, so they cannot drift. A CHECK that
+        disagreed with the schema bound would answer 500 for exactly the values
+        between them."""
+        from models import MAX_PAGE_NUMBER_IN_A_BOOK
+        from schemas.progress import MAX_PAGE
+
+        assert MAX_PAGE == MAX_PAGE_NUMBER_IN_A_BOOK
+
+    def test_an_over_long_excerpt_is_refused_by_the_database(self, db, user, book):
+        """`ck_quotes_text_bounds`, because `String(2000)` refuses nothing.
+
+        SQLite ignores VARCHAR width: before the CHECK existed, a Core insert
+        of 50,000 characters into this column stored 50,000, so the docstrings
+        claiming the ceiling was "in the database and not only in the schema"
+        described a rule that was not there. Only `backup.restore` reaches this
+        table without `QuoteCreate`, so it was a false claim rather than a live
+        hole; it is now neither.
+        """
+        db.add(Quote(book_id=book.id, user_id=user.id, text="x" * 2_001))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_an_excerpt_at_the_ceiling_is_stored(self, db, user, book):
+        db.add(Quote(book_id=book.id, user_id=user.id, text="x" * 2_000))
+        db.commit()
+        assert len(db.query(Quote).one().text) == 2_000
+
+    def test_an_over_long_remark_is_refused_by_the_database(self, db, user, book):
+        """The same CHECK covers `note`, which is the field an over-long value
+        is most likely to reach: it is optional, so nothing else looks at it."""
+        db.add(Quote(book_id=book.id, user_id=user.id, text="ok", note="y" * 1_001))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_a_null_remark_satisfies_the_length_check(self, db, user, book):
+        """`note IS NULL OR length(note) <= n`. Without the null branch the
+        CHECK evaluates to NULL, which SQLite treats as passing, so this pins
+        the branch rather than the outcome."""
+        db.add(Quote(book_id=book.id, user_id=user.id, text="ok", note=None))
+        db.commit()
+        assert db.query(Quote).one().note is None
+
+    def test_the_book_id_index_is_the_composite_and_only_the_composite(self):
+        """No standalone `ix_quotes_book_id` beside `ix_quotes_book_page`.
+
+        A composite leading with the same column serves every lookup a
+        standalone one would, so shipping both is a second B-tree written on
+        every insert for nothing. `reading_progress`, `user_books` and `loans`
+        each keep a standalone `book_id` index because their composite leads
+        with a different column or is partial; none of those reasons applies
+        here, and this is what stops one being added back out of symmetry.
+        """
+        # From the metadata, not `Quote.__table__`: a declarative class types
+        # that attribute as the wider `FromClause`, which has no `indexes`.
+        # The same trap `backup.py` and `conftest.py` both document for
+        # `insert` and `delete`.
+        shapes = {
+            tuple(column.name for column in index.columns)
+            for index in Base.metadata.tables["quotes"].indexes
+        }
+        assert ("book_id", "page") in shapes, shapes
+        assert ("book_id",) not in shapes, shapes
+
+    def test_deleting_a_book_takes_its_quotes(self, db, user, book):
+        """Cascaded like the notes beside them: a passage has no meaning
+        without the book it came out of."""
+        db.add(Quote(book_id=book.id, user_id=user.id, text="A line"))
+        db.commit()
+
+        db.delete(book)
+        db.commit()
+
+        assert db.query(Quote).count() == 0
 
 
 class TestBook:
@@ -554,13 +654,51 @@ class TestEveryBookQueryIsFiltered:
         door: the tag counts and the collection counts were each fixed for
         exactly that.
 
-        Counted over the tree with this rule's own scoping, **12** leaf
+        Counted over the tree with this rule's own scoping, **14** leaf
         statements take the column form and none of them also takes the row
-        form: four in `routers/books.py`, four in `routers/stats.py`, two in
+        form: six in `routers/books.py`, four in `routers/stats.py`, two in
         `routers/imports.py`, one in `routers/collections.py` and one in
-        `serialisation.py`. Sixteen more take the row form. One of the twelve
+        `serialisation.py`. Sixteen more take the row form. One of the fourteen
         (`routers/imports.py`, the ISBN uniqueness check) carried no exemption
         comment, because nothing had ever asked it for one.
+
+        Two of the six in `routers/books.py` are `list_quotes`, and they are
+        the reason the column form matters rather than an example of it. Its
+        row half selects `Book.title`, `Book.author` and `Book.cover_url`
+        beside a quote row, so without the predicate it would print a private
+        book's title and cover next to a passage out of it. Its count half is
+        spelled `count(Book.id)` rather than `count(Quote.id)` **so that this
+        rule can see it at all**: the two are identical over an inner join on a
+        primary key, and only the first is a statement this rule inspects.
+
+        **What this rule does not see: the join-only form.** A statement whose
+        `query()` names no `Book` and reaches the table through
+        `.join(Book, ...)` is invisible here, whatever it selects. Measured
+        over the tree, **10** statements take that shape:
+        `routers/books.py:138`, `routers/loans.py:239`,
+        `routers/stats.py:76,112,126,144`, `routers/loans.py:80`,
+        `routers/books.py:625` and `notifications.py:140,171`. Every one is
+        filtered, but only the first six carry the predicate inside the
+        statement itself; `loans.py:80` and `books.py:625` both mutate a query
+        built with `visible_to` in an *earlier* statement, and the two in
+        `notifications.py` apply an explicit `Book.is_private` clause instead,
+        because the overdue digest counts the private ones rather than hiding
+        them.
+
+        So **14** is the count of column-form statements this rule inspects,
+        not the count of every query that derives from books, and a new
+        join-only query gets no help from here.
+
+        Widening `_queries_books` to catch `.join(Book, ...)` was measured
+        rather than argued about: the inspected set goes from **30** statements
+        to **40**, and the run reports **4** offenders that are all correct
+        code (`notifications.py:140,171`, `routers/loans.py:80`,
+        `routers/books.py:625`), so it buys ten more inspected statements at
+        the price of four exemptions that
+        exist only to silence it. Refused on that arithmetic, and recorded here
+        because the next reader will have the same idea. `_masked` records its
+        own blind spot the same way, and for the same reason: a guard whose
+        limits are undocumented is read as a guarantee it never made.
         """
         for call in ast.walk(node):
             if not isinstance(call, ast.Call):

@@ -15,6 +15,8 @@ import {
   type NoteOut,
   type PageBookOut,
   type ProgressOut,
+  type QuoteOut,
+  type QuoteWithBookOut,
   type PageLoanOut,
   type StatsOut,
   type TagOut,
@@ -125,6 +127,34 @@ export function makeNote(overrides: Partial<NoteOut> = {}): NoteOut {
     created_at: "2026-03-01T00:00:00",
     updated_at: "2026-03-01T00:00:00",
     author: makeUser(),
+    ...overrides,
+  };
+}
+
+export function makeQuote(overrides: Partial<QuoteOut> = {}): QuoteOut {
+  return {
+    id: id(),
+    book_id: 1,
+    user_id: 1,
+    text: "A line worth keeping",
+    page: null,
+    note: null,
+    created_at: "2026-03-01T00:00:00",
+    updated_at: "2026-03-01T00:00:00",
+    author: makeUser(),
+    ...overrides,
+  };
+}
+
+/** A row of the cross-book listing, which carries its book's three scalars. */
+export function makeQuoteWithBook(
+  overrides: Partial<QuoteWithBookOut> = {},
+): QuoteWithBookOut {
+  return {
+    ...makeQuote(),
+    book_title: "Dune",
+    book_author: "Frank Herbert",
+    book_cover_url: null,
     ...overrides,
   };
 }

@@ -19,7 +19,7 @@ import pytest
 import backup
 from backup import RestoreError
 from database import SessionLocal
-from models import Book, Loan, Note, Tag, UserBook
+from models import Book, Loan, Note, Quote, Tag, UserBook
 
 
 def read_manifest(data: bytes) -> dict:
@@ -75,6 +75,11 @@ def library(client, admin, member, make_book, db, covers_dir):
         json={"page": 64, "minutes": 30},
         headers=admin["headers"],
     )
+    client.post(
+        f"/api/books/{book['id']}/quotes",
+        json={"text": "Fear is the mind-killer", "page": 214},
+        headers=admin["headers"],
+    )
     return {"book": book, "private": private, "tag_id": tag.id}
 
 
@@ -99,7 +104,7 @@ class TestTheArchive:
         tables = read_manifest(data)["tables"]
 
         assert {"users", "tags", "books", "user_books", "reading_progress",
-                "loans", "notes", "settings", "book_tags"} <= set(tables)
+                "loans", "notes", "quotes", "settings", "book_tags"} <= set(tables)
 
     def test_holds_the_book_tag_links(self, client, admin, library):
         """No model of its own, so it is the one that gets forgotten.
@@ -173,6 +178,45 @@ class TestRoundTrip:
 
         db.expire_all()
         assert [note.content for note in db.query(Note).all()] == ["Lent to Ana"]
+
+    def test_the_quotes_come_back(self, client, admin, library, db):
+        """With their page numbers. A quote is typed by hand and exists nowhere
+        else, which is exactly the class of thing a backup is for."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        db.query(Quote).delete()
+        db.commit()
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        assert [(q.text, q.page) for q in db.query(Quote).all()] == [
+            ("Fear is the mind-killer", 214)
+        ]
+
+    def test_an_archive_from_before_quotes_existed_still_restores(
+        self, client, admin, library
+    ):
+        """`quotes` is deliberately absent from `_REQUIRED_TABLES`. Adding a
+        table to that set would refuse every backup the household already
+        holds, which is the trap the set exists to have escaped once."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        del manifest["tables"]["quotes"]
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["quotes"] == 0
 
     def test_the_reading_statuses_come_back(self, client, admin, library, db):
         data = client.get("/api/backup", headers=admin["headers"]).content

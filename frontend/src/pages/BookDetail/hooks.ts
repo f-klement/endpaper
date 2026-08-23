@@ -13,6 +13,7 @@ import { useState } from "react";
 import {
   getGetBookQueryKey,
   getGetNotesQueryKey,
+  getGetQuotesQueryKey,
   getListCopiesQueryKey,
   getListProgressQueryKey,
   useAddBookTag,
@@ -22,13 +23,17 @@ import {
   useDeleteProgress,
   useListProgress,
   useAddNote,
+  useAddQuote,
   useApplyEnrichment,
   useDeleteBook,
   useDeleteNote,
+  useDeleteQuote,
   useEditNote,
+  useEditQuote,
   useEnrichmentCandidates,
   useGetBook,
   useGetNotes,
+  useGetQuotes,
   useListLocations,
   useListTags,
   useCreateTag,
@@ -71,6 +76,8 @@ import type {
   OwnershipStatus,
   ProgressCreate,
   ProgressOut,
+  QuoteCreate,
+  QuoteOut,
   ReadStatus,
   TagOut,
   UserOut,
@@ -333,6 +340,52 @@ export function useBookNotes(bookId: number): UseBookNotesResult {
     remove: (noteId) => remove.mutate({ bookId, noteId }),
     isAdding: add.isPending,
     error: notes.error ?? add.error ?? edit.error ?? remove.error,
+  };
+}
+
+export interface UseBookQuotesResult {
+  quotes: QuoteOut[];
+  add: (quote: QuoteCreate) => void;
+  edit: (quoteId: number, quote: QuoteCreate) => void;
+  remove: (quoteId: number) => void;
+  isAdding: boolean;
+  error: unknown;
+}
+
+/**
+ * The passages saved from this book.
+ *
+ * The cross-book list at `/quotes` reads the same rows through a different
+ * endpoint, so every write here drops that cache too. Without it, saving a
+ * quote and then opening the quotes page shows a list that is missing the one
+ * just added, which reads as a lost write rather than as a stale cache.
+ */
+export function useBookQuotes(bookId: number): UseBookQuotesResult {
+  const queryClient = useQueryClient();
+  const quotes = useGetQuotes(bookId);
+
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getGetQuotesQueryKey(bookId),
+      });
+      // The prefix, not `getListQuotesQueryKey()`: that key carries the paging
+      // parameters, so an exact match would leave every page but the first.
+      void queryClient.invalidateQueries({ queryKey: ["/api/books/quotes"] });
+    },
+  };
+
+  const add = useAddQuote({ mutation });
+  const edit = useEditQuote({ mutation });
+  const remove = useDeleteQuote({ mutation });
+
+  return {
+    quotes: quotes.data ?? [],
+    add: (quote) => add.mutate({ bookId, data: quote }),
+    edit: (quoteId, quote) => edit.mutate({ bookId, quoteId, data: quote }),
+    remove: (quoteId) => remove.mutate({ bookId, quoteId }),
+    isAdding: add.isPending,
+    error: quotes.error ?? add.error ?? edit.error ?? remove.error,
   };
 }
 

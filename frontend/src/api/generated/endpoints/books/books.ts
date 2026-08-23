@@ -51,6 +51,7 @@ import type {
   ExportBooksParams,
   HTTPValidationError,
   ListBooksParams,
+  ListQuotesParams,
   ListTrashParams,
   LocationOut,
   LookupIsbnParams,
@@ -59,10 +60,13 @@ import type {
   NoteOut,
   OwnershipUpdate,
   PageBookOut,
+  PageQuoteWithBookOut,
   PrivacyUpdate,
   ProgressCreate,
   ProgressOut,
   PurgeResult,
+  QuoteCreate,
+  QuoteOut,
   SearchBooksParams,
   SeriesOut,
   TagCreate,
@@ -669,9 +673,16 @@ export const getUnmergeAuthorUrl = (aliasId: number) => {
  * the row restores exactly the state before it was written, and the books
  * were never involved.
  *
- * A row whose spelling this caller cannot see anywhere is **404**, for the
- * same reason `list_authors` does not list it: an alias naming a spelling
- * that survives only on somebody else's private book must not be confirmable.
+ * A row whose spelling is on no book this caller can see is **404**, and the
+ * reason is authority rather than secrecy: undo what you can see the effect
+ * of. The page offers this beside the spelling it folded, so a row with no
+ * such spelling on your shelf has no button here and no meaning here either.
+ *
+ * That leaves an **orphan** alias, whose spelling is on nobody's shelf because
+ * the book was deleted, unreachable and undeletable. Accepted: it maps a name
+ * nothing is credited with, so it changes no view, and it starts working again
+ * by itself if an import re-creates that spelling, which is the property the
+ * whole design is for.
  * @summary Unmerge Author
  */
 export const unmergeAuthor = async (
@@ -776,9 +787,13 @@ export const getMergeAuthorsUrl = () => {
  * a 403 would confirm that somebody owns a book by that name.
  *
  * A `keep_name` that is itself already folded into somebody resolves to that
- * somebody, so the map stays one lookup deep. A `keep_name` that no book
- * carries is allowed and is the point: "Le Guin, Ursula K." splits into two
- * people, neither spelled correctly, and the repair is a name typed by hand.
+ * somebody, so the map stays one lookup deep. One exception, below: a row
+ * naming one of the keys being merged is not followed, because that is how a
+ * merge is reversed.
+ *
+ * A `keep_name` that no book carries is allowed and is the point: "Le Guin,
+ * Ursula K." splits into two people, neither spelled correctly, and the
+ * repair is a name typed by hand.
  * @summary Merge Authors
  */
 export const mergeAuthors = async (
@@ -1865,10 +1880,10 @@ export const getMergeBooksUrl = () => {
  * ISBN, a page count. It never overwrites a value it already holds, on the
  * same principle as enrichment, since the kept row is the one a person chose.
  *
- * Tags, notes, loans and reading statuses are repointed rather than dropped.
- * A status collision (both rows read by the same person) keeps the one on the
- * survivor, because deleting somebody's reading history to satisfy a unique
- * index is not an acceptable way to resolve it.
+ * Tags, notes, quotes, loans and reading statuses are repointed rather than
+ * dropped. A status collision (both rows read by the same person) keeps the
+ * one on the survivor, because deleting somebody's reading history to
+ * satisfy a unique index is not an acceptable way to resolve it.
  * @summary Merge Books
  */
 export const mergeBooks = async (
@@ -1949,6 +1964,180 @@ export const useMergeBooks = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getMergeBooksMutationOptions(options), queryClient);
 };
+export const getListQuotesUrl = (params?: ListQuotesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/quotes?${stringifiedParams}`
+    : `/api/books/quotes`;
+};
+
+/**
+ * Every passage the caller may see, from every book.
+ *
+ * Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+ * in declaration order, so the reverse would make this a request for the book
+ * with id "quotes".
+ *
+ * **This is a book query wearing a different hat**, and `visible_to` is on
+ * both halves of it. Without it a quote from somebody else's private book
+ * would be listed here with its title and cover, which discloses the book,
+ * the passage and that the member owns it, in one 200. The count is filtered
+ * for the same reason: an unfiltered total announces how many are hidden.
+ *
+ * Newest first. A book's own quotes come back in reading order because a book
+ * has one; a list spanning the shelf does not, and the interesting end of it
+ * is the one somebody just added.
+ *
+ * Joined to the book rather than fetching one per row: a hundred quotes over
+ * ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+ * exists to avoid.
+ * @summary List Quotes
+ */
+export const listQuotes = async (
+  params?: ListQuotesParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PageQuoteWithBookOut> => {
+  return customFetch<PageQuoteWithBookOut>(getListQuotesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListQuotesQueryKey = (params?: ListQuotesParams) => {
+  return [`/api/books/quotes`, ...(params ? [params] : [])] as const;
+};
+
+export const getListQuotesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listQuotes>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListQuotesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListQuotesQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listQuotes>>> = ({
+    signal,
+  }) => listQuotes(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listQuotes>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListQuotesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listQuotes>>
+>;
+export type ListQuotesQueryError = HTTPValidationError;
+
+export function useListQuotes<
+  TData = Awaited<ReturnType<typeof listQuotes>>,
+  TError = HTTPValidationError,
+>(
+  params: undefined | ListQuotesParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listQuotes>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQuotes>>,
+          TError,
+          Awaited<ReturnType<typeof listQuotes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListQuotes<
+  TData = Awaited<ReturnType<typeof listQuotes>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListQuotesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listQuotes>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listQuotes>>,
+          TError,
+          Awaited<ReturnType<typeof listQuotes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListQuotes<
+  TData = Awaited<ReturnType<typeof listQuotes>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListQuotesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Quotes
+ */
+
+export function useListQuotes<
+  TData = Awaited<ReturnType<typeof listQuotes>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListQuotesParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListQuotesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getScanAddUrl = () => {
   return `/api/books/scan`;
 };
@@ -3540,11 +3729,11 @@ export const getAddCopyUrl = (bookId: number) => {
  * that came back public would disclose the book. The caller added the copy,
  * so they are its owner and `PATCH /{id}/privacy` can change it afterwards.
  *
- * **Reading state is not copied.** Status, rating, progress, notes and loans
- * all belong to a person and an object, and the new object is one nobody has
- * read yet. Tags are copied: they describe the work, and re-picking six of
- * them for a second paperback is exactly the friction this feature exists to
- * remove.
+ * **Reading state is not copied.** Status, rating, progress, notes, quotes
+ * and loans all belong to a person and an object, and the new object is one
+ * nobody has read yet. Tags are copied: they describe the work, and
+ * re-picking six of them for a second paperback is exactly the friction this
+ * feature exists to remove.
  * @summary Add Copy
  */
 export const addCopy = async (
@@ -5231,6 +5420,416 @@ export const useDeleteProgress = <
 > => {
   return useMutation(getDeleteProgressMutationOptions(options), queryClient);
 };
+export const getGetQuotesUrl = (bookId: number) => {
+  return `/api/books/${bookId}/quotes`;
+};
+
+/**
+ * Requires read access to the book, exactly as the notes route does.
+ *
+ * `BookForRead` is the whole privacy check here: it answers 404 for a book
+ * the caller may not see, so there is no path to the quotes on one.
+ * @summary Get Quotes
+ */
+export const getQuotes = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<QuoteOut[]> => {
+  return customFetch<QuoteOut[]>(getGetQuotesUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetQuotesQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/quotes`] as const;
+};
+
+export const getGetQuotesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getQuotes>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetQuotesQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getQuotes>>> = ({
+    signal,
+  }) => getQuotes(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>;
+  };
+};
+
+export type GetQuotesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getQuotes>>
+>;
+export type GetQuotesQueryError = HTTPValidationError;
+
+export function useGetQuotes<
+  TData = Awaited<ReturnType<typeof getQuotes>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQuotes>>,
+          TError,
+          Awaited<ReturnType<typeof getQuotes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetQuotes<
+  TData = Awaited<ReturnType<typeof getQuotes>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQuotes>>,
+          TError,
+          Awaited<ReturnType<typeof getQuotes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetQuotes<
+  TData = Awaited<ReturnType<typeof getQuotes>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Quotes
+ */
+
+export function useGetQuotes<
+  TData = Awaited<ReturnType<typeof getQuotes>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getQuotes>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetQuotesQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAddQuoteUrl = (bookId: number) => {
+  return `/api/books/${bookId}/quotes`;
+};
+
+/**
+ * @summary Add Quote
+ */
+export const addQuote = async (
+  bookId: number,
+  quoteCreate: QuoteCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<QuoteOut> => {
+  return customFetch<QuoteOut>(getAddQuoteUrl(bookId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(quoteCreate),
+  });
+};
+
+export const getAddQuoteMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addQuote>>,
+    TError,
+    { bookId: number; data: QuoteCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addQuote>>,
+  TError,
+  { bookId: number; data: QuoteCreate },
+  TContext
+> => {
+  const mutationKey = ["addQuote"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addQuote>>,
+    { bookId: number; data: QuoteCreate }
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return addQuote(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddQuoteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addQuote>>
+>;
+export type AddQuoteMutationBody = QuoteCreate;
+export type AddQuoteMutationError = HTTPValidationError;
+
+/**
+ * @summary Add Quote
+ */
+export const useAddQuote = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof addQuote>>,
+      TError,
+      { bookId: number; data: QuoteCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof addQuote>>,
+  TError,
+  { bookId: number; data: QuoteCreate },
+  TContext
+> => {
+  return useMutation(getAddQuoteMutationOptions(options), queryClient);
+};
+export const getDeleteQuoteUrl = (bookId: number, quoteId: number) => {
+  return `/api/books/${bookId}/quotes/${quoteId}`;
+};
+
+/**
+ * @summary Delete Quote
+ */
+export const deleteQuote = async (
+  bookId: number,
+  quoteId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteQuoteUrl(bookId, quoteId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteQuoteMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteQuote>>,
+    TError,
+    { bookId: number; quoteId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteQuote>>,
+  TError,
+  { bookId: number; quoteId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteQuote"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteQuote>>,
+    { bookId: number; quoteId: number }
+  > = (props) => {
+    const { bookId, quoteId } = props ?? {};
+
+    return deleteQuote(bookId, quoteId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteQuoteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteQuote>>
+>;
+
+export type DeleteQuoteMutationError = HTTPValidationError;
+
+/**
+ * @summary Delete Quote
+ */
+export const useDeleteQuote = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteQuote>>,
+      TError,
+      { bookId: number; quoteId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteQuote>>,
+  TError,
+  { bookId: number; quoteId: number },
+  TContext
+> => {
+  return useMutation(getDeleteQuoteMutationOptions(options), queryClient);
+};
+export const getEditQuoteUrl = (bookId: number, quoteId: number) => {
+  return `/api/books/${bookId}/quotes/${quoteId}`;
+};
+
+/**
+ * @summary Edit Quote
+ */
+export const editQuote = async (
+  bookId: number,
+  quoteId: number,
+  quoteCreate: QuoteCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<QuoteOut> => {
+  return customFetch<QuoteOut>(getEditQuoteUrl(bookId, quoteId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(quoteCreate),
+  });
+};
+
+export const getEditQuoteMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof editQuote>>,
+    TError,
+    { bookId: number; quoteId: number; data: QuoteCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof editQuote>>,
+  TError,
+  { bookId: number; quoteId: number; data: QuoteCreate },
+  TContext
+> => {
+  const mutationKey = ["editQuote"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof editQuote>>,
+    { bookId: number; quoteId: number; data: QuoteCreate }
+  > = (props) => {
+    const { bookId, quoteId, data } = props ?? {};
+
+    return editQuote(bookId, quoteId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type EditQuoteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof editQuote>>
+>;
+export type EditQuoteMutationBody = QuoteCreate;
+export type EditQuoteMutationError = HTTPValidationError;
+
+/**
+ * @summary Edit Quote
+ */
+export const useEditQuote = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof editQuote>>,
+      TError,
+      { bookId: number; quoteId: number; data: QuoteCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof editQuote>>,
+  TError,
+  { bookId: number; quoteId: number; data: QuoteCreate },
+  TContext
+> => {
+  return useMutation(getEditQuoteMutationOptions(options), queryClient);
+};
 export const getSetRatingUrl = (bookId: number) => {
   return `/api/books/${bookId}/rating`;
 };
@@ -5416,9 +6015,10 @@ export const getRestoreBookUrl = (bookId: number) => {
 /**
  * Put a trashed book back on the shelf.
  *
- * Everything comes back with it: tags, notes, loans and every member's
- * reading status, because none of it ever left. That is the difference
- * between this and re-adding the book by hand, and it is the whole point.
+ * Everything comes back with it: tags, notes, quotes, loans and every
+ * member's reading status, because none of it ever left. That is the
+ * difference between this and re-adding the book by hand, and it is the whole
+ * point.
  * @summary Restore Book
  */
 export const restoreBook = async (

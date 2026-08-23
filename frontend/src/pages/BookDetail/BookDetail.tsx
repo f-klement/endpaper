@@ -18,6 +18,7 @@ import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
 import ProgressPanel from "./components/ProgressPanel";
+import QuoteList from "./components/QuoteList";
 import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
@@ -35,6 +36,7 @@ import {
   useBookLoan,
   useBookNotes,
   useBookProgress,
+  useBookQuotes,
   useGoodreadsLookup,
 } from "./hooks";
 
@@ -55,6 +57,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
     useBook(bookId);
   const actions = useBookActions(bookId, () => navigate("/"));
   const notes = useBookNotes(bookId);
+  const quotes = useBookQuotes(bookId);
   const loan = useBookLoan(bookId);
   const progress = useBookProgress(bookId);
   const enrichment = useBookEnrichment(bookId);
@@ -79,7 +82,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const isOwner = book.added_by?.id === currentUser.id;
   const otherMembers = users.filter((member) => member.id !== currentUser.id);
   const pageError =
-    actions.error ?? notes.error ?? loan.error ?? progress.error;
+    actions.error ?? notes.error ?? quotes.error ?? loan.error ?? progress.error;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -270,6 +273,19 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           onAdd={notes.add}
           onEdit={notes.edit}
           onRemove={notes.remove}
+        />
+
+        {/* Below the notes, deliberately. A note is written about the book and
+            is the thing a reader reaches for first; a quote is copied out of
+            it and is longer, so putting it above would push the shorter,
+            commoner control off the first screen on a phone. */}
+        <QuoteList
+          quotes={quotes.quotes}
+          currentUser={currentUser}
+          isAdding={quotes.isAdding}
+          onAdd={quotes.add}
+          onEdit={quotes.edit}
+          onRemove={quotes.remove}
         />
 
         {showEnrichHelp && (

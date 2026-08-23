@@ -10,9 +10,11 @@ import type { AuthorMergeOut } from "./authorMergeOut.ts";
 /**
  * One person, as far as this shelf knows, and what it knows about them.
  *
- * `key` is the identity, not `name`. It is what the book filter and the merge
- * endpoint take, because a display name changes the moment somebody merges a
- * better spelling into it and a link that named it would then point nowhere.
+ * `key` is what the book filter and the merge endpoint address an author by,
+ * and it is derived from `name` rather than being an identity behind it: a
+ * merge retires the keys it folds, exactly as it retires the spellings. Both
+ * endpoints therefore accept either, and resolve a retired one through the
+ * alias rows.
  *
  * `book_count` is filtered by `visible_to`, like every count this API serves.
  * An unfiltered one would announce that somebody's private books exist and

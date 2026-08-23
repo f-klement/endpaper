@@ -1,7 +1,7 @@
 # Backend test coverage
 
-**1950 tests**, in 48 files. Line coverage was last measured at **96%** (4303 statements,
-186 missed) when the suite held 1571, which is 379 tests ago, and has not been re-measured
+**2025 tests**, in 49 files. Line coverage was last measured at **96%** (4303 statements,
+186 missed) when the suite held 1571, which is 454 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
 
@@ -35,24 +35,24 @@ is why the helper uses regexes.
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
 | `test_config.py` | 41 | Settings resolution, the startup secret guard, upload limits |
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
-| `test_backup.py` | 61 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
+| `test_backup.py` | 63 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
 | `test_metadata.py` | 82 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
-| `test_schemas.py` | 46 | Request/response contracts and their validation rules |
+| `test_schemas.py` | 58 | Request/response contracts and their validation rules |
 | `test_google_books.py` | 37 | Volume mapping, the gap-filling merge, upstream failures |
 | `test_notifications.py` | 42 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, and that a failure leaves the loan to retry |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
-| `test_models.py` | 67 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that the unfiltered-book-query walk sees a query for one column as well as for a row, cannot be laundered by a binding in another function, by any binding form `symtable` knows about (including three an AST walk structurally cannot see), by a shadowing parameter or by a class body it never visited, and reads its own exemption count out of its docstring |
+| `test_models.py` | 77 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that the unfiltered-book-query walk sees a query for one column as well as for a row, cannot be laundered by a binding in another function, by any binding form `symtable` knows about (including three an AST walk structurally cannot see), by a shadowing parameter or by a class body it never visited, reads its own exemption count out of its docstring, and that a quote's length ceilings are a CHECK rather than a `String(n)` SQLite ignores |
 | `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules, and the two bounds that keep them from being a plantable denial of service: a cap per bucket and a budget for the pass |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 28 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan |
-| `test_house_rules.py` | 28 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; and that a provenance column stays unread |
+| `test_house_rules.py` | 29 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed |
 | `test_serialisation.py` | 28 | Assembling `BookOut`: the per-request fields, and that the copy count and the collection name each cost one statement for a page rather than one per book |
 | `test_schema.py` | 40 | Alembic: create, adopt a pre-Alembic database, upgrade, and that two table rewrites left their partial unique indexes partial |
 | `test_database.py` | 27 | Engine setup and the session dependency |
@@ -60,6 +60,7 @@ is why the helper uses regexes.
 | `routers/test_collections.py` | 19 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, counts filtered to the caller, and a delete that unfiles rather than destroys |
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 31 | Duplicate detection and the merge, incl. the ORM cascade trap |
+| `routers/test_books_quotes.py` | 50 | **Passages copied out of a book.** The bounds on the excerpt, the remark and the page, reading order with the unpaged last, who may correct one, that a private book's quotes are 404, and that the cross-book listing filters its rows *and* its count |
 | `routers/test_books_progress.py` | 29 | **The reading log.** One unit per entry, the promotion to reading, that a member never sees another's, and the merge that would otherwise cascade it away |
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
@@ -119,7 +120,7 @@ current status must not move a date that already records something true, going s
 "read" stamps both ends, and moving back to unread clears them, or a book stays in "books
 finished this year" forever.
 
-**The merge cascade** (`routers/test_books_duplicates.py`). Repointing notes, loans and
+**The merge cascade** (`routers/test_books_duplicates.py`). Repointing notes, quotes, loans and
 statuses with a bulk `UPDATE` leaves the session's loaded collections stale, and the
 `db.delete()` that follows cascades straight through them, deleting exactly what was just
 moved. Four tests cover the rows surviving a merge, and one covers the unique-index

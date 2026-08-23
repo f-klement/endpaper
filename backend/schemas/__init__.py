@@ -51,6 +51,7 @@ from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.loan import LoanCreate, LoanOut
 from schemas.note import NoteCreate, NoteOut
 from schemas.progress import ProgressCreate, ProgressOut
+from schemas.quote import QuoteCreate, QuoteOut, QuoteWithBookOut
 from schemas.settings import (
     FeatureFlagsOut,
     LoginImageOut,
@@ -130,6 +131,9 @@ __all__ = [
     "ProgressCreate",
     "ProgressOut",
     "PurgeResult",
+    "QuoteCreate",
+    "QuoteOut",
+    "QuoteWithBookOut",
     "StatsOut",
     "TagCreate",
     "TagOut",

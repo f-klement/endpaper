@@ -31,6 +31,8 @@ export interface RestoreResult {
   /** @minimum 0 */
   notes: number;
   /** @minimum 0 */
+  quotes?: number;
+  /** @minimum 0 */
   reading_progress?: number;
   /** @minimum 0 */
   user_books?: number;

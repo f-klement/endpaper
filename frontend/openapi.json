@@ -157,7 +157,7 @@
         "type": "object"
       },
       "AuthorOut": {
-        "description": "One person, as far as this shelf knows, and what it knows about them.\n\n`key` is the identity, not `name`. It is what the book filter and the merge\nendpoint take, because a display name changes the moment somebody merges a\nbetter spelling into it and a link that named it would then point nowhere.\n\n`book_count` is filtered by `visible_to`, like every count this API serves.\nAn unfiltered one would announce that somebody's private books exist and\nhow many, on a page every member can read.",
+        "description": "One person, as far as this shelf knows, and what it knows about them.\n\n`key` is what the book filter and the merge endpoint address an author by,\nand it is derived from `name` rather than being an identity behind it: a\nmerge retires the keys it folds, exactly as it retires the spellings. Both\nendpoints therefore accept either, and resolve a retired one through the\nalias rows.\n\n`book_count` is filtered by `visible_to`, like every count this API serves.\nAn unfiltered one would announce that somebody's private books exist and\nhow many, on a page every member can read.",
         "properties": {
           "book_count": {
             "minimum": 0.0,
@@ -2611,6 +2611,41 @@
         "title": "Page[LoanOut]",
         "type": "object"
       },
+      "Page_QuoteWithBookOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuoteWithBookOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[QuoteWithBookOut]",
+        "type": "object"
+      },
       "PerUserStat": {
         "properties": {
           "count": {
@@ -2762,6 +2797,220 @@
         "title": "PurgeResult",
         "type": "object"
       },
+      "QuoteCreate": {
+        "description": "A passage somebody copied out of a book.\n\n`text` is the excerpt and nothing else. `note` is what the member wants to\nsay about it, and it is a separate field so the excerpt stays a faithful\ntranscription: fold the two together and the one string in this app that is\nsupposed to be verbatim is where people put their own words.\n\nBoth are bounded, and `text` more tightly than `NoteCreate.content`: see\n`models.QUOTE_TEXT_MAX`.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "text": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "QuoteCreate",
+        "type": "object"
+      },
+      "QuoteOut": {
+        "description": "One saved passage.\n\n`book_id` is here for the same reason `NoteOut` carries it, and it earns\nits place twice over in the cross-book listing, which is a flat list of\nquotes from many books.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "user_id",
+          "text",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "QuoteOut",
+        "type": "object"
+      },
+      "QuoteWithBookOut": {
+        "description": "A quote plus enough of its book to render a row without a second fetch.\n\nThree scalars rather than a nested `BookOut`. `BookOut` carries the tags,\nthe adder, the active loan and the caller's own reading state, which is\nwork per row to render a title and a cover on a list whose rows are quotes.\nThe book id is already on the row, so anybody wanting the rest follows it.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "book_author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Author"
+          },
+          "book_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Cover Url"
+          },
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "book_title": {
+            "title": "Book Title",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "user_id",
+          "text",
+          "created_at",
+          "updated_at",
+          "book_title"
+        ],
+        "title": "QuoteWithBookOut",
+        "type": "object"
+      },
       "ReadStatus": {
         "description": "A member's own progress through a book. Stored in `user_books.status`.\n\nWANT_TO_READ is deliberately distinct from UNREAD: \"on the shelf, not\nstarted\" and \"I intend to read this\" are different statements, and\nGoodreads exports carry the distinction (its `to-read` shelf), so\ncollapsing them would lose information on import.\n\nDID_NOT_FINISH is started, not finished, and not going to be. Named for\nwhat the two apps that ship it call it rather than for the act: Openreads'\nfourth list is \"books you didn't finish\" and BookLogr's is \"Did not\nfinish\". Neither calls it \"abandoned\", and matching them costs nothing\nwhile a third spelling of the same shelf costs a reader a moment every\ntime. The importers accept `abandoned`, `dnf` and the German for both, so\nnothing turns on the stored spelling.\n\n**It is not a kind of READ**, and every query that counts finished books\ntests `finished_at`, which `_stamp_reading_dates` clears for it. A book\nsomebody gave up on must never appear in \"books finished this year\".\n\nNo migration: the column is a plain string, so a new member needs no DDL.",
         "enum": [
@@ -2801,6 +3050,12 @@
           "notes": {
             "minimum": 0.0,
             "title": "Notes",
+            "type": "integer"
+          },
+          "quotes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Quotes",
             "type": "integer"
           },
           "reading_progress": {
@@ -3777,7 +4032,7 @@
     },
     "/api/books/authors/aliases/{alias_id}": {
       "delete": {
-        "description": "Undo one merge. The spelling becomes its own author again.\n\nThis is why merging is allowed to guess. Nothing was rewritten, so removing\nthe row restores exactly the state before it was written, and the books\nwere never involved.\n\nA row whose spelling this caller cannot see anywhere is **404**, for the\nsame reason `list_authors` does not list it: an alias naming a spelling\nthat survives only on somebody else's private book must not be confirmable.",
+        "description": "Undo one merge. The spelling becomes its own author again.\n\nThis is why merging is allowed to guess. Nothing was rewritten, so removing\nthe row restores exactly the state before it was written, and the books\nwere never involved.\n\nA row whose spelling is on no book this caller can see is **404**, and the\nreason is authority rather than secrecy: undo what you can see the effect\nof. The page offers this beside the spelling it folded, so a row with no\nsuch spelling on your shelf has no button here and no meaning here either.\n\nThat leaves an **orphan** alias, whose spelling is on nobody's shelf because\nthe book was deleted, unreachable and undeletable. Accepted: it maps a name\nnothing is credited with, so it changes no view, and it starts working again\nby itself if an import re-creates that spelling, which is the property the\nwhole design is for.",
         "operationId": "unmerge_author",
         "parameters": [
           {
@@ -3820,7 +4075,7 @@
     },
     "/api/books/authors/merge": {
       "post": {
-        "description": "Say that these spellings are one person.\n\n**Nothing in `books` is written.** Every named author keeps its credit line\nexactly as printed, and what changes is one row per spelling saying who\nthat spelling means. Deleting the row undoes it, and a later import that\nre-creates the spelling is folded by the row that is already there. A\nrewrite of the strings could do neither: it is not reversible, and it\nrepairs a split only until the same file is imported again.\n\nAny member, like creating and renaming a collection, and for the same\nreason: it is reversible, and a shelf only an admin can tidy is one nobody\ntidies. Unlike deleting a collection, which is admin only because it\nstrips a label off every book with no undo.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is:\na 403 would confirm that somebody owns a book by that name.\n\nA `keep_name` that is itself already folded into somebody resolves to that\nsomebody, so the map stays one lookup deep. A `keep_name` that no book\ncarries is allowed and is the point: \"Le Guin, Ursula K.\" splits into two\npeople, neither spelled correctly, and the repair is a name typed by hand.",
+        "description": "Say that these spellings are one person.\n\n**Nothing in `books` is written.** Every named author keeps its credit line\nexactly as printed, and what changes is one row per spelling saying who\nthat spelling means. Deleting the row undoes it, and a later import that\nre-creates the spelling is folded by the row that is already there. A\nrewrite of the strings could do neither: it is not reversible, and it\nrepairs a split only until the same file is imported again.\n\nAny member, like creating and renaming a collection, and for the same\nreason: it is reversible, and a shelf only an admin can tidy is one nobody\ntidies. Unlike deleting a collection, which is admin only because it\nstrips a label off every book with no undo.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is:\na 403 would confirm that somebody owns a book by that name.\n\nA `keep_name` that is itself already folded into somebody resolves to that\nsomebody, so the map stays one lookup deep. One exception, below: a row\nnaming one of the keys being merged is not followed, because that is how a\nmerge is reversed.\n\nA `keep_name` that no book carries is allowed and is the point: \"Le Guin,\nUrsula K.\" splits into two people, neither spelled correctly, and the\nrepair is a name typed by hand.",
         "operationId": "merge_authors",
         "requestBody": {
           "content": {
@@ -4154,7 +4409,7 @@
     },
     "/api/books/merge": {
       "post": {
-        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, loans and reading statuses are repointed rather than dropped.\nA status collision (both rows read by the same person) keeps the one on the\nsurvivor, because deleting somebody's reading history to satisfy a unique\nindex is not an acceptable way to resolve it.",
+        "description": "Fold several catalogue entries into one.\n\nThe survivor absorbs anything the others have and it lacks: a cover, an\nISBN, a page count. It never overwrites a value it already holds, on the\nsame principle as enrichment, since the kept row is the one a person chose.\n\nTags, notes, quotes, loans and reading statuses are repointed rather than\ndropped. A status collision (both rows read by the same person) keeps the\none on the survivor, because deleting somebody's reading history to\nsatisfy a unique index is not an acceptable way to resolve it.",
         "operationId": "merge_books",
         "requestBody": {
           "content": {
@@ -4194,6 +4449,73 @@
           }
         ],
         "summary": "Merge Books",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/quotes": {
+      "get": {
+        "description": "Every passage the caller may see, from every book.\n\nDeclared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches\nin declaration order, so the reverse would make this a request for the book\nwith id \"quotes\".\n\n**This is a book query wearing a different hat**, and `visible_to` is on\nboth halves of it. Without it a quote from somebody else's private book\nwould be listed here with its title and cover, which discloses the book,\nthe passage and that the member owns it, in one 200. The count is filtered\nfor the same reason: an unfiltered total announces how many are hidden.\n\nNewest first. A book's own quotes come back in reading order because a book\nhas one; a list spanning the shelf does not, and the interesting end of it\nis the one somebody just added.\n\nJoined to the book rather than fetching one per row: a hundred quotes over\nninety books is ninety extra statements, which is the N+1 `_books_to_out`\nexists to avoid.",
+        "operationId": "list_quotes",
+        "parameters": [
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_QuoteWithBookOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Quotes",
         "tags": [
           "books"
         ]
@@ -4836,7 +5158,7 @@
         ]
       },
       "post": {
-        "description": "Record that the household owns another copy of this book.\n\nThe deliberate half of the ISBN collision. Scanning a book already on the\nshelf answers 409 exactly as it always has, because the overwhelmingly\ncommon reason for it is a second pass through the same bookcase; this\nendpoint is the other reason, and it is reached by pressing something that\nsays so rather than by the app guessing.\n\n**`is_private` is inherited, never chosen here.** A copy of a private book\nthat came back public would disclose the book. The caller added the copy,\nso they are its owner and `PATCH /{id}/privacy` can change it afterwards.\n\n**Reading state is not copied.** Status, rating, progress, notes and loans\nall belong to a person and an object, and the new object is one nobody has\nread yet. Tags are copied: they describe the work, and re-picking six of\nthem for a second paperback is exactly the friction this feature exists to\nremove.",
+        "description": "Record that the household owns another copy of this book.\n\nThe deliberate half of the ISBN collision. Scanning a book already on the\nshelf answers 409 exactly as it always has, because the overwhelmingly\ncommon reason for it is a second pass through the same bookcase; this\nendpoint is the other reason, and it is reached by pressing something that\nsays so rather than by the app guessing.\n\n**`is_private` is inherited, never chosen here.** A copy of a private book\nthat came back public would disclose the book. The caller added the copy,\nso they are its owner and `PATCH /{id}/privacy` can change it afterwards.\n\n**Reading state is not copied.** Status, rating, progress, notes, quotes\nand loans all belong to a person and an object, and the new object is one\nnobody has read yet. Tags are copied: they describe the work, and\nre-picking six of them for a second paperback is exactly the friction this\nfeature exists to remove.",
         "operationId": "add_copy",
         "parameters": [
           {
@@ -5760,6 +6082,238 @@
         ]
       }
     },
+    "/api/books/{book_id}/quotes": {
+      "get": {
+        "description": "Requires read access to the book, exactly as the notes route does.\n\n`BookForRead` is the whole privacy check here: it answers 404 for a book\nthe caller may not see, so there is no path to the quotes on one.",
+        "operationId": "get_quotes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuoteOut"
+                  },
+                  "title": "Response Get Quotes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Quotes",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "operationId": "add_quote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Quote",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/quotes/{quote_id}": {
+      "delete": {
+        "operationId": "delete_quote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quote_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Quote Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Quote",
+        "tags": [
+          "books"
+        ]
+      },
+      "put": {
+        "operationId": "edit_quote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quote_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Quote Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Edit Quote",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/rating": {
       "patch": {
         "description": "Rate a book, or clear the rating with a null.\n\nRead access, like status, and for the same reason: a rating is one person's\nopinion and changes nothing for anyone else. It deliberately does not touch\nthe reading dates, because rating a book is not a claim about having\nfinished it just now.",
@@ -5871,7 +6425,7 @@
     },
     "/api/books/{book_id}/restore": {
       "post": {
-        "description": "Put a trashed book back on the shelf.\n\nEverything comes back with it: tags, notes, loans and every member's\nreading status, because none of it ever left. That is the difference\nbetween this and re-adding the book by hand, and it is the whole point.",
+        "description": "Put a trashed book back on the shelf.\n\nEverything comes back with it: tags, notes, quotes, loans and every\nmember's reading status, because none of it ever left. That is the\ndifference between this and re-adding the book by hand, and it is the whole\npoint.",
         "operationId": "restore_book",
         "parameters": [
           {

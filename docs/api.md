@@ -298,9 +298,9 @@ book the household owns.
 
 `POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled
 out rather than inferred so a mistyped request fails instead of silently keeping whichever
-row sorted first. The survivor absorbs only what it is missing, and tags, notes, loans and
-statuses are repointed rather than dropped. Where the same member holds a status on two of
-the merged rows, the survivor's own row wins: deleting somebody's reading history to
+row sorted first. The survivor absorbs only what it is missing, and tags, notes, quotes,
+loans and statuses are repointed rather than dropped. Where the same member holds a status
+on two of the merged rows, the survivor's own row wins: deleting somebody's reading history to
 satisfy a unique index is not an acceptable resolution.
 
 Merging two rows that were copies of each other is a member saying they were never two
@@ -320,8 +320,9 @@ nothing else:
 ```
 
 Everything about the work (title, author, ISBN, cover, series, description) and the tags are
-taken from the book being copied. Nothing personal is: status, rating, progress, notes and
-loans belong to a person and an object, and the copy is an object nobody has read yet.
+taken from the book being copied. Nothing personal is: status, rating, progress, notes,
+quotes and loans belong to a person and an object, and the copy is an object nobody has
+read yet.
 `is_private` is **inherited and cannot be set here**, because a public copy of a private
 book discloses the book. The caller owns the copy, so `PATCH /{id}/privacy` can change it
 afterwards.
@@ -565,8 +566,8 @@ exception: a cover the member uploaded (a `/covers/` URL) is never replaced by a
 ### Deleting, and taking it back
 
 `DELETE /api/books/{id}` no longer destroys anything. It stamps `deleted_at`
-and the row stays, with its notes, loans, tags and every member's reading
-status still attached, which is what makes `POST /{id}/restore` an undo rather
+and the row stays, with its notes, quotes, loans, tags and every member's
+reading status still attached, which is what makes `POST /{id}/restore` an undo rather
 than a re-add. The status code is unchanged at 204.
 
 **`visible_to()` is what hides it.** The trashed check lives in the same
@@ -592,8 +593,8 @@ Two consequences worth knowing:
   `in_trash_for`, so it never reaches a book the caller could not see in it.
 
 Merge is the exception: its losing rows are destroyed rather than trashed,
-because their notes, loans and statuses have already been repointed to the
-survivor and restoring one would produce an empty husk.
+because their notes, quotes, loans and statuses have already been repointed
+to the survivor and restoring one would produce an empty husk.
 
 ### Tags
 
@@ -672,8 +673,8 @@ somebody read, which is silent on whether a copy was ever in the house.
 | POST | `/api/backup/restore?confirm=true` | **admin** | multipart. Replaces everything. **400** without `confirm` |
 
 The CSV export is not a backup and never was: it carries one row per book and
-drops the notes, the loans, every member's reading status, the accounts and
-every cover file. The archive holds `endpaper.json` (every row of every table,
+drops the notes, the quotes, the loans, every member's reading status, the
+accounts and every cover file. The archive holds `endpaper.json` (every row of every table,
 including the `book_tags` association, which has no model of its own and is
 therefore the one that gets forgotten) plus a `covers/` directory.
 
@@ -778,6 +779,37 @@ on the next run.
 
 A `note_id` belonging to a different book returns 404. The ids must agree, so a note cannot
 be reached through a book the caller happens to have access to.
+
+### Quotes
+
+A passage copied out of a book, the page it is on, and optionally a remark about it. Same
+access rules as notes: a quote is visible to whoever can see the book, and only its author
+or an admin may change it.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/quotes` | signed in | Every visible quote, newest first, paginated |
+| GET | `/api/books/{id}/quotes` | read | In reading order: by page, unpaged last |
+| POST | `/api/books/{id}/quotes` | read | 201; `text` must be non-empty |
+| PUT | `/api/books/{id}/quotes/{quote_id}` | author or admin | **403** otherwise |
+| DELETE | `/api/books/{id}/quotes/{quote_id}` | author or admin | 204 |
+
+`GET /api/books/quotes` is declared **before** `/{book_id}`, like `/export` and `/trash`,
+or it would be a request for the book with id "quotes". It is a book query: it returns a
+title, an author and a cover per row, so `visible_to()` filters both the rows and the
+count.
+
+Bounds, all of them 422 rather than 500: `text` is 1 to 2,000 characters, `note` is at
+most 1,000, and `page` is 1 to 100,000. All three are stated again as CHECK constraints
+(`ck_quotes_text_bounds`, `ck_quotes_page_bounds`), because a restore inserts through Core
+and never sees the schema, and because SQLite does not enforce a `VARCHAR` width.
+
+The excerpt's ceiling is lower than a note's 10,000 on purpose: a quote is a verbatim
+excerpt of somebody else's copyrighted text, and 2,000 characters is about one printed
+page.
+
+A `quote_id` belonging to a different book returns 404, for the same reason a `note_id`
+does.
 
 ### Settings, stats, users
 

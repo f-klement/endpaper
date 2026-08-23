@@ -15,6 +15,7 @@ from enums import (
     ReadStatus,
 )
 from google_books import split_categories
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from schemas.common import RowIdField
 from schemas.tag import TagOut
 from schemas.user import UserOut
@@ -82,7 +83,7 @@ class BookCreate(BaseModel):
     #: a 500. Bounded like every other caller-supplied row id: see MAX_ROW_ID.
     collection_id: RowIdField | None = None
     language: str | None = Field(default=None, max_length=16)
-    page_count: int | None = Field(default=None, ge=1, le=100_000)
+    page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     # The one collector field offered at add time. Somebody scanning a book is
     # holding it, so this is the one moment they can answer without checking.
     format: BookFormat | None = None
@@ -348,7 +349,7 @@ class BookMatch(BaseModel):
     # the same column.
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = None
-    page_count: int | None = Field(default=None, ge=1, le=100_000)
+    page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     language: str | None = None
     categories: str | None = None
     cover_url: str | None = None

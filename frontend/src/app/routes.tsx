@@ -10,6 +10,7 @@ import { NotFoundPage } from "../pages/errors";
 import Home from "../pages/Home";
 import LoansPage from "../pages/LoansPage";
 import LoginPage from "../pages/LoginPage";
+import QuotesPage from "../pages/QuotesPage";
 import ScanPage from "../pages/ScanPage";
 import SeriesPage from "../pages/SeriesPage";
 import SettingsPage from "../pages/SettingsPage";
@@ -40,6 +41,7 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       <Route path="/series" element={<SeriesPage />} />
       <Route path="/authors" element={<AuthorsPage />} />
       <Route path="/collections" element={<CollectionsPage />} />
+      <Route path="/quotes" element={<QuotesPage />} />
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
       <Route

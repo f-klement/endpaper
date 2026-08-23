@@ -247,6 +247,32 @@ export const en = {
   "notes.addLabel": "Add a note",
   "notes.editLabel": "Edit note",
 
+  // ── Quotes ──────────────────────────────────────────────────────────────
+  "quotes.title": "Quotes",
+  "quotes.none": "No quotes yet",
+  "quotes.placeholder": "Copy out a passage...",
+  "quotes.addLabel": "The passage",
+  "quotes.editLabel": "Edit quote",
+  "quotes.addButton": "Add quote",
+  // Every field on this page needs a name of its own. The book page already
+  // has a "Page" number field (reading progress) and an "Add" button (notes),
+  // and two controls with one accessible name is a screen reader reading the
+  // same label twice with no way to tell which is which.
+  "quotes.pageLabel": "Page the quote is on",
+  "quotes.editPageLabel": "Edit the page the quote is on",
+  "quotes.pagePlaceholder": "Page",
+  "quotes.noteLabel": "What you want to say about it",
+  "quotes.editNoteLabel": "Edit what you said about it",
+  "quotes.notePlaceholder": "Why this one (optional)",
+  "quotes.onPage": "p. {page}",
+  "quotes.empty": "No quotes saved yet",
+  "quotes.emptyHint": "Open a book and copy out a passage worth keeping.",
+  "quotes.couldNotLoad": "Could not load the quotes.",
+  "quotes.pagination": "Quote pages",
+  "quotes.pageOf": "Page {page} of {of}",
+  "quotes.previous": "Previous",
+  "quotes.next": "Next",
+
   // ── Stats ───────────────────────────────────────────────────────────────
   "stats.title": "Collection Stats",
   "stats.booksInLibrary": "books in your library",

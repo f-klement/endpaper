@@ -1,9 +1,9 @@
 """Taking the whole catalogue out, and putting it back.
 
 The CSV export has existed since the beginning and is not a backup. It carries
-one row per book and drops the notes, the loans, every member's reading status,
-the accounts themselves and every cover file, which is to say it drops most of
-what somebody spent an evening typing in.
+one row per book and drops the notes, the quotes, the loans, every member's
+reading status, the accounts themselves and every cover file, which is to say
+it drops most of what somebody spent an evening typing in.
 
 This produces a **zip** holding two things:
 
@@ -43,6 +43,7 @@ from models import (
     Collection,
     Loan,
     Note,
+    Quote,
     ReadingProgress,
     Setting,
     Tag,
@@ -93,6 +94,11 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         ("reading_progress", ReadingProgress),
         ("loans", Loan),
         ("notes", Note),
+        # After notes, which it is shaped after and has no relationship with.
+        # Deliberately absent from `_REQUIRED_TABLES`: an archive taken before
+        # quotes existed restores with none, which is the state it was written
+        # in.
+        ("quotes", Quote),
         ("settings", Setting),
     )
 )

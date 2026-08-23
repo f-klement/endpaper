@@ -10,7 +10,7 @@ a book through a dependency rather than fetching one and writing their own check
 
 | Dependency | Grants | Used by |
 |---|---|---|
-| `book_for_read` | The book is public, or the caller added it | reading a book, reading and adding notes, setting your own status |
+| `book_for_read` | The book is public, or the caller added it | reading a book, reading and adding notes and quotes, setting your own status |
 | `book_for_write` | As above; public books are a shared shelf any member may curate | deleting, tagging, covers, metadata refresh |
 | `book_for_owner` | As above, and the caller added it (or is an admin) | changing privacy |
 
@@ -440,10 +440,10 @@ Worth knowing before exposing this beyond a private network:
   database row.
 - **No endpoint deletes or renames an account**, test accounts included. Removing a member
   means deciding what happens to the books they added, the loans they are part of and the
-  notes they wrote, which is a larger decision than this feature. The cost is that every
-  test account ever made is permanently in the **"Loan to…" picker**, which is the member
-  list and which every member uses, so a typo made once is a name everybody picks past
-  forever.
+  notes and quotes they wrote, which is a larger decision than this feature. The cost is
+  that every test account ever made is permanently in the **"Loan to…" picker**, which is
+  the member list and which every member uses, so a typo made once is a name everybody
+  picks past forever.
 - **A renamed test account tells nobody.** The automatic rename above is a WARNING in the
   log and nothing in the app. Under proxy a session switched into it corrects itself,
   because `/auth/me` is the identity; under `ldap` and `local` it does not, since the top

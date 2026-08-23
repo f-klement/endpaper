@@ -184,3 +184,7 @@ class RestoreResult(BaseModel):
     #: silently restores every book unfiled, which reads as a clean restore
     #: until somebody opens the library and finds their shelves gone.
     collections: int = Field(default=0, ge=0)
+    #: Passages members typed out by hand. They exist nowhere else: a book can
+    #: be rescanned and a cover refetched, and a quote cannot, so a restore
+    #: that silently dropped them is the worst case this field guards against.
+    quotes: int = Field(default=0, ge=0)

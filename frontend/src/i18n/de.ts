@@ -243,6 +243,28 @@ export const de: Messages = {
   "notes.addLabel": "Notiz hinzufügen",
   "notes.editLabel": "Notiz bearbeiten",
 
+  // ── Zitate ──────────────────────────────────────────────────────────────
+  "quotes.title": "Zitate",
+  "quotes.none": "Noch keine Zitate",
+  "quotes.placeholder": "Eine Stelle abschreiben...",
+  "quotes.addLabel": "Die Stelle",
+  "quotes.editLabel": "Zitat bearbeiten",
+  "quotes.addButton": "Zitat hinzufügen",
+  "quotes.pageLabel": "Seite, auf der das Zitat steht",
+  "quotes.editPageLabel": "Seite des Zitats bearbeiten",
+  "quotes.pagePlaceholder": "Seite",
+  "quotes.noteLabel": "Was du dazu sagen möchtest",
+  "quotes.editNoteLabel": "Deine Anmerkung bearbeiten",
+  "quotes.notePlaceholder": "Warum gerade dieses (optional)",
+  "quotes.onPage": "S. {page}",
+  "quotes.empty": "Noch keine Zitate gespeichert",
+  "quotes.emptyHint": "Öffne ein Buch und schreibe eine Stelle ab, die bleiben soll.",
+  "quotes.couldNotLoad": "Die Zitate konnten nicht geladen werden.",
+  "quotes.pagination": "Zitatseiten",
+  "quotes.pageOf": "Seite {page} von {of}",
+  "quotes.previous": "Zurück",
+  "quotes.next": "Weiter",
+
   // ── Statistik ───────────────────────────────────────────────────────────
   "stats.title": "Sammlung in Zahlen",
   "stats.booksInLibrary": "Bücher in deiner Bibliothek",

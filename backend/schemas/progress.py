@@ -2,8 +2,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-#: Matches `BookCreate.page_count`. A book with more pages than this is a typo.
-MAX_PAGE = 100_000
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
+
+#: A book with more pages than this is a typo. Re-exported from `models` rather
+#: than restated: `ck_quotes_page_bounds` interpolates the same number into
+#: SQL, and a CHECK that disagreed with a schema bound would answer 500 for
+#: exactly the values between them.
+MAX_PAGE = MAX_PAGE_NUMBER_IN_A_BOOK
 
 #: A single sitting, in minutes. A day is the ceiling because anything past it
 #: is a mistyped field rather than a long evening, and the number exists to

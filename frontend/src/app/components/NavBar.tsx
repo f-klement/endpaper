@@ -34,6 +34,7 @@ const SECONDARY: { to: string; label: MessageKey }[] = [
   { to: "/series", label: "series.title" },
   { to: "/authors", label: "authors.title" },
   { to: "/collections", label: "collections.title" },
+  { to: "/quotes", label: "quotes.title" },
   { to: "/stats", label: "nav.stats" },
   { to: "/settings", label: "nav.settings" },
   { to: "/?status=want_to_read&ownership=not_owned", label: "nav.wishlist" },

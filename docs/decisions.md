@@ -1432,12 +1432,163 @@ to `books`, a merge changes no `updated_at` and produces no sync traffic at all.
 
 A bulk `UPDATE ... synchronize_session=False` leaves the session's loaded collections
 stale, and the `db.delete()` that follows cascades straight through them, deleting exactly
-the notes, loans and statuses just moved to the survivor. The rows are reassigned object by
-object and the losers are expired before deletion.
+the notes, quotes, loans and statuses just moved to the survivor. The rows are reassigned
+object by object and the losers are expired before deletion.
 
 Relatedly, the losers release their ISBN in **its own flush** before the keeper absorbs it.
 Doing both in one flush puts them in a single `executemany` where the set lands before the
 clear and trips the unique index.
+
+### A quote is its own table, not a page number on a note
+
+BookLogr, the Apache-2.0 reference for this feature, has no quotes table: it adds a
+nullable `quote_page` to its notes table, and a saved quote is a note that happens to
+carry one. That was the cheaper option here too and it was refused, for a reason that
+shows up the first time anybody asks a question of the data: nothing in that shape can
+tell a quote from a note whose author remembered the page.
+
+The sharper reason is what the two fields are for. `quotes.text` is meant to be a
+**faithful transcription** of somebody else's sentence; `notes.content` is the member's
+own words about the book. One column holding both is the column where the verbatim
+promise quietly stops being true, and it is also the column somebody will later want to
+render as a blockquote and be unable to.
+
+So `quotes` carries `text`, an optional `page`, and an optional `note` for the remark. The
+excerpt and the remark are separate columns for the same reason the table is separate.
+**BookWyrm** does the same, and it is the best worked example of quotes from books
+anywhere; it is also **ACSL v1.4**, which is compatible with neither GPL nor MIT, so it
+was read and not borrowed from. Nothing here is derived from its code.
+
+### What was left off a quote, and why
+
+Four fields that a reference implementation has and this one does not. Recorded so nobody
+adds one back thinking it was an oversight.
+
+| Field | Where it exists | Why not here |
+|---|---|---|
+| `endposition` | BookWyrm | It stores a **range**, needed because it also renders percentages and ebook locations in a federated post. There is no reader here and no range to draw. |
+| `position_mode` (page or percent) | BookWyrm | Same reason. `reading_progress` carries a percent because an audiobook has no pages; a quote is copied out of something with a page or out of nothing at all. |
+| per-quote `visibility` | BookLogr | It has a **public profile**, so a row-level visibility is what decides whether the world sees a quote. Nothing here is public, and privacy in this schema is a property of the book. |
+| a favourite flag | BookWyrm has social `favorites` | That is other people liking a post. There is no social layer here, and "my favourite of my own quotes" is a second ranking beside the shelf's tags. |
+
+### The page is an integer, so a preface has no page
+
+`quotes.page` is an `Integer` bounded 1 to 100,000, where BookWyrm's equivalent is free
+text. Free text would take "xiv", "loc. 3312" and "about a third in", all of which somebody
+will want; what it would not do is sort, and a book's quotes coming back in reading order
+is the only ordering that makes the list worth reading down.
+
+The cost is real and is accepted rather than worked around: a passage from a roman-numbered
+preface is saved unpaged, and unpaged quotes sort to the end. If free-text positions are
+ever wanted, they are a second nullable column, not a widening of this one, because
+widening it silently unsorts every list that exists by then.
+
+`ck_quotes_page_bounds` states the same rule in the database, because a restore inserts
+through Core and never sees `QuoteCreate`. The number lives once, in
+`models.MAX_PAGE_NUMBER_IN_A_BOOK`, and `schemas/progress.py`, `schemas/book.py` (twice)
+and `csv_import._int` now read it from there: it was written out **four** times before
+this change, and a CHECK that disagreed with a schema bound would answer 500 for exactly
+the values between them. `csv_import` was the one that stayed behind on the first pass,
+found on review, and it is the one that matters most: an importer admitting a page count
+the API refuses is a second answer to the same question.
+
+The **length** ceilings are enforced the same way and were nearly not.
+`quotes.text` is `String(2000)`, and SQLite ignores VARCHAR width entirely: a Core insert
+of 50,000 characters stored 50,000, measured. So the model and the migration both carry
+`ck_quotes_text_bounds`, covering `text` and `note`, and the docstrings that said the
+ceiling was "in the database and not only in the schema" are now true rather than
+aspirational. Nothing member-facing could reach it (only `backup.restore` bypasses
+`QuoteCreate`, and it is admin-only), so this closed a false claim rather than a live
+hole, which is exactly the kind of thing that becomes a live hole two features later.
+
+### A quote is visible to whoever can see the book
+
+Two precedents in this codebase point opposite ways. `get_notes` returns **every member's**
+notes on a book anyone may read; `list_progress` returns **only the caller's own** rows,
+because a reading log is a diary about a person rather than a fact about the book.
+
+Quotes follow the notes. A passage is a fact about the book, and copying one out is the
+household saying "this is worth reading", which is the whole pleasure of the feature. The
+alternative would be a per-row privacy flag, and that is the expensive part: privacy in
+this schema is a property of the **book**, expressed once in `visible_to()`, and a second
+rule that every query has to remember is the one that eventually gets forgotten.
+
+The copyright argument cuts the way it first appears not to. A quote is a verbatim excerpt
+of somebody else's work, but showing it to the four people who share the shelf the book
+sits on is not publication: this app has no public profile, no feed and no federation, and
+a quote leaves the instance only in the member's own backup. That is what makes "follows
+the book" safe here and would not make it safe in BookWyrm, which is federated and
+therefore has per-status privacy. What the argument does buy is the length ceiling:
+`QUOTE_TEXT_MAX` is 2,000 against `MAX_NOTE_LENGTH`'s 10,000, so the table cannot hold a
+chapter.
+
+The consequence to state plainly: a quote from a private book is invisible to everybody
+but its owner, because the book is, and an invisible book is 404 rather than 403.
+
+### A quote belongs to a copy, not to a work
+
+Multiple copies shipped first, so a book row can be one of several joined by a
+`copy_group`, and a quote from "the paperback" is arguably a quote from the work. It hangs
+off the **book row** anyway, for one concrete reason: the page number is a fact about an
+edition. Page 214 of the paperback is not page 214 of the hardback, and a quote promoted to
+the work would carry a page number that is wrong for most of the rows it then appears
+under.
+
+Everything else per copy already lives this way (notes, loans, reading progress), so this
+is the existing shape rather than a new one, and `_repoint_relations` moves quotes to the
+survivor on a merge exactly as it moves notes. Merging two rows that were two printings
+does leave their page numbers describing a printing that is no longer named; the
+alternative is refusing the merge, which is worse.
+
+`POST /{id}/copies` deliberately copies **no** quotes, for the same reason it copies no
+notes or reading state: they belong to a person and an object, and the copy is an object
+nobody has read yet.
+
+**The cost this pays on `/quotes`**, which the first version of this entry left out: two
+copies of one title render identically there. `QuoteCard` shows the title, the author, the
+cover, the page and who saved it, and every one of those is the same for the paperback and
+the hardback; only the link target differs. Accepted rather than fixed, because the fix is
+`format` and `location` in the card footer and that is metadata about the object on a card
+whose subject is a passage. It is the right thing to add the first time somebody actually
+cannot tell two rows apart, and the schema is ready for it: `QuoteWithBookOut` already
+takes its book fields as flat scalars, so it is two more columns in the same `SELECT`.
+
+### There is a cross-book quotes page, and it is a book listing
+
+`GET /api/books/quotes` and `/quotes` in the app exist because a quote saved and never
+re-read is a write-only field. It is the feature's main pleasure in BookWyrm and it is
+cheap here: one endpoint, one page folder.
+
+It is also **a second book listing wearing a different hat**. Every row carries a title, an
+author and a cover, so `visible_to()` filters the rows *and* the count, and a quote on
+somebody's private book is neither listed nor counted.
+
+**The count is spelled `count(Book.id)`, not `count(Quote.id)`, and that is a decision.**
+The two are identical over an inner join on a primary key that is never null. The
+difference is that `TestEveryBookQueryIsFiltered` identifies a book query by the arguments
+to `query()`, so the `Quote.id` spelling put the count outside the guard entirely: removing
+its filter was measured to produce **no** offender, while removing the row half's filter
+correctly reported the file. Both critics found this independently, which is the strongest
+signal that review process produces. The alternative, teaching the rule about
+`.join(Book, ...)`, was measured too and refused: 30 inspected statements to 39, three of
+them correct code needing fresh exemptions. The rule's own docstring now records the
+join-only blind spot, because the class is wider than this one instance.
+
+Editing is deliberately **not** offered there. A quote is corrected on the book it came
+from, where the page number and the passage can be checked against the book in somebody's
+hand, and a second editor would be a second place for the same rules to be got wrong.
+
+**It pages with numbered Previous/Next, which is a third idiom in this app**, and the
+reason is the row height. Home uses `useListBooksInfinite` with a "Load more" button; the
+loans and trash lists ask for one large `page_size` and offer no controls at all. Neither
+suits this one. A quote is up to 2,000 characters, so a page of fifty is a column of
+unpredictable height that an infinite list makes unnavigable: with "Load more" there is no
+way back to something seen two screens ago except scrolling past everything added since.
+One large page is worse again, because the ceiling here is a household's entire history of
+saved passages rather than its shelf. Numbered pages give a stable position to return to.
+That is three idioms in one app, which is one more than anybody wants; the honest reading
+is that Home's infinite list is the odd one out and the others should converge on this,
+not that this should have copied one of them.
 
 ### One bulk endpoint, not six
 

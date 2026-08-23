@@ -57,6 +57,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Reading progress**: record the page you reached, or a percentage for an audiobook, as
   often as you like. It is a log, not one number, so it can say how much you read in March
   as well as where you are now. Recording a page starts the book for you
+- **Quotes**: copy out a passage worth keeping, with the page it is on and a line about
+  why. Every quote the household can see is on one page, newest first
 - **On the shelf or not**: what you own, tracked separately from what you have read
 - **More than one copy**: two paperbacks of the same title are two objects, each with its
   own shelf, condition, price and loan. Scanning a book you already own still asks before
@@ -76,7 +78,7 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Series gaps**: which volumes of a series you are missing, worked out for you
 - **Duplicate detection and merge**: fold two records into one, keeping the best of both
 - **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
-  tags, loans and reading history
+  quotes, tags, loans and reading history
 - **Bulk edits**: tag, re-shelve, set a status or delete a whole selection at once
 - **Two ways to look at it**: a grid of covers whose cards fold out for the details, or a
   table of nineteen metadata columns. Your choice is remembered in your browser

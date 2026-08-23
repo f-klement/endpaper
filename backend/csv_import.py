@@ -34,6 +34,7 @@ from typing import Final
 
 from enums import BookFormat, ReadStatus
 from isbn import parse as parse_isbn
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 logger = logging.getLogger("endpaper.csv_import")
 
@@ -348,12 +349,20 @@ def _clean(value: str | None) -> str:
     return text.strip()
 
 
-def _int(value: str, *, minimum: int = 1, maximum: int = 100_000) -> int | None:
+def _int(
+    value: str, *, minimum: int = 1, maximum: int = MAX_PAGE_NUMBER_IN_A_BOOK
+) -> int | None:
     """A bounded integer, or nothing.
 
     Bounded because a page count of 0 and a year of 12345 are both what a
     spreadsheet produces when a column has slipped, and both are worse stored
     than absent.
+
+    The default ceiling is the page ceiling, because `pages` is the one caller
+    that takes it, and it is imported rather than retyped: this column ends up
+    in `books.page_count`, which `BookCreate` and `BookDetailsUpdate` bound by
+    the same constant. An importer that admitted a page count the API refuses
+    would be a second answer to the same question.
 
     Anchored at the start, which matters more than it looks: taking the first
     run of digits anywhere read "1,234 pages" as **1** and a date sitting in a

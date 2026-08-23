@@ -11,6 +11,7 @@ from schemas import (
     LoanCreate,
     LoginRequest,
     NoteCreate,
+    QuoteCreate,
     UserCreate,
 )
 
@@ -138,6 +139,54 @@ class TestSmallSchemas:
         indistinguishable from a rendering bug."""
         with pytest.raises(ValidationError):
             NoteCreate(content="")
+
+
+class TestQuoteCreate:
+    """The excerpt is verbatim, the remark is not, and both are bounded.
+
+    The bounds are the interesting part. `text` takes 2,000 characters against
+    `NoteCreate.content`'s 10,000, because this field holds somebody else's
+    copyrighted words and because an unbounded free-text column reachable by
+    any member is a stored denial of service, which this app has shipped once.
+    """
+
+    def test_it_requires_some_text(self):
+        with pytest.raises(ValidationError):
+            QuoteCreate()  # type: ignore[call-arg]  # omission is the point
+
+    def test_whitespace_is_not_a_quote(self):
+        with pytest.raises(ValidationError):
+            QuoteCreate(text="   \n ")
+
+    def test_the_excerpt_is_trimmed(self):
+        assert QuoteCreate(text="  kept  ").text == "kept"
+
+    def test_inner_whitespace_survives(self):
+        """A quote is often several lines. Collapsing them, as
+        `CollectionCreate.tidy` does for a name, would rewrite the passage."""
+        assert QuoteCreate(text="one\n\ntwo").text == "one\n\ntwo"
+
+    def test_a_blank_remark_becomes_no_remark(self):
+        assert QuoteCreate(text="kept", note="  ").note is None
+
+    @pytest.mark.parametrize("page", [0, -1, 100_001, 2**63])
+    def test_a_page_outside_the_bounds(self, page):
+        with pytest.raises(ValidationError):
+            QuoteCreate(text="kept", page=page)
+
+    def test_the_first_and_last_page_are_both_accepted(self):
+        assert QuoteCreate(text="kept", page=1).page == 1
+        assert QuoteCreate(text="kept", page=100_000).page == 100_000
+
+    def test_the_excerpt_ceiling(self):
+        assert QuoteCreate(text="x" * 2_000).text
+        with pytest.raises(ValidationError):
+            QuoteCreate(text="x" * 2_001)
+
+    def test_the_remark_ceiling(self):
+        assert QuoteCreate(text="kept", note="x" * 1_000).note
+        with pytest.raises(ValidationError):
+            QuoteCreate(text="kept", note="x" * 1_001)
 
 
 class TestLoanCreate:
