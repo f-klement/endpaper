@@ -5,8 +5,9 @@ pages are for changing it.
 
 | Document | What it covers |
 |---|---|
+| [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
 | [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |
-| [data-model.md](data-model.md) | The ten tables, the relationships, and the privacy rule that every query must honour |
+| [data-model.md](data-model.md) | The twelve tables, the relationships, and the privacy rule that every query must honour |
 | [api.md](api.md) | Every endpoint, its auth requirement, and the status codes it returns |
 | [theming.md](theming.md) | The seven palettes and the rule that generated them, the ten wallpapers and the rule that admits them, the picker, and where an appearance is stored |
 | [frontend.md](frontend.md) | Component and page layout, state handling, the typed API client |
