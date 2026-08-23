@@ -331,6 +331,33 @@ describe("useLibrary collection filter", () => {
   });
 });
 
+describe("useLibrary author filter", () => {
+  it("omits it until a link asks for one", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    expect(lastQuery().has("author")).toBe(false);
+  });
+
+  it("starts on the author a link names", async () => {
+    // The key, not the display name: a merge changes what an author is called
+    // and a saved link naming the old spelling would show an empty shelf.
+    const { result } = renderLibrary("/?author=ursula%20k%20le%20guin");
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    expect(lastQuery().get("author")).toBe("ursula k le guin");
+  });
+
+  it("clears back to the whole library", async () => {
+    const { result } = renderLibrary("/?author=ursula%20k%20le%20guin");
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    act(() => result.current.setAuthor(null));
+
+    await waitFor(() => expect(lastQuery().has("author")).toBe(false));
+  });
+});
+
 describe("useLibrary lending and discussion filters", () => {
   it("omits both by default", async () => {
     const { result } = renderLibrary();

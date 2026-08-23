@@ -85,6 +85,7 @@ export default function Home() {
         onLocationChange={library.setLocation}
         onCollectionChange={library.setCollection}
         onSeriesClear={() => library.setSeries(null)}
+        onAuthorClear={() => library.setAuthor(null)}
         locations={library.locations}
         collections={library.collections}
         onSortChange={library.setSort}

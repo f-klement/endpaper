@@ -57,8 +57,17 @@ export function makeTagSet(): TagOut[] {
   ];
 }
 
+/**
+ * A book payload.
+ *
+ * `authors` is derived rather than defaulted, because the server derives it on
+ * every serialisation: a factory that let the credit line and the split names
+ * disagree would let a test pass against a payload the API cannot produce. The
+ * real rule lives in `backend/authors.split_authors`; this only has to agree
+ * with it for the shapes tests use.
+ */
 export function makeBook(overrides: Partial<BookOut> = {}): BookOut {
-  return {
+  const book = {
     id: id(),
     isbn: "9780441013593",
     title: "Dune",
@@ -80,6 +89,15 @@ export function makeBook(overrides: Partial<BookOut> = {}): BookOut {
     discuss_with: [],
     tags: [],
     ...overrides,
+  };
+  return {
+    ...book,
+    authors:
+      book.authors ??
+      (book.author ?? "")
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
   };
 }
 

@@ -1,7 +1,7 @@
 # Backend test coverage
 
-**1843 tests**, in 46 files. Line coverage was last measured at **96%** (4303 statements,
-186 missed) when the suite held 1571, which is 272 tests ago, and has not been re-measured
+**1950 tests**, in 48 files. Line coverage was last measured at **96%** (4303 statements,
+186 missed) when the suite held 1571, which is 379 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
 
@@ -45,7 +45,8 @@ is why the helper uses regexes.
 | `test_notifications.py` | 42 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, and that a failure leaves the loan to retry |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
-| `test_models.py` | 52 | Constraints, defaults, cascades, relationships, what may be switched into, and that a collection is not a privacy boundary |
+| `test_models.py` | 67 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that the unfiltered-book-query walk sees a query for one column as well as for a row, cannot be laundered by a binding in another function, by any binding form `symtable` knows about (including three an AST walk structurally cannot see), by a shadowing parameter or by a class body it never visited, and reads its own exemption count out of its docstring |
+| `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules, and the two bounds that keep them from being a plantable denial of service: a cap per bucket and a budget for the pass |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
@@ -62,6 +63,7 @@ is why the helper uses regexes.
 | `routers/test_books_progress.py` | 29 | **The reading log.** One unit per entry, the promotion to reading, that a member never sees another's, and the merge that would otherwise cascade it away |
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
+| `routers/test_books_authors.py` | 47 | The author index and its privacy, the `?author=` filter, merging and reversing one, the household wide mapping against the filtered shelf, the flat map, and undoing a merge |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
 | `routers/test_books_google.py` | 22 | Enrichment, the chosen-edition apply and that its body cannot overflow the database, candidates, the feature gate |
 | `routers/test_books_search.py` | 31 | **Free-text search.** That it works with no API key, that all six catalogues answer, and how they merge |

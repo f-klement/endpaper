@@ -30,6 +30,17 @@ export default function BookHeader({
   onRefreshMetadata,
 }: BookHeaderProps) {
   const { t } = useTranslation();
+
+  // "by {author}" with each name a link, without breaking the phrase into
+  // fragments a translator would have to reassemble. German does not keep
+  // English word order, so the catalogue holds the whole sentence and the
+  // placeholder is located by rendering it with a sentinel and splitting
+  // there: whatever sits on either side of the name stays where the
+  // translation put it. A catalogue that lost the placeholder degrades to the
+  // phrase followed by the names rather than to an exception.
+  const [byPrefix, bySuffix = ""] = t("book.by", { author: "\u0000" }).split(
+    "\u0000",
+  );
   const coverInput = useRef<HTMLInputElement>(null);
 
   function handleCover(event: ChangeEvent<HTMLInputElement>) {
@@ -96,7 +107,25 @@ export default function BookHeader({
         )}
         {book.author && (
           <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
-            {t("book.by", { author: book.author })}
+            {/* The credit line as printed, with each name inside it a link.
+                The split comes from the payload (`authors`) rather than from a
+                comma in here: the separator rule belongs to the server, which
+                is also where `categories` proves how easy it is to get wrong.
+                A book whose credit line is one name still renders the line, so
+                the text on screen is what the cover says either way. */}
+            {byPrefix}
+            {(book.authors ?? [book.author]).map((name, index) => (
+              <span key={name}>
+                {index > 0 && ", "}
+                <Link
+                  to={`/?author=${encodeURIComponent(name)}`}
+                  className="hover:text-accent-700 hover:underline dark:hover:text-accent-400"
+                >
+                  {name}
+                </Link>
+              </span>
+            ))}
+            {bySuffix}
           </p>
         )}
 

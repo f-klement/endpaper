@@ -15,6 +15,15 @@ export interface BookFilters {
   /** Whether a copy is physically here. Independent of `status`. */
   ownership: OwnershipStatus | null;
   series: string | null;
+  /**
+   * One person, as a name or as the key `GET /api/books/authors` issues.
+   *
+   * Whichever the link carried, kept verbatim so the chip can show it. Neither
+   * is durable: a merge moves the key as surely as it moves the display name,
+   * and an older link keeps working because the API resolves a folded spelling
+   * back to whoever it was folded into, not because a key is an identity.
+   */
+  author: string | null;
   location: string | null;
   /** Hardback, paperback, ebook, audiobook. "Do we have this on audio". */
   format: BookFormat | null;
@@ -47,6 +56,7 @@ export const DEFAULT_FILTERS: BookFilters = {
   status: null,
   ownership: null,
   series: null,
+  author: null,
   location: null,
   format: null,
   lending: null,
@@ -158,6 +168,7 @@ export function hasActiveFilters(filters: BookFilters): boolean {
     filters.status ||
     filters.ownership ||
     filters.series ||
+    filters.author ||
     filters.location ||
     filters.format ||
     filters.lending ||

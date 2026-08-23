@@ -1,10 +1,11 @@
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 import covers
 import isbn as isbn_utils
+from authors import split_authors
 from enums import (
     BookCondition,
     BookFormat,
@@ -171,6 +172,20 @@ class BookOut(BaseModel):
     title: str
     subtitle: str | None
     author: str | None
+    #: The credit line split into the people in it, in the order written.
+    #:
+    #: Derived from `author` on every serialisation, never stored: the column
+    #: stays the one place a book says who wrote it, and this is the same fact
+    #: parsed. It is here so a card can link each name to that author's shelf
+    #: without every client reimplementing the separator rule, which is the
+    #: mistake `categories` already documents (Google's own category names
+    #: contain commas, so that field is semicolon joined; this one is not, and
+    #: the two rules must not be swapped).
+    #:
+    #: Costs no statement: `authors.split_authors` is a string operation on a
+    #: column already loaded. See the note above `_books_to_out` about what
+    #: adding a per-request *query* here would cost.
+    authors: list[str] = []
     publisher: str | None
     year: int | None
     description: str | None
@@ -281,6 +296,21 @@ class BookOut(BaseModel):
         if value is None:
             return []
         return value
+
+    @model_validator(mode="after")
+    def derive_authors(self) -> BookOut:
+        """Split the credit line, every time this model is built.
+
+        Here rather than in `serialisation.books_to_out` so the two fields
+        cannot disagree: any future caller that builds a `BookOut` gets the
+        same split, and a value passed in for `authors` is overwritten rather
+        than believed. `author` is the fact; this is that fact parsed.
+
+        Free: a string operation on a column already loaded, with no statement
+        behind it.
+        """
+        self.authors = split_authors(self.author)
+        return self
 
 
 class BookEnrichmentOut(BaseModel):

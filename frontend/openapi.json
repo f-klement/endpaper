@@ -109,6 +109,125 @@
         "title": "AuthMode",
         "type": "string"
       },
+      "AuthorMergeOut": {
+        "description": "A spelling that reached this author through somebody's merge.\n\nCarries the alias row's id because undoing a merge is deleting that row,\nand the spelling as written because the key it is stored under is\nnormalised past the point of being readable (\"le guin ursula k\").",
+        "properties": {
+          "alias_id": {
+            "title": "Alias Id",
+            "type": "integer"
+          },
+          "spelling": {
+            "title": "Spelling",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alias_id",
+          "spelling"
+        ],
+        "title": "AuthorMergeOut",
+        "type": "object"
+      },
+      "AuthorMergeRequest": {
+        "description": "Fold these spellings into this name.\n\n`keys` are authors that exist on the shelf. `keep_name` is free text and\ndeliberately need not be one of them: a credit line stored as \"Le Guin,\nUrsula K.\" splits into two people, neither of whom is spelled correctly,\nand the repair is to fold both into a name typed by hand. Nothing about\nthat edits the book, and deleting the alias rows puts the shelf back.",
+        "properties": {
+          "keep_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Keep Name",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys",
+          "keep_name"
+        ],
+        "title": "AuthorMergeRequest",
+        "type": "object"
+      },
+      "AuthorOut": {
+        "description": "One person, as far as this shelf knows, and what it knows about them.\n\n`key` is the identity, not `name`. It is what the book filter and the merge\nendpoint take, because a display name changes the moment somebody merges a\nbetter spelling into it and a link that named it would then point nowhere.\n\n`book_count` is filtered by `visible_to`, like every count this API serves.\nAn unfiltered one would announce that somebody's private books exist and\nhow many, on a page every member can read.",
+        "properties": {
+          "book_count": {
+            "minimum": 0.0,
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "merged": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorMergeOut"
+            },
+            "title": "Merged",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "spellings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Spellings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "book_count"
+        ],
+        "title": "AuthorOut",
+        "type": "object"
+      },
+      "AuthorSuggestionOut": {
+        "description": "Names that are probably one person, and the rules that said so.\n\nA suggestion, never a verdict. `reasons` is returned so a reader can tell a\ncertainty from a guess: `spelling` is the same name with the spaces moved,\n`initials` is an abbreviated given name, and `fragment` is one name's words\nsitting inside another's, which is what a credit line stored in catalogue\norder splits into.",
+        "properties": {
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys",
+          "names",
+          "reasons"
+        ],
+        "title": "AuthorSuggestionOut",
+        "type": "object"
+      },
       "Body_import_csv": {
         "properties": {
           "file": {
@@ -983,6 +1102,14 @@
               }
             ],
             "title": "Author"
+          },
+          "authors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
           },
           "categories": {
             "default": [],
@@ -3411,6 +3538,25 @@
             }
           },
           {
+            "description": "Only books credited to this author, by key or by any spelling",
+            "in": "query",
+            "name": "author",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only books credited to this author, by key or by any spelling",
+              "title": "Author"
+            }
+          },
+          {
             "in": "query",
             "name": "location",
             "required": false,
@@ -3593,6 +3739,158 @@
           }
         ],
         "summary": "Add Book",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors": {
+      "get": {
+        "description": "Everybody credited on the shelf, with what the shelf knows about them.\n\nUnpaginated, like `/series` and `/locations`. The page it backs is a browse\nof the whole catalogue and filters in the browser, so paging it would trade\na list nobody scrolls for a request per keystroke. One entry per name, each\na name, a count and the spellings behind it, which is a smaller payload per\nrow than `/duplicates` already returns unpaginated with a whole `BookOut`\nper book.",
+        "operationId": "list_authors",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorOut"
+                  },
+                  "title": "Response List Authors",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Authors",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/aliases/{alias_id}": {
+      "delete": {
+        "description": "Undo one merge. The spelling becomes its own author again.\n\nThis is why merging is allowed to guess. Nothing was rewritten, so removing\nthe row restores exactly the state before it was written, and the books\nwere never involved.\n\nA row whose spelling this caller cannot see anywhere is **404**, for the\nsame reason `list_authors` does not list it: an alias naming a spelling\nthat survives only on somebody else's private book must not be confirmable.",
+        "operationId": "unmerge_author",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alias_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Alias Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Unmerge Author",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/merge": {
+      "post": {
+        "description": "Say that these spellings are one person.\n\n**Nothing in `books` is written.** Every named author keeps its credit line\nexactly as printed, and what changes is one row per spelling saying who\nthat spelling means. Deleting the row undoes it, and a later import that\nre-creates the spelling is folded by the row that is already there. A\nrewrite of the strings could do neither: it is not reversible, and it\nrepairs a split only until the same file is imported again.\n\nAny member, like creating and renaming a collection, and for the same\nreason: it is reversible, and a shelf only an admin can tidy is one nobody\ntidies. Unlike deleting a collection, which is admin only because it\nstrips a label off every book with no undo.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is:\na 403 would confirm that somebody owns a book by that name.\n\nA `keep_name` that is itself already folded into somebody resolves to that\nsomebody, so the map stays one lookup deep. A `keep_name` that no book\ncarries is allowed and is the point: \"Le Guin, Ursula K.\" splits into two\npeople, neither spelled correctly, and the repair is a name typed by hand.",
+        "operationId": "merge_authors",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Merge Authors",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/suggestions": {
+      "get": {
+        "description": "Names that are probably one person.\n\nA suggestion and never a verdict: it is offered because accepting one\nwrites an alias row and deleting that row puts the shelf back exactly as it\nwas. `authors.suggest_merges` records which rule produced each group so a\nreader can tell a near-certainty from a guess before pressing anything.",
+        "operationId": "list_author_suggestions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorSuggestionOut"
+                  },
+                  "title": "Response List Author Suggestions",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Author Suggestions",
         "tags": [
           "books"
         ]

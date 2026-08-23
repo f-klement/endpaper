@@ -5,6 +5,9 @@ behaviour under test belongs to the schema.
 """
 
 import ast
+import re
+import symtable
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -488,76 +491,324 @@ class TestEveryBookQueryIsFiltered:
     books.
 
     A statement may opt out with a `# visible_to exempt:` comment giving the
-    reason. There are four, in two groups, and `test_the_exemptions_are_still_the_known_ones`
+    reason. There are 5, in two groups, and `test_the_exemptions_are_still_the_known_ones`
     counts them so the list cannot grow quietly:
 
-    * three about **uniqueness**, which is a table-wide rule. A clash with a
+    * four about **uniqueness**, which is a table-wide rule. A clash with a
       book the caller cannot see is still a clash, so filtering the check would
       turn a 409 into a 500.
     * one in `serialisation`, which re-reads rows a caller already filtered in
       order to populate a relationship on the objects in hand.
+
+    The number above is parsed out of this paragraph by that test, so prose and
+    tree cannot drift. That is not a flourish: this round produced four
+    separate stated numbers that disagreed with the code, in four files.
     """
 
     EXEMPTION = "visible_to exempt:"
     PREDICATES = ("visible_to(", "in_trash_for(")
 
-    def _leaf_statements(self, tree):
-        """Statements that contain no other statement.
+    def _leaf_statements(self, scope):
+        """Statements in one scope that contain no other statement.
 
         The unit to check is the whole chained expression, since the filter is
         several calls along from `query(Book)`. Checking a `for` or an `if`
         would swallow its entire body and pass on a predicate used elsewhere
         inside it.
+
+        **Scope limited**: it does not descend into a nested function, which is
+        visited in its own right with its own bindings. Without that, a
+        statement inside a function would be checked twice, and the pass that
+        did not hold its bindings would report it.
         """
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.stmt):
-                continue
+        for node in self._statements_in(scope):
             if any(isinstance(child, ast.stmt) for child in ast.iter_child_nodes(node)):
                 continue
             yield node
 
+    def _statements_in(self, scope):
+        """Every statement in one scope, not descending into a nested scope.
+
+        A nested function is its own scope and is visited in its own right, so
+        walking into it here would attribute its bindings to the parent.
+        """
+        pending = list(ast.iter_child_nodes(scope))
+        while pending:
+            node = pending.pop()
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                # Each of these opens a scope and is visited as one, a class
+                # body included: skipping classes outright meant a query
+                # written directly in one was never checked at all.
+                continue
+            if isinstance(node, ast.stmt):
+                yield node
+            pending.extend(ast.iter_child_nodes(node))
+
     def _queries_books(self, node) -> bool:
+        """Whether this statement queries the books table at all.
+
+        Both shapes count, and the second was invisible to this rule for as
+        long as it existed. `query(Book)` returns rows; `query(Book.author)`
+        returns a column out of the same rows, and leaking which authors,
+        locations, series or collections exist is the same leak by a narrower
+        door: the tag counts and the collection counts were each fixed for
+        exactly that.
+
+        Counted over the tree with this rule's own scoping, **12** leaf
+        statements take the column form and none of them also takes the row
+        form: four in `routers/books.py`, four in `routers/stats.py`, two in
+        `routers/imports.py`, one in `routers/collections.py` and one in
+        `serialisation.py`. Sixteen more take the row form. One of the twelve
+        (`routers/imports.py`, the ISBN uniqueness check) carried no exemption
+        comment, because nothing had ever asked it for one.
+        """
         for call in ast.walk(node):
             if not isinstance(call, ast.Call):
                 continue
             func = call.func
             if not (isinstance(func, ast.Attribute) and func.attr == "query"):
                 continue
-            if any(isinstance(a, ast.Name) and a.id == "Book" for a in call.args):
-                return True
+            for argument in call.args:
+                if isinstance(argument, ast.Name) and argument.id == "Book":
+                    return True
+                # `Book.author`, `Book.id`, `func.count(Book.id)`: any column
+                # of the table, however deep in the expression.
+                if any(
+                    isinstance(child, ast.Attribute)
+                    and isinstance(child.value, ast.Name)
+                    and child.value.id == "Book"
+                    for child in ast.walk(argument)
+                ):
+                    return True
         return False
+
+    def _bindings(self, scope, table) -> tuple[set[str], set[str]]:
+        """`(names bound to a predicate here, names bound to anything else)`.
+
+        `routers/stats.py` applies the predicate six times and binds it once
+        (`visible = visible_to(current_user.id)`), so the statements using it
+        never contain the call. A purely textual rule reports all six, which is
+        a rule that cries wolf on the file that gets it most right.
+
+        **The second set comes from `symtable`, not from walking the AST.**
+        Two earlier versions enumerated binding syntax and both enumerations
+        were short: first only `ast.Assign`, then every `Name` in `Store`
+        context plus parameters, which still could not see
+        `except ValueError as visible`, `import os as visible` or a match
+        capture pattern, because each of those carries its target as a plain
+        `str` rather than as a `Name` node. There is nothing there to walk.
+
+        `symtable` is the compiler's own answer to "what does this scope bind",
+        so it covers those three, covers whatever Python binds next, and
+        replaces the parameter walk with a flag. `is_imported()` is needed
+        beside `is_assigned()`: `import os as visible` binds a name that
+        reports `is_assigned() == False`, which is the shape that would have
+        been missed by adopting this carelessly.
+
+        **It is asked about a source with the predicate assignments masked
+        out**, which is what makes it answer the right question. A symbol table
+        is set valued: `visible` bound once by `visible_to(...)` and `visible`
+        bound twice, the second time by a request value, are the same symbol
+        with the same flags. Asking it directly therefore accepted every
+        rebinding, which is the hole the previous version existed to close. So
+        `_masked` blanks the predicate targets in the text first, and whatever
+        `symtable` still reports as bound is bound by something else.
+        """
+        predicate = {
+            target.id
+            for node in self._statements_in(scope)
+            for target in self._predicate_targets(node)
+        }
+        bound = {
+            symbol.get_name()
+            for symbol in table.get_symbols()
+            if symbol.is_assigned() or symbol.is_parameter() or symbol.is_imported()
+        }
+        return predicate, bound
+
+    def _predicate_targets(self, node):
+        """The `Name` targets of a statement that assigns a predicate call."""
+        if not isinstance(node, ast.Assign):
+            return []
+        call = node.value
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and f"{call.func.id}(" in self.PREDICATES
+        ):
+            return []
+        return [target for target in node.targets if isinstance(target, ast.Name)]
+
+    def _masked(self, source: str) -> str:
+        """The source with every predicate assignment's target blanked out.
+
+        Replaced by underscores of **the same length**, so every line, column
+        and line number is exactly where it was and the scope mapping still
+        lines up. What comes back from `symtable` for this text is therefore
+        "bound by something that is not one of those assignments", which is the
+        question this rule actually asks.
+
+        A source that already contains a name of only underscores would have a
+        rebinding of *that* name missed. Stated rather than guarded, because
+        the guard would cost more than the case is worth.
+
+        Sliced as **bytes**, because `col_offset` is a UTF-8 byte offset rather
+        than a character index. A line with an accent before the target would
+        otherwise be cut in the wrong place, and the result is not a wrong
+        answer but a `SyntaxError` out of the lint.
+        """
+        lines = source.splitlines(keepends=True)
+        for node in ast.walk(ast.parse(source)):
+            for target in self._predicate_targets(node):
+                line = lines[target.lineno - 1].encode()
+                width = target.end_col_offset - target.col_offset
+                lines[target.lineno - 1] = (
+                    line[: target.col_offset]
+                    + b"_" * width
+                    + line[target.end_col_offset :]
+                ).decode()
+        return "".join(lines)
+
+    def _tables(self, source: str):
+        """The module's symbol table, plus every nested one by AST position.
+
+        Keyed on `(kind, name, lineno)`, which is what an `ast` scope node
+        knows about itself. Both agree on the `def` or `class` line even when
+        the definition is decorated, which was checked rather than assumed.
+
+        `annotation` tables are skipped: PEP 649 gives every annotated scope an
+        `__annotate__` child, and it binds nothing anybody wrote.
+        """
+        top = symtable.symtable(self._masked(source), "<rule>", "exec")
+        nested: dict[tuple[str, str, int], symtable.SymbolTable] = {}
+
+        def collect(table: symtable.SymbolTable) -> None:
+            for child in table.get_children():
+                if child.get_type() != "annotation":
+                    nested[(child.get_type(), child.get_name(), child.get_lineno())] = child
+                collect(child)
+
+        collect(top)
+        return top, nested
+
+    def _table_for(self, node, top, nested):
+        """The symbol table for one AST scope, or None if they disagree."""
+        if isinstance(node, ast.Module):
+            return top
+        kind = "class" if isinstance(node, ast.ClassDef) else "function"
+        return nested.get((kind, node.name, node.lineno))
+
+    def _scopes(self, node, top, nested, inherited=frozenset()):
+        """`(scope, names in scope)` for the module and every scope inside it.
+
+        Inherited downward, because a closure really can read the enclosing
+        function's local, and this rule is about what the interpreter would
+        resolve rather than about where the characters sit.
+
+        Recursion goes through the **immediately** nested scopes rather than
+        through every scope anywhere below, or a nested one is visited twice:
+        once here with its parent's bindings and once from the module with
+        none, and the second pass reports what the first accepts.
+
+        A **class body is a scope**, which is what `symtable` says too. It was
+        skipped outright once, and a query written in one was then never
+        checked at all.
+        """
+        table = self._table_for(node, top, nested)
+        if table is None:
+            # Nothing is known about this scope's bindings, so nothing is
+            # accepted on their strength. `test_every_scope_has_a_symbol_table`
+            # asserts this branch is unreachable over the real tree, so a
+            # mismatch cannot quietly start accepting queries.
+            predicate, other = set[str](), set[str]()
+        else:
+            predicate, other = self._bindings(node, table)
+        # Rebinding wins over inheriting, which is what makes a parameter named
+        # `visible` shadow the enclosing local rather than borrow its meaning.
+        names = (inherited | predicate) - other
+        yield node, names
+        for child in self._nested_scopes(node):
+            yield from self._scopes(child, top, nested, names)
+
+    def _nested_scopes(self, scope):
+        """Scopes opened directly in this one, not inside another one."""
+        pending = list(ast.iter_child_nodes(scope))
+        while pending:
+            node = pending.pop()
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                # Not descended into: its own pass recurses, with its bindings.
+                yield node
+                continue
+            pending.extend(ast.iter_child_nodes(node))
+
+    def _filtered_with(self, node) -> set[str]:
+        """Names handed **directly** to a `.filter(...)` or `.where(...)`.
+
+        Being in scope is not enough: `.order_by(visible)` and `.limit(visible)`
+        mention the name without filtering on it, and both used to pass. The
+        predicate has to reach the clause that narrows the rows.
+
+        Directly, and that is the second half. `filter(Book.author == visible)`
+        uses the name as a **value** on one side of a comparison, which filters
+        by whatever it holds rather than applying it as a predicate, and a walk
+        of the argument counted it. A predicate is passed whole.
+        """
+        names: set[str] = set()
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            if not (isinstance(func, ast.Attribute) and func.attr in {"filter", "where"}):
+                continue
+            names.update(
+                argument.id for argument in call.args if isinstance(argument, ast.Name)
+            )
+        return names
+
+    def _offenders(self, sources: dict[str, str]) -> list[str]:
+        """The rule itself, over source text rather than over the tree.
+
+        Separated so the guard tests drive **this** rather than its helpers.
+        Asserting on the helpers individually is what let a branch of the
+        previous version sit unreachable while every piece passed its own test.
+        """
+        offenders: list[str] = []
+        for name, source in sources.items():
+            lines = source.splitlines()
+            tree = ast.parse(source)
+            top, nested = self._tables(source)
+            for scope, bound in self._scopes(tree, top, nested):
+                for node in self._leaf_statements(scope):
+                    if not self._queries_books(node):
+                        continue
+                    # The statement, plus the comment block immediately above
+                    # it, which is where an exemption sits. Walked upward
+                    # rather than a fixed number of lines, so the reason can be
+                    # as long as it needs to be.
+                    start = node.lineno - 1
+                    while start > 0 and lines[start - 1].lstrip().startswith("#"):
+                        start -= 1
+                    window = "\n".join(lines[start : node.end_lineno])
+                    if self.EXEMPTION in window:
+                        continue
+                    if any(predicate in window for predicate in self.PREDICATES):
+                        continue
+                    if self._filtered_with(node) & bound:
+                        continue
+                    offenders.append(f"{name}:{node.lineno}")
+        return sorted(set(offenders))
 
     def test_no_unfiltered_book_query_reaches_the_database(self):
         backend = Path(__file__).resolve().parent.parent
-        offenders: list[str] = []
+        sources = {
+            str(path.relative_to(backend)): path.read_text()
+            for path in backend.rglob("*.py")
+            if path.relative_to(backend).parts[0] not in {"tests", "migrations", ".venv"}
+        }
 
-        for path in backend.rglob("*.py"):
-            relative = path.relative_to(backend)
-            if relative.parts[0] in {"tests", "migrations", ".venv"}:
-                continue
-            source = path.read_text()
-            lines = source.splitlines()
-
-            for node in self._leaf_statements(ast.parse(source)):
-                if not self._queries_books(node):
-                    continue
-                # The statement, plus the comment block immediately above it,
-                # which is where an exemption sits. Walked upward rather than a
-                # fixed number of lines, so the reason can be as long as it
-                # needs to be.
-                start = node.lineno - 1
-                while start > 0 and lines[start - 1].lstrip().startswith("#"):
-                    start -= 1
-                window = "\n".join(lines[start : node.end_lineno])
-                if self.EXEMPTION in window:
-                    continue
-                if any(predicate in window for predicate in self.PREDICATES):
-                    continue
-                offenders.append(f"{relative}:{node.lineno}")
-
-        assert offenders == [], (
+        assert self._offenders(sources) == [], (
             "These statements query Book without visible_to() or in_trash_for(): "
-            + ", ".join(offenders)
+            + ", ".join(self._offenders(sources))
         )
 
     def test_the_exemptions_are_still_the_known_ones(self):
@@ -565,7 +816,8 @@ class TestEveryBookQueryIsFiltered:
 
         The docstring above says how many there are and what they are for, and
         a number written in prose is a number that goes stale. Adding one is
-        allowed; adding one without saying why in both places is not.
+        allowed; adding one without saying why in both places is not, and the
+        number in the prose is read back here rather than trusted.
         """
         backend = Path(__file__).resolve().parent.parent
         exempt: list[str] = []
@@ -578,19 +830,277 @@ class TestEveryBookQueryIsFiltered:
                 if self.EXEMPTION in line:
                     exempt.append(str(relative))
 
+        # Read back out of the class docstring, so the sentence a reader
+        # believes and the list below cannot disagree.
+        stated = re.search(r"There are (\d+), in two groups", self.__doc__ or "")
+        assert stated is not None, "the class docstring no longer states a count"
+        assert int(stated.group(1)) == len(exempt), (
+            f"the docstring says {stated.group(1)} exemptions and the tree has "
+            f"{len(exempt)}"
+        )
+
         # By file rather than by line: a line number here would fail on any
         # edit above the exemption, which is a test that cries wolf.
         assert sorted(exempt) == [
             "routers/books.py",
             "routers/books.py",
             "routers/books.py",
+            "routers/imports.py",
             "serialisation.py",
         ], exempt
 
-    def test_the_guard_would_notice_an_unfiltered_query(self, tmp_path):
+    def _probe(self, source: str) -> list[str]:
+        """Drive the whole rule over synthetic source.
+
+        The guards below go through this rather than through a helper, because
+        the previous version's helpers each passed their own test while the
+        branch that used them was wrong.
+        """
+        return self._offenders({"probe.py": textwrap.dedent(source).strip()})
+
+    def test_the_guard_would_notice_an_unfiltered_query(self):
         """A guard that cannot fail is not a guard. This pins that the shape it
         looks for is the shape the code actually uses."""
-        offending = "books = db.query(Book).filter(Book.title == 'Dune').all()"
+        assert self._probe(
+            "books = db.query(Book).filter(Book.title == 'Dune').all()"
+        ) == ["probe.py:1"]
+
+    def test_the_guard_accepts_a_predicate_bound_to_a_local(self):
+        """`routers/stats.py` binds it once and applies it six times. A rule
+        that reported those six would be a rule people work around."""
+        assert (
+            self._probe(
+                """
+                def stats(db, user):
+                    visible = visible_to(user.id)
+                    return db.query(Book.id).filter(visible).all()
+                """
+            )
+            == []
+        )
+
+    def test_a_binding_in_another_function_launders_nothing(self):
+        """The hole, and it is not merely a loophole: delete the first function
+        and the second is reported, so the verdict depended on code that could
+        not run."""
+        assert self._probe(
+            """
+            def elsewhere(db, user):
+                visible = visible_to(user.id)
+                return visible
+
+            def leaky(db):
+                return db.query(Book.author).filter(visible).all()
+            """
+        ) == ["probe.py:6"]
+
+    def test_a_name_rebound_to_something_else_is_not_a_predicate(self):
+        """One assignment made the name a predicate forever, whatever the next
+        line did to it."""
+        assert self._probe(
+            """
+            def leaky(db, request, user):
+                visible = visible_to(user.id)
+                visible = request.args["visible"]
+                return db.query(Book).filter(visible).all()
+            """
+        ) == ["probe.py:4"]
+
+    def test_every_way_of_rebinding_counts_not_only_assignment(self):
+        """Reading `ast.Assign` alone closed one of six doors.
+
+        A `for` target, `with ... as`, a walrus, an annotated assignment and an
+        augmented one all rebind the name, and each shape was accepted. Binding
+        **context** catches them together rather than one at a time.
+        """
+        shapes = {
+            "a for target": "for visible in rows: pass",
+            "a with binding": "with open(path) as visible: pass",
+            "a walrus": "if (visible := request.args): pass",
+            "an annotated assignment": "visible: str = request.args",
+            "an augmented assignment": "visible += request.args",
+        }
+        for label, line in shapes.items():
+            offenders = self._probe(
+                f"""
+                def leaky(db, request, user, rows, path):
+                    visible = visible_to(user.id)
+                    {line}
+                    return db.query(Book).filter(visible).all()
+                """
+            )
+            assert offenders == ["probe.py:4"], f"{label}: {offenders}"
+
+    def test_the_three_bindings_an_ast_walk_cannot_see(self):
+        """Each of these carries its target as a plain string, not a `Name`.
+
+        `except ... as`, `import ... as` and a match capture pattern were all
+        accepted by a `Store` context walk, because there is no `Store` node in
+        any of them to find. This is why the rule asks `symtable` rather than
+        enumerating syntax: two enumerations were already short.
+
+        Written out rather than built by interpolation, because each shape is
+        several lines with its own indentation.
+        """
+        shapes = {
+            "except as": (
+                "def leaky(db, user):\n"
+                "    visible = visible_to(user.id)\n"
+                "    try:\n"
+                "        pass\n"
+                "    except ValueError as visible:\n"
+                "        pass\n"
+                "    return db.query(Book).filter(visible).all()\n"
+            ),
+            "import as": (
+                "def leaky(db, user):\n"
+                "    visible = visible_to(user.id)\n"
+                "    import os as visible\n"
+                "    return db.query(Book).filter(visible).all()\n"
+            ),
+            "match capture": (
+                "def leaky(db, user, thing):\n"
+                "    visible = visible_to(user.id)\n"
+                "    match thing:\n"
+                "        case {'a': visible}:\n"
+                "            pass\n"
+                "    return db.query(Book).filter(visible).all()\n"
+            ),
+        }
+        for label, source in shapes.items():
+            offenders = self._offenders({"probe.py": source})
+            assert len(offenders) == 1, f"{label} was accepted: {offenders}"
+
+    def test_every_scope_has_a_symbol_table(self):
+        """The rule's one permissive branch, asserted unreachable.
+
+        A scope whose table cannot be found accepts nothing on the strength of
+        its bindings, which is the safe direction but silent. This walks the
+        real tree and proves the two agree on every scope in it, so the branch
+        is a guard rather than a hole.
+        """
+        backend = Path(__file__).resolve().parent.parent
+        unmatched: list[str] = []
+
+        for path in backend.rglob("*.py"):
+            if path.relative_to(backend).parts[0] in {"tests", "migrations", ".venv"}:
+                continue
+            source = path.read_text()
+            top, nested = self._tables(source)
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if not isinstance(
+                    node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+                ):
+                    continue
+                if self._table_for(node, top, nested) is None:
+                    unmatched.append(
+                        f"{path.relative_to(backend)}:{node.lineno} ({node.name})"
+                    )
+
+        assert unmatched == [], unmatched
+
+    def test_a_parameter_shadows_an_inherited_predicate(self):
+        """The case that contradicted the rule's own stated property.
+
+        `visible` inside `inner` is the parameter, whatever the enclosing
+        function bound. A rule about what the interpreter resolves has to see
+        that; a rule about where the characters sit does not.
+        """
+        assert self._probe(
+            """
+            def outer(db, user):
+                visible = visible_to(user.id)
+
+                def inner(visible):
+                    return db.query(Book).filter(visible).all()
+
+                return inner(request.args)
+            """
+        ) == ["probe.py:5"]
+
+    def test_a_query_in_a_class_body_is_checked_at_all(self):
+        """It was not: the walk skipped `ClassDef` outright, so this shape was
+        never examined rather than being examined and accepted."""
+        assert self._probe(
+            """
+            class Report:
+                rows = db.query(Book).all()
+            """
+        ) == ["probe.py:2"]
+
+    def test_the_predicate_used_as_a_value_is_not_a_filter(self):
+        """`filter(Book.author == visible)` filters **by** the name's contents.
+        A predicate is passed whole, and a walk of the argument counted the
+        comparison as one."""
+        assert self._probe(
+            """
+            def leaky(db, user):
+                visible = visible_to(user.id)
+                return db.query(Book).filter(Book.author == visible).all()
+            """
+        ) == ["probe.py:3"]
+
+    def test_mentioning_the_predicate_without_filtering_on_it_is_not_enough(self):
+        """`order_by(visible)` narrows nothing, and passed."""
+        assert self._probe(
+            """
+            def leaky(db, user):
+                visible = visible_to(user.id)
+                return db.query(Book).order_by(visible).all()
+            """
+        ) == ["probe.py:3"]
+
+    def test_a_closure_may_use_the_enclosing_function_s_predicate(self):
+        """The interpreter resolves it, so the rule does too. Reporting this
+        would be a rule about where characters sit rather than about what
+        runs."""
+        assert (
+            self._probe(
+                """
+                def outer(db, user):
+                    visible = visible_to(user.id)
+
+                    def inner():
+                        return db.query(Book).filter(visible).all()
+
+                    return inner()
+                """
+            )
+            == []
+        )
+
+    def test_an_exemption_still_opts_out(self):
+        assert (
+            self._probe(
+                """
+                # visible_to exempt: the ISBN is unique across the whole table.
+                taken = db.query(Book.isbn).all()
+                """
+            )
+            == []
+        )
+
+    def test_the_guard_would_notice_a_query_for_one_column(self):
+        """The narrower door, and the one this rule could not see.
+
+        An author index, a location list and a series list are all built this
+        way, and each of them publishes a name and a count. A private book
+        reaching one of those is the same leak as a private book reaching a
+        listing.
+        """
+        offending = "rows = db.query(Book.author).all()"
         node = next(self._leaf_statements(ast.parse(offending)))
         assert self._queries_books(node)
-        assert not any(predicate in offending for predicate in self.PREDICATES)
+
+    def test_the_guard_would_notice_a_column_inside_a_function(self):
+        """`func.count(Book.id)` is how every count in this app is written."""
+        offending = "rows = db.query(func.count(Book.id)).all()"
+        node = next(self._leaf_statements(ast.parse(offending)))
+        assert self._queries_books(node)
+
+    def test_the_guard_leaves_another_table_alone(self):
+        """Or the rule would demand `visible_to` on every query in the app."""
+        offending = "rows = db.query(Tag.name).all()"
+        node = next(self._leaf_statements(ast.parse(offending)))
+        assert not self._queries_books(node)

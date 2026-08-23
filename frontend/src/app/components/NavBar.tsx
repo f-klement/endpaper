@@ -32,6 +32,7 @@ const PRIMARY: { to: string; label: MessageKey; icon: IconName; end: boolean }[]
 /** Everything else. Navigation only: the actions below are written out. */
 const SECONDARY: { to: string; label: MessageKey }[] = [
   { to: "/series", label: "series.title" },
+  { to: "/authors", label: "authors.title" },
   { to: "/collections", label: "collections.title" },
   { to: "/stats", label: "nav.stats" },
   { to: "/settings", label: "nav.settings" },

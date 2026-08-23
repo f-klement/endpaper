@@ -25,6 +25,7 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     onLendingChange: vi.fn(),
     onDiscussChange: vi.fn(),
     onSeriesClear: vi.fn(),
+    onAuthorClear: vi.fn(),
     locations: [],
     collections: [],
     onSortChange: vi.fn(),
@@ -109,5 +110,24 @@ describe("the collection filter", () => {
     await userEvent.selectOptions(screen.getByLabelText("Collection"), "");
 
     expect(props.onCollectionChange).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("the author chip", () => {
+  it("is absent until a link filtered by one", () => {
+    renderFilters();
+
+    expect(screen.queryByText(/^Author:/)).not.toBeInTheDocument();
+  });
+
+  it("names the author and can be taken off", async () => {
+    const props = renderFilters({
+      filters: { ...DEFAULT_FILTERS, author: "ursula k le guin" },
+    });
+
+    expect(screen.getByText("Author: ursula k le guin")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByLabelText("Clear selection"));
+
+    expect(props.onAuthorClear).toHaveBeenCalled();
   });
 });

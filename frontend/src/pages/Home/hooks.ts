@@ -58,6 +58,7 @@ function toParams(filters: BookFilters): ListBooksParams {
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.ownership ? { ownership: filters.ownership } : {}),
     ...(filters.series ? { series: filters.series } : {}),
+    ...(filters.author ? { author: filters.author } : {}),
     ...(filters.location ? { location: filters.location } : {}),
     ...(filters.format ? { format: filters.format } : {}),
     ...(filters.lending ? { lending: filters.lending } : {}),
@@ -80,6 +81,7 @@ export interface UseLibraryResult {
   setStatus: (status: BookFilters["status"]) => void;
   setOwnership: (ownership: BookFilters["ownership"]) => void;
   setSeries: (series: BookFilters["series"]) => void;
+  setAuthor: (author: BookFilters["author"]) => void;
   setLocation: (location: BookFilters["location"]) => void;
   setFormat: (format: BookFilters["format"]) => void;
   setLending: (lending: BookFilters["lending"]) => void;
@@ -185,6 +187,7 @@ export function useLibrary(): UseLibraryResult {
       discuss:
         searchParams.has("discuss") && searchParams.get("discuss") !== "false",
       series: searchParams.get("series"),
+      author: searchParams.get("author"),
       location: searchParams.get("location"),
       // `?collection=4` is the link the collections page offers, and
       // `?collection=unfiled` is the one the picker's empty option offers.
@@ -252,6 +255,7 @@ export function useLibrary(): UseLibraryResult {
     setOwnership: (ownership) =>
       setFilters((current) => ({ ...current, ownership })),
     setSeries: (series) => setFilters((current) => ({ ...current, series })),
+    setAuthor: (author) => setFilters((current) => ({ ...current, author })),
     setLocation: (location) =>
       setFilters((current) => ({ ...current, location })),
     setFormat: (format) => setFilters((current) => ({ ...current, format })),

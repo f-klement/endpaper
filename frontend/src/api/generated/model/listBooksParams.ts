@@ -22,6 +22,10 @@ export type ListBooksParams = {
   format?: BookFormat | null;
   lending?: LendingWillingness | null;
   series?: string | null;
+  /**
+   * Only books credited to this author, by key or by any spelling
+   */
+  author?: string | null;
   location?: string | null;
   /**
    * Only books filed in this collection

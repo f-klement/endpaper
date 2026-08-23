@@ -46,6 +46,7 @@ describe("hasActiveFilters", () => {
     ["a collection", { collection: 3 }],
     // Both spellings of the field narrow the view, so both count.
     ["the unfiled books", { collection: "unfiled" as const }],
+    ["an author", { author: "ursula k le guin" }],
   ])("is true with %s", (_label, overrides) => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, ...overrides })).toBe(true);
   });

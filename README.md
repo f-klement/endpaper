@@ -88,6 +88,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
 - **Saved views**: keep a filter combination under a name, including a wishlist of books
   you want but do not own
+- **Author pages**: everybody your shelf credits, with their books behind one click. Where
+  one person has ended up under two spellings, fold them together: your books are never
+  edited, and any fold can be undone
 - **Statistics**: what is on the shelf, who reads what, what got finished when, and how
   many pages you read each month
 

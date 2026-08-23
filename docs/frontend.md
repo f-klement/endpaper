@@ -50,6 +50,7 @@ src/
 │   ├── LoansPage/          index.ts · LoansPage.tsx · hooks.ts · components/
 │   ├── LoginPage/          index.ts · LoginPage.tsx · hooks.ts · components/
 │   ├── SeriesPage/         index.ts · SeriesPage.tsx · hooks.ts · components/
+│   ├── AuthorsPage/        index.ts · AuthorsPage.tsx · hooks.ts · components/
 │   ├── DuplicatesPage/     index.ts · DuplicatesPage.tsx · hooks.ts · components/
 │   ├── SettingsPage/       index.ts · SettingsPage.tsx · hooks.ts · components/
 │   ├── StatsPage/          index.ts · StatsPage.tsx · hooks.ts · components/

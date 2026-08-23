@@ -1244,6 +1244,190 @@ accidental duplicates* above.
 Matching is deliberately lossy because it is a suggestion a person confirms, not an
 automatic merge.
 
+### An author is a name on a book, not a row
+
+`books.author` stays what it has always been: one free text `String(500)`, comma separated
+when a book credits more than one person. There is no `authors` table and no join table,
+and an author page is a `GROUP BY` over that column, exactly as a series page is a
+`GROUP BY` over `series_name`.
+
+The reference implementation was read rather than guessed at. **Jelu** (MIT, the closest
+architectural sibling) does the opposite: `AuthorTable` is a UUID row with a name,
+biography, dates, image and six link fields, and `book_authors`, `book_translators` and
+`book_narrators` join books to it. Its merge repoints every book from the losing author to
+the surviving one and deletes the loser's row. That is the right design **for Jelu**,
+because it has somewhere to put a biography and a portrait, and this repository does not:
+the shelf knows a name and nothing else about a person, and Wikipedia enrichment is
+deliberately out of scope. A table whose only column is the name it is keyed by buys a
+join, an orphan-cleanup rule and a write path on every importer, and answers no question
+that grouping does not.
+
+What normalising **would** have bought is identity, and this design does not buy it back.
+An author is addressed by `authors.author_key(name)`, a normalised form of the name itself,
+so it is not durable: merging "Le Guin" and "Ursula K." into "Ursula K. Le Guin" leaves an
+index keyed `ursula k le guin` and neither old key names an entry. An old link keeps working
+because the alias row **redirects** it, which is the same treatment a display name gets, so
+the key is no more stable than the name it came from and the API takes either.
+
+Stated plainly because it is the cost of the design rather than a detail of it: if a
+biography, a portrait or a birth date is ever wanted, the only thing to hang them on is a
+key that moves under an ordinary tidy-up, and that is the point at which a real `authors`
+table earns its join. What this design buys instead is the thing that argument does not
+touch: a merge that writes **zero rows to `books`**, is undone by deleting one row, and
+keeps folding the same split every time an import re-creates it.
+
+### Two spellings are one person because somebody said so, not because the strings changed
+
+The rejected alternative is the one the derived design appears to force: make the merge
+**rewrite `books.author`** everywhere the folded spelling appears. It was refused for four
+reasons, in order of how badly each one bites.
+
+**It is not reversible.** Rewriting is a destructive edit to the field that records what the
+cover says, and nothing is left to say what it said before. Undo would need a second table
+holding the old strings, which is the alias table with worse ergonomics.
+
+**It does not stay repaired.** `flip_catalogue_name` cannot save a name a source hands over
+in catalogue order without marking it (see below), so the same CSV imported twice re-creates
+the same split. An alias row folds it again the moment it reappears; a rewrite has to be
+done again by hand, and nothing tells anybody it is needed.
+
+**It cannot express a name no book carries.** "Le Guin, Ursula K." splits into two people,
+neither of them spelled correctly. The repair is a name typed by a person, which a rewrite
+would have to write into every affected book, editing the credit line on books whose
+printed credit is not wrong.
+
+**It multiplies across peer sync.** Every rewritten row takes a new `updated_at`, so one
+tidy-up re-pushes every affected book to every peer, and two instances that tidy the same
+names independently produce two rewrites of the same strings with no way to tell they were
+the same decision.
+
+So `author_aliases` stores the decision, `books` is never touched, and undoing a merge is
+deleting one row. That is also what licenses the deduplication suggestions to guess: a
+wrong suggestion accepted costs one row and one click to undo, which is why
+`authors.suggest_merges` is allowed to be lossy in the way `_duplicate_key` already is.
+
+### Three keys, and only the conservative one folds without asking
+
+| Key | Folds | Decides |
+|---|---|---|
+| `author_key` | case, accents, punctuation (which becomes a space) | automatically, nobody asked |
+| `squashed_key` | the above plus every space | a suggestion, somebody confirms |
+| an alias row | anything at all | a person, reversibly |
+
+The line between the first two is a counter-example rather than a principle:
+`author_key` folds `J.R.R. Tolkien` into `J. R. R. Tolkien`, and the rule that would also
+reach `JRR Tolkien` folds `Ann Aker` into `Anna Ker`. An automatic fold has no row to
+delete to undo it, so it has to be a difference nobody would call a decision.
+
+### The credit line is split on commas, and the importers' flip rule is not reused
+
+`books.author` is comma separated. Every writer of it says so: `metadata._marc_authors`,
+`_bnf_authors` and `google_books` all join with `", "`, and every import path runs a single
+name through `flip_catalogue_name` first, so a catalogue-order name is flipped **before**
+it reaches the column.
+
+This is a different decision from the one `categories` made, and the two must not be swapped.
+Categories are semicolon joined *because* Google's category names contain commas
+("Fiction, general"). Author names contain commas too, and the field is comma separated
+anyway, because a comma in it means "and" far more often than it means a name in catalogue
+order.
+
+`flip_catalogue_name` therefore cannot be reused on a stored credit line. It flips on
+exactly one comma, which is also what "Terry Pratchett, Neil Gaiman" has, so applying it
+here would mangle every two-author book on the shelf. What is left is a residue: a name
+that reached the column in catalogue order anyway splits into two people. That residue is
+exactly what merging exists to repair, and the `fragment` suggestion rule is aimed at it.
+
+### The author page is the library, filtered
+
+There is no `/authors/{key}` page. The index at `/authors` lists everybody with their book
+count, spellings and merges, and following one goes to `/?author=<key>`, which is the
+library grid with a removable chip: the same route `/series` already takes.
+
+The alternative was a page of its own rendering the books itself, which means a second book
+grid in a second page folder, kept in step with the first through every later change to a
+book card. "Everything by this person" is a filtered library, and the library is already the
+thing that renders a filtered library well: it sorts, pages, filters further and shows the
+same cards as everywhere else.
+
+### Deduplication has two entry points, and the suggestions are the smaller one
+
+The suggestion rules catch a spelling, an abbreviated given name and a fragment. A
+**misspelling** is none of those. `Tolkein` against `Tolkien` shares no word, no surname and
+no squashed key. `Fyodor Dostoyevsky` against `Fyodor Dostoevsky` does share a word, and
+still produces nothing: the fragment rule wants one name's words to sit *inside* the other's
+and neither is a subset, while the initials rule buckets on the last word, which is the word
+that is misspelled. Both were run against `suggest_merges` and both return `[]`. They are
+exactly what an alias row is for, and the first thing `models.AuthorAlias` names as its
+purpose.
+
+So the authors page also folds names by hand: select any two, keep one of their names or type
+a third. One name selected on its own is a **rename**, which is the same write and was
+unreachable for the same reason. Shipping only the suggested path would have made
+deduplication reachable exactly where a heuristic had already guessed for you, which is the
+opposite of what the feature is for.
+
+The rules are not therefore redundant. They are what turns "I know these two are the same" into
+"here are the six pairs worth looking at", which is the part a person cannot do by scrolling.
+
+### Merging is any member's, and so is undoing it
+
+The same rule as creating and renaming a collection, and for the same reason: it is
+reversible, and a shelf only an admin may tidy is a shelf nobody tidies. Deleting a
+collection is admin only because it strips a label off every book at once with no undo;
+nothing here has that shape.
+
+### The alias mapping is household wide; the shelf is what `visible_to` filters
+
+The same shape as a collection, shipped the day before: **the name is everybody's, the count
+is yours.** Every alias applies to every member, so one book is filed under the same person
+for all of them, `?author=` resolves identically for all of them, and a `canonical_name` is
+not withheld from anybody.
+
+**The privacy rule is one line and it is not on the mapping.** An author entry exists only
+because `counts` was populated, and `counts` is populated only from rows a query filtered
+with `visible_to`. So an author whose every book is private appears for nobody else: no book
+the other member can see is credited to a spelling that resolves to that person, so no entry
+is built. The mapping says who a name means; it never says a book exists. A row proves even
+less than it looks like it does, because it outlives the book it was created for: an alias
+whose spelling nothing carries any more is an orphan that maps a name nothing is credited
+with.
+
+**Filtering the mapping per caller was built, reviewed and withdrawn**, and the reasons are
+worth keeping because the idea is an attractive one:
+
+* It made **identity** per member. One book resolved to a different key *and* a different
+  display name depending on who asked, which is not a narrower view of one catalogue, it is
+  two catalogues.
+* It **broke an old link**. A spelling in the middle of a chain is on no book at all, so a
+  per-caller gate dropped it for everybody and `?author=` answered "nothing by her" for a
+  name that had just been merged.
+* The merge endpoint gates on a different set (`reachable`, which is keyed on canonical
+  names), so **the two gates disagreed**, and `list_authors` handed a member a string that
+  the merge endpoint would then answer questions about. The narrow gate leaked what the wide
+  one withheld, with no guessing required.
+
+What is still filtered is what a member has evidence for. `AuthorOut.merged` lists a folded
+spelling only where it appears on a book the caller can see, and `DELETE
+/authors/aliases/{id}` refuses one that does not: **undo what you can see the effect of.**
+That is authority rather than secrecy, and its cost is the orphan above, which is unreachable
+and therefore undeletable. Accepted: it changes no view, and it starts working again by
+itself if an import re-creates the spelling, which is the property the whole design is for.
+
+`POST /api/books/authors/merge` still answers 404 for an author that exists only on somebody
+else's private book, exactly as an invisible book is 404 rather than 403: that question is
+about the shelf, and any other answer confirms a book is on it.
+
+### Author aliases never cross to a peer
+
+`implementation_plan.md` A6. The peer payload carries `author` as the string on the book, and
+that does not change: a peer receives the credit line as printed and applies its own
+household's decisions to it, if it has any. An alias is shelf taxonomy in the same class as
+`location` and a collection name, and it is one household's reading of its own shelf.
+
+This is the property the rewrite alternative could not have had. Since merging writes nothing
+to `books`, a merge changes no `updated_at` and produces no sync traffic at all.
+
 ### Merging repoints through the ORM, not a bulk UPDATE
 
 A bulk `UPDATE ... synchronize_session=False` leaves the session's loaded collections

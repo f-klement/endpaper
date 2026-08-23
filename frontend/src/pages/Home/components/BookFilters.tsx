@@ -30,6 +30,7 @@ interface BookFiltersProps {
   onLendingChange: (lending: Filters["lending"]) => void;
   onDiscussChange: (discuss: boolean) => void;
   onSeriesClear: () => void;
+  onAuthorClear: () => void;
   locations: LocationOut[];
   collections: CollectionOut[];
   onSortChange: (sort: Filters["sort"]) => void;
@@ -53,6 +54,7 @@ export default function BookFilters({
   onLocationChange,
   onCollectionChange,
   onSeriesClear,
+  onAuthorClear,
   locations,
   collections,
   onSortChange,
@@ -269,6 +271,27 @@ export default function BookFilters({
               </option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* An author filter is arrived at by following a link, like the series
+          one below, so it is a removable chip rather than a dropdown over
+          every name on the shelf. The chip shows the key, which is what the
+          link carried: the display name is on the authors page, and showing it
+          here would need a second request to find out what it is. */}
+      {filters.author && (
+        <div className="mt-2">
+          <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-accent-50 border border-accent-200 text-accent-800 dark:bg-accent-950 dark:border-accent-900 dark:text-accent-300">
+            {t("authors.label")}: {filters.author}
+            <button
+              type="button"
+              onClick={onAuthorClear}
+              aria-label={t("common.clearSelection")}
+              className="opacity-60 hover:opacity-100 leading-none"
+            >
+              ×
+            </button>
+          </span>
         </div>
       )}
 

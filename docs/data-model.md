@@ -252,6 +252,60 @@ the UI offers as suggestions rather than as a closed list.
 real row, because a typo would otherwise make a second shelf rather than a second spelling.
 See *Collections* below.
 
+`author` is the third member of the same family and is derived the same way, with one
+addition: a table of the decisions grouping cannot make. See *Authors* below.
+
+## Authors
+
+**There is no `authors` table.** `books.author` is a single free text column holding a
+**comma separated** credit line, and an author is a name inside it. Everything the author
+pages serve is a `GROUP BY` over that column, exactly as the series pages are a `GROUP BY`
+over `series_name`, and `backend/authors.py` is the whole of the derivation.
+
+An author is addressed by a **key**, which is derived from the name rather than being an
+identity behind it: `authors.author_key(name)` casefolds, strips accents, turns punctuation
+into a space and collapses the result. A merge retires the keys it folds along with the
+spellings, so a key is exactly as durable as the name, and a link carrying a retired one
+resolves through the alias rows rather than by the key surviving. So `J.R.R. Tolkien`, `J. R. R. Tolkien` and `j r r tolkien` are one
+person with no decision required of anybody, while `JRR Tolkien` is not: that fold needs the
+spaces dropped too, which also folds `Ann Aker` into `Anna Ker`, so it is offered as a
+suggestion instead. See [decisions.md](decisions.md), *Three keys*.
+
+**`author_aliases`** is the one stored table in the feature, and it holds decisions rather
+than data:
+
+| Column | |
+|---|---|
+| `alias_key` | the key of the spelling being folded away. **Unique**: a spelling means one person |
+| `canonical_name` | the name to show, as a member typed or picked it. Need not be a name any book carries |
+| `created_by_user_id` | provenance, read by nothing, nullable so deleting an account keeps the household's decisions |
+
+Nothing in it is a foreign key, because there is no author row to point at, and that is what
+makes it survive: a spelling no book carries any more leaves an alias that matches nothing
+and costs one row, and the same alias starts working again by itself the day an import
+re-creates that spelling. Merging never writes to `books`, so undoing one is deleting the
+row and the credit lines still say what the covers say.
+
+**Splitting is on the comma, and that is not the rule `categories` uses.** Categories are
+semicolon joined because Google's category names contain commas; author names contain commas
+too, and this field is comma separated anyway, because every writer of it joins with `", "`
+and every importer runs a single name through `flip_catalogue_name` first. The residue is a
+name that reached the column in catalogue order regardless ("Le Guin, Ursula K."), which
+splits into two people; repairing that is what merging is for, and the `fragment` suggestion
+rule is aimed at it.
+
+**The privacy rule reaches all of it, and it is on the shelf rather than on the mapping.**
+The index is built from one query that applies `visible_to`, so a private book cannot put a
+name in the list, add to a count, appear in a suggestion or answer the `?author=` filter. An
+author whose every book is private therefore appears for nobody else: nothing they can see is
+credited to a spelling that resolves to that person. Merging an author nobody can see is
+**404**, not 403.
+
+The **mapping** is household wide, like a collection's name: every member resolves a spelling
+to the same person, so identity does not fork per reader and an old link resolves the same way
+for everybody. What is filtered beside the shelf is what a member has evidence for: a folded
+spelling is listed, and its undo offered, only where it appears on a book they can see.
+
 ## Copies
 
 A household that genuinely owns two paperbacks of one title has two objects, and the whole
@@ -517,6 +571,11 @@ trashed rows here would move that trap rather than remove it.
 on the column. A stored lowercase column would be the same name written twice, with the two
 free to disagree. `books.collection_id` is indexed beside it, because filtering the library
 by collection is a browse over the whole catalogue rather than a search.
+
+**One person per spelling** (migration `a9c4e7b21d03`). `author_aliases.alias_key` is
+unique, so re-merging a spelling somewhere else replaces the row rather than adding a second
+one for a reader to choose between. No index on `canonical_name`: the table is read whole on
+every author request (it is one row per merge a household has made) and never searched.
 
 **Lending willingness** (migration `d1a7f36b9c58`). `ix_books_lending`, for the same reason
 `ix_books_format` exists: "what could we lend the book club" is a filter over the whole

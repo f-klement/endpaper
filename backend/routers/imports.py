@@ -298,6 +298,10 @@ class _CatalogueIndex:
             # title collide, which is acceptable for a status and would not be
             # for anything destructive.
             by_title=_first_wins((title.lower(), book_id) for book_id, _isbn, title in visible),
+            # visible_to exempt: the ISBN is unique across the whole table, so
+            # an import row that collides with a book this member cannot see
+            # still collides. Filtering here would let the import write a row
+            # the database then refuses, turning a reported conflict into a 500.
             taken_isbns={isbn for (isbn,) in db.query(Book.isbn).filter(Book.isbn.isnot(None))},
             statuses={
                 row.book_id: row

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
 
 import covers
+from authors import AUTHOR_NAME_MAX
 from database import Base
 from enums import (
     AuthMode,
@@ -99,6 +100,90 @@ class Collection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     books: Mapped[list[Book]] = relationship("Book", back_populates="collection")
+
+
+#: The longest key an alias row files a spelling under.
+#:
+#: `authors.author_key` never lengthens a name except through NFKD (a ligature
+#: becomes two letters), and the longest spelling it can be given is the whole
+#: of `books.author`, so this is that column's 500 with room for the expansion.
+#: `AUTHOR_NAME_MAX` bounds the other end: what somebody may *type* as the name
+#: to keep.
+AUTHOR_KEY_MAX = 500
+
+
+class AuthorAlias(Base):
+    """One spelling of a name, and the person a member said it means.
+
+    **The whole author feature is derived except for this table.** Authors are
+    not rows: `books.author` stays the free text credit line it has always
+    been, and an author page is a `GROUP BY` over it, exactly as a series page
+    is a `GROUP BY` over `series_name`. What that cannot do is record a
+    decision, and "Le Guin, Ursula K. is Ursula K. Le Guin" is a decision:
+    there is no spelling difference a machine can be trusted to fold on its
+    own, no place to put the answer, and nothing to stop the next import
+    splitting the name again. So the decision is stored, and the books are not
+    touched. `docs/decisions.md` records the rewrite-the-strings alternative
+    and why it was refused.
+
+    **Nothing here is a foreign key, and that is the design rather than an
+    omission.** An author has no row to point at. A spelling that no book
+    carries any more leaves an alias that matches nothing, which costs a row
+    and breaks nothing, and the same alias starts working again by itself the
+    day an import re-creates that spelling. That is the property a rewrite of
+    `books.author` cannot have: it repairs the split once, and the next import
+    of the same file makes it again.
+
+    **One lookup is always enough.** Following a row's `canonical_name` one hop
+    further never changes it: the merge handler repoints every row that pointed
+    at a name it is folding away, and resolves a name that is itself folded
+    before storing it. A row naming **itself** satisfies that too, and is the
+    ordinary way a display name is pinned against the most-used-spelling
+    default. `authors.resolve_alias_map` still flattens what it is given,
+    because a hand-edited database is not bound by a handler, and
+    `tests/routers/test_books_authors.py::test_one_lookup_is_always_enough`
+    asserts the invariant after three merges in a ring.
+
+    **The mapping is household wide and so are the names in it**, exactly like
+    a collection's name: every member resolves a spelling to the same person,
+    and `canonical_name` is not withheld from anybody. What is filtered is the
+    shelf, not the mapping. An author appears for a member only because that
+    member can see a book credited to a spelling resolving to them, so an
+    author whose every book is private appears for nobody else, and a row here
+    proves no book exists: it outlives the book it was created for.
+    """
+
+    __tablename__ = "author_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    # Unique, because a spelling means one person. Re-merging a spelling
+    # somewhere else replaces the row rather than adding a second one, which is
+    # what keeps a lookup a lookup instead of a decision about which row wins.
+    #
+    # The key rather than the spelling as written: `authors.author_key` already
+    # folds case, accents and punctuation, so storing "Le Guin, Ursula K." as
+    # typed would leave "LE GUIN, URSULA K." unfolded on the next import.
+    alias_key: Mapped[str] = mapped_column(
+        String(AUTHOR_KEY_MAX), unique=True, nullable=False
+    )
+
+    # The name to show, as a member typed or picked it. Not a key: this is the
+    # one string in the feature that is a choice rather than a derivation, and
+    # it is what an author page is headed with.
+    #
+    # It need not be a name any book carries. Merging two fragments into a name
+    # that appears nowhere is how a credit line stored in catalogue order gets
+    # repaired without editing the book.
+    canonical_name: Mapped[str] = mapped_column(String(AUTHOR_NAME_MAX), nullable=False)
+
+    # Provenance, like `Collection.created_by_user_id`, and read by nothing.
+    # Deliberately not indexed: no query consults it and there is no
+    # delete-account path whose child check it would speed up.
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Tag(Base):

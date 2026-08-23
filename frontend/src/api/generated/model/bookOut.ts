@@ -19,6 +19,7 @@ export interface BookOut {
   added_at: string;
   added_by?: UserOut | null;
   author: string | null;
+  authors?: string[];
   categories?: string[];
   collection_id?: number | null;
   collection_name?: string | null;

@@ -82,7 +82,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
+| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the household's own |
@@ -92,6 +92,10 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/export?format=csv\|txt` | user | File download, not paginated |
 | GET | `/api/books/search?q=` | user | Free-text search for the add flow. Needs no API key |
 | GET | `/api/books/series` | user | Every series, with the gaps in it |
+| GET | `/api/books/authors` | user | Everybody credited on the shelf, with counts, spellings and merges |
+| GET | `/api/books/authors/suggestions` | user | Names that look like one person |
+| POST | `/api/books/authors/merge` | user | `{keys, keep_name}`. Says two spellings are one person. **404** for an author the caller cannot see |
+| DELETE | `/api/books/authors/aliases/{id}` | user | 204. Undoes one merge. **404** for one the caller cannot see |
 | GET | `/api/books/locations` | user | Distinct shelf locations, most-populated first |
 | GET | `/api/books/duplicates` | user | Books that look like the same work |
 | GET | `/api/books/trash` | user | What the caller has deleted and could put back |
@@ -121,6 +125,9 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 "read" and "write" are the access rules in [security.md](security.md): read means the book
 is public or yours; write additionally means public books are a shared shelf any member may
 curate.
+
+`/authors` and `/authors/suggestions` are declared before `/{book_id}` too, or the first
+would be a request for the book with id "authors".
 
 `/search` and `/bulk` are declared **before** the `/{book_id}` routes. FastAPI matches in
 declaration order, so `/search` would otherwise be a request for the book with id
@@ -226,6 +233,50 @@ to unread.
 `my_progress_recorded_at`, all of them the caller's own. The percentage is **derived**,
 never stored twice: `page / page_count` when the page count is known, else the recorded
 `percent`, else null, clamped at 100. `ProgressOut` deliberately does not repeat it.
+
+### Authors
+
+There is no author table. `books.author` is a comma separated credit line, an author is a
+name inside it, and `GET /authors` groups the column. Each entry carries a `key`
+(casefolded, unaccented, punctuation turned to spaces), the `name` to show, a
+`book_count`, every `spelling` on the shelf most used first, and `merged`, the spellings
+folded in by a member with the alias row id behind each one.
+
+**Link either; the key is not more durable than the name.** `GET /api/books?author=` takes
+a key, a display name, or a spelling a merge has folded away, and resolves all three through
+the household's alias rows, which is what keeps an old link working after a tidy-up,
+**including a spelling no book carries any more**: the middle of a chain of merges is on
+nothing, and resolving through the shelf instead of through the mapping answered it with an
+empty library. A merge moves the key
+too (folding "Le Guin" into "Ursula K. Le Guin" retires `le guin` as an entry key), so
+nothing here is an identity in the sense a row id would be. The pages link the **name**,
+because that is what the library's filter chip then shows back. An unknown name is an empty
+shelf rather than a 404: this is a filter on a listing, and a stale bookmark should not be
+an error page.
+
+`GET /authors/suggestions` offers groups of names that look like one person, each with the
+rules that produced it: `spelling` (the same name with the spaces moved), `initials` (an
+abbreviated given name against a full one, which requires an abbreviation on one side or
+every pair of people sharing a surname would be offered), and `fragment` (one name's words
+sitting inside another's, which is what a credit line stored in catalogue order splits
+into). It is a suggestion and never a verdict.
+
+`POST /authors/merge` is reached two ways from the page, because a suggestion is not the
+only case: accepting a suggested group, or selecting names by hand, which is the only path
+to a **misspelling** (no rule joins `Tolkein` to `Tolkien`) and to a **rename** (one name
+selected, a new one typed).
+
+It takes `{keys, keep_name}` and writes **nothing to `books`**: it
+records one row per spelling saying who that spelling means. `keep_name` is free text and
+need not be a name any book carries, because "Le Guin, Ursula K." splits into two people
+neither of whom is spelled correctly. A `keep_name` that is itself already folded into
+somebody resolves to them, so one lookup is always enough. `DELETE
+/authors/aliases/{id}` undoes exactly one merge, and since nothing was rewritten the shelf
+returns to precisely what it was.
+
+`BookOut` carries `authors`, the credit line split into the names in it, derived on every
+serialisation and never stored. It costs no statement, and it exists so a client can link
+each name without reimplementing the separator rule.
 
 ### Series, shelves and duplicates
 

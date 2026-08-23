@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,261 tests**, in 83 files.
+**1,301 tests**, in 88 files.
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
@@ -71,8 +71,8 @@ readers as a side effect.
 | `pages/components/BookCard.test.tsx`  |    39 | One book in a grid: status, tags, ownership, the talk-about-it marker, selection, and the fold out |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
-| `pages/Home/*`                        |   156 | Filters (incl. the collection filter and its unfiled option), ownership, lending, pagination, selection, the bulk verbs, and the table view |
-| `pages/BookDetail/*`                  |   144 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, enrichment, the reading log and its two units |
+| `pages/Home/*`                        |   162 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, and the table view |
+| `pages/BookDetail/*`                  |   149 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, enrichment, the reading log and its two units, and the credit line whose names are links |
 | `pages/ScanPage/*`                    |   124 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
 | `pages/SettingsPage/*`                |   100 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
 | `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |
@@ -81,6 +81,7 @@ readers as a side effect.
 | `pages/StatsPage/*`                   |    18 | Every section, the pages-read series, and the all-zero case |
 | `pages/SeriesPage/*`                  |     7 | Series cards, their counts and their gaps                   |
 | `pages/CollectionsPage/*`             |    14 | Naming parts of the shelf: creating, renaming, the delete that names its count, and the link into the filtered library |
+| `pages/AuthorsPage/*`                 |    29 | The index and its browser-side search, the suggestion card's checkboxes, selecting two names no rule joins, renaming one, the count in the confirmation, the rename wording when one name is selected, the note when a merge lands under a third name (and its silence when it did not), and undoing one merge |
 | `pages/DuplicatesPage/*`              |     8 | Suspected duplicates and confirming a merge                 |
 | `pages/errors/*`                      |     9 | 404, 403 and the render-crash boundary                      |
 | `theme/index.test.tsx`                |    31 | Mode resolution, the palette on the document, more contrast, and a wallpaper turned off |

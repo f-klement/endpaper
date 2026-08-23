@@ -117,7 +117,11 @@ describe("BookDetail", () => {
     expect(
       await screen.findByRole("heading", { name: "Dune" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("by Frank Herbert")).toBeInTheDocument();
+    // The credit line is a phrase with each name inside it linked, so the
+    // sentence is spread across elements and the link is what to assert on.
+    expect(
+      screen.getByRole("link", { name: "Frank Herbert" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Chilton")).toBeInTheDocument();
   });
 

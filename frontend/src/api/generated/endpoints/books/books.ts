@@ -27,6 +27,9 @@ import type {
 
 import type {
   ApplyEnrichmentParams,
+  AuthorMergeRequest,
+  AuthorOut,
+  AuthorSuggestionOut,
   BackfillCoversParams,
   BodyUploadCover,
   BookCreate,
@@ -512,6 +515,514 @@ export const useAddBook = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getAddBookMutationOptions(options), queryClient);
 };
+export const getListAuthorsUrl = () => {
+  return `/api/books/authors`;
+};
+
+/**
+ * Everybody credited on the shelf, with what the shelf knows about them.
+ *
+ * Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+ * of the whole catalogue and filters in the browser, so paging it would trade
+ * a list nobody scrolls for a request per keystroke. One entry per name, each
+ * a name, a count and the spellings behind it, which is a smaller payload per
+ * row than `/duplicates` already returns unpaginated with a whole `BookOut`
+ * per book.
+ * @summary List Authors
+ */
+export const listAuthors = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorOut[]> => {
+  return customFetch<AuthorOut[]>(getListAuthorsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuthorsQueryKey = () => {
+  return [`/api/books/authors`] as const;
+};
+
+export const getListAuthorsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuthors>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuthorsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuthors>>> = ({
+    signal,
+  }) => listAuthors({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthors>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListAuthorsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuthors>>
+>;
+export type ListAuthorsQueryError = unknown;
+
+export function useListAuthors<
+  TData = Awaited<ReturnType<typeof listAuthors>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuthors>>,
+          TError,
+          Awaited<ReturnType<typeof listAuthors>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAuthors<
+  TData = Awaited<ReturnType<typeof listAuthors>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuthors>>,
+          TError,
+          Awaited<ReturnType<typeof listAuthors>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAuthors<
+  TData = Awaited<ReturnType<typeof listAuthors>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Authors
+ */
+
+export function useListAuthors<
+  TData = Awaited<ReturnType<typeof listAuthors>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAuthors>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListAuthorsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUnmergeAuthorUrl = (aliasId: number) => {
+  return `/api/books/authors/aliases/${aliasId}`;
+};
+
+/**
+ * Undo one merge. The spelling becomes its own author again.
+ *
+ * This is why merging is allowed to guess. Nothing was rewritten, so removing
+ * the row restores exactly the state before it was written, and the books
+ * were never involved.
+ *
+ * A row whose spelling this caller cannot see anywhere is **404**, for the
+ * same reason `list_authors` does not list it: an alias naming a spelling
+ * that survives only on somebody else's private book must not be confirmable.
+ * @summary Unmerge Author
+ */
+export const unmergeAuthor = async (
+  aliasId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getUnmergeAuthorUrl(aliasId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getUnmergeAuthorMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof unmergeAuthor>>,
+    TError,
+    { aliasId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof unmergeAuthor>>,
+  TError,
+  { aliasId: number },
+  TContext
+> => {
+  const mutationKey = ["unmergeAuthor"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof unmergeAuthor>>,
+    { aliasId: number }
+  > = (props) => {
+    const { aliasId } = props ?? {};
+
+    return unmergeAuthor(aliasId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UnmergeAuthorMutationResult = NonNullable<
+  Awaited<ReturnType<typeof unmergeAuthor>>
+>;
+
+export type UnmergeAuthorMutationError = HTTPValidationError;
+
+/**
+ * @summary Unmerge Author
+ */
+export const useUnmergeAuthor = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof unmergeAuthor>>,
+      TError,
+      { aliasId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof unmergeAuthor>>,
+  TError,
+  { aliasId: number },
+  TContext
+> => {
+  return useMutation(getUnmergeAuthorMutationOptions(options), queryClient);
+};
+export const getMergeAuthorsUrl = () => {
+  return `/api/books/authors/merge`;
+};
+
+/**
+ * Say that these spellings are one person.
+ *
+ * **Nothing in `books` is written.** Every named author keeps its credit line
+ * exactly as printed, and what changes is one row per spelling saying who
+ * that spelling means. Deleting the row undoes it, and a later import that
+ * re-creates the spelling is folded by the row that is already there. A
+ * rewrite of the strings could do neither: it is not reversible, and it
+ * repairs a split only until the same file is imported again.
+ *
+ * Any member, like creating and renaming a collection, and for the same
+ * reason: it is reversible, and a shelf only an admin can tidy is one nobody
+ * tidies. Unlike deleting a collection, which is admin only because it
+ * strips a label off every book with no undo.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is:
+ * a 403 would confirm that somebody owns a book by that name.
+ *
+ * A `keep_name` that is itself already folded into somebody resolves to that
+ * somebody, so the map stays one lookup deep. A `keep_name` that no book
+ * carries is allowed and is the point: "Le Guin, Ursula K." splits into two
+ * people, neither spelled correctly, and the repair is a name typed by hand.
+ * @summary Merge Authors
+ */
+export const mergeAuthors = async (
+  authorMergeRequest: AuthorMergeRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorOut> => {
+  return customFetch<AuthorOut>(getMergeAuthorsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(authorMergeRequest),
+  });
+};
+
+export const getMergeAuthorsMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof mergeAuthors>>,
+    TError,
+    { data: AuthorMergeRequest },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof mergeAuthors>>,
+  TError,
+  { data: AuthorMergeRequest },
+  TContext
+> => {
+  const mutationKey = ["mergeAuthors"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof mergeAuthors>>,
+    { data: AuthorMergeRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return mergeAuthors(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MergeAuthorsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof mergeAuthors>>
+>;
+export type MergeAuthorsMutationBody = AuthorMergeRequest;
+export type MergeAuthorsMutationError = HTTPValidationError;
+
+/**
+ * @summary Merge Authors
+ */
+export const useMergeAuthors = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof mergeAuthors>>,
+      TError,
+      { data: AuthorMergeRequest },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof mergeAuthors>>,
+  TError,
+  { data: AuthorMergeRequest },
+  TContext
+> => {
+  return useMutation(getMergeAuthorsMutationOptions(options), queryClient);
+};
+export const getListAuthorSuggestionsUrl = () => {
+  return `/api/books/authors/suggestions`;
+};
+
+/**
+ * Names that are probably one person.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `authors.suggest_merges` records which rule produced each group so a
+ * reader can tell a near-certainty from a guess before pressing anything.
+ * @summary List Author Suggestions
+ */
+export const listAuthorSuggestions = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorSuggestionOut[]> => {
+  return customFetch<AuthorSuggestionOut[]>(getListAuthorSuggestionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuthorSuggestionsQueryKey = () => {
+  return [`/api/books/authors/suggestions`] as const;
+};
+
+export const getListAuthorSuggestionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listAuthorSuggestions>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuthorSuggestionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAuthorSuggestions>>
+  > = ({ signal }) => listAuthorSuggestions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthorSuggestions>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListAuthorSuggestionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuthorSuggestions>>
+>;
+export type ListAuthorSuggestionsQueryError = unknown;
+
+export function useListAuthorSuggestions<
+  TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuthorSuggestions>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuthorSuggestions>>,
+          TError,
+          Awaited<ReturnType<typeof listAuthorSuggestions>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAuthorSuggestions<
+  TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuthorSuggestions>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuthorSuggestions>>,
+          TError,
+          Awaited<ReturnType<typeof listAuthorSuggestions>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListAuthorSuggestions<
+  TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuthorSuggestions>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Author Suggestions
+ */
+
+export function useListAuthorSuggestions<
+  TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuthorSuggestions>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListAuthorSuggestionsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getBulkActionUrl = () => {
   return `/api/books/bulk`;
 };

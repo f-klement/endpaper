@@ -12,6 +12,12 @@ raises `PydanticUndefinedAnnotation`, and FastAPI would fail at startup rather
 than at request time.
 """
 
+from schemas.author import (
+    AuthorMergeOut,
+    AuthorMergeRequest,
+    AuthorOut,
+    AuthorSuggestionOut,
+)
 from schemas.book import (
     BookCreate,
     BookDetailsUpdate,
@@ -76,6 +82,10 @@ __all__ = [
     "AppearanceOut",
     "AppearanceUpdate",
     "AuthConfigOut",
+    "AuthorMergeOut",
+    "AuthorMergeRequest",
+    "AuthorOut",
+    "AuthorSuggestionOut",
     "BookCreate",
     "BookDetailsUpdate",
     "BookDiscussUpdate",

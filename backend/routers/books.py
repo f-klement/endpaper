@@ -20,6 +20,13 @@ import isbn as isbn_utils
 import metadata
 import settings_store
 from auth import require_admin
+from authors import (
+    AuthorEntry,
+    author_key,
+    build_index,
+    resolve_alias_map,
+    suggest_merges,
+)
 from config import COVERS_DIR
 from dependencies import (
     BookForOwner,
@@ -44,6 +51,8 @@ from enums import (
     TagCategory,
 )
 from models import (
+    AUTHOR_KEY_MAX,
+    AuthorAlias,
     Book,
     Collection,
     Loan,
@@ -60,6 +69,10 @@ from models import (
 from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
     MAX_ROW_ID,
+    AuthorMergeOut,
+    AuthorMergeRequest,
+    AuthorOut,
+    AuthorSuggestionOut,
     BookCreate,
     BookDetailsUpdate,
     BookDiscussUpdate,
@@ -501,6 +514,13 @@ def list_books(
     format: Annotated[BookFormat | None, Query()] = None,
     lending: Annotated[LendingWillingness | None, Query()] = None,
     series: Annotated[str | None, Query(max_length=255)] = None,
+    author: Annotated[
+        str | None,
+        Query(
+            max_length=AUTHOR_KEY_MAX,
+            description="Only books credited to this author, by key or by any spelling",
+        ),
+    ] = None,
     location: Annotated[str | None, Query(max_length=120)] = None,
     collection_id: Annotated[
         int | None,
@@ -552,6 +572,41 @@ def list_books(
 
     if series is not None:
         query = query.filter(Book.series_name == series)
+
+    # An author is a name inside a comma separated column, so this filter
+    # cannot be a comparison: SQLite can neither split the column nor fold the
+    # case, accents and punctuation that decide whether two spellings are one
+    # person, and it knows nothing about the alias rows that decide the rest.
+    # The ids are resolved in Python and handed back as a set, which is exactly
+    # what `/duplicates` does with the same normalisation and for the same
+    # reason.
+    #
+    # The list is bounded by the visible catalogue, because every id in it came
+    # out of a query that applied `visible_to`. Two extra statements, and they
+    # are **per page rather than per request**: this runs again for every page
+    # of a filtered listing, and each time it re-reads every visible credit
+    # line and re-splits it. Measured in `test_books_authors.py`.
+    #
+    # One id is one bound parameter, and SQLite has a ceiling on those:
+    # `SQLITE_LIMIT_VARIABLE_NUMBER`, measured per environment rather than
+    # assumed, is **250,000** in the shipped image (SQLite 3.53.2) and in the
+    # container the suites run in, which CI and the repository's test runner
+    # pin to one digest (3.51.2). Every runtime that runs the suite therefore
+    # agrees with production, and the suite can reach the boundary production
+    # has.
+    #
+    # The one place that differs is a bare `uv run` on a developer's machine:
+    # SQLite 3.50.4, **32,766**. `CLAUDE.md` forbids running the suites there
+    # anyway, but it is worth the sentence, because a debugging session on this
+    # query can raise `OperationalError` at 32,767 rows for a clause neither CI
+    # nor production would refuse, and the obvious conclusion from that is the
+    # wrong one.
+    #
+    # Against a household catalogue of a few thousand books, of which one
+    # author holds a fraction, every one of these numbers is far away. If that
+    # stops being true the fix is a temporary table, not a bigger IN clause.
+    if author is not None:
+        query = query.filter(Book.id.in_(_author_book_ids(db, current_user.id, author)))
 
     if location is not None:
         query = query.filter(Book.location == location)
@@ -1114,6 +1169,288 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
             SeriesOut(name=name, book_count=counts[name], missing_indexes=missing)
         )
     return result
+
+
+# ── Authors ───────────────────────────────────────────────────────────────────
+#
+# Declared here, above `/{book_id}`, for the reason `/series` and `/export` are:
+# FastAPI matches in declaration order, so `/authors` written after `/{book_id}`
+# is a request for the book with id "authors".
+#
+# There is no author table. An author is a name inside `books.author`, and these
+# endpoints group the column exactly as `list_series` groups `series_name`. The
+# one thing that is stored is `author_aliases`, which holds decisions rather than
+# data: see `models.AuthorAlias` and `docs/decisions.md`.
+
+
+def _author_index(
+    db: Session, user_id: int
+) -> tuple[list[AuthorEntry], list[AuthorAlias]]:
+    """Every author this caller can see, and the alias rows behind them.
+
+    **Two statements, whatever the shelf holds**: the visible credit lines, and
+    the alias table. Measured by `test_books_authors.py::
+    test_the_author_index_costs_two_statements` on a shelf of 40 books, which
+    is the same number it costs on a shelf of one.
+
+    The scan is unpaginated on purpose, like `/duplicates` and `/locations`
+    before it: the grouping needs the whole catalogue to count anything
+    correctly, and a page of it would count only the page. It selects two
+    columns rather than whole rows, so what comes back is one id and one string
+    per book.
+
+    `visible_to` is applied here and nowhere else in the feature. Every author,
+    every count and every book id downstream is derived from these rows, so a
+    private book cannot reach an author page, a count, a suggestion or a filter
+    without passing this line first.
+    """
+    # `.tuples()` rather than `.all()`: a `Row` is a tuple at runtime and is
+    # not one to a type checker, and `build_index` takes pairs.
+    rows = (
+        db.query(Book.id, Book.author)
+        .filter(Book.author.isnot(None), visible_to(user_id))
+        .tuples()
+        .all()
+    )
+    # Ordered oldest first, which is what makes "the most recent decision wins"
+    # mean something in `build_index` when two aliases name one person with
+    # different spellings.
+    aliases = db.query(AuthorAlias).order_by(AuthorAlias.id).all()
+    return build_index(rows, {row.alias_key: row.canonical_name for row in aliases}), aliases
+
+
+def _author_out(entry: AuthorEntry, alias_ids: dict[str, int]) -> AuthorOut:
+    """One index entry as the API serves it.
+
+    `merged` is built from the entry's own `alias_keys`, which `build_index`
+    fills in only for a spelling that appears on a book **this caller can
+    see**. That is the privacy line for the alias table: the rows are household
+    wide, and one whose spelling survives only on somebody else's private book
+    would otherwise announce that the book exists.
+
+    The author's own key is left out of it: see the comment below.
+    """
+    spelling_for = {author_key(spelling): spelling for spelling in reversed(entry.spellings)}
+    return AuthorOut(
+        key=entry.key,
+        name=entry.name,
+        book_count=len(entry.book_ids),
+        spellings=list(entry.spellings),
+        merged=sorted(
+            (
+                AuthorMergeOut(alias_id=alias_ids[key], spelling=spelling_for.get(key, entry.name))
+                for key in entry.alias_keys
+                # The author's own key is not a spelling folded **into** them.
+                # A merge writes a row for every key it was given, the kept one
+                # included, which is what pins the display name; listing it
+                # here put "Folded in: J. R. R. Tolkien" under the heading
+                # "J. R. R. Tolkien", with an undo beside it.
+                if key != entry.key and key in alias_ids
+            ),
+            key=lambda merged: merged.spelling.casefold(),
+        ),
+    )
+
+
+def _author_book_ids(db: Session, user_id: int, author: str) -> list[int]:
+    """The visible books credited to one author, by key or by any spelling.
+
+    Liberal in what it accepts: `author_key` is idempotent on a key this API
+    issued, so a link carrying the key and a link carrying the display name
+    both land here. A spelling that a merge folded away resolves to the person
+    it was folded into, which is what makes an old link keep working after a
+    tidy-up.
+
+    Resolved through the **whole** alias map rather than through the spellings
+    on this caller's shelf. A link may name a spelling no book carries any more:
+    fold "Le Guin" into "Ursula K. Le Guin", then that into "U. K. Le Guin",
+    and the middle name is on nothing. Resolving through the shelf returned an
+    empty list for it, which reads as "we own nothing by her".
+
+    **Re-read per page, not per request.** The listing is paginated and this
+    runs on every page of it, so a scroll through an author's shelf re-scans
+    and re-splits the whole visible catalogue once per page. Acceptable at
+    household size and the same trade `/duplicates` makes, but it is per page,
+    which is the number to remember if this ever needs a cache.
+
+    An unknown name gives an empty list rather than a 404. This is a filter on
+    a listing, and a listing that matches nothing is empty: the alternative
+    turns a stale bookmark into an error page.
+    """
+    entries, aliases = _author_index(db, user_id)
+    resolved = resolve_alias_map({row.alias_key: row.canonical_name for row in aliases})
+    key = author_key(author)
+    canonical = resolved.get(key)
+    if canonical is not None:
+        key = author_key(canonical)
+    return next((list(entry.book_ids) for entry in entries if entry.key == key), [])
+
+
+@router.get("/authors", response_model=list[AuthorOut])
+def list_authors(db: DbSession, current_user: CurrentUser) -> list[AuthorOut]:
+    """Everybody credited on the shelf, with what the shelf knows about them.
+
+    Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+    of the whole catalogue and filters in the browser, so paging it would trade
+    a list nobody scrolls for a request per keystroke. One entry per name, each
+    a name, a count and the spellings behind it, which is a smaller payload per
+    row than `/duplicates` already returns unpaginated with a whole `BookOut`
+    per book.
+    """
+    entries, aliases = _author_index(db, current_user.id)
+    alias_ids = {row.alias_key: row.id for row in aliases}
+    return [_author_out(entry, alias_ids) for entry in entries]
+
+
+@router.get("/authors/suggestions", response_model=list[AuthorSuggestionOut])
+def list_author_suggestions(
+    db: DbSession, current_user: CurrentUser
+) -> list[AuthorSuggestionOut]:
+    """Names that are probably one person.
+
+    A suggestion and never a verdict: it is offered because accepting one
+    writes an alias row and deleting that row puts the shelf back exactly as it
+    was. `authors.suggest_merges` records which rule produced each group so a
+    reader can tell a near-certainty from a guess before pressing anything.
+    """
+    entries, _ = _author_index(db, current_user.id)
+    return [
+        AuthorSuggestionOut(
+            keys=list(group.keys), names=list(group.names), reasons=list(group.reasons)
+        )
+        for group in suggest_merges(entries)
+    ]
+
+
+@router.post("/authors/merge", response_model=AuthorOut)
+def merge_authors(
+    payload: AuthorMergeRequest, db: DbSession, current_user: CurrentUser
+) -> AuthorOut:
+    """Say that these spellings are one person.
+
+    **Nothing in `books` is written.** Every named author keeps its credit line
+    exactly as printed, and what changes is one row per spelling saying who
+    that spelling means. Deleting the row undoes it, and a later import that
+    re-creates the spelling is folded by the row that is already there. A
+    rewrite of the strings could do neither: it is not reversible, and it
+    repairs a split only until the same file is imported again.
+
+    Any member, like creating and renaming a collection, and for the same
+    reason: it is reversible, and a shelf only an admin can tidy is one nobody
+    tidies. Unlike deleting a collection, which is admin only because it
+    strips a label off every book with no undo.
+
+    An author nobody can see is **404, not 403**, exactly as a private book is:
+    a 403 would confirm that somebody owns a book by that name.
+
+    A `keep_name` that is itself already folded into somebody resolves to that
+    somebody, so the map stays one lookup deep. One exception, below: a row
+    naming one of the keys being merged is not followed, because that is how a
+    merge is reversed.
+
+    A `keep_name` that no book carries is allowed and is the point: "Le Guin,
+    Ursula K." splits into two people, neither spelled correctly, and the
+    repair is a name typed by hand.
+    """
+    entries, aliases = _author_index(db, current_user.id)
+    by_key = {entry.key: entry for entry in entries}
+
+    # `author_key` on what arrived, not the raw string. It is idempotent on a
+    # key this API issued, so a caller may send either the key or a spelling of
+    # the name and gets the same answer.
+    requested = {author_key(key) for key in payload.keys}
+    # An author the caller can see, or a spelling a previous merge folded away
+    # that they can still see the effect of. The second half is what lets a
+    # merge be corrected without undoing it first: the folded spelling is no
+    # longer an author in its own right, so it is not in `by_key`.
+    reachable = by_key.keys() | {key for entry in entries for key in entry.alias_keys}
+    if any(key not in reachable for key in requested):
+        raise HTTPException(status_code=404, detail="Author not found")
+
+    by_alias_key = {row.alias_key: row for row in aliases}
+    keep_name = payload.keep_name
+    existing_target = by_alias_key.get(author_key(keep_name))
+    # Followed whoever the row belongs to: a canonical name is household wide,
+    # like a collection's name, so there is nothing here to withhold. Gating
+    # this on what the caller can see was tried and withdrawn: it made a chain
+    # storable, and it disagreed with the `reachable` set above, which is a
+    # different question with a different answer.
+    #
+    # **But not a row naming one of the keys being merged.** Reversing a merge
+    # is folding A and B the other way round, which arrives as the same two
+    # keys with the other `keep_name`; following the row that says "B means A"
+    # would rewrite the request back into itself and answer 200 with nothing
+    # changed.
+    if existing_target is not None and existing_target.alias_key not in requested:
+        # The name to keep is one that a previous merge already folded into
+        # somebody else. Following it keeps the map flat: without this the new
+        # rows would point at a name that itself points elsewhere, and
+        # resolution would depend on the order the rows are read in.
+        keep_name = existing_target.canonical_name
+    keep_key = author_key(keep_name)
+
+    for row in aliases:
+        # Rows that pointed at a name being folded away have to come along, or
+        # they are left naming somebody who is now a spelling of somebody else.
+        if author_key(row.canonical_name) in requested and row.alias_key != keep_key:
+            row.canonical_name = keep_name
+
+    for key in sorted(requested):
+        existing = by_alias_key.get(key)
+        if existing is not None:
+            existing.canonical_name = keep_name
+        else:
+            db.add(
+                AuthorAlias(
+                    alias_key=key,
+                    canonical_name=keep_name,
+                    created_by_user_id=current_user.id,
+                )
+            )
+
+    db.commit()
+
+    entries, aliases = _author_index(db, current_user.id)
+    alias_ids = {row.alias_key: row.id for row in aliases}
+    merged = next((entry for entry in entries if entry.key == keep_key), None)
+    if merged is None:
+        # Unreachable while every requested key named an author with a visible
+        # book, which is what the 404 above enforces. It is here for the race:
+        # another member trashing the last of those books between the two index
+        # reads leaves an author with nothing to show.
+        raise HTTPException(status_code=404, detail="Author not found")
+    return _author_out(merged, alias_ids)
+
+
+@router.delete("/authors/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unmerge_author(alias_id: RowId, db: DbSession, current_user: CurrentUser) -> None:
+    """Undo one merge. The spelling becomes its own author again.
+
+    This is why merging is allowed to guess. Nothing was rewritten, so removing
+    the row restores exactly the state before it was written, and the books
+    were never involved.
+
+    A row whose spelling is on no book this caller can see is **404**, and the
+    reason is authority rather than secrecy: undo what you can see the effect
+    of. The page offers this beside the spelling it folded, so a row with no
+    such spelling on your shelf has no button here and no meaning here either.
+
+    That leaves an **orphan** alias, whose spelling is on nobody's shelf because
+    the book was deleted, unreachable and undeletable. Accepted: it maps a name
+    nothing is credited with, so it changes no view, and it starts working again
+    by itself if an import re-creates that spelling, which is the property the
+    whole design is for.
+    """
+    alias = db.get(AuthorAlias, alias_id)
+    if alias is None:
+        raise HTTPException(status_code=404, detail="Author not found")
+
+    entries, _ = _author_index(db, current_user.id)
+    if not any(alias.alias_key in entry.alias_keys for entry in entries):
+        raise HTTPException(status_code=404, detail="Author not found")
+
+    db.delete(alias)
+    db.commit()
 
 
 @router.get("/locations", response_model=list[LocationOut])
