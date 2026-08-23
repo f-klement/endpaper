@@ -82,7 +82,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `series`, `location`, `unrated`, `tags`, `sort` |
+| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `location`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on a duplicate ISBN |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the household's own |
@@ -111,6 +111,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | PATCH | `/api/books/{id}` | write | Correct title, author, year, series or location |
 | PATCH | `/api/books/{id}/rating` | read | Your own 1 to 5, or null to clear |
 | PATCH | `/api/books/{id}/ownership` | write | Whether a copy is physically here |
+| PATCH | `/api/books/{id}/discuss` | read | Offer to talk about this book, or withdraw the offer |
 | POST | `/api/books/{id}/enrich` | write | Fill gaps from Google Books |
 | GET | `/api/books/{id}/enrich/candidates` | read | Other editions, for picking the right one |
 
@@ -136,6 +137,15 @@ is also present and the request 500s. `ownership` accepts `owned`,
 `not_owned` or `unknown`; `?ownership=unknown` is the query the whole bulk-confirmation
 flow is built around.
 
+`lending` accepts `happy`, `in_use` or `never`, and matches nothing on a book nobody has
+answered for: null is not one of the three.
+
+`discuss=true` lists books **somebody** has offered to talk about, not the caller's own
+offers. That is deliberate and matches what the grid draws: the marker is on every book
+with an offer on it, whoever made it, so a filter scoped to the caller would hide half of
+what it claims to select. It is a correlated exists and names the table to correlate
+against for the same reason `unrated` does.
+
 ### Editing, rating and reading dates
 
 `PATCH /{id}` is a partial update: an absent field is left alone and an explicit null
@@ -148,6 +158,31 @@ reading dates: rating a book is not a claim to have finished it just now.
 
 The reading dates are never sent by a client. They are stamped from status transitions;
 see [data-model.md](data-model.md) for the rules.
+
+### Willing to lend, and willing to talk
+
+Two fields that look alike and are not.
+
+`books.lending` is the household's standing answer to "would you lend this copy": `happy`,
+`in_use` (wanted by its owner at the moment, so ask again later) or `never`. Null means
+nobody has been asked. It is set through `PATCH /{id}` with everything else about the copy,
+and it is **not** a fact about whether the book is out right now: that is `active_loan`.
+
+`user_books.wants_to_discuss` is one member's "ask me about this book", set through
+`PATCH /{id}/discuss` with **read** access, like status and rating. It creates the
+`user_books` row when there is none, since a row appears only once somebody sets something.
+
+The two per-member fields it produces on `BookOut` differ in scope, and that is the feature
+rather than an oversight:
+
+| Field | Whose | Why |
+|---|---|---|
+| `my_wants_to_discuss` | the caller's | Drives the caller's own checkbox |
+| `discuss_with` | **everybody's** | A flag meaning "ask me" is worth nothing if only the person who set it can see it |
+
+`discuss_with` discloses the usernames of members who opted in and nothing else. In
+particular it says nothing about their reading status, which stays in `my_status` and stays
+the caller's own.
 
 ### Reading progress
 
@@ -506,7 +541,7 @@ likes, including one outside the covers directory.
 | Method | Path | Access | Notes |
 |---|---|---|---|
 | GET | `/api/loans?active_only=&overdue_only=` | user | Paginated; defaults to active only |
-| POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out, **404** for an unknown or invisible book |
+| POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out **or** marked never lent, **404** for an unknown or invisible book |
 | PUT | `/api/loans/{id}/return` | user | **400** if already returned |
 | POST | `/api/loans/overdue/notify` | **admin** | Runs the overdue digest now and reports what it sent |
 
@@ -525,6 +560,15 @@ the field answers "chase this", not "was this late".
 A book has at most one open loan. Recording a return is a shelf action, not an ownership
 one, so any member may do it for any book they can see. The listing excludes loans of books
 the caller cannot see, which would otherwise disclose a private book's title and holder.
+
+**A book marked `lending = never` is refused once, not forbidden.** The first request gets
+a **409** whose detail is an object, `{"message": ..., "code": "not_lendable"}`; the same
+request carrying `acknowledge_not_lendable: true` creates the loan. The code is there
+because the client has to branch on it: this 409 puts a confirmation in front of the lend
+button, and the already-out 409 does not, so matching on the prose would break the moment
+it was reworded. The flag is **not stored**, and the book still says it is never lent
+afterwards: it answers one request rather than changing the household's mind. `in_use` and
+`happy` are not checked at all. The reasoning is in [decisions.md](decisions.md).
 
 **Overdue reminders** go out as one JSON digest POSTed to an admin-configured webhook,
 hourly from a task started with the app. `POST /api/loans/overdue/notify` runs the same

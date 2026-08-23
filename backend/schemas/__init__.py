@@ -15,6 +15,7 @@ than at request time.
 from schemas.book import (
     BookCreate,
     BookDetailsUpdate,
+    BookDiscussUpdate,
     BookEnrichmentOut,
     BookLookup,
     BookMatch,
@@ -69,6 +70,7 @@ __all__ = [
     "AuthConfigOut",
     "BookCreate",
     "BookDetailsUpdate",
+    "BookDiscussUpdate",
     "BookEnrichmentOut",
     "BookLookup",
     "BookOut",

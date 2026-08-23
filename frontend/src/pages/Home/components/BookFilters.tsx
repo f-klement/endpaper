@@ -5,6 +5,7 @@ import { TagPicker } from "../../components";
 import type { BookFilters as Filters } from "../types";
 import {
   FORMAT_FILTERS,
+  LENDING_FILTERS,
   OWNERSHIP_FILTERS,
   SORT_OPTIONS,
   STATUS_FILTERS,
@@ -21,6 +22,8 @@ interface BookFiltersProps {
   onOwnershipChange: (ownership: Filters["ownership"]) => void;
   onLocationChange: (location: Filters["location"]) => void;
   onFormatChange: (format: Filters["format"]) => void;
+  onLendingChange: (lending: Filters["lending"]) => void;
+  onDiscussChange: (discuss: boolean) => void;
   onSeriesClear: () => void;
   locations: LocationOut[];
   onSortChange: (sort: Filters["sort"]) => void;
@@ -39,6 +42,8 @@ export default function BookFilters({
   onStatusChange,
   onOwnershipChange,
   onFormatChange,
+  onLendingChange,
+  onDiscussChange,
   onLocationChange,
   onSeriesClear,
   locations,
@@ -157,6 +162,40 @@ export default function BookFilters({
             </option>
           ))}
         </select>
+
+        {/* Beside the format, because both narrow what kind of copy this is
+            rather than what the reader has done with it. */}
+        <select
+          value={filters.lending ?? ""}
+          onChange={(event) =>
+            onLendingChange((event.target.value || null) as Filters["lending"])
+          }
+          aria-label={t("lending.label")}
+          className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
+        >
+          {LENDING_FILTERS.map((option) => (
+            <option key={option.label} value={option.value ?? ""}>
+              {t(option.label)}
+            </option>
+          ))}
+        </select>
+
+        {/* A toggle rather than a third dropdown: it has one useful state.
+            The books nobody has offered to talk about are the whole library,
+            which is what the button already off shows. */}
+        <button
+          type="button"
+          onClick={() => onDiscussChange(!filters.discuss)}
+          aria-pressed={filters.discuss}
+          className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+            filters.discuss
+              ? "bg-accent-fill border-accent-fill text-on-accent"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
+                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+          }`}
+        >
+          {t("discuss.badge")}
+        </button>
       </div>
 
       {(locations.length > 0 || filters.location) && (

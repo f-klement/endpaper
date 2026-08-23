@@ -12,6 +12,7 @@ import { formatMinor } from "../../../lib/money";
 import {
   CONDITION_LABELS,
   FORMAT_LABELS,
+  LENDING_LABELS,
   OWNERSHIP_LABELS,
   STATUS_LABELS,
 } from "../../types";
@@ -103,6 +104,20 @@ const COLUMNS: Column[] = [
     sort: null,
     render: (book, t) =>
       book.condition ? t(CONDITION_LABELS[book.condition]) : "",
+  },
+  {
+    key: "lending",
+    label: "lending.label",
+    sort: null,
+    render: (book, t) => (book.lending ? t(LENDING_LABELS[book.lending]) : ""),
+  },
+  {
+    key: "discuss",
+    label: "discuss.label",
+    sort: null,
+    // The names, not a tick. "Ask about it" is only useful if it says whom.
+    render: (book) =>
+      (book.discuss_with ?? []).map((member) => member.username).join(", "),
   },
   {
     key: "location",
@@ -223,7 +238,7 @@ interface BookTableProps {
 /**
  * The library as a table, for reading the metadata rather than the covers.
  *
- * Nineteen columns will not fit a phone and are not meant to: **the table
+ * Twenty one columns will not fit a phone and are not meant to: **the table
  * scrolls inside its own container**, so the page body never scrolls sideways.
  * A body that scrolls horizontally takes the navigation and the header with it,
  * which on a touch device is how a reader loses the app.
@@ -281,7 +296,7 @@ export default function BookTable({
                       >
                         {t(column.label)}
                         {/* Always drawn, dimmed until this column is the one
-                            ordering the list. Only 5 of the 19 columns can be
+                            ordering the list. Only 5 of the 21 columns can be
                             sorted, and with the chevron shown only when active
                             the sole always-visible difference was a hover
                             colour: the feature was there and undiscoverable.
@@ -319,7 +334,7 @@ export default function BookTable({
                     }`}
                   >
                     {/* Only the title links. A whole row of links is one
-                        destination announced nineteen times, and a reader
+                        destination announced twenty one times, and a reader
                         copying a publisher out of a cell should not navigate. */}
                     {column.key === "title" ? (
                       <Link

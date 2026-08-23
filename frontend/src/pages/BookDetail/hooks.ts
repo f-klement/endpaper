@@ -34,6 +34,7 @@ import {
   useRefreshMetadata,
   useRestoreBook,
   useRemoveBookTag,
+  useSetDiscuss,
   useSetOwnership,
   useSetPrivacy,
   useSetRating,
@@ -122,6 +123,8 @@ export interface UseBookActionsResult {
   refreshMetadata: () => void;
   setOwnership: (ownership: OwnershipStatus) => void;
   setRating: (rating: number | null) => void;
+  /** Offer to talk about this book, or withdraw the offer. */
+  setDiscuss: (wantsToDiscuss: boolean) => void;
   updateDetails: (fields: BookDetailsUpdate) => void;
   isSavingDetails: boolean;
   /** Move the book to the trash. Reversible from the toast this raises. */
@@ -172,6 +175,7 @@ export function useBookActions(
   const refresh = useRefreshMetadata({ mutation });
   const ownership = useSetOwnership({ mutation });
   const rating = useSetRating({ mutation });
+  const discuss = useSetDiscuss({ mutation });
   const details = useUpdateBookDetails({ mutation });
   const restore = useRestoreBook({
     mutation: {
@@ -227,6 +231,8 @@ export function useBookActions(
     uploadCover: (file) => cover.mutate({ bookId, data: { file } }),
     refreshMetadata: () => refresh.mutate({ bookId }),
     setRating: (value) => rating.mutate({ bookId, data: { rating: value } }),
+    setDiscuss: (wantsToDiscuss) =>
+      discuss.mutate({ bookId, data: { wants_to_discuss: wantsToDiscuss } }),
     updateDetails: (fields) => details.mutate({ bookId, data: fields }),
     isSavingDetails: details.isPending,
     setOwnership: (value) =>
@@ -245,6 +251,7 @@ export function useBookActions(
       cover.error ??
       ownership.error ??
       rating.error ??
+      discuss.error ??
       details.error ??
       remove.error,
   };
@@ -287,7 +294,11 @@ export function useBookNotes(bookId: number): UseBookNotesResult {
 }
 
 export interface UseBookLoanResult {
-  lend: (borrower: Borrower, dueAt?: string | null) => void;
+  lend: (
+    borrower: Borrower,
+    dueAt?: string | null,
+    acknowledgeNotLendable?: boolean,
+  ) => void;
   markReturned: (loanId: number) => void;
   isBusy: boolean;
   error: unknown;
@@ -304,7 +315,7 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
     // Exactly one of the two borrower fields, which is what the API accepts
     // and what the CHECK constraint behind it enforces. The union is what
     // stops the both-or-neither request being expressible at all.
-    lend: (borrower, dueAt) =>
+    lend: (borrower, dueAt, acknowledgeNotLendable = false) =>
       create.mutate({
         data: {
           book_id: bookId,
@@ -312,6 +323,10 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
             borrower.kind === "member" ? borrower.userId : null,
           loaned_to_name: borrower.kind === "external" ? borrower.name : null,
           due_at: dueAt ?? null,
+          // A book marked "never lent" is a 409 without this. It says
+          // something about one request and is not stored, so it is passed
+          // through rather than remembered here.
+          acknowledge_not_lendable: acknowledgeNotLendable,
         },
       }),
     markReturned: (loanId) => complete.mutate({ loanId }),

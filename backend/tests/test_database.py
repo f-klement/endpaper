@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import database
 from database import Base, engine, get_db
 
 
@@ -102,3 +103,38 @@ class TestMetadata:
         assert {
             "users", "books", "tags", "book_tags", "user_books", "loans", "notes"
         } <= set(Base.metadata.tables)
+
+
+class TestSynchronousIsWhitelisted:
+    """`SQLITE_SYNCHRONOUS` reaches a statement that cannot be parameterised.
+
+    `_synchronous()` interpolates its result into `PRAGMA synchronous={...}`, so
+    the whitelist is the only thing between an environment variable and SQL. The
+    docstring said it could not leak and nothing pinned that, which is the shape
+    of a guard that gets simplified away.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        ["OFF; DROP TABLE books", "1", "", "  ", "NORMAL --", "FULL; PRAGMA foo"],
+    )
+    def test_anything_not_on_the_list_falls_back_to_full(
+        self, value: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SQLITE_SYNCHRONOUS", value)
+        assert database._synchronous() == "FULL"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("off", "OFF"), ("OFF", "OFF"), (" normal ", "NORMAL"), ("Full", "FULL")],
+    )
+    def test_a_listed_mode_is_accepted_in_any_case(
+        self, value: str, expected: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SQLITE_SYNCHRONOUS", value)
+        assert database._synchronous() == expected
+
+    def test_the_default_is_durable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Unset means FULL. This database is somebody's only copy."""
+        monkeypatch.delenv("SQLITE_SYNCHRONOUS", raising=False)
+        assert database._synchronous() == "FULL"

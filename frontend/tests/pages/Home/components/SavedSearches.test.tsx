@@ -1,6 +1,6 @@
 /** Tests for src/pages/Home/components/SavedSearches.tsx. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -72,7 +72,7 @@ describe("SavedSearches", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Save this view" }));
-    await user.type(screen.getByLabelText("Name for this view"), "Kitchen");
+    fireEvent.change(screen.getByLabelText("Name for this view"), { target: { value: "Kitchen" } });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(props.onSave).toHaveBeenCalledWith("Kitchen");

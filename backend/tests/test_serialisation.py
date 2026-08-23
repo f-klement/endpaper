@@ -138,6 +138,56 @@ class TestBooksToOut:
         assert for_two == for_one
 
 
+class TestWhoWantsToBeAsked:
+    """`discuss_with` is the one per-member field on this payload that is not
+    scoped to the caller, and the reason is the whole feature: a marker only
+    its owner can see is not a way to be asked about anything."""
+
+    def test_nobody_offered_is_an_empty_list(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        out = book_to_out(two_books[0], user, db)
+        assert out.my_wants_to_discuss is False
+        assert out.discuss_with == []
+
+    def test_it_carries_another_members_offer(self, db, admin, member, two_books):
+        me = db.get(User, admin["user"]["id"])
+        them = db.get(User, member["user"]["id"])
+        db.add(UserBook(user_id=them.id, book_id=two_books[0].id, wants_to_discuss=True))
+        db.commit()
+
+        out = book_to_out(two_books[0], me, db)
+
+        assert out.my_wants_to_discuss is False
+        assert [user.username for user in out.discuss_with] == ["member"]
+
+    def test_it_does_not_bleed_between_books_on_a_page(
+        self, db, admin, member, two_books
+    ):
+        me = db.get(User, admin["user"]["id"])
+        them = db.get(User, member["user"]["id"])
+        db.add(UserBook(user_id=them.id, book_id=two_books[1].id, wants_to_discuss=True))
+        db.commit()
+
+        first, second = books_to_out(two_books, me, db)
+
+        assert first.discuss_with == []
+        assert [user.username for user in second.discuss_with] == ["member"]
+
+    def test_a_row_with_the_flag_off_is_not_listed(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        db.add(
+            UserBook(
+                user_id=user.id,
+                book_id=two_books[0].id,
+                status=ReadStatus.READ,
+                wants_to_discuss=False,
+            )
+        )
+        db.commit()
+
+        assert book_to_out(two_books[0], user, db).discuss_with == []
+
+
 class TestDerivedPercent:
     """`page / page_count`, else the recorded percent, else nothing.
 

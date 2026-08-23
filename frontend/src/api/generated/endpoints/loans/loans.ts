@@ -212,6 +212,23 @@ export const getCreateLoanUrl = () => {
 };
 
 /**
+ * Record that a book has gone out.
+ *
+ * **A book marked `lending = never` is refused once, not forbidden.** Neither
+ * extreme is right here. Allowing it silently makes the field decorative, and
+ * a household that took the trouble to mark a copy would find the app had
+ * quietly ignored it. Forbidding it outright is worse: the same household
+ * lends that book to a sibling anyway, and an app that will not let them
+ * record what actually happened gets a loan kept in somebody's head instead,
+ * which is the one thing this table exists to replace.
+ *
+ * So the refusal costs one extra deliberate step: a 409 carrying
+ * `code: not_lendable`, then the same request again with
+ * `acknowledge_not_lendable`. The other two willingness values are not
+ * checked at all. `in_use` means "come back later", which is a conversation
+ * between two people rather than a rule, and `happy` is a yes.
+ *
+ * The flag is not stored: see `LoanCreate.acknowledge_not_lendable`.
  * @summary Create Loan
  */
 export const createLoan = async (

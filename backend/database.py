@@ -1,5 +1,6 @@
+import os
 from collections.abc import Generator
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -47,8 +48,37 @@ def _sqlite_pragmas(connection: Any, _record: Any) -> None:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute(f"PRAGMA synchronous={_synchronous()}")
     finally:
         cursor.close()
+
+
+#: What `PRAGMA synchronous` may be set to. Anything else is refused rather than
+#: passed through, because this value is read from the environment and reaches a
+#: statement that cannot be parameterised.
+_SYNCHRONOUS_MODES: Final = frozenset({"OFF", "NORMAL", "FULL", "EXTRA"})
+
+
+def _synchronous() -> str:
+    """How hard SQLite works to survive a power cut. FULL unless told otherwise.
+
+    **FULL in production and that is not negotiable**: it is what makes a commit
+    survive the machine losing power, and this database is somebody's only copy
+    of a hand-built catalogue.
+
+    **OFF in the test suite**, set by `tests/conftest.py`, and the reason is
+    measurable rather than stylistic. A run performs tens of thousands of
+    inserts, each fsynced, into a database deleted at the end of it. The suite
+    was measured at 0.68 cores across two workers: it was not computing, it was
+    waiting for a disk to acknowledge writes nobody would ever read.
+
+    Durability is meaningless for a database thrown away at the end of the run,
+    so this is one of the rare cases where the unsafe setting is the correct
+    one, and it is scoped so it cannot leak: an unknown value falls back to
+    FULL rather than being passed to SQLite.
+    """
+    mode = os.getenv("SQLITE_SYNCHRONOUS", "FULL").strip().upper()
+    return mode if mode in _SYNCHRONOUS_MODES else "FULL"
 
 
 class Base(DeclarativeBase):

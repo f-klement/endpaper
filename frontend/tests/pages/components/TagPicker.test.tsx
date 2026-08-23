@@ -1,6 +1,6 @@
 /** Tests for src/pages/components/TagPicker.tsx: shared by three pages. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderLocalised } from "../../utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -161,7 +161,7 @@ describe("TagPicker, inventing a tag", () => {
     );
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("New tag"), "Holiday reads");
+    fireEvent.change(screen.getByLabelText("New tag"), { target: { value: "Holiday reads" } });
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(onCreate).toHaveBeenCalledWith("Holiday reads");
@@ -201,7 +201,7 @@ describe("TagPicker, inventing a tag", () => {
     );
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("New tag"), "  Loft  ");
+    fireEvent.change(screen.getByLabelText("New tag"), { target: { value: "  Loft  " } });
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(onCreate).toHaveBeenCalledWith("Loft");
@@ -236,7 +236,7 @@ describe("TagPicker, inventing a tag", () => {
 
     const user = userEvent.setup();
     const box = screen.getByLabelText("New tag");
-    await user.type(box, "Loft");
+    fireEvent.change(box, { target: { value: "Loft" } });
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(box).toHaveValue("");

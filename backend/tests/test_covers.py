@@ -327,7 +327,11 @@ class TestNoOtherModuleBuildsACoverUrl:
         return [
             path
             for path in self.BACKEND.rglob("*.py")
+            # `site-packages` as well as `.venv`: a dependency tree can land
+            # outside a directory called .venv depending on how the environment
+            # was built, and this walk must never leave first-party code.
             if ".venv" not in path.parts
+            and "site-packages" not in path.parts
             and "tests" not in path.parts
             and "migrations" not in path.parts
             and path.name != "covers.py"
@@ -390,8 +394,15 @@ class TestNoOtherModuleBuildsACoverUrl:
         image host. String constants only, so the comments in `middleware.py`
         that explain the policy are not offenders.
         """
+        # Matched as `//host`, not as a bare substring. `archive.org` joined
+        # COVER_HOSTS when Open Library's redirect chain was traced, and it is a
+        # real domain that appears in third-party prose: sqlalchemy's Oracle
+        # dialect links to it in a docstring, which turned this rule red in CI
+        # against code that builds no URL at all. Requiring the scheme separator
+        # keeps exactly what the rule is for, a module assembling a cover URL,
+        # and cannot match a mention.
         hosts = [
-            host.removeprefix("https://").removeprefix("*.")
+            "//" + host.removeprefix("https://").removeprefix("*.")
             for host in covers.COVER_HOSTS
         ]
 
@@ -697,10 +708,35 @@ class TestWhatThisServerMayConnectTo:
             "https://covers.openlibrary.org:99999/x",
             "https://covers.openlibrary.org:abc/x",
             "https://[::1/x",
+            # Where Open Library's redirects land, and the shapes that only look
+            # like it. `notus.archive.org` matches the suffix `us.archive.org`
+            # and is still refused, because the wildcard is a label boundary and
+            # not a substring.
+            "https://archive.org.attacker.test/x",
+            "https://evil.us.archive.org.attacker.test/x",
+            "https://us.archive.org.evil.test/x",
+            "http://archive.org/x",
+            "https://xarchive.org/x",
+            "https://notus.archive.org/x",
         ],
     )
     def test_everything_else_is_not(self, url):
         assert covers.is_fetchable(url) is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # The two hops Open Library actually takes. Measured against the
+            # live service: covers.openlibrary.org 302s to archive.org, which
+            # 302s to a numbered ia<n>.us.archive.org. Refusing either of these
+            # refuses every Open Library cover, which is what the first live
+            # backfill reported as `unreachable: 4` of 4.
+            "https://archive.org/download/l_covers_0014/x.zip/1-L.jpg",
+            "https://ia800505.us.archive.org/view_archive.php?archive=/35/items/x",
+        ],
+    )
+    def test_where_open_library_redirects_to_is_reachable(self, url):
+        assert covers.is_fetchable(url) is True
 
     @pytest.mark.parametrize(
         "url",

@@ -1,6 +1,7 @@
 import {
   BookFormat,
   BookSort,
+  LendingWillingness,
   OwnershipStatus,
   ReadStatus,
 } from "../../api/generated/model";
@@ -17,6 +18,16 @@ export interface BookFilters {
   location: string | null;
   /** Hardback, paperback, ebook, audiobook. "Do we have this on audio". */
   format: BookFormat | null;
+  /** Would the household lend it. Nothing to do with whether it is out now. */
+  lending: LendingWillingness | null;
+  /**
+   * Only books somebody has offered to talk about.
+   *
+   * **Anybody's offer, not the reader's own.** It is a boolean rather than a
+   * three-way, because the useful question is "what can we talk about"; the
+   * opposite view, books nobody has offered, is the rest of the library.
+   */
+  discuss: boolean;
   sort: BookSort;
   tagIds: number[];
 }
@@ -28,6 +39,8 @@ export const DEFAULT_FILTERS: BookFilters = {
   series: null,
   location: null,
   format: null,
+  lending: null,
+  discuss: false,
   sort: BookSort.title_asc,
   tagIds: [],
 };
@@ -107,6 +120,16 @@ export const FORMAT_FILTERS: {
   { label: "copy.format.other", value: BookFormat.other },
 ];
 
+export const LENDING_FILTERS: {
+  label: MessageKey;
+  value: LendingWillingness | null;
+}[] = [
+  { label: "lending.filterAll", value: null },
+  { label: "lending.happy", value: LendingWillingness.happy },
+  { label: "lending.in_use", value: LendingWillingness.in_use },
+  { label: "lending.never", value: LendingWillingness.never },
+];
+
 export const SORT_OPTIONS: { label: MessageKey; value: BookSort }[] = [
   { label: "sort.title_asc", value: BookSort.title_asc },
   { label: "sort.title_desc", value: BookSort.title_desc },
@@ -126,6 +149,8 @@ export function hasActiveFilters(filters: BookFilters): boolean {
     filters.series ||
     filters.location ||
     filters.format ||
+    filters.lending ||
+    filters.discuss ||
     filters.tagIds.length,
   );
 }

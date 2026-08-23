@@ -5,7 +5,14 @@ from pydantic import BaseModel, Field, field_validator
 
 import covers
 import isbn as isbn_utils
-from enums import BookCondition, BookFormat, BulkAction, OwnershipStatus, ReadStatus
+from enums import (
+    BookCondition,
+    BookFormat,
+    BulkAction,
+    LendingWillingness,
+    OwnershipStatus,
+    ReadStatus,
+)
 from google_books import split_categories
 from schemas.tag import TagOut
 from schemas.user import UserOut
@@ -147,6 +154,8 @@ class BookOut(BaseModel):
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
+    #: Whether the household will lend this copy. Null while nobody has said.
+    lending: LendingWillingness | None = None
     #: Minor units (cents). The client divides by 100 to display it; storing a
     #: decimal would round-trip through a float over SQLite.
     purchase_price_minor: int | None = None
@@ -171,6 +180,16 @@ class BookOut(BaseModel):
     #: number, which is the precision a progress bar can show.
     my_progress_percent: int | None = None
     my_progress_recorded_at: datetime | None = None
+
+    #: Whether the caller has offered to talk about this book.
+    my_wants_to_discuss: bool = False
+    #: Everybody who has, the caller included.
+    #:
+    #: The one per-member field on this payload that is **not** scoped to who
+    #: is asking, and deliberately so: a flag meaning "ask me about it" is
+    #: worth nothing if only the person who set it can see it. It says nothing
+    #: about anybody's reading status, which stays private.
+    discuss_with: list[UserOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -254,6 +273,18 @@ class BookRatingUpdate(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=5)
 
 
+class BookDiscussUpdate(BaseModel):
+    """Offer to talk about this book, or withdraw the offer.
+
+    Its own schema rather than a field on `BookStatusUpdate`, because the two
+    are not the same act and are not set at the same moment: a book can be
+    unread and worth talking about, and finishing one says nothing about
+    wanting to be asked.
+    """
+
+    wants_to_discuss: bool
+
+
 class BookDetailsUpdate(BaseModel):
     """The fields a person edits by hand after a book exists.
 
@@ -274,6 +305,7 @@ class BookDetailsUpdate(BaseModel):
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
+    lending: LendingWillingness | None = None
     purchase_price_minor: int | None = Field(default=None, ge=0, le=MAX_PRICE_MINOR)
     # Upper case, three letters, ISO 4217 shaped without asserting the code is
     # real: a household using a currency this app has never heard of is not an

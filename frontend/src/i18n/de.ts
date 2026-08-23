@@ -564,6 +564,20 @@ export const de: Messages = {
   "copy.purchaseSourcePlaceholder": "Der Buchladen um die Ecke",
   "format.filterAll": "Jede Ausgabe",
 
+  // ── Herborgen und drüber reden ──────────────────────────────────────────
+  "lending.label": "Verleihen",
+  "lending.unset": "Nicht erfasst",
+  "lending.filterAll": "Verleihen: beliebig",
+  "lending.happy": "Borge ich gern her",
+  "lending.in_use": "Brauche ich gerade selbst",
+  "lending.never": "Wird nicht hergeborgt",
+  "lending.neverWarning": "Dieses Buch ist als \"wird nicht hergeborgt\" markiert.",
+  "lending.lendAnyway": "Trotzdem herborgen",
+  "discuss.toggle": "Über dieses Buch rede ich gern, frag mich einfach danach",
+  "discuss.label": "Ansprechpartner",
+  "discuss.badge": "Gesprächsstoff",
+  "discuss.others": "Sprich {names} darauf an.",
+
   // ── Bibliothek übernehmen ───────────────────────────────────────────────
   "import.title": "Bibliothek übernehmen",
   "import.explain":

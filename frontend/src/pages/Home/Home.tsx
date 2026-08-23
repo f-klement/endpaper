@@ -79,7 +79,9 @@ export default function Home() {
         onToggleTagPanel={() => setShowTagPanel((open) => !open)}
         onStatusChange={library.setStatus}
         onOwnershipChange={library.setOwnership}
-          onFormatChange={library.setFormat}
+        onFormatChange={library.setFormat}
+        onLendingChange={library.setLending}
+        onDiscussChange={library.setDiscuss}
         onLocationChange={library.setLocation}
         onSeriesClear={() => library.setSeries(null)}
         locations={library.locations}

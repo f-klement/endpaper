@@ -1,6 +1,6 @@
 /** Tests for src/pages/BookDetail. */
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -329,16 +329,27 @@ describe("BookDetail", () => {
       );
       await user.click(screen.getByRole("button", { name: "Loan" }));
 
-      await waitFor(() =>
-        expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
-          book_id: 1,
-          loaned_to_user_id: OTHER.id,
-          // Exactly one borrower: the API rejects both or neither with a 422.
-          loaned_to_name: null,
-          // Explicitly null rather than absent: a loan with no deadline is the
-          // common case, and the field is always sent.
-          due_at: null,
-        }),
+      // An explicit timeout, because the default 1000ms is a budget this test
+      // was already spending most of before it asserted. `user-event` does its
+      // own async work per interaction, so the wall clock here is a function of
+      // how loaded the worker is rather than of what the code does, and the
+      // pair of loan tests failed in CI while passing locally for exactly that
+      // reason. The assertion is unchanged; only the patience is.
+      await waitFor(
+        () =>
+          expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
+            book_id: 1,
+            loaned_to_user_id: OTHER.id,
+            // Exactly one borrower: the API rejects both or neither with a 422.
+            loaned_to_name: null,
+            // Explicitly null rather than absent: a loan with no deadline is the
+            // common case, and the field is always sent.
+            due_at: null,
+            // False, not absent, on a book nobody said not to lend. The server
+            // reads it only on a book marked "never lent".
+            acknowledge_not_lendable: false,
+          }),
+        { timeout: 5000 },
       );
     });
 
@@ -351,20 +362,27 @@ describe("BookDetail", () => {
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
-      await user.type(
-        screen.getByLabelText("Borrower's name"),
-        "the neighbour",
-      );
+      // `fireEvent.change`, not `user.type`. Typing thirteen characters costs
+      // thirteen async round trips and was most of this test's 2.4 seconds; the
+      // field has no per-keystroke behaviour to exercise, so a single change
+      // event tests the same thing. CLAUDE.md already says user-event is the
+      // wrong tool where its own scheduling is what is being measured.
+      fireEvent.change(screen.getByLabelText("Borrower's name"), {
+        target: { value: "the neighbour" },
+      });
       await user.click(screen.getByRole("button", { name: "Loan" }));
 
-      await waitFor(() =>
-        expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
-          book_id: 1,
-          // Exactly one of the two. Both is a 422.
-          loaned_to_user_id: null,
-          loaned_to_name: "the neighbour",
-          due_at: null,
-        }),
+      await waitFor(
+        () =>
+          expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toEqual({
+            book_id: 1,
+            // Exactly one of the two. Both is a 422.
+            loaned_to_user_id: null,
+            loaned_to_name: "the neighbour",
+            due_at: null,
+            acknowledge_not_lendable: false,
+          }),
+        { timeout: 5000 },
       );
     });
 
@@ -385,7 +403,7 @@ describe("BookDetail", () => {
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
-      await user.type(screen.getByLabelText("Borrower's name"), "   ");
+      fireEvent.change(screen.getByLabelText("Borrower's name"), { target: { value: "   " } });
 
       expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
     });
@@ -534,7 +552,7 @@ describe("BookDetail", () => {
       renderDetail();
 
       const user = userEvent.setup();
-      await user.type(await screen.findByLabelText("Add a note"), "  padded  ");
+      fireEvent.change(await screen.findByLabelText("Add a note"), { target: { value: "  padded  " } });
       await user.click(screen.getByRole("button", { name: "Add" }));
 
       await waitFor(() =>
@@ -564,7 +582,7 @@ describe("BookDetail", () => {
       await user.click(await screen.findByRole("button", { name: "Edit" }));
       const box = screen.getByLabelText("Edit note");
       await user.clear(box);
-      await user.type(box, "v2");
+      fireEvent.change(box, { target: { value: "v2" } });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -932,7 +950,7 @@ describe("BookDetail lending with a due date", () => {
       await screen.findByLabelText("Loan to"),
       String(OTHER.id),
     );
-    await user.type(screen.getByLabelText("Due back"), "2026-09-01");
+    fireEvent.change(screen.getByLabelText("Due back"), { target: { value: "2026-09-01" } });
     await user.click(screen.getByRole("button", { name: "Loan" }));
 
     await waitFor(() =>

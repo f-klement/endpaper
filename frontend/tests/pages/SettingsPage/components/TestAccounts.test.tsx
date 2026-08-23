@@ -7,7 +7,7 @@
  * else fails there whatever is typed in.
  */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -73,7 +73,7 @@ describe("TestAccounts", () => {
     const props = renderSection();
     await user.click(screen.getByRole("button", { name: "Switch to tester" }));
 
-    await user.type(screen.getByLabelText("Password for tester"), "pw12345678");
+    fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "pw12345678" } });
     // The row's own control is labelled "Switch to tester", so this names the
     // submit button and nothing else.
     await user.click(screen.getByRole("button", { name: "Switch" }));
@@ -91,7 +91,7 @@ describe("TestAccounts", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Switch to tester" }));
-    await user.type(screen.getByLabelText("Password for tester"), "pw12345678");
+    fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "pw12345678" } });
     await user.click(screen.getByRole("button", { name: "Switch to reader" }));
 
     expect(screen.getByLabelText("Password for reader")).toHaveValue("");
@@ -101,8 +101,8 @@ describe("TestAccounts", () => {
     const user = userEvent.setup();
     const props = renderSection();
 
-    await user.type(screen.getByLabelText("Username"), "newcomer");
-    await user.type(screen.getByLabelText("Password"), "pw12345678");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "newcomer" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw12345678" } });
     await user.click(screen.getByRole("button", { name: "Create test account" }));
 
     expect(props.onCreate).toHaveBeenCalledWith("newcomer", "pw12345678");

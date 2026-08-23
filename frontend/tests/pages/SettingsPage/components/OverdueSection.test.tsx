@@ -1,6 +1,6 @@
 /** Tests for src/pages/SettingsPage/components/OverdueSection.tsx. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -85,10 +85,7 @@ describe("OverdueSection", () => {
     const user = userEvent.setup();
     const { onSave } = renderSection();
 
-    await user.type(
-      screen.getByLabelText("Webhook address"),
-      "https://a.test/h",
-    );
+    fireEvent.change(screen.getByLabelText("Webhook address"), { target: { value: "https://a.test/h" } });
     expect(onSave).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Save address" }));
@@ -145,7 +142,7 @@ describe("OverdueSection", () => {
       "Days between reminders for the same loan",
     );
     await user.clear(field);
-    await user.type(field, "3");
+    fireEvent.change(field, { target: { value: "3" } });
     expect(onSave).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Save interval" }));
@@ -161,7 +158,7 @@ describe("OverdueSection", () => {
       "Days between reminders for the same loan",
     );
     await user.clear(field);
-    await user.type(field, "0");
+    fireEvent.change(field, { target: { value: "0" } });
 
     expect(
       screen.queryByRole("button", { name: "Save interval" }),

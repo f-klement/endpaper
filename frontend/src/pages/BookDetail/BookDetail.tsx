@@ -10,6 +10,7 @@ import { ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import BookHeader from "./components/BookHeader";
+import DiscussToggle from "./components/DiscussToggle";
 import EnrichPanel from "./components/EnrichPanel";
 import ReadingPanel from "./components/ReadingPanel";
 import LoanBadge from "./components/LoanBadge";
@@ -133,6 +134,15 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
 
         <ReadingPanel book={book} onRate={actions.setRating} />
 
+        {/* Under the status and the rating, because it is the third thing this
+            reader has to say about this book, and the only one anybody else
+            gets to see. */}
+        <DiscussToggle
+          book={book}
+          currentUserId={currentUser.id}
+          onChange={actions.setDiscuss}
+        />
+
         {/* Below the status buttons, because the first entry promotes an
             unstarted book to reading: the control that asserts that sits next
             to the one that says so. */}
@@ -166,6 +176,8 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           book={book}
           members={otherMembers}
           isBusy={loan.isBusy}
+          isSavingDetails={actions.isSavingDetails}
+          onSaveLending={actions.updateDetails}
           onLend={loan.lend}
           onMarkReturned={loan.markReturned}
         />

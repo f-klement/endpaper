@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,162 tests.**
+**1,201 tests.**
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
@@ -66,13 +66,13 @@ readers as a side effect.
 | `lib/libraryView.test.ts`             |     5 | Covers or table, remembered locally, and storage refusing to answer |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
 | `pages/hooks.test.ts`                 |    33 | Session state, auth modes, corrupt storage, switching into a test account under proxy, and dropping the cache whenever the identity changes |
-| `pages/types.test.ts`                 |    13 | Tag grouping, the style tables, and the light and dark modes |
+| `pages/types.test.ts`                 |    16 | Tag grouping, the style tables, the lending answers, and the light and dark modes |
 | `pages/components/TagPicker.test.tsx` |    17 | The picker shared by three pages                            |
-| `pages/components/BookCard.test.tsx`  |    31 | One book in a grid: status, tags, ownership, selection, and the fold out |
+| `pages/components/BookCard.test.tsx`  |    37 | One book in a grid: status, tags, ownership, the talk-about-it marker, selection, and the fold out |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
-| `pages/Home/*`                        |   125 | Filters, ownership, pagination, selection, the bulk verbs, and the table view |
-| `pages/BookDetail/*`                  |   110 | Status, ratings, series, shelf, loans, notes, enrichment, the reading log and its two units |
+| `pages/Home/*`                        |   137 | Filters, ownership, lending, pagination, selection, the bulk verbs, and the table view |
+| `pages/BookDetail/*`                  |   128 | Status, ratings, series, shelf, loans and the never-lent confirmation, the offer to talk about a book, notes, enrichment, the reading log and its two units |
 | `pages/ScanPage/*`                    |   116 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
 | `pages/SettingsPage/*`                |   101 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
 | `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |

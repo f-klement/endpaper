@@ -10,6 +10,7 @@ export type ListTrashParams = {
   /**
    * 1-based page number
    * @minimum 1
+   * @maximum 1000000
    */
   page?: number;
   /**

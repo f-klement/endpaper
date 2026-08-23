@@ -25,7 +25,15 @@ from sqlalchemy.sql.elements import ColumnElement
 
 import covers
 from database import Base
-from enums import AuthMode, BookCondition, BookFormat, OwnershipStatus, ReadStatus, TagCategory
+from enums import (
+    AuthMode,
+    BookCondition,
+    BookFormat,
+    LendingWillingness,
+    OwnershipStatus,
+    ReadStatus,
+    TagCategory,
+)
 
 logger = logging.getLogger("endpaper.models")
 
@@ -174,6 +182,21 @@ class Book(Base):
     # is worse than admitting the answer is not known. Indexed because "have we
     # got this on audio" is a filter, not a search.
     format: Mapped[BookFormat | None] = mapped_column(String(20), nullable=True, index=True)
+
+    # Whether the household will lend this copy out, or null while nobody has
+    # been asked. A standing intention rather than a state: the open `Loan`
+    # answers "is it out", and a book can be marked happy to lend while it is
+    # at somebody's house. Storing the answer on the loan would mean it only
+    # existed while the book was somewhere else.
+    #
+    # Nullable rather than defaulted, for the reason `format` is: a guess
+    # written into every imported book at once is worse than a blank, because
+    # nobody re-checks a field that looks filled in. Indexed because "what
+    # could we lend the book club" is a filter over the whole catalogue, which
+    # is a browse action rather than a search.
+    lending: Mapped[LendingWillingness | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )
 
     # ── Collector details ────────────────────────────────────────────────
     #
@@ -324,6 +347,22 @@ class UserBook(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Indexed: it drives the per-month "books finished" statistic.
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    # "Ask me about this book", and the one column on this table meant to be
+    # read by other people. The status, the rating and both dates are private
+    # to the member who set them and reach the API only as the caller's own
+    # `my_*` fields; this one is served as `discuss_with` on every book the
+    # caller can see, which is the whole point of the flag. It discloses the
+    # usernames and nothing else, in particular not whether those members have
+    # read the book.
+    #
+    # NOT NULL with a default of false rather than nullable, unlike
+    # `books.lending`. There is nothing between yes and no here, and absence of
+    # the row already means "has not said" for every member who never touched
+    # the book, so a nullable column would be a second, weaker spelling of it.
+    wants_to_discuss: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
     user: Mapped[User] = relationship("User", back_populates="user_books")
     book: Mapped[Book] = relationship("Book", back_populates="user_books")

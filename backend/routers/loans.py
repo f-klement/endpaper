@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 import notifications
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, Paging
+from enums import LendingWillingness
 from models import Book, Loan, User, visible_to
 from schemas import LoanCreate, LoanOut, OverdueNotifyResult, Page
 from serialisation import books_to_out
@@ -125,8 +126,36 @@ def list_loans(
     )
 
 
+#: The `detail.code` on the 409 a never-lent book answers with.
+#:
+#: A code beside the sentence rather than the sentence alone, because the
+#: client has to *branch* on this one: it puts a confirmation in front of the
+#: lend button and resends. Matching on the prose would break the moment the
+#: prose was reworded or translated, and the two 409s this endpoint raises
+#: (already out, never lent) mean entirely different things to the reader.
+NOT_LENDABLE: Final = "not_lendable"
+
+
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
 def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -> LoanOut:
+    """Record that a book has gone out.
+
+    **A book marked `lending = never` is refused once, not forbidden.** Neither
+    extreme is right here. Allowing it silently makes the field decorative, and
+    a household that took the trouble to mark a copy would find the app had
+    quietly ignored it. Forbidding it outright is worse: the same household
+    lends that book to a sibling anyway, and an app that will not let them
+    record what actually happened gets a loan kept in somebody's head instead,
+    which is the one thing this table exists to replace.
+
+    So the refusal costs one extra deliberate step: a 409 carrying
+    `code: not_lendable`, then the same request again with
+    `acknowledge_not_lendable`. The other two willingness values are not
+    checked at all. `in_use` means "come back later", which is a conversation
+    between two people rather than a rule, and `happy` is a yes.
+
+    The flag is not stored: see `LoanCreate.acknowledge_not_lendable`.
+    """
     book = (
         db.query(Book)
         .filter(Book.id == payload.book_id, visible_to(current_user.id))
@@ -140,6 +169,23 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     # behind it.
     if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # A book the household said it does not lend. Refused once, then allowed:
+    # see `_refuse_unless_acknowledged`.
+    if (
+        book.lending == LendingWillingness.NEVER
+        and not payload.acknowledge_not_lendable
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "This book is marked as never lent. Send "
+                    "acknowledge_not_lendable to lend it anyway."
+                ),
+                "code": NOT_LENDABLE,
+            },
+        )
 
     already_out = (
         db.query(Loan)

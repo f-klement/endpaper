@@ -7,6 +7,7 @@
  */
 
 export interface LoanCreate {
+  acknowledge_not_lendable?: boolean;
   book_id: number;
   due_at?: string | null;
   loaned_to_name?: string | null;

@@ -88,6 +88,22 @@ COVER_HOSTS: Final = (
     # the volume record. Google serves them from two hosts.
     "https://books.google.com",
     "https://*.googleusercontent.com",
+    # Where Open Library's covers actually live. `covers.openlibrary.org` serves
+    # **every** cover as a 302 to `archive.org`, which 302s again to a numbered
+    # `ia<n>.us.archive.org`. Measured 2026-08-22 against the live service:
+    #
+    #   covers.openlibrary.org  302 -> archive.org
+    #   archive.org             302 -> ia800505.us.archive.org
+    #   ia800505.us.archive.org 200    image/jpeg
+    #
+    # Omitting these is not a hypothetical: the first backfill on the live
+    # deployment reported `unreachable: 4` out of 4, because the guard correctly
+    # refused a redirect target it had never been told about. An allowlist for a
+    # fetch has to name where the bytes are, not where the request is addressed.
+    # The DNB serves its covers directly with no redirect, so only Open Library
+    # needs this.
+    "https://archive.org",
+    "https://*.us.archive.org",
 )
 
 _INSECURE_SCHEME: Final = "http://"

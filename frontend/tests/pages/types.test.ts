@@ -1,9 +1,21 @@
+/**
+ * @vitest-environment node
+ *
+ * Touches no DOM, so it needs no jsdom. Building one costs more than this file
+ * spends running: measured across the suite, `environment` was 168s of a 245s
+ * run, paid once per file.
+ */
 /** Tests for src/pages/types.ts: the shared tag grouping and constants. */
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { TagCategory } from "../../src/api/generated/model";
 import {
+  LendingWillingness,
+  TagCategory,
+} from "../../src/api/generated/model";
+import {
+  LENDING_LABELS,
+  LENDING_ORDER,
   MODE_LABELS,
   MODE_ORDER,
   TAG_CATEGORY_LABELS,
@@ -132,5 +144,30 @@ describe("the light and dark modes", () => {
     // A default reads better as the thing you return to than the thing you
     // start at, and both screens take their order from here.
     expect(MODE_ORDER[MODE_ORDER.length - 1]).toBe("system");
+  });
+});
+
+describe("the lending willingness", () => {
+  it("names every answer the backend can send", () => {
+    // A `Record<...>` rather than a lookup with a default, so a fourth value
+    // added to the enum is a compile error here and not a blank cell.
+    expect(Object.keys(LENDING_LABELS).sort()).toEqual(
+      Object.values(LendingWillingness).sort(),
+    );
+  });
+
+  it("offers every one of them, and nothing else", () => {
+    expect([...LENDING_ORDER].sort()).toEqual(
+      Object.values(LendingWillingness).sort(),
+    );
+  });
+
+  it("offers the yes first and the no last", () => {
+    // The order somebody would say them in, rather than the order the enum
+    // happens to declare.
+    expect(LENDING_ORDER[0]).toBe(LendingWillingness.happy);
+    expect(LENDING_ORDER[LENDING_ORDER.length - 1]).toBe(
+      LendingWillingness.never,
+    );
   });
 });

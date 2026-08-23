@@ -13,6 +13,7 @@ import { formatMinor } from "../../lib/money";
 import {
   CONDITION_LABELS,
   FORMAT_LABELS,
+  LENDING_LABELS,
   STATUS_LABELS,
   TAG_PILL_CLASSES,
 } from "../types";
@@ -109,6 +110,11 @@ function factsFor(book: BookOut, hiddenTags: TagOut[], t: Translate): Fact[] {
       "copy.condition",
       book.condition ? t(CONDITION_LABELS[book.condition]) : null,
     ],
+    ["lending.label", book.lending ? t(LENDING_LABELS[book.lending]) : null],
+    [
+      "discuss.label",
+      (book.discuss_with ?? []).map((member) => member.username).join(", "),
+    ],
     ["field.pageCount", book.page_count],
     ["library.tags", hiddenTags.map((tag) => tag.name).join(", ")],
     ["copy.price", priceText(book)],
@@ -152,6 +158,7 @@ export default function BookCard({
 
   const status = book.my_status ?? ReadStatus.unread;
   const isUnconfirmed = book.ownership === OwnershipStatus.unknown;
+  const wantsDiscussion = (book.discuss_with ?? []).length > 0;
   const tags = book.tags ?? [];
   const shown = facePills(tags);
   const hidden = tags.filter((tag) => !shown.includes(tag));
@@ -193,6 +200,17 @@ export default function BookCard({
         {book.active_loan && (
           <div className="absolute top-1.5 right-1.5 bg-orange-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
             {t("library.loaned")}
+          </div>
+        )}
+
+        {/* On the face of the card, not in the fold out. The offer exists to
+            be noticed by somebody browsing, and a marker that needs a click to
+            find is a marker only the person who set it ever sees. Bottom
+            right, which is the one corner nothing else uses: ownership takes
+            bottom left and a loan takes top right. */}
+        {wantsDiscussion && (
+          <div className="absolute bottom-1.5 right-1.5 bg-accent-fill text-on-accent text-xs font-medium px-1.5 py-0.5 rounded-full">
+            {t("discuss.badge")}
           </div>
         )}
       </div>

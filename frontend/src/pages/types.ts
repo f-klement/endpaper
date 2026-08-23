@@ -14,6 +14,7 @@
 import {
   BookCondition,
   BookFormat,
+  LendingWillingness,
   OwnershipStatus,
   ReadStatus,
   TagCategory,
@@ -116,6 +117,30 @@ export const CONDITION_ORDER: readonly BookCondition[] = [
   BookCondition.fair,
   BookCondition.poor,
   BookCondition.ex_library,
+];
+
+/**
+ * What each answer to "would you lend this" is called.
+ *
+ * Here for the same reason the two tables above are: four places name these
+ * now (the lend panel's select, the card's fold out, the table column and the
+ * library filter), and the copy that drifts is the one nobody is looking at.
+ *
+ * The strings are deliberately about the owner rather than about the book.
+ * "Not available" would describe a state; "I am using it myself" describes a
+ * person, and that is what the field records.
+ */
+export const LENDING_LABELS: Record<LendingWillingness, MessageKey> = {
+  [LendingWillingness.in_use]: "lending.in_use",
+  [LendingWillingness.never]: "lending.never",
+  [LendingWillingness.happy]: "lending.happy",
+};
+
+/** Yes, later, no. Offered in the order somebody would say them. */
+export const LENDING_ORDER: readonly LendingWillingness[] = [
+  LendingWillingness.happy,
+  LendingWillingness.in_use,
+  LendingWillingness.never,
 ];
 
 /** Type, genre and age. One value, written once. */

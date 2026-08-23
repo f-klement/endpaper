@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   BookSort,
+  LendingWillingness,
   OwnershipStatus,
   ReadStatus,
 } from "../../../src/api/generated/model";
@@ -257,6 +258,63 @@ describe("useLibrary ownership filter", () => {
       act(() => result.current.setOwnership(null));
 
       await waitFor(() => expect(result.current.filters.ownership).toBeNull());
+    });
+  });
+});
+
+describe("useLibrary lending and discussion filters", () => {
+  it("omits both by default", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+    expect(lastQuery().has("lending")).toBe(false);
+    expect(lastQuery().has("discuss")).toBe(false);
+  });
+
+  it("sends the chosen willingness", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    act(() => result.current.setLending(LendingWillingness.happy));
+
+    await waitFor(() => expect(lastQuery().get("lending")).toBe("happy"));
+  });
+
+  it("sends the discussion filter only when it is on", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    act(() => result.current.setDiscuss(true));
+    await waitFor(() => expect(lastQuery().get("discuss")).toBe("true"));
+
+    act(() => result.current.setDiscuss(false));
+    await waitFor(() => expect(lastQuery().has("discuss")).toBe(false));
+  });
+
+  describe("seeded from the URL", () => {
+    it("starts on a willingness the route asks for", async () => {
+      const { result } = renderLibrary("/?lending=never");
+      await waitFor(() =>
+        expect(result.current.filters.lending).toBe(LendingWillingness.never),
+      );
+    });
+
+    it("ignores a willingness that is not one of the three", async () => {
+      const { result } = renderLibrary("/?lending=sometimes");
+      await waitFor(() => expect(result.current.books).toHaveLength(1));
+      expect(result.current.filters.lending).toBeNull();
+    });
+
+    it("treats a bare ?discuss as on", async () => {
+      // What a link somebody typed looks like. Reading it as off would make
+      // the link silently do nothing.
+      const { result } = renderLibrary("/?discuss");
+      await waitFor(() => expect(result.current.filters.discuss).toBe(true));
+    });
+
+    it("treats ?discuss=false as off", async () => {
+      const { result } = renderLibrary("/?discuss=false");
+      await waitFor(() => expect(result.current.books).toHaveLength(1));
+      expect(result.current.filters.discuss).toBe(false);
     });
   });
 });

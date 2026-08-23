@@ -99,6 +99,38 @@ class BookCondition(StrEnum):
     EX_LIBRARY = "ex_library"
 
 
+class LendingWillingness(StrEnum):
+    """Whether the household is prepared to lend this copy out.
+
+    **Not the same question as a loan, and not the same as `ownership`.** A
+    loan is a fact about right now, `ownership` is a fact about the shelf, and
+    this is a standing intention that survives both: a book can be marked
+    happy to lend while it is out, and a book nobody will ever lend is still
+    owned. Storing it on the loan instead would mean the answer only existed
+    while the book was somewhere else.
+
+    IN_USE is the one that would otherwise be missing, and it is the reason
+    this is three values rather than a boolean. "Ask me later" is a real
+    answer, distinct from "no": the copy is spoken for at the moment and the
+    person asking should come back, which a yes/no field cannot say.
+
+    NEVER is a rule, not a state. It is what a signed first edition or a copy
+    somebody was given gets, and nothing about the shelf can change it.
+
+    Nullable on the column rather than defaulted to HAPPY: an unanswered
+    question is not an answer, and a guess written into every imported book at
+    once is worse than a blank, because nobody re-checks a field that looks
+    filled in. Same reasoning as `BookFormat`.
+    """
+
+    #: Wanted by its owner at the moment. Not a refusal.
+    IN_USE = "in_use"
+    #: Not lent, as a matter of principle.
+    NEVER = "never"
+    #: Offered freely.
+    HAPPY = "happy"
+
+
 class TagCategory(StrEnum):
     """The groups tags are presented in throughout the UI.
 

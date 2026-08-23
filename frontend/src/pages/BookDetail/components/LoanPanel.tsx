@@ -1,15 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { BookOut, UserOut } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import {
+  LendingWillingness,
+  type BookDetailsUpdate,
+  type BookOut,
+  type UserOut,
+} from "../../../api/generated/model";
+import { useTranslation, type MessageKey } from "../../../i18n";
+import { LENDING_LABELS, LENDING_ORDER } from "../../types";
 
 interface LoanPanelProps {
   book: BookOut;
   members: UserOut[];
   isBusy: boolean;
-  onLend: (borrower: Borrower, dueAt: string | null) => void;
+  /** Saving the willingness, which goes through the ordinary details PATCH. */
+  isSavingDetails: boolean;
+  onSaveLending: (fields: BookDetailsUpdate) => void;
+  onLend: (
+    borrower: Borrower,
+    dueAt: string | null,
+    acknowledgeNotLendable: boolean,
+  ) => void;
   onMarkReturned: (loanId: number) => void;
 }
+
+// Built from the shared table rather than restated, so this panel and the
+// card's fold out cannot call the same value two different things.
+const WILLINGNESS: { value: LendingWillingness; label: MessageKey }[] =
+  LENDING_ORDER.map((value) => ({ value, label: LENDING_LABELS[value] }));
 
 /**
  * Who the book is going to.
@@ -29,6 +47,8 @@ export default function LoanPanel({
   book,
   members,
   isBusy,
+  isSavingDetails,
+  onSaveLending,
   onLend,
   onMarkReturned,
 }: LoanPanelProps) {
@@ -37,9 +57,20 @@ export default function LoanPanel({
   const [target, setTarget] = useState("");
   const [externalName, setExternalName] = useState("");
   const [dueAt, setDueAt] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  const isNeverLent = book.lending === LendingWillingness.never;
+
+  // Untick when the book stops being one that needs the confirmation, and when
+  // the loan completes. A checkbox left ticked from the last lend would make
+  // the next one a single click again, which is the whole thing this guards.
+  useEffect(() => {
+    setAcknowledged(false);
+  }, [book.id, book.lending, book.active_loan?.id]);
 
   const trimmedName = externalName.trim();
-  const canLend = kind === "member" ? Boolean(target) : Boolean(trimmedName);
+  const hasBorrower = kind === "member" ? Boolean(target) : Boolean(trimmedName);
+  const canLend = hasBorrower && (!isNeverLent || acknowledged);
 
   function lend() {
     onLend(
@@ -50,6 +81,10 @@ export default function LoanPanel({
       // rather than midnight, or a book due "today" is overdue from the moment
       // it is lent.
       dueAt ? `${dueAt}T23:59:59` : null,
+      // Sent only when it is the answer to a question that was asked. The
+      // server refuses a never-lent book without it, and accepts it as noise
+      // on any other book.
+      isNeverLent && acknowledged,
     );
   }
 
@@ -58,6 +93,35 @@ export default function LoanPanel({
       <p className="text-sm font-semibold text-paper-700 mb-2 dark:text-paper-200">
         {t("loans.management")}
       </p>
+
+      {/* The willingness lives here rather than in the copy panel, which is
+          about the object. This is the panel it governs, and a rule the lend
+          button enforces has to be visible from the lend button. */}
+      <label className="block text-sm mb-3">
+        <span className="block text-xs text-paper-600 mb-1 dark:text-paper-400">
+          {t("lending.label")}
+        </span>
+        <select
+          value={book.lending ?? ""}
+          disabled={isSavingDetails}
+          onChange={(event) =>
+            onSaveLending({
+              // Empty means "clear". The API tells absent from null apart, and
+              // an empty string is neither.
+              lending: (event.target.value ||
+                null) as LendingWillingness | null,
+            })
+          }
+          className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm bg-paper-0 dark:border-paper-700 dark:bg-paper-900"
+        >
+          <option value="">{t("lending.unset")}</option>
+          {WILLINGNESS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.label)}
+            </option>
+          ))}
+        </select>
+      </label>
 
       {book.active_loan ? (
         <button
@@ -69,6 +133,30 @@ export default function LoanPanel({
         </button>
       ) : (
         <>
+          {/* Refused once, not forbidden. A household lends a never-lent book
+              to a sibling sometimes, and an app that will not let them record
+              it gets the loan kept in somebody's head instead. So the button
+              stays disabled until this is ticked, and the server asks for the
+              same acknowledgement whatever the client does. */}
+          {isNeverLent && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-500/40 dark:bg-amber-500/10">
+              <p className="text-xs text-paper-700 dark:text-paper-200">
+                {t("lending.neverWarning")}
+              </p>
+              <label className="mt-1.5 flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(event) => setAcknowledged(event.target.checked)}
+                  className="w-4 h-4 rounded border-paper-300 text-accent-600"
+                />
+                <span className="text-xs font-medium text-paper-700 dark:text-paper-200">
+                  {t("lending.lendAnyway")}
+                </span>
+              </label>
+            </div>
+          )}
+
           {/* Two radios rather than a select with an "Other..." row: the second
               choice needs a text field, and a select cannot grow one. */}
           <fieldset className="mb-2">

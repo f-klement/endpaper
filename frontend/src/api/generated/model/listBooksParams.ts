@@ -7,6 +7,7 @@
  */
 import type { BookFormat } from "./bookFormat.ts";
 import type { BookSort } from "./bookSort.ts";
+import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
 
@@ -19,16 +20,22 @@ export type ListBooksParams = {
   tags?: string | null;
   ownership?: OwnershipStatus | null;
   format?: BookFormat | null;
+  lending?: LendingWillingness | null;
   series?: string | null;
   location?: string | null;
   /**
    * Only books you have not rated
    */
   unrated?: boolean;
+  /**
+   * Only books somebody has offered to talk about
+   */
+  discuss?: boolean;
   sort?: BookSort;
   /**
    * 1-based page number
    * @minimum 1
+   * @maximum 1000000
    */
   page?: number;
   /**

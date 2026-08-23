@@ -7,6 +7,7 @@
  */
 import type { BookCondition } from "./bookCondition.ts";
 import type { BookFormat } from "./bookFormat.ts";
+import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { LoanOut } from "./loanOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
@@ -23,12 +24,14 @@ export interface BookOut {
   cover_url: string | null;
   deleted_at?: string | null;
   description: string | null;
+  discuss_with?: UserOut[];
   format?: BookFormat | null;
   google_books_id?: string | null;
   id: number;
   is_private?: boolean;
   isbn: string | null;
   language?: string | null;
+  lending?: LendingWillingness | null;
   location?: string | null;
   my_finished_at?: string | null;
   my_progress_page?: number | null;
@@ -37,6 +40,7 @@ export interface BookOut {
   my_rating?: number | null;
   my_started_at?: string | null;
   my_status?: ReadStatus;
+  my_wants_to_discuss?: boolean;
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher: string | null;

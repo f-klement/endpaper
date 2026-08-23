@@ -1,6 +1,6 @@
 /** Tests for src/pages/BookDetail/components/ShelfPanel.tsx. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,7 +42,7 @@ describe("ShelfPanel", () => {
     const onSave = renderPanel({ location: null });
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Where it is"), "Kitchen");
+    fireEvent.change(screen.getByLabelText("Where it is"), { target: { value: "Kitchen" } });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).toHaveBeenCalledWith(
@@ -67,7 +67,7 @@ describe("ShelfPanel", () => {
     const onSave = renderPanel({ series_name: "Discworld" });
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("No."), "2.5");
+    fireEvent.change(screen.getByLabelText("No."), { target: { value: "2.5" } });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).toHaveBeenCalledWith(

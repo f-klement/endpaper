@@ -413,6 +413,16 @@
               }
             ]
           },
+          "lending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LendingWillingness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "location": {
             "anyOf": [
               {
@@ -552,6 +562,20 @@
           }
         },
         "title": "BookDetailsUpdate",
+        "type": "object"
+      },
+      "BookDiscussUpdate": {
+        "description": "Offer to talk about this book, or withdraw the offer.\n\nIts own schema rather than a field on `BookStatusUpdate`, because the two\nare not the same act and are not set at the same moment: a book can be\nunread and worth talking about, and finishing one says nothing about\nwanting to be asked.",
+        "properties": {
+          "wants_to_discuss": {
+            "title": "Wants To Discuss",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "wants_to_discuss"
+        ],
+        "title": "BookDiscussUpdate",
         "type": "object"
       },
       "BookEnrichmentOut": {
@@ -993,6 +1017,14 @@
             ],
             "title": "Description"
           },
+          "discuss_with": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UserOut"
+            },
+            "title": "Discuss With",
+            "type": "array"
+          },
           "format": {
             "anyOf": [
               {
@@ -1044,6 +1076,16 @@
               }
             ],
             "title": "Language"
+          },
+          "lending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LendingWillingness"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "location": {
             "anyOf": [
@@ -1128,6 +1170,11 @@
           "my_status": {
             "$ref": "#/components/schemas/ReadStatus",
             "default": "unread"
+          },
+          "my_wants_to_discuss": {
+            "default": false,
+            "title": "My Wants To Discuss",
+            "type": "boolean"
           },
           "ownership": {
             "$ref": "#/components/schemas/OwnershipStatus",
@@ -1674,8 +1721,23 @@
         "title": "ImportResultOut",
         "type": "object"
       },
+      "LendingWillingness": {
+        "description": "Whether the household is prepared to lend this copy out.\n\n**Not the same question as a loan, and not the same as `ownership`.** A\nloan is a fact about right now, `ownership` is a fact about the shelf, and\nthis is a standing intention that survives both: a book can be marked\nhappy to lend while it is out, and a book nobody will ever lend is still\nowned. Storing it on the loan instead would mean the answer only existed\nwhile the book was somewhere else.\n\nIN_USE is the one that would otherwise be missing, and it is the reason\nthis is three values rather than a boolean. \"Ask me later\" is a real\nanswer, distinct from \"no\": the copy is spoken for at the moment and the\nperson asking should come back, which a yes/no field cannot say.\n\nNEVER is a rule, not a state. It is what a signed first edition or a copy\nsomebody was given gets, and nothing about the shelf can change it.\n\nNullable on the column rather than defaulted to HAPPY: an unanswered\nquestion is not an answer, and a guess written into every imported book at\nonce is worse than a blank, because nobody re-checks a field that looks\nfilled in. Same reasoning as `BookFormat`.",
+        "enum": [
+          "in_use",
+          "never",
+          "happy"
+        ],
+        "title": "LendingWillingness",
+        "type": "string"
+      },
       "LoanCreate": {
         "properties": {
+          "acknowledge_not_lendable": {
+            "default": false,
+            "title": "Acknowledge Not Lendable",
+            "type": "boolean"
+          },
           "book_id": {
             "title": "Book Id",
             "type": "integer"
@@ -3037,6 +3099,22 @@
           },
           {
             "in": "query",
+            "name": "lending",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LendingWillingness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lending"
+            }
+          },
+          {
+            "in": "query",
             "name": "series",
             "required": false,
             "schema": {
@@ -3082,6 +3160,18 @@
             }
           },
           {
+            "description": "Only books somebody has offered to talk about",
+            "in": "query",
+            "name": "discuss",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only books somebody has offered to talk about",
+              "title": "Discuss",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,
@@ -3098,6 +3188,7 @@
             "schema": {
               "default": 1,
               "description": "1-based page number",
+              "maximum": 1000000,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -3817,6 +3908,7 @@
             "schema": {
               "default": 1,
               "description": "1-based page number",
+              "maximum": 1000000,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -4064,6 +4156,64 @@
           }
         ],
         "summary": "Upload Cover",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/discuss": {
+      "patch": {
+        "description": "Offer to talk about this book, or withdraw the offer.\n\nRead access, like status and rating: it is the caller's own flag on a book\nthey can see, and it changes nothing about the book itself.\n\nUnlike those two it is **read by everybody**, which is the point. It says\nnothing about whether the caller has read the book; `my_status` stays\nprivate.\n\nCreates the `user_books` row when there is none, exactly as the status and\nrating paths do: absence of a row means unread, not the absence of a\nmember.",
+        "operationId": "set_discuss",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookDiscussUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Discuss",
         "tags": [
           "books"
         ]
@@ -5321,6 +5471,7 @@
             "schema": {
               "default": 1,
               "description": "1-based page number",
+              "maximum": 1000000,
               "minimum": 1,
               "title": "Page",
               "type": "integer"
@@ -5374,6 +5525,7 @@
         ]
       },
       "post": {
+        "description": "Record that a book has gone out.\n\n**A book marked `lending = never` is refused once, not forbidden.** Neither\nextreme is right here. Allowing it silently makes the field decorative, and\na household that took the trouble to mark a copy would find the app had\nquietly ignored it. Forbidding it outright is worse: the same household\nlends that book to a sibling anyway, and an app that will not let them\nrecord what actually happened gets a loan kept in somebody's head instead,\nwhich is the one thing this table exists to replace.\n\nSo the refusal costs one extra deliberate step: a 409 carrying\n`code: not_lendable`, then the same request again with\n`acknowledge_not_lendable`. The other two willingness values are not\nchecked at all. `in_use` means \"come back later\", which is a conversation\nbetween two people rather than a rule, and `happy` is a yes.\n\nThe flag is not stored: see `LoanCreate.acknowledge_not_lendable`.",
         "operationId": "create_loan",
         "requestBody": {
           "content": {

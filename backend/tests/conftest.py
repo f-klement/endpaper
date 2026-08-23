@@ -7,7 +7,9 @@ is what the module-level block below does. It must stay above any application
 import in the test suite.
 """
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -18,9 +20,53 @@ import pytest
 
 # ── Environment must be set before the app is imported ────────────────────────
 
-_TMP_DATA_DIR = Path(tempfile.mkdtemp(prefix="endpaper-tests-"))
+def _fastest_scratch() -> str | None:
+    """A tmpfs to put the test database on, or None to take the default.
+
+    `/dev/shm` is memory on every Linux container this suite runs in, and the
+    default temp directory is the container's overlay filesystem, which is a
+    real disk. Every test drops and recreates twelve tables and seeds 105 tags,
+    so the run is tens of thousands of writes that are deleted immediately, and
+    doing them against a disk is why the suite measured 0.68 cores across two
+    workers rather than being CPU bound.
+
+    Falls back silently when the path is missing or not writable, because a
+    suite that refuses to run somewhere unusual is worse than one that runs a
+    little slower. macOS has no `/dev/shm` and is the case that hits this.
+    """
+    shm = Path("/dev/shm")
+    if not shm.is_dir():
+        return None
+    try:
+        # `mkstemp`, not a path built from the pid. /dev/shm is world writable
+        # with the sticky bit, and a pid is guessable, so writing to a
+        # predictable name follows a symlink somebody else planted and truncates
+        # whatever it points at with the test user's rights. `mkstemp` creates
+        # with O_EXCL and answers the same question, which is only ever "can
+        # this user write here".
+        handle, name = tempfile.mkstemp(dir=shm)
+        os.close(handle)
+        os.unlink(name)
+    except OSError:
+        return None
+    return str(shm)
+
+
+_TMP_DATA_DIR = Path(tempfile.mkdtemp(prefix="endpaper-tests-", dir=_fastest_scratch()))
+
+
+# **Removed at exit.** `_TMP_DATA_DIR` lives on tmpfs, which is RAM, and nothing
+# was cleaning it: measured on the development host, eleven leftover directories
+# at 180K each, three per run (the controller and two xdist workers) and never
+# reclaimed. Harmless per run and unbounded over a day, on a machine that also
+# runs etcd. `atexit` rather than a fixture, because it has to fire for the
+# controller process too, which owns a directory but runs no tests.
+atexit.register(shutil.rmtree, _TMP_DATA_DIR, True)
 os.environ["DATA_DIR"] = str(_TMP_DATA_DIR)
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DATA_DIR / 'test.db'}"
+# Durability is meaningless for a database dropped after every test, and the
+# fsync it buys was most of this suite's runtime. See database._synchronous.
+os.environ["SQLITE_SYNCHRONOUS"] = "OFF"
 os.environ["SECRET_KEY"] = "test-secret-key-at-least-32-characters-long"
 os.environ.setdefault("ALLOW_REGISTRATION", "true")
 # The suite exercises the startup secret guard explicitly in test_config.py;
@@ -61,18 +107,77 @@ from ratelimit import (  # noqa: E402
 )
 
 
-@pytest.fixture(autouse=True)
-def clean_database() -> Iterator[None]:
-    """Give every test an empty database with only the predefined tags seeded.
+@pytest.fixture(scope="session")
+def _schema_once() -> None:
+    """Build the schema once per worker, not once per test.
 
-    Dropping and recreating is affordable here because the database is a
-    SQLite file of a few kilobytes, and it keeps tests order-independent.
+    Each xdist worker is a separate process with its own `mkdtemp` directory and
+    its own database file, so this runs once per worker and they cannot collide.
     """
-    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    main.seed_tags()
+
+
+@pytest.fixture(autouse=True)
+def clean_database(_schema_once: None) -> Iterator[None]:
+    """Empty every table and reseed the predefined tags, on one connection.
+
+    **Deletes rows; does not rebuild the schema.** Measured in the CI pod with
+    the database on tmpfs and `synchronous=OFF`: a drop, create and seed costs
+    **58.8ms**, this costs **3.1ms**, and it is the difference between a suite
+    that spends a third of its time on DDL and one that does not.
+
+    Two designs were rejected to get here, and the reasons are worth keeping.
+
+    **A transaction rolled back per test** is faster still (0.8ms) and was built,
+    reviewed and abandoned. It binds every session to one connection through a
+    savepoint, and savepoints on a shared connection are **one stack, not one per
+    session**: a session that opened its savepoint first and rolls back destroys
+    the committed work of every session that committed after it. Measured against
+    the real app, that turns a privacy test into a vacuous one, because a test
+    asserting "another member gets 404" gets its 404 just as readily when the
+    book was never written. It also held a write lock for a whole test rather
+    than a statement, and one unguarded `connection.close()` in its teardown
+    could wedge an xdist worker for the rest of a run: observed once in thirty,
+    as 423 failures and 121 errors.
+
+    **Keeping the seeded tags** rather than reseeding is faster again (1.0ms) and
+    is wrong: `backup.restore` deletes and reinserts the tags table and
+    `_repair_seeded_tags` rewrites `is_predefined`, so a test can legitimately
+    mutate a predefined tag.
+
+    Order matters: children before parents, because the foreign keys are real
+    and enforced. `Base.metadata.sorted_tables` is dependency ordered, so
+    reversing it deletes children first.
+
+    Ids still restart at 1, which the `covers_dir` fixture depends on, because
+    nothing here uses `AUTOINCREMENT`: SQLite reuses the highest free rowid, and
+    an empty table has none taken.
+    """
+    _empty_and_reseed()
     yield
-    Base.metadata.drop_all(bind=engine)
+
+
+def _empty_and_reseed() -> None:
+    """One connection, one transaction, no DDL and no second session.
+
+    `seed_tags()` is not called: it opens its **own** session against the engine,
+    which is a second connection, and the whole point of this shape is that the
+    reset never needs one. The tags are inserted here from the same list, so a
+    tag added to `PREDEFINED_TAGS` reaches the suite without touching this.
+    """
+    with engine.begin() as connection:
+        for table in reversed(Base.metadata.sorted_tables):
+            connection.execute(table.delete())
+        # From the metadata, not `Tag.__table__`. A declarative class types that
+        # attribute as the wider `FromClause`, which has no `insert`, which is
+        # the same trap `backup.py` documents for `delete()`.
+        connection.execute(
+            Base.metadata.tables["tags"].insert(),
+            [
+                {"name": name, "category": category, "is_predefined": True}
+                for name, category in main.PREDEFINED_TAGS
+            ],
+        )
 
 
 @pytest.fixture(autouse=True)

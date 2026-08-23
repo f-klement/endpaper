@@ -6,12 +6,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  LendingWillingness,
   OwnershipStatus,
   ReadStatus,
   type BookOut,
 } from "../../../src/api/generated/model";
 import BookCard from "../../../src/pages/components/BookCard";
-import { makeBook, makeLoan, makeTag, resetIds } from "../../factories";
+import { makeBook, makeLoan, makeTag, makeUser, resetIds } from "../../factories";
 
 beforeEach(resetIds);
 
@@ -276,6 +277,70 @@ describe("BookCard ownership", () => {
   it("says nothing about a book marked as not owned", () => {
     renderCard(makeBook({ ownership: OwnershipStatus.not_owned }));
     expect(screen.queryByText("Not confirmed")).not.toBeInTheDocument();
+  });
+});
+
+describe("BookCard talk-about-it marker", () => {
+  it("is on the face of the card, not behind the fold out", () => {
+    // The offer exists to be noticed by somebody browsing. A marker that
+    // needs a click to find is one only the person who set it ever sees.
+    renderCard(makeBook({ discuss_with: [makeUser({ username: "ana" })] }));
+    expect(screen.getByText("Talk about it")).toBeInTheDocument();
+  });
+
+  it("appears for somebody else's offer, not only the reader's own", () => {
+    renderCard(
+      makeBook({
+        my_wants_to_discuss: false,
+        discuss_with: [makeUser({ username: "ana" })],
+      }),
+    );
+    expect(screen.getByText("Talk about it")).toBeInTheDocument();
+  });
+
+  it("says nothing when nobody has offered", () => {
+    renderCard(makeBook());
+    expect(screen.queryByText("Talk about it")).not.toBeInTheDocument();
+  });
+
+  it("names who to ask in the fold out", async () => {
+    renderCard(
+      makeBook({
+        title: "Dune",
+        discuss_with: [
+          makeUser({ username: "ana" }),
+          makeUser({ username: "ben" }),
+        ],
+      }),
+    );
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
+
+    expect(screen.getByText("ana, ben")).toBeInTheDocument();
+  });
+});
+
+describe("BookCard lending willingness", () => {
+  it("is in the fold out, in the reader's own words", async () => {
+    renderCard(makeBook({ title: "Dune", lending: LendingWillingness.never }));
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
+
+    expect(screen.getByText("Never lent")).toBeInTheDocument();
+  });
+
+  it("is left out of a book nobody has been asked about", async () => {
+    renderCard(makeBook({ title: "Dune", publisher: "Chilton" }));
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
+
+    expect(screen.queryByText("Lending")).not.toBeInTheDocument();
   });
 });
 

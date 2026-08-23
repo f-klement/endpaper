@@ -129,6 +129,34 @@ def _latest_progress(
     }
 
 
+def _discussers(book_ids: list[int], db: Session) -> dict[int, list[UserOut]]:
+    """Who has offered to talk about each of these books.
+
+    **Not filtered to the caller**, unlike every other per-member field here,
+    and that is the whole point of the flag: a reader browsing the shelf has to
+    be able to see whose door to knock on. It leaks nothing else, in particular
+    not whether those members have read the book.
+
+    One statement for the page, joined to `users` so the names arrive with it.
+    A per-book query here is the exact N+1 this module exists to avoid, and a
+    lazy `user_book.user` read inside the loop would be the same thing wearing
+    a different coat.
+
+    Ordered by username so a book with three readers reads the same way twice.
+    """
+    rows = (
+        db.query(UserBook.book_id, User)
+        .join(User, User.id == UserBook.user_id)
+        .filter(UserBook.book_id.in_(book_ids), UserBook.wants_to_discuss.is_(True))
+        .order_by(User.username.asc())
+        .all()
+    )
+    grouped: dict[int, list[UserOut]] = {}
+    for book_id, user in rows:
+        grouped.setdefault(book_id, []).append(UserOut.model_validate(user))
+    return grouped
+
+
 def books_to_out(books: list[Book], current_user: User, db: Session) -> list[BookOut]:
     """Serialise a page of books, adding the per-request fields.
 
@@ -140,9 +168,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     `docs/data-model.md` point here rather than repeating a number, because
     both have been wrong before and were wrong in the same way twice.
 
-    Five statements, constant in the size of the page: the books re-read to
-    populate their tags, the tag load itself, the loans, the statuses, and the
-    progress. Measured at 1, 5 and 25 books, unchanged.
+    Six statements, constant in the size of the page: the books re-read to
+    populate their tags, the tag load itself, the loans, the statuses, the
+    progress, and the members offering to talk about each book. Measured at 1,
+    5 and 25 books, unchanged.
 
     **Plus one per distinct `added_by` author the session has not already
     loaded**, and that one is not this function's: `BookOut.model_validate`
@@ -158,14 +187,14 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     books, for one, two and three distinct authors:
 
         authors                  1   2   3
-        caller wrote none        6   7   8
-        caller is one of them    5   6   7
+        caller wrote none        7   8   9
+        caller is one of them    6   7   8
 
     Every listing endpoint in `routers/books.py` passes
     `joinedload(Book.added_by)`, so none of them pays any of it: `GET
-    /api/books` measures a flat **10 SELECTs** end to end at 5 and 25 books and
+    /api/books` measures a flat **11 SELECTs** end to end at 5 and 25 books and
     at one, two and three authors, and `books_to_out` on rows fetched with the
-    option is a flat 5 at 1, 5 and 25 books.
+    option is a flat 6 at 1, 5 and 25 books.
 
     A new caller that fetches books without that option gets the per-author
     cost back. That is the trap this paragraph exists to name.
@@ -207,6 +236,7 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     }
 
     latest_progress = _latest_progress(book_ids, current_user, db)
+    discussers = _discussers(book_ids, db)
 
     results: list[BookOut] = []
     for book in books:
@@ -224,6 +254,8 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
         out.my_rating = user_book.rating if user_book else None
         out.my_started_at = user_book.started_at if user_book else None
         out.my_finished_at = user_book.finished_at if user_book else None
+        out.my_wants_to_discuss = bool(user_book.wants_to_discuss) if user_book else False
+        out.discuss_with = discussers.get(book.id, [])
 
         progress = latest_progress.get(book.id)
         if progress is not None:

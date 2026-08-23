@@ -1,4 +1,11 @@
 /**
+ * @vitest-environment node
+ *
+ * Touches no DOM, so it needs no jsdom. Building one costs more than this file
+ * spends running: measured across the suite, `environment` was 168s of a 245s
+ * run, paid once per file.
+ */
+/**
  * Rules that hold across the whole tree, asserted rather than trusted.
  *
  * Neither has any other enforcement, and both are the kind of thing that looks

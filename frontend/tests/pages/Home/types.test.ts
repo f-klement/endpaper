@@ -1,10 +1,22 @@
+/**
+ * @vitest-environment node
+ *
+ * Touches no DOM, so it needs no jsdom. Building one costs more than this file
+ * spends running: measured across the suite, `environment` was 168s of a 245s
+ * run, paid once per file.
+ */
 /** Tests for src/pages/Home/types.ts. */
 
 import { describe, expect, it } from "vitest";
 
-import { BookSort, ReadStatus } from "../../../src/api/generated/model";
+import {
+  BookSort,
+  LendingWillingness,
+  ReadStatus,
+} from "../../../src/api/generated/model";
 import {
   DEFAULT_FILTERS,
+  LENDING_FILTERS,
   SORT_OPTIONS,
   STATUS_FILTERS,
   hasActiveFilters,
@@ -29,6 +41,8 @@ describe("hasActiveFilters", () => {
     ["a search term", { query: "dune" }],
     ["a status", { status: ReadStatus.read }],
     ["a tag", { tagIds: [1] }],
+    ["a lending answer", { lending: LendingWillingness.happy }],
+    ["the talk-about-it filter", { discuss: true }],
   ])("is true with %s", (_label, overrides) => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, ...overrides })).toBe(true);
   });
@@ -61,5 +75,26 @@ describe("option lists", () => {
   it("gives every sort a distinct value", () => {
     const values = SORT_OPTIONS.map((option) => option.value);
     expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("the lending filter", () => {
+  it("offers every answer, plus one that narrows nothing", () => {
+    const values = LENDING_FILTERS.map((option) => option.value);
+    expect(values).toContain(null);
+    for (const willingness of Object.values(LendingWillingness)) {
+      expect(values).toContain(willingness);
+    }
+  });
+
+  it("starts on the one that narrows nothing", () => {
+    expect(DEFAULT_FILTERS.lending).toBeNull();
+  });
+
+  it("starts with the talk-about-it filter off", () => {
+    // Off is the whole library. The books nobody has offered to talk about
+    // are not a view worth having, which is why this is a toggle rather than
+    // a third dropdown.
+    expect(DEFAULT_FILTERS.discuss).toBe(false);
   });
 });

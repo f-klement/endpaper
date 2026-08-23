@@ -4,7 +4,28 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 
 // jsdom has no layout engine; some libraries measure on mount.
-if (!window.matchMedia) {
+//
+// Guarded on `window` existing at all, not just on the method. This file is the
+// suite-wide setup, so it also runs for the files carrying
+// `@vitest-environment node`: the pure helpers, the house rules, the palette
+// maths. Reaching for a bare `window` there is a ReferenceError that collects
+// zero tests and reports the file as failed with no assertion named, which is a
+// confusing way to learn that a docblock took effect.
+// happy-dom implements no modal dialogue functions at all, where jsdom shipped
+// stubs that throw "not implemented". The app calls `confirm()` before the
+// destructive actions (emptying the trash, deleting a household tag, a bulk
+// delete), and tests spy on it to assert that a given action does or does not
+// ask. `vi.spyOn` on a missing property fails outright, so these have to exist
+// before a spy can replace them. Defaults are deliberately the safe answers: a
+// confirm nobody stubbed says no, so a test that forgets to stub cannot
+// silently perform a deletion.
+if (typeof window !== "undefined") {
+  window.confirm ??= () => false;
+  window.alert ??= () => undefined;
+  window.prompt ??= () => null;
+}
+
+if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,
     media: query,
@@ -84,12 +105,37 @@ function shippedPalette(): Record<string, string> {
   return tokens;
 }
 
-const PALETTE_TOKENS = shippedPalette();
+/**
+ * Parsed once per worker **process**, not once per test file.
+ *
+ * This file is the suite-wide setup, so anything at module scope runs again for
+ * every one of the seventy-eight files, and vitest gives each file a fresh
+ * module registry: a plain module-level `let` is therefore not a cache, it is
+ * the same work with an extra branch. `globalThis` outlives the registry
+ * because the fork pool reuses the process, so with two workers this parses
+ * twice for the whole run instead of seventy-eight times.
+ *
+ * The work and its errors are unchanged; only how often it happens is.
+ */
+const PALETTE_CACHE_KEY = "__endpaper_palette_tokens__";
+
+function paletteTokensOnce(): Record<string, string> {
+  const store = globalThis as Record<string, unknown>;
+  store[PALETTE_CACHE_KEY] ??= shippedPalette();
+  return store[PALETTE_CACHE_KEY] as Record<string, string>;
+}
 
 beforeEach(() => {
-  localStorage.clear();
-  for (const [token, value] of Object.entries(PALETTE_TOKENS)) {
-    document.documentElement.style.setProperty(token, value);
+  // Same guard as the matchMedia shim above, and for the same reason: this hook
+  // runs for the `@vitest-environment node` files too, which have neither a
+  // localStorage nor a document. The network stub below is installed either way,
+  // because a node-environment test reaching the real network is exactly as
+  // wrong as a jsdom one doing it.
+  if (typeof document !== "undefined") {
+    localStorage.clear();
+    for (const [token, value] of Object.entries(paletteTokensOnce())) {
+      document.documentElement.style.setProperty(token, value);
+    }
   }
   // Anything the test forgot to stub should fail loudly rather than reach the
   // real network. Tests install their own handlers via mockApi().
@@ -110,6 +156,8 @@ beforeEach(() => {
 // tree. The gap is jsdom's, not the app's: real browsers have had these for
 // years. Toggling `open` is enough to make the element behave for a test.
 beforeAll(() => {
+  // Third and last of the DOM guards in this file. See the matchMedia shim.
+  if (typeof window === "undefined") return;
   const dialog = window.HTMLDialogElement?.prototype;
   if (dialog && !dialog.showModal) {
     dialog.showModal = function showModal(this: HTMLDialogElement) {
@@ -123,7 +171,8 @@ beforeAll(() => {
 });
 
 afterEach(() => {
-  cleanup();
+  // `cleanup()` unmounts React trees, of which a node-environment file has none.
+  if (typeof document !== "undefined") cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

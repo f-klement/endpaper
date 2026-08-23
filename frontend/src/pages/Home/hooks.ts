@@ -25,6 +25,7 @@ import {
 import {
   BookFormat,
   BulkAction,
+  LendingWillingness,
   OwnershipStatus,
   ReadStatus,
   type BookOut,
@@ -57,6 +58,8 @@ function toParams(filters: BookFilters): ListBooksParams {
     ...(filters.series ? { series: filters.series } : {}),
     ...(filters.location ? { location: filters.location } : {}),
     ...(filters.format ? { format: filters.format } : {}),
+    ...(filters.lending ? { lending: filters.lending } : {}),
+    ...(filters.discuss ? { discuss: true } : {}),
     ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
     sort: filters.sort,
     page_size: PAGE_SIZE,
@@ -71,6 +74,8 @@ export interface UseLibraryResult {
   setSeries: (series: BookFilters["series"]) => void;
   setLocation: (location: BookFilters["location"]) => void;
   setFormat: (format: BookFilters["format"]) => void;
+  setLending: (lending: BookFilters["lending"]) => void;
+  setDiscuss: (discuss: boolean) => void;
   /** Replace the whole filter set, for a saved view such as the wishlist. */
   setFilters: (filters: BookFilters) => void;
 
@@ -120,6 +125,13 @@ function isFormat(value: string | null): value is BookFormat {
   );
 }
 
+function isLending(value: string | null): value is LendingWillingness {
+  return (
+    value !== null &&
+    (Object.values(LendingWillingness) as string[]).includes(value)
+  );
+}
+
 function isOwnership(value: string | null): value is OwnershipStatus {
   return (
     value === OwnershipStatus.owned ||
@@ -146,6 +158,14 @@ export function useLibrary(): UseLibraryResult {
       ...(isFormat(searchParams.get("format"))
         ? { format: searchParams.get("format") as BookFormat }
         : {}),
+      ...(isLending(searchParams.get("lending"))
+        ? { lending: searchParams.get("lending") as LendingWillingness }
+        : {}),
+      // Present and not "false" is on. A bare `?discuss` is what a link
+      // somebody typed looks like, and treating it as off would make the link
+      // silently do nothing.
+      discuss:
+        searchParams.has("discuss") && searchParams.get("discuss") !== "false",
       series: searchParams.get("series"),
       location: searchParams.get("location"),
     };
@@ -209,6 +229,8 @@ export function useLibrary(): UseLibraryResult {
     setLocation: (location) =>
       setFilters((current) => ({ ...current, location })),
     setFormat: (format) => setFilters((current) => ({ ...current, format })),
+    setLending: (lending) => setFilters((current) => ({ ...current, lending })),
+    setDiscuss: (discuss) => setFilters((current) => ({ ...current, discuss })),
     setFilters: (next) => setFilters(next),
 
     savedSearches,

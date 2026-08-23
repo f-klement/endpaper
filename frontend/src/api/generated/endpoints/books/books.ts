@@ -31,6 +31,7 @@ import type {
   BodyUploadCover,
   BookCreate,
   BookDetailsUpdate,
+  BookDiscussUpdate,
   BookEnrichmentOut,
   BookLookup,
   BookMatch,
@@ -2835,6 +2836,104 @@ export const useUploadCover = <
   TContext
 > => {
   return useMutation(getUploadCoverMutationOptions(options), queryClient);
+};
+export const getSetDiscussUrl = (bookId: number) => {
+  return `/api/books/${bookId}/discuss`;
+};
+
+/**
+ * Offer to talk about this book, or withdraw the offer.
+ *
+ * Read access, like status and rating: it is the caller's own flag on a book
+ * they can see, and it changes nothing about the book itself.
+ *
+ * Unlike those two it is **read by everybody**, which is the point. It says
+ * nothing about whether the caller has read the book; `my_status` stays
+ * private.
+ *
+ * Creates the `user_books` row when there is none, exactly as the status and
+ * rating paths do: absence of a row means unread, not the absence of a
+ * member.
+ * @summary Set Discuss
+ */
+export const setDiscuss = async (
+  bookId: number,
+  bookDiscussUpdate: BookDiscussUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getSetDiscussUrl(bookId), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(bookDiscussUpdate),
+  });
+};
+
+export const getSetDiscussMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setDiscuss>>,
+    TError,
+    { bookId: number; data: BookDiscussUpdate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setDiscuss>>,
+  TError,
+  { bookId: number; data: BookDiscussUpdate },
+  TContext
+> => {
+  const mutationKey = ["setDiscuss"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setDiscuss>>,
+    { bookId: number; data: BookDiscussUpdate }
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return setDiscuss(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetDiscussMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setDiscuss>>
+>;
+export type SetDiscussMutationBody = BookDiscussUpdate;
+export type SetDiscussMutationError = HTTPValidationError;
+
+/**
+ * @summary Set Discuss
+ */
+export const useSetDiscuss = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setDiscuss>>,
+      TError,
+      { bookId: number; data: BookDiscussUpdate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setDiscuss>>,
+  TError,
+  { bookId: number; data: BookDiscussUpdate },
+  TContext
+> => {
+  return useMutation(getSetDiscussMutationOptions(options), queryClient);
 };
 export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
   const normalizedParams = new URLSearchParams();

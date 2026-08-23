@@ -1,6 +1,6 @@
 /** Tests for src/pages/SettingsPage/SettingsPage.tsx. */
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -233,10 +233,7 @@ describe("SettingsPage", () => {
       renderSettings();
       const user = userEvent.setup();
 
-      await user.type(
-        await screen.findByLabelText("API key"),
-        "  secret-key  ",
-      );
+      fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "  secret-key  " } });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -260,7 +257,7 @@ describe("SettingsPage", () => {
       renderSettings();
       const user = userEvent.setup();
 
-      await user.type(await screen.findByLabelText("API key"), "secret-key");
+      fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "secret-key" } });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -400,7 +397,7 @@ describe("SettingsPage API key handling", () => {
     // stored key, so there is nothing else here to reveal.
     renderSettings();
     const user = userEvent.setup();
-    await user.type(await screen.findByLabelText("API key"), "typed-key");
+    fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "typed-key" } });
 
     await user.click(screen.getByRole("button", { name: "Show" }));
 
@@ -530,8 +527,8 @@ describe("SettingsPage API key handling", () => {
       renderSettings();
       const user = userEvent.setup();
 
-      await user.type(await screen.findByLabelText("Username"), "tester");
-      await user.type(screen.getByLabelText("Password"), "pw12345678");
+      fireEvent.change(await screen.findByLabelText("Username"), { target: { value: "tester" } });
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw12345678" } });
       api.on("/api/users/test-accounts", { status: 201, body: TESTER }, "POST");
       await user.click(
         screen.getByRole("button", { name: "Create test account" }),
@@ -556,10 +553,7 @@ describe("SettingsPage API key handling", () => {
       await user.click(
         await screen.findByRole("button", { name: "Switch to tester" }),
       );
-      await user.type(
-        screen.getByLabelText("Password for tester"),
-        "pw12345678",
-      );
+      fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "pw12345678" } });
       await user.click(screen.getByRole("button", { name: "Switch" }));
 
       await waitFor(() =>
@@ -584,7 +578,7 @@ describe("SettingsPage API key handling", () => {
       await user.click(
         await screen.findByRole("button", { name: "Switch to tester" }),
       );
-      await user.type(screen.getByLabelText("Password for tester"), "wrong");
+      fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "wrong" } });
       await user.click(screen.getByRole("button", { name: "Switch" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(

@@ -555,6 +555,70 @@ read and not owned. Collapsing them is what makes an imported reading history lo
 catalogue of possessions. `unknown` exists because a Goodreads export cannot answer the
 ownership question at all, and guessing either way would assert something nobody checked.
 
+### Lending willingness is a third axis, and it is on the book
+
+`books.lending` answers "would we lend this copy", and it is neither `ownership` nor a
+loan. A loan is a fact about right now; this is a standing intention that outlives it. A
+book can be marked happy to lend while it is at somebody's house, and one marked never lent
+can still be out with a sibling. Putting the answer on the loan would mean it existed only
+while the book was somewhere else, which is precisely when nobody needs to read it.
+
+Three values rather than a boolean, and `in_use` is the reason. "I need it myself at the
+moment" is a real answer and is not a refusal: it means come back later, which yes-or-no
+cannot express. It arrived that way from the household that asked for the feature, in three
+sentences rather than a tick box.
+
+Nullable rather than defaulted, like `format` and `condition`: an unanswered question is
+not an answer, and a guess written into every imported book at once is worse than a blank,
+because nobody re-checks a field that looks filled in.
+
+### A book marked never lent is refused once, not forbidden
+
+`POST /api/loans` answers a **409** carrying `code: not_lendable` for a book whose
+`lending` is `never`, and creates the loan when the same request comes back with
+`acknowledge_not_lendable: true`.
+
+Neither extreme is right. Allowing it silently makes the field decorative: a household that
+took the trouble to mark a copy would find the app had quietly ignored them. Forbidding it
+outright is worse, because the same household lends that book to a sibling anyway, and an
+app that will not let them record what actually happened gets a loan kept in somebody's
+head instead. That is the one thing this table exists to replace.
+
+So the refusal costs one deliberate extra step and nothing more. `in_use` and `happy` are
+not checked at all: the first means "come back later", which is a conversation between two
+people rather than a rule, and the second is a yes.
+
+The acknowledgement is **not stored**. It says something about one request, not about the
+book, and a household that lent a never-lent book once has not changed its mind about
+lending it to anybody else. Pinned by a test: lending it, returning it and lending it again
+asks again.
+
+The code sits beside the message rather than replacing it because the client has to
+**branch** on this one, and matching on prose would break the moment it was reworded or
+translated. The two 409s this endpoint raises mean entirely different things to the reader,
+and only one of them has a way past it.
+
+### "Ask me about this book" is on the member, and everybody can see it
+
+`user_books.wants_to_discuss` is per member, for the same reason the rating is: two people
+can hold the same copy and feel entirely differently about it.
+
+It is also the **one** field on that table meant to be read by other people. The status,
+the rating and both dates are private and reach the API only as the caller's own `my_*`
+fields; this one is served to everybody as `discuss_with`, a list of the members who set
+it. That is not a leak of a private field, it is the feature: a marker only its owner can
+see is not a way to be asked about anything. It discloses usernames and nothing else, and
+in particular says nothing about whether those members have read the book.
+
+It costs one statement per page, which is why `discuss_with` is filled by a single grouped
+query rather than a lazy relationship read inside the serialisation loop. `books_to_out`
+went from 5 statements to 6 and `GET /api/books` from 10 to 11, both measured and both flat
+in the size of the page.
+
+`?discuss=true` matches **anybody's** offer rather than the caller's, so the filter selects
+exactly the books that carry the marker the grid draws. Scoped to the caller it would hide
+half of what it claims to select.
+
 ### `categories` is joined with a semicolon, not a comma
 
 Google's own category names contain commas ("Fiction, general"), so a comma-joined list
@@ -840,6 +904,122 @@ two filters.
 `schemas/book.py` and `schemas/loan.py` reference each other under `TYPE_CHECKING`, with
 unquoted annotations naming types that do not exist at runtime. That works only because
 3.14 defers annotation evaluation. On 3.13 it raises `NameError` at import.
+
+### The test suites were slow for reasons nobody had measured
+
+Both suites were profiled rather than guessed at, and every intuition about
+where the time went was wrong.
+
+**The backend was not CPU bound.** Two xdist workers used **0.68 cores between
+them**: the suite was waiting on fsync, not computing. Every test drops and
+recreates nine tables and seeds 105 tags, so a run performs tens of thousands
+of DDL statements and inserts against a database deleted microseconds later.
+`PRAGMA synchronous=OFF` in tests and the database on `/dev/shm` took it from
+**710s to 133s**. `SQLITE_SYNCHRONOUS` defaults to `FULL` and is whitelisted,
+because it reaches a statement that cannot be parameterised; production keeps
+FULL, which is what makes a commit survive a power cut on somebody's only copy
+of a hand built catalogue.
+
+Before that, `pytest-xdist` at `-n 2` had already halved it from 1370s. `-n 2`
+and not `-n auto`: the CI pod is capped at two cores, and `auto` spawns one
+worker per core only to be throttled back, which is the same work done slower
+and makes the pod look like it needs a bigger limit.
+
+**The frontend was not slow because of its tests.** `environment` was **168s of
+a 245s run**, building a jsdom once per test file, and 11 of 78 files touch no
+DOM at all. Those carry `@vitest-environment node`. The larger win was swapping
+jsdom for **happy-dom**, which took the run to 178s.
+
+**happy-dom does not inherit CSS custom properties down the tree.** A
+`--color-*` token set on `documentElement` reads back on that element and
+resolves to `""` on every descendant, measured with a two line probe. The
+wallpaper resolves its ink, bloom and page from a child, so `isColour()` sees
+empty strings and nothing is painted. Three files are pinned back to jsdom with
+`@vitest-environment jsdom` for that reason alone; if happy-dom ever fixes it,
+the pin comes off.
+
+**Then the tests themselves.** 29 of 40 `user.type` calls became a single
+`fireEvent.change`. Typing thirteen characters costs thirteen async round trips,
+and a field with no per keystroke behaviour tests the same thing either way.
+That took 178s to **140s**. Two calls keep `user-event` deliberately, because
+`"{Enter}"` and `"{Escape}"` are keyboard semantics rather than text.
+
+**What was refused: `deps.optimizer`.** It would pre-bundle dependencies with
+esbuild and take a bite out of the 51s `import` bucket. It also produces a third
+module graph, neither the dev server's nor Rollup's production build, and
+`vi.mock` cannot intercept an import already inlined into a bundled chunk. Two
+of the four mock sites here target `react-router-dom`. The failure mode is a
+silent false pass, which is the one this repository is least willing to buy
+speed with.
+
+Net: a full local gate went from about 27 minutes to about 4.
+
+### The per-test reset deletes rows, and two faster designs were refused
+
+Measured in the CI pod, database on tmpfs, `synchronous=OFF`, warm:
+
+| Reset strategy | Per test |
+|---|---|
+| drop, create and seed (what this replaced) | 58.8ms |
+| **delete every table, reseed the tags in bulk** | **3.1ms** |
+| keep the seeded tags, delete the rest | 1.0ms |
+| open a transaction and roll it back | 0.8ms |
+
+The suite went from 134s to **92s** on the second row. The two faster rows were
+both refused, and the reasons matter more than the milliseconds.
+
+**Rolling back a transaction per test** was built, reviewed by three seats and
+abandoned. Binding every session to one connection means savepoints form **one
+stack, not one per session**: a session that opened its savepoint first and rolls
+back destroys the committed work of every session that committed after it.
+Measured against the running application, that makes a privacy test vacuous, and
+silently: a test asserting "another member gets 404" gets its 404 just as readily
+when the book was never written at all. Sixty five privacy tests assert an
+absence with nothing proving the row survived to the assertion, so a broken
+`visible_to()` under a wiped fixture is a **green** run.
+
+It had a second fault of its own. It held a write lock for a whole test rather
+than a statement, and one unguarded `connection.close()` in its teardown could
+leave a connection checked out holding that lock for the life of an xdist
+worker. Observed once in thirty runs as 423 failures and 121 errors; twenty one
+later runs could not reproduce it, and no seat could name what made the rollback
+raise in the first place. The guard is worth having; the design is not, when a
+row delete is three milliseconds slower and cannot fail that way at all.
+
+**Keeping the seeded tags** is wrong for a duller reason: `backup.restore`
+deletes and reinserts the tags table and `_repair_seeded_tags` rewrites
+`is_predefined`, so a test can legitimately mutate a predefined tag and the next
+test would inherit it.
+
+The reset calls no `seed_tags()`. That helper opens its own session, which is a
+second connection, and the point of this shape is that a reset never needs one.
+Ids still restart at 1, which `covers_dir` depends on, because nothing here uses
+`AUTOINCREMENT` and SQLite reuses the highest free rowid.
+
+**One number in this file was wrong for a whole day and is worth naming.** The
+rebuild cost was derived as 40.6s over 3236 rebuilds, giving 12ms. 40.6s was a
+two worker wall clock, so the division halved a figure that direct measurement
+puts at 58.8ms. A derived number that nobody measured is the kind this
+repository is meant to catch.
+
+### The remote test runner was reporting on a tree nobody had
+
+It ships the working tree by piping `tar` into `tar -xf` on a **persistent
+hostPath**. Extraction adds and overwrites and never deletes, so a file removed
+locally lived on in the runner's copy indefinitely. A reviewer's scratch test,
+deleted an hour earlier, still failed `ruff check .` and contributed two pytest
+failures against a tree that no longer contained it.
+
+`rm -rf` before extracting fixed that and created a worse fault: two runs share
+the hostPath, so the second deleted the first's working directory mid run. The
+symptom named neither cause, being `Module not found .../vitest/dist/workers/
+forks.js` followed by a rolldown panic reading "Failed to get current dir". Two
+runs were spent blaming a vitest config.
+
+Each run now extracts into `/work/repo-$POD` and removes it in the exit trap.
+The dependency caches stay shared at `/work/cache`, which is the reason the
+hostPath exists. This matters more than it did: the runner serving this project
+is at `concurrent: 2`, so two real CI jobs can now land together.
 
 ## Frontend
 
@@ -1415,3 +1595,29 @@ httptools, watchfiles, greenlet, sqlalchemy) was verified to install from muslli
 
 `noUncheckedIndexedAccess` in particular, which is why array access reads `tags[1]!` in
 places. That is honest about the fact that an index may miss.
+
+### Each test runs in a transaction, and pysqlite is not allowed to open it
+
+Every test used to drop nine tables, recreate them and reseed 105 tags. That was about
+1690 rebuilds a run, and the dominant cost once the database moved to tmpfs and
+`synchronous` went OFF. It is now one rebuild per xdist worker, with each test inside a
+transaction that is rolled back. Measured on the CI host at `-n 2`: 134.44s for 1683 tests
+before, 93.99s to 101.01s for 1689 after, over four runs.
+
+Two pieces of it are load-bearing and fail silently. `join_transaction_mode="create_savepoint"`
+is what survives the application committing constantly: without it the first `db.commit()`
+in a request ends the outer transaction. And pysqlite has to be taken off transaction duty
+(`isolation_level = None`, plus a `begin` listener that emits `BEGIN`), because it opens a
+transaction before an INSERT, UPDATE or DELETE and before nothing else, so `SAVEPOINT`
+would stand alone in autocommit. Measured before writing the fixture: two tests writing two
+rows each left **4** rows behind, and 0 with the listeners in place, on the real engine.
+
+Neither failure breaks the test it happens in. It leaves rows for whoever runs next, which
+is why `tests/test_conftest.py` asserts the isolation with an ordered pair of tests rather
+than trusting it.
+
+`@pytest.mark.real_database` opts a test out and restores the old behaviour, for DDL, a
+second connection, or state that has to outlive a commit. The list and the reason per entry
+are in [testing.md](testing.md). The rule is to opt out and say why rather than to force a
+file into the transaction: a test that passes alone and fails in a suite costs more than
+the seconds it saves.

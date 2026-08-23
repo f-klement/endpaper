@@ -27,6 +27,18 @@ class LoanCreate(BaseModel):
     # make the common case worse to serve the rare one.
     due_at: datetime | None = None
 
+    #: "Yes, I know, lend it anyway."
+    #:
+    #: The only way past a book marked `lending = never`. Without it that book
+    #: is a 409 rather than a loan. It is a field on the request and not a
+    #: separate endpoint because it changes nothing about the loan that is
+    #: created: the same row, reached by an extra deliberate step.
+    #:
+    #: Deliberately **not** stored. It says something about one request, not
+    #: about the loan, and a household that lends a never-lent book to a
+    #: sibling has not changed its mind about lending it to anybody else.
+    acknowledge_not_lendable: bool = False
+
     @model_validator(mode="after")
     def _exactly_one_borrower(self) -> LoanCreate:
         """Both or neither is a 422, never a loan nobody can be asked about.

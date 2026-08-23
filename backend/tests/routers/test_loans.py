@@ -72,6 +72,112 @@ class TestCreateLoan:
         assert res.status_code == 401
 
 
+class TestLendingABookMarkedNeverLent:
+    """Refused once, then allowed. Neither silent nor forbidden: the reasoning
+    is on `create_loan` and in docs/decisions.md."""
+
+    @pytest.fixture
+    def never_lent(self, client, admin, make_book) -> dict:
+        book = make_book(admin["headers"], title="Signed first edition")
+        res = client.patch(
+            f"/api/books/{book['id']}",
+            json={"lending": "never"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 200, res.text
+        return book
+
+    def lend(self, client, admin, member, book, **extra):
+        return client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": member["user"]["id"],
+                **extra,
+            },
+            headers=admin["headers"],
+        )
+
+    def test_the_first_attempt_is_refused(self, client, admin, member, never_lent):
+        assert self.lend(client, admin, member, never_lent).status_code == 409
+
+    def test_the_refusal_says_why_in_a_form_the_client_can_branch_on(
+        self, client, admin, member, never_lent
+    ):
+        """A code beside the sentence, because this 409 and the already-lent
+        one mean different things and only one of them can be acknowledged."""
+        detail = self.lend(client, admin, member, never_lent).json()["detail"]
+        assert detail["code"] == "not_lendable"
+
+    def test_nothing_was_recorded_by_the_refusal(self, client, admin, member, never_lent):
+        self.lend(client, admin, member, never_lent)
+        fetched = client.get(
+            f"/api/books/{never_lent['id']}", headers=admin["headers"]
+        ).json()
+        assert fetched["active_loan"] is None
+
+    def test_acknowledging_it_lends_the_book(self, client, admin, member, never_lent):
+        res = self.lend(
+            client, admin, member, never_lent, acknowledge_not_lendable=True
+        )
+        assert res.status_code == 201
+        assert res.json()["loaned_to"]["username"] == "member"
+
+    def test_the_acknowledgement_is_not_remembered(
+        self, client, admin, member, never_lent
+    ):
+        """It is about one request, not about the book. A household that lent
+        this once has not changed its mind about lending it in general."""
+        loan = self.lend(
+            client, admin, member, never_lent, acknowledge_not_lendable=True
+        ).json()
+        client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
+
+        assert self.lend(client, admin, member, never_lent).status_code == 409
+
+    def test_the_book_still_says_it_is_never_lent(
+        self, client, admin, member, never_lent
+    ):
+        self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
+        fetched = client.get(
+            f"/api/books/{never_lent['id']}", headers=admin["headers"]
+        ).json()
+        assert fetched["lending"] == "never"
+
+    def test_the_other_two_values_are_not_checked_at_all(
+        self, client, admin, member, make_book
+    ):
+        """`in_use` is "come back later", which is a conversation rather than a
+        rule, and `happy` is a yes."""
+        for value in ("in_use", "happy"):
+            book = make_book(admin["headers"], title=f"Book {value}")
+            client.patch(
+                f"/api/books/{book['id']}",
+                json={"lending": value},
+                headers=admin["headers"],
+            )
+            assert self.lend(client, admin, member, book).status_code == 201
+
+    def test_an_unanswered_book_lends_without_a_prompt(
+        self, client, admin, member, book
+    ):
+        assert self.lend(client, admin, member, book).status_code == 201
+
+    def test_an_acknowledgement_does_not_override_the_already_lent_409(
+        self, client, admin, member, never_lent
+    ):
+        """The two refusals are unrelated, and only one of them has a way past
+        it. A book that is out is out."""
+        self.lend(client, admin, member, never_lent, acknowledge_not_lendable=True)
+
+        res = self.lend(
+            client, admin, member, never_lent, acknowledge_not_lendable=True
+        )
+
+        assert res.status_code == 409
+        assert res.json()["detail"] == "Book is already loaned out"
+
+
 class TestReturnLoan:
     def test_marks_it_returned(self, client, admin, loan):
         res = client.put(f"/api/loans/{loan['id']}/return", headers=admin["headers"])
@@ -322,7 +428,7 @@ class TestTheNestedBook:
         # breakdown wrongly twice, both times by editing prose rather than
         # measuring. The number this test exists to catch is a linear one, and
         # it was 53 for 25 loans.
-        assert len(selects) <= 10, f"{len(selects)} selects for 10 loans"
+        assert len(selects) <= 11, f"{len(selects)} selects for 10 loans"
 
 
 class TestOneOpenLoanPerBook:

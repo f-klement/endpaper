@@ -6,7 +6,7 @@
  * its own tests.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -195,7 +195,7 @@ describe("ScanPage", () => {
       renderWithProviders(<ScanPage />);
 
       const user = userEvent.setup();
-      await user.type(screen.getByLabelText("ISBN"), "9780441013593");
+      fireEvent.change(screen.getByLabelText("ISBN"), { target: { value: "9780441013593" } });
       await user.click(screen.getByRole("button", { name: "Look up" }));
 
       expect(await screen.findByText("Dune")).toBeInTheDocument();
@@ -444,11 +444,8 @@ describe("ScanPage", () => {
       });
       renderWithProviders(<ScanPage />);
 
-      const user = await scan();
-      await user.type(
-        await screen.findByLabelText("Title *"),
-        "Untracked Book",
-      );
+      await scan();
+      fireEvent.change(await screen.findByLabelText("Title *"), { target: { value: "Untracked Book" } });
 
       expect(
         screen.getByRole("button", { name: "Add to Library" }),

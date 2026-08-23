@@ -35,6 +35,7 @@ from enums import (
     BookSort,
     BulkAction,
     ExportFormat,
+    LendingWillingness,
     Locale,
     OwnershipStatus,
     ReadStatus,
@@ -57,6 +58,7 @@ from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
     BookCreate,
     BookDetailsUpdate,
+    BookDiscussUpdate,
     BookEnrichmentOut,
     BookLookup,
     BookMatch,
@@ -478,9 +480,13 @@ def list_books(
     tags: Annotated[str | None, Query(description="Comma-separated tag ids")] = None,
     ownership: Annotated[OwnershipStatus | None, Query()] = None,
     format: Annotated[BookFormat | None, Query()] = None,
+    lending: Annotated[LendingWillingness | None, Query()] = None,
     series: Annotated[str | None, Query(max_length=255)] = None,
     location: Annotated[str | None, Query(max_length=120)] = None,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
+    discuss: Annotated[
+        bool, Query(description="Only books somebody has offered to talk about")
+    ] = False,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
 ) -> Page[BookOut]:
     query = db.query(Book).filter(visible_to(current_user.id))
@@ -490,6 +496,9 @@ def list_books(
 
     if format is not None:
         query = query.filter(Book.format == format)
+
+    if lending is not None:
+        query = query.filter(Book.lending == lending)
 
     if series is not None:
         query = query.filter(Book.series_name == series)
@@ -534,6 +543,23 @@ def list_books(
             .correlate(Book)
         )
         query = query.filter(~rated.exists())
+
+    if discuss:
+        # **Anybody's** flag, not the caller's, which is the same choice
+        # `discuss_with` on the payload makes and for the same reason: the
+        # filter has to select exactly the books that carry the marker the
+        # grid draws, or pressing it hides half of them.
+        #
+        # `correlate(Book)` for the reason spelled out above `rated`: with a
+        # status filter also in play, SQLAlchemy would otherwise pull UserBook
+        # out of this subquery and leave it with no FROM clause.
+        offered = (
+            db.query(UserBook.id)
+            .filter(UserBook.book_id == Book.id)
+            .filter(UserBook.wants_to_discuss.is_(True))
+            .correlate(Book)
+        )
+        query = query.filter(offered.exists())
 
     if tags:
         for tag_id in (int(t) for t in tags.split(",") if t.strip().isdigit()):
@@ -1103,7 +1129,7 @@ _MERGEABLE_FIELDS = (
     "subtitle", "author", "publisher", "year", "description", "cover_url",
     "page_count", "language", "categories", "google_books_id",
     "series_name", "series_index", "location",
-    "format", "condition", "purchase_price_minor", "purchase_currency",
+    "format", "condition", "lending", "purchase_price_minor", "purchase_currency",
     "purchased_at", "purchase_source",
 )
 
@@ -2054,6 +2080,40 @@ def set_rating(
         db.add(user_book)
 
     user_book.rating = payload.rating
+    db.commit()
+    return book_to_out(book, current_user, db)
+
+
+@router.patch("/{book_id}/discuss", response_model=BookOut)
+def set_discuss(
+    payload: BookDiscussUpdate,
+    book: BookForRead,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """Offer to talk about this book, or withdraw the offer.
+
+    Read access, like status and rating: it is the caller's own flag on a book
+    they can see, and it changes nothing about the book itself.
+
+    Unlike those two it is **read by everybody**, which is the point. It says
+    nothing about whether the caller has read the book; `my_status` stays
+    private.
+
+    Creates the `user_books` row when there is none, exactly as the status and
+    rating paths do: absence of a row means unread, not the absence of a
+    member.
+    """
+    user_book = (
+        db.query(UserBook)
+        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
+        .first()
+    )
+    if user_book is None:
+        user_book = UserBook(user_id=current_user.id, book_id=book.id)
+        db.add(user_book)
+
+    user_book.wants_to_discuss = payload.wants_to_discuss
     db.commit()
     return book_to_out(book, current_user, db)
 

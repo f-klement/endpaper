@@ -8,6 +8,7 @@ import {
   BookCondition,
   BookFormat,
   BookSort,
+  LendingWillingness,
   ReadStatus,
 } from "../../../../src/api/generated/model";
 import BookTable from "../../../../src/pages/Home/components/BookTable";
@@ -36,6 +37,8 @@ const DUNE = () =>
     purchase_price_minor: 1299,
     purchase_currency: "EUR",
     purchase_source: "The Oxfam on the high street",
+    lending: LendingWillingness.happy,
+    discuss_with: [makeUser({ username: "ana" })],
   });
 
 function renderTable(
@@ -72,6 +75,9 @@ describe("BookTable", () => {
       "kim",
       "12.99 EUR",
       "The Oxfam on the high street",
+      "Happy to lend",
+      // The names, not a tick: "ask about it" is only useful if it says whom.
+      "ana",
     ]) {
       expect(within(row).getByText(value)).toBeInTheDocument();
     }
@@ -92,8 +98,8 @@ describe("BookTable", () => {
   });
 
   it("links only the title", () => {
-    // A whole row of links is one destination announced nineteen times, and a
-    // reader copying a publisher out of a cell should not navigate.
+    // A whole row of links is one destination announced twenty one times, and
+    // a reader copying a publisher out of a cell should not navigate.
     renderTable();
 
     const row = screen.getAllByRole("row")[1]!;
@@ -122,7 +128,7 @@ describe("BookTable", () => {
   });
 
   it("marks a sortable column before it is the active one", () => {
-    // 5 of the 19 columns can be sorted. With the chevron shown only when
+    // 5 of the 21 columns can be sorted. With the chevron shown only when
     // active, the only always-visible difference was a hover colour, so the
     // feature was there and nobody could find it.
     renderTable({ sort: BookSort.title_asc });

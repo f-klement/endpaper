@@ -4,6 +4,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+// Lever A is applied per file with a `@vitest-environment node` docblock, not
+// here. A `projects` split with `isolate: false` was tried first and broke the
+// run outright: vitest could not resolve `vitest/dist/workers/forks.js` and
+// rolldown panicked with "Failed to get current dir". A docblock cannot do that,
+// because it changes one file's environment rather than how workers are spawned.
+
 export default defineConfig({
   plugins: [
     react(),
@@ -118,7 +124,18 @@ export default defineConfig({
   },
 
   test: {
-    environment: "jsdom",
+    // happy-dom, not jsdom. Measured on this suite: `environment` was 160s of a
+    // 322s run, paid once per test file to build a DOM, and happy-dom
+    // constructs one substantially faster for the same API surface this suite
+    // uses. The eleven DOM-free files opt out entirely with a
+    // `@vitest-environment node` docblock and are unaffected either way.
+    //
+    // The risk is real and is why this is worth a note rather than a swap:
+    // happy-dom is not jsdom, and a test relying on a corner jsdom implements
+    // and it does not will fail on the DOM rather than on the assertion. The
+    // suite passing in full is the evidence; if a future test fails for a
+    // reason that makes no sense, this line is the first thing to suspect.
+    environment: "happy-dom",
     globals: true,
     // Two, not one per core. vitest left alone forks per CPU: measured on a
     // four core CI host it sustained 3.2 of them for the whole run, which is

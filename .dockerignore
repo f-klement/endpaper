@@ -11,6 +11,15 @@
 backend/data/
 data/
 
+# The React Native client. It never reaches the image regardless, because the
+# Dockerfile copies frontend/ and backend/ by name rather than the whole tree.
+# Excluded here so it is not shipped to the daemon as build context either: a
+# node_modules tree for a native project is large and none of it is read.
+#
+# `shared/` is deliberately NOT excluded. Once frontend/ imports from it the
+# bundle needs it, and its absence would fail at the build step rather than here.
+mobile/
+
 # Installed dependencies and build output; both stages build these themselves
 frontend/node_modules/
 frontend/dist/

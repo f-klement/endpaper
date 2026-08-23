@@ -1,4 +1,11 @@
 /**
+ * @vitest-environment node
+ *
+ * Touches no DOM, so it needs no jsdom. Building one costs more than this file
+ * spends running: measured across the suite, `environment` was 168s of a 245s
+ * run, paid once per file.
+ */
+/**
  * Tests for src/lib/goodreads.ts.
  *
  * Mirrors backend/tests/test_goodreads.py's TestSearchUrl, deliberately: the

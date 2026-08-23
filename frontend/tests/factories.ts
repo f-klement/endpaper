@@ -72,6 +72,11 @@ export function makeBook(overrides: Partial<BookOut> = {}): BookOut {
     added_by: null,
     active_loan: null,
     my_status: ReadStatus.unread,
+    // Null rather than a value: nobody has been asked whether this copy is
+    // lent out, which is what the column means on a real book too.
+    lending: null,
+    my_wants_to_discuss: false,
+    discuss_with: [],
     tags: [],
     ...overrides,
   };

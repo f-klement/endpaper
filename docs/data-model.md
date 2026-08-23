@@ -49,6 +49,10 @@ never be matched against any metadata source.
 `ownership` records whether a copy is **physically on the shelf**: `owned`, `not_owned` or
 `unknown`. It is deliberately **not** the same axis as read status. See below.
 
+`lending` records whether the household will lend the copy: `happy`, `in_use` or `never`,
+and null while nobody has been asked. A third axis again, and not a fact about right now:
+see *Three axes, not one* below.
+
 Four columns are filled on demand from Google Books and are empty otherwise: `page_count`,
 `language`, `categories` and `google_books_id`. `categories` is Google's own subject list,
 stored as one delimited string because SQLite has no array type, and served as a list.
@@ -72,12 +76,13 @@ book drops its tag links without touching the tags themselves. That cascade did 
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
-**`user_books`.** Per-person read status, rating and reading dates (`unread` / `want_to_read` /
-`reading` / `read` / `did_not_finish`). This is the table
+**`user_books`.** Per-person read status, rating, reading dates (`unread` / `want_to_read` /
+`reading` / `read` / `did_not_finish`) and the "ask me about this book" flag. This is the table
 that makes "read" a property of *a person and a book*, not of a book. A row only appears
 once someone sets a status, so **absence means `unread`**. Every query filtering on status
 has to treat a missing row as unread, and the API fills in `"unread"` when building
-`my_status`.
+`my_status`. Setting anything on a book with no row creates one, which is why the discuss
+endpoint reads like the status and rating ones.
 
 **Cover images are files** under `data/covers/<book id>.<ext>`, not a column. `cover_url` is
 the pointer a client renders: `/covers/<id>.<ext>` for a cover this app holds, the remote URL
@@ -160,6 +165,22 @@ the interesting part.
 No migration was needed: `user_books.status` is a plain `String(20)`, so a new member of the
 enum is a new value in a text column, and existing rows are untouched.
 
+`wants_to_discuss` is "ask me about this book", and it is **the one column on this table
+meant to be read by other people.** The status, the rating and both dates are private to
+the member who set them and reach the API only as the caller's own `my_*` fields. This one
+is the opposite: a flag whose entire purpose is that somebody browsing the shelf notices it
+and asks, so `BookOut.discuss_with` names everybody who has set it, on every book the
+caller can see. It discloses the usernames and nothing else, in particular not whether
+those members have read the book.
+
+It is NOT NULL with a default of false rather than nullable, unlike `books.lending`. There
+is nothing between yes and no here, and absence of the row already means "has not said" for
+every member who never touched the book, so a nullable column would be a second and weaker
+spelling of the same thing.
+
+Per member rather than per book because two people can hold the same copy and feel entirely
+differently about it, which is the same reason the rating is per member.
+
 ## Progress is a log
 
 `reading_progress` answers "where am I" the same way a bank statement answers "how much
@@ -216,15 +237,32 @@ own shelf taxonomy before they start, and a wrong vocabulary imposed up front is
 a slightly untidy one that grows. `GET /api/books/locations` returns what is in use, which
 the UI offers as suggestions rather than as a closed list.
 
-## Ownership is not read status
+## Three axes, not one
 
-`ownership` and `user_books.status` answer different questions, and conflating them is the
-mistake the separation exists to prevent:
+`ownership`, `lending` and `user_books.status` answer different questions, and conflating
+any two of them is the mistake the separation exists to prevent:
 
 | | Question | Scope |
 |---|---|---|
 | `books.ownership` | Is a copy physically here? | The **object**. One value, shared. |
+| `books.lending` | Would we lend it? | The **object**. One value, shared. |
 | `user_books.status` | Has this person read it? | The **person**. One row each. |
+
+`lending` is a standing intention and not a state. It is not "is this book out": that is
+the open `Loan`, and a book can be marked happy to lend while it is at somebody's house, or
+marked never lent and out with a sibling anyway. Storing the answer on the loan would mean
+it only existed while the book was somewhere else.
+
+`in_use` is why it is three values rather than a boolean. "I need it myself at the moment"
+is a real answer and is not a refusal: come back later, which yes-or-no cannot say. `never`
+is the opposite, a rule rather than a state, and nothing about the shelf changes it.
+
+Null rather than a default, like `format` and `condition`: an unanswered question is not an
+answer, and a guess written into every imported book at once is worse than a blank, because
+nobody re-checks a field that looks filled in.
+
+What creating a loan does about it is in [api.md](api.md) and [decisions.md](decisions.md):
+refused once, then allowed.
 
 They are genuinely independent. A library borrowing is read and not owned; an unread gift
 is owned and not read.
@@ -297,8 +335,11 @@ predicate in listings.
 columns:
 
 - `active_loan`: the open `Loan`, or null.
-- `my_status`, `my_rating`, `my_started_at`, `my_finished_at`: the caller's row from
-  `user_books`, with the status defaulting to `"unread"`.
+- `my_status`, `my_rating`, `my_started_at`, `my_finished_at`, `my_wants_to_discuss`: the
+  caller's row from `user_books`, with the status defaulting to `"unread"`.
+- `discuss_with`: every member who has offered to talk about this book, the caller
+  included. **Not scoped to the caller**, unlike everything else in this list, which is the
+  point of the flag rather than an oversight. See *What `user_books` carries* above.
 - `my_progress_page`, `my_progress_percent`, `my_progress_recorded_at`: the caller's newest
   row from `reading_progress`. The percentage is the derived one.
 
@@ -342,6 +383,10 @@ member, this book, in order. `recorded_at` deliberately has **no** index of its 
 per-month statistic reads it under `user_id` and the history reads it under
 `(user_id, book_id)`, so the composite serves both, and a second index on an append-only
 table would be a write cost with no read behind it.
+
+**Lending willingness** (migration `d1a7f36b9c58`). `ix_books_lending`, for the same reason
+`ix_books_format` exists: "what could we lend the book club" is a filter over the whole
+catalogue, which is a browse action rather than a search.
 
 `reading_progress.book_id` is indexed as well, for the reason in *Foreign keys* above
 rather than for any query: it is a child of a table whose rows get deleted, and purging a

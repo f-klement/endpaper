@@ -1,3 +1,18 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * The suite runs on happy-dom, which is much faster to construct. This file is
+ * pinned back to jsdom because **happy-dom does not inherit CSS custom
+ * properties down the tree**: a `--color-*` token set on `documentElement`
+ * reads back on that element and resolves to "" on every descendant. Measured
+ * 2026-08-22 with a two line probe.
+ *
+ * The wallpaper resolves its ink, bloom and page off the document from a child
+ * element, so under happy-dom `isColour()` sees empty strings, `applyWallpaper`
+ * returns before painting, and seven tests fail asserting on a background that
+ * was never drawn. Nothing is wrong with the app or the tests; the engine lacks
+ * the cascade they depend on.
+ */
 /** Tests for src/pages/AppearancePage/AppearancePage.tsx. */
 
 import { screen, within } from "@testing-library/react";

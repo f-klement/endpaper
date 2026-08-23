@@ -566,6 +566,20 @@ export const en = {
   "copy.purchaseSourcePlaceholder": "The Oxfam on the high street",
   "format.filterAll": "Any format",
 
+  // ── Willing to lend, and willing to talk ────────────────────────────────
+  "lending.label": "Lending",
+  "lending.unset": "Not recorded",
+  "lending.filterAll": "Lending: any",
+  "lending.happy": "Happy to lend",
+  "lending.in_use": "Using it myself right now",
+  "lending.never": "Never lent",
+  "lending.neverWarning": "This book is marked as never lent.",
+  "lending.lendAnyway": "Lend it anyway",
+  "discuss.toggle": "I would like to talk about this book, ask me about it",
+  "discuss.label": "Ask about it",
+  "discuss.badge": "Talk about it",
+  "discuss.others": "Ask {names} about this book.",
+
   // ── Importing a library ─────────────────────────────────────────────────
   "import.title": "Bring a library across",
   "import.explain":

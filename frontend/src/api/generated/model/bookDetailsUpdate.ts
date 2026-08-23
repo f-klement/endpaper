@@ -7,6 +7,7 @@
  */
 import type { BookCondition } from "./bookCondition.ts";
 import type { BookFormat } from "./bookFormat.ts";
+import type { LendingWillingness } from "./lendingWillingness.ts";
 
 /**
  * The fields a person edits by hand after a book exists.
@@ -20,6 +21,7 @@ export interface BookDetailsUpdate {
   condition?: BookCondition | null;
   description?: string | null;
   format?: BookFormat | null;
+  lending?: LendingWillingness | null;
   location?: string | null;
   publisher?: string | null;
   purchase_currency?: string | null;
