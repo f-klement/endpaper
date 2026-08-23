@@ -29,6 +29,7 @@ from dependencies import (
     CurrentUser,
     DbSession,
     Paging,
+    RowId,
 )
 from enums import (
     BookFormat,
@@ -44,6 +45,7 @@ from enums import (
 )
 from models import (
     Book,
+    Collection,
     Loan,
     Note,
     ReadingProgress,
@@ -57,6 +59,7 @@ from models import (
 )
 from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
+    MAX_ROW_ID,
     BookCreate,
     BookDetailsUpdate,
     BookDiscussUpdate,
@@ -68,6 +71,7 @@ from schemas import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
+    CollectionAssign,
     CopyCreate,
     CoverBackfillOut,
     DuplicateGroup,
@@ -161,7 +165,7 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tag(
-    tag_id: int,
+    tag_id: RowId,
     db: DbSession,
     current_user: Annotated[User, Depends(require_admin)],
 ) -> None:
@@ -326,7 +330,15 @@ def export_books(
 ) -> StreamingResponse:
     books = (
         db.query(Book)
-        .options(joinedload(Book.added_by), selectinload(Book.tags))
+        # `Book.collection` eagerly, because the CSV writes its name per row.
+        # A many-to-one lazy load would be answered from the identity map after
+        # the first book on each shelf, so the cost is small and the reason to
+        # state it is that it is not zero and not obvious.
+        .options(
+            joinedload(Book.added_by),
+            joinedload(Book.collection),
+            selectinload(Book.tags),
+        )
         .filter(visible_to(current_user.id))
         .order_by(Book.title)
         .all()
@@ -354,7 +366,7 @@ def export_books(
             [
                 "Title", "Author", "ISBN", "Publisher", "Year",
                 "Description", "Tags", "My Status", "Date Added", "Added By",
-                "Format", "Condition", "Location", "Purchase Price",
+                "Format", "Condition", "Location", "Collection", "Purchase Price",
                 "Purchase Currency", "Purchased On", "Purchased From",
             ]
         )
@@ -377,6 +389,11 @@ def export_books(
                     book.format or "",
                     book.condition or "",
                     _csv_safe(book.location),
+                    # The name, not the id: an export is read by people, and a
+                    # foreign key means nothing in a spreadsheet. Through
+                    # `_csv_safe` like every other member-supplied cell,
+                    # because a collection is named by a member.
+                    _csv_safe(book.collection.name if book.collection else ""),
                     # Back to major units for the export. A spreadsheet column
                     # of cents is not what anybody means by "what did this
                     # cost", and an export is read by people, not by us.
@@ -485,6 +502,22 @@ def list_books(
     lending: Annotated[LendingWillingness | None, Query()] = None,
     series: Annotated[str | None, Query(max_length=255)] = None,
     location: Annotated[str | None, Query(max_length=120)] = None,
+    collection_id: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            # Bounded above for the reason `after_id` is, and this one has no
+            # lower-bound-only escape: a Python int has no ceiling and SQLite's
+            # does, so an id above 2**63-1 would reach the driver and raise
+            # `OverflowError` from inside the query, answering 500 to a value
+            # the caller chose.
+            le=MAX_ROW_ID,
+            description="Only books filed in this collection",
+        ),
+    ] = None,
+    unfiled: Annotated[
+        bool, Query(description="Only books in no collection at all")
+    ] = False,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
     discuss: Annotated[
         bool, Query(description="Only books somebody has offered to talk about")
@@ -492,6 +525,21 @@ def list_books(
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
 ) -> Page[BookOut]:
     query = db.query(Book).filter(visible_to(current_user.id))
+
+    # Two parameters rather than a magic id for "none", and refused together
+    # rather than one silently winning. "Books in collection 3" and "books in
+    # no collection" are different questions, and a caller that asked both has
+    # made a mistake worth being told about: picking one for them is how a
+    # filter quietly shows the wrong shelf.
+    if collection_id is not None and unfiled:
+        raise HTTPException(
+            status_code=422,
+            detail="Ask for one collection or for the unfiled books, not both.",
+        )
+    if collection_id is not None:
+        query = query.filter(Book.collection_id == collection_id)
+    if unfiled:
+        query = query.filter(Book.collection_id.is_(None))
 
     if ownership is not None:
         query = query.filter(Book.ownership == ownership)
@@ -627,6 +675,34 @@ def _store_cover(book: Book) -> bool:
     return True
 
 
+def _checked_collection(db: Session, collection_id: int | None) -> int | None:
+    """The id of a collection that exists, or None, or a 400.
+
+    Every write that files a book goes through here. Without it an unknown id
+    reaches the foreign key and surfaces as a 500 from inside an add, which
+    tells the caller nothing about what they got wrong.
+
+    A 400 rather than a 404: the request is about a book, and the thing that
+    does not exist is a field in its body. It is also not a privacy question,
+    because collections are household wide, so there is nothing here to withhold
+    by answering vaguely.
+
+    The range check is not redundant with the schemas that bound this field.
+    `BulkRequest.value` is deliberately loose (`str | int | None`, because which
+    field it fills depends on the verb), so the bulk verb parses an id out of it
+    and arrives here having validated nothing. An id past SQLite's INTEGER
+    raises `OverflowError` from inside `db.get`, which is a 500 rather than a
+    refusal. See `MAX_ROW_ID`.
+    """
+    if collection_id is None:
+        return None
+    if not 1 <= collection_id <= MAX_ROW_ID:
+        raise HTTPException(status_code=400, detail="No such collection")
+    if db.get(Collection, collection_id) is None:
+        raise HTTPException(status_code=400, detail="No such collection")
+    return collection_id
+
+
 def _create_book(payload: BookCreate, current_user: User, db: Session, conflict: str) -> BookOut:
     # payload.isbn is already canonical ISBN-13 (see BookCreate's validator),
     # but rows written before canonicalisation may hold the ISBN-10, so both
@@ -636,6 +712,10 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # across the whole table, so a clash with somebody else's private book is
     # still a clash. That also means it sees **trashed** rows, which is the
     # trap soft deletion introduces and `_freeable` exists to resolve.
+    # Before the ISBN walk below, which purges trashed rows to free the number.
+    # A bad collection id refused afterwards would have destroyed them first.
+    _checked_collection(db, payload.collection_id)
+
     freed: list[int] = []
     if payload.isbn:
         forms = isbn_utils.equivalent_forms(payload.isbn)
@@ -922,6 +1002,37 @@ def _bulk_set_location(
     return updated, unchanged
 
 
+def _bulk_set_collection(
+    db: Session, books: list[Book], value: str | int | None, current_user: User
+) -> tuple[int, int]:
+    """File a selection into a collection, or unfile it.
+
+    None and the empty string both clear, matching `_bulk_set_location`: a
+    verb that can only add is a verb somebody has to undo one book at a time.
+    An unknown id is a 400 from `_checked_collection` and changes nothing,
+    because the whole selection is applied in one transaction.
+    """
+    if value is None or str(value).strip() == "":
+        new_collection: int | None = None
+    else:
+        try:
+            new_collection = int(str(value))
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail="A collection id is required"
+            ) from None
+        _checked_collection(db, new_collection)
+
+    updated = unchanged = 0
+    for book in books:
+        if book.collection_id == new_collection:
+            unchanged += 1
+        else:
+            book.collection_id = new_collection
+            updated += 1
+    return updated, unchanged
+
+
 def _bulk_delete(
     db: Session, books: list[Book], value: str | int | None, current_user: User
 ) -> tuple[int, int]:
@@ -954,6 +1065,7 @@ _BULK_HANDLERS: dict[
     BulkAction.SET_STATUS: _bulk_set_status,
     BulkAction.SET_OWNERSHIP: _bulk_set_ownership,
     BulkAction.SET_LOCATION: _bulk_set_location,
+    BulkAction.SET_COLLECTION: _bulk_set_collection,
     BulkAction.DELETE: _bulk_delete,
 }
 
@@ -1266,6 +1378,11 @@ _MERGEABLE_FIELDS = (
     "subtitle", "author", "publisher", "year", "description", "cover_url",
     "page_count", "language", "categories", "google_books_id",
     "series_name", "series_index", "location",
+    # Present for the same reason `location` is: merging two entries for one
+    # book, one of them filed, should leave the survivor on that shelf rather
+    # than unfiled. It fills a gap and never overrides, so a keeper that is
+    # already in a collection stays where its owner put it.
+    "collection_id",
     "format", "condition", "lending", "purchase_price_minor", "purchase_currency",
     "purchased_at", "purchase_source",
 )
@@ -1713,6 +1830,8 @@ def add_copy(
     them for a second paperback is exactly the friction this feature exists to
     remove.
     """
+    _checked_collection(db, payload.collection_id)
+
     if book.copy_group is None:
         book.copy_group = copy_group_token()
 
@@ -1794,6 +1913,30 @@ def _normalise_copy_group(token: str | None, db: Session) -> None:
         if clash is not None:
             return
     survivor.copy_group = None
+
+
+@router.patch("/{book_id}/collection", response_model=BookOut)
+def set_collection(
+    payload: CollectionAssign,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """File this book into a collection, or take it out of one.
+
+    `BookForWrite`, not `BookForOwner`. A collection is shelving, and a public
+    book is a shared shelf that any member may curate, exactly like its tags
+    and its location. Privacy is the one thing reserved to the owner, and this
+    is deliberately not that: filing a book changes nothing about who can see
+    it.
+
+    **Per book row, so per copy.** Filing one paperback does not file the
+    other, which is the point of two rows: see `models.Book.collection_id`.
+    """
+    book.collection_id = _checked_collection(db, payload.collection_id)
+    db.commit()
+    db.refresh(book)
+    return book_to_out(book, current_user, db)
 
 
 @router.patch("/{book_id}/privacy", response_model=BookOut)
@@ -2030,7 +2173,7 @@ def add_progress(
 
 @router.delete("/{book_id}/progress/{progress_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_progress(
-    progress_id: int,
+    progress_id: RowId,
     book: BookForRead,
     db: DbSession,
     current_user: CurrentUser,
@@ -2067,7 +2210,7 @@ def delete_progress(
 
 @router.post("/{book_id}/tags/{tag_id}", response_model=BookOut)
 def add_book_tag(
-    tag_id: int,
+    tag_id: RowId,
     book: BookForWrite,
     db: DbSession,
     current_user: CurrentUser,
@@ -2084,7 +2227,7 @@ def add_book_tag(
 
 @router.delete("/{book_id}/tags/{tag_id}", response_model=BookOut)
 def remove_book_tag(
-    tag_id: int,
+    tag_id: RowId,
     book: BookForWrite,
     db: DbSession,
     current_user: CurrentUser,
@@ -2207,7 +2350,7 @@ def _note_for_edit(note_id: int, book: Book, current_user: User, db: Session) ->
 
 @router.put("/{book_id}/notes/{note_id}", response_model=NoteOut)
 def edit_note(
-    note_id: int,
+    note_id: RowId,
     payload: NoteCreate,
     book: BookForRead,
     db: DbSession,
@@ -2221,7 +2364,7 @@ def edit_note(
 
 @router.delete("/{book_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_note(
-    note_id: int,
+    note_id: RowId,
     book: BookForRead,
     db: DbSession,
     current_user: CurrentUser,

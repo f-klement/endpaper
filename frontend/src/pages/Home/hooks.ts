@@ -17,6 +17,7 @@ import {
   useListBooksInfinite,
   useListTags,
 } from "../../api/generated/endpoints/books/books";
+import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import {
   readLibraryView,
   writeLibraryView,
@@ -30,6 +31,7 @@ import {
   ReadStatus,
   type BookOut,
   type BulkResult,
+  type CollectionOut,
   type ListBooksParams,
   type LocationOut,
   type TagOut,
@@ -59,6 +61,12 @@ function toParams(filters: BookFilters): ListBooksParams {
     ...(filters.location ? { location: filters.location } : {}),
     ...(filters.format ? { format: filters.format } : {}),
     ...(filters.lending ? { lending: filters.lending } : {}),
+    // The two are mutually exclusive on the server, which is why one field
+    // produces one parameter or the other and never both.
+    ...(typeof filters.collection === "number"
+      ? { collection_id: filters.collection }
+      : {}),
+    ...(filters.collection === "unfiled" ? { unfiled: true } : {}),
     ...(filters.discuss ? { discuss: true } : {}),
     ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
     sort: filters.sort,
@@ -75,6 +83,7 @@ export interface UseLibraryResult {
   setLocation: (location: BookFilters["location"]) => void;
   setFormat: (format: BookFilters["format"]) => void;
   setLending: (lending: BookFilters["lending"]) => void;
+  setCollection: (collection: BookFilters["collection"]) => void;
   setDiscuss: (discuss: boolean) => void;
   /** Replace the whole filter set, for a saved view such as the wishlist. */
   setFilters: (filters: BookFilters) => void;
@@ -84,6 +93,8 @@ export interface UseLibraryResult {
   saveCurrentSearch: (name: string) => void;
   deleteSavedSearch: (id: string) => void;
   locations: LocationOut[];
+  /** Every collection in the household, for the filter. */
+  collections: CollectionOut[];
   setSort: (sort: BookFilters["sort"]) => void;
   toggleTag: (tagId: number) => void;
   clearTags: () => void;
@@ -132,6 +143,13 @@ function isLending(value: string | null): value is LendingWillingness {
   );
 }
 
+function readCollection(value: string | null): BookFilters["collection"] {
+  if (value === "unfiled") return "unfiled";
+  if (value === null) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function isOwnership(value: string | null): value is OwnershipStatus {
   return (
     value === OwnershipStatus.owned ||
@@ -168,6 +186,11 @@ export function useLibrary(): UseLibraryResult {
         searchParams.has("discuss") && searchParams.get("discuss") !== "false",
       series: searchParams.get("series"),
       location: searchParams.get("location"),
+      // `?collection=4` is the link the collections page offers, and
+      // `?collection=unfiled` is the one the picker's empty option offers.
+      // Anything else is ignored rather than sent on, so a hand-typed value
+      // cannot produce a request the API answers 422 to.
+      collection: readCollection(searchParams.get("collection")),
     };
   });
 
@@ -211,6 +234,9 @@ export function useLibrary(): UseLibraryResult {
   // panel, not the grid, so their errors are deliberately not surfaced.
   const tags = useListTags();
   const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
+  // Cached like the locations, and for the same reason: how a household has
+  // divided its shelf changes far less often than what is on it.
+  const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
 
   const flatBooks = useMemo(
     () => books.data?.pages.flatMap((page) => page.items) ?? [],
@@ -230,6 +256,8 @@ export function useLibrary(): UseLibraryResult {
       setFilters((current) => ({ ...current, location })),
     setFormat: (format) => setFilters((current) => ({ ...current, format })),
     setLending: (lending) => setFilters((current) => ({ ...current, lending })),
+    setCollection: (collection) =>
+      setFilters((current) => ({ ...current, collection })),
     setDiscuss: (discuss) => setFilters((current) => ({ ...current, discuss })),
     setFilters: (next) => setFilters(next),
 
@@ -237,6 +265,7 @@ export function useLibrary(): UseLibraryResult {
     saveCurrentSearch: (name) => setSavedSearches(saveSearch(name, filters)),
     deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
+    collections: collections.data ?? [],
     setSort: (sort) => setFilters((current) => ({ ...current, sort })),
     toggleTag: (tagId) =>
       setFilters((current) => ({
@@ -282,7 +311,8 @@ export interface UseBookSelectionResult {
   clear: () => void;
 
   apply: (ownership: OwnershipStatus) => void;
-  /** Any of the other bulk verbs: tagging, status, location, deletion. */
+  /** Any of the other bulk verbs: tagging, status, location, collection,
+   * deletion. */
   run: (action: BulkAction, value?: string | number) => void;
   isApplying: boolean;
   result: BulkResult | null;

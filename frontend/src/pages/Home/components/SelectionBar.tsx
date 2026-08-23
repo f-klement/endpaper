@@ -5,6 +5,7 @@ import {
   OwnershipStatus,
   ReadStatus,
   type BulkResult,
+  type CollectionOut,
   type TagOut,
 } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
@@ -17,6 +18,7 @@ interface SelectionBarProps {
   result: BulkResult | null;
   error: unknown;
   tags: TagOut[];
+  collections: CollectionOut[];
   onSelectAll: () => void;
   onClear: () => void;
   onApply: (ownership: OwnershipStatus) => void;
@@ -36,6 +38,7 @@ export default function SelectionBar({
   result,
   error,
   tags,
+  collections,
   onSelectAll,
   onClear,
   onApply,
@@ -160,6 +163,39 @@ export default function SelectionBar({
                 ))}
               </select>
             </div>
+
+            {/* Only once a household has made one. An empty picker offering
+                only "take these out of every collection" is a control for a
+                state that cannot exist yet. */}
+            {collections.length > 0 && (
+              <select
+                aria-label={t("bulk.setCollection")}
+                defaultValue=""
+                disabled={selectedCount === 0 || isApplying}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    // The empty string is the placeholder, so clearing needs a
+                    // value of its own: the API reads null as "unfile these".
+                    onRun(
+                      BulkAction.set_collection,
+                      event.target.value === "none"
+                        ? ""
+                        : Number(event.target.value),
+                    );
+                    event.target.value = "";
+                  }
+                }}
+                className="w-full px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+              >
+                <option value="">{t("bulk.setCollection")}</option>
+                {collections.map((collection) => (
+                  <option key={collection.id} value={collection.id}>
+                    {collection.name}
+                  </option>
+                ))}
+                <option value="none">{t("bulk.clearCollection")}</option>
+              </select>
+            )}
 
             <div className="flex gap-2">
               <button

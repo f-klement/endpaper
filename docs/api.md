@@ -82,7 +82,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 
 | Method | Path | Access | Notes |
 |---|---|---|---|
-| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `location`, `unrated`, `tags`, `sort` |
+| GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
 | GET | `/api/books/tags` | user | The seeded vocabulary plus the household's own |
@@ -111,6 +111,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | PATCH | `/api/books/{id}` | write | Correct title, author, year, series or location |
 | PATCH | `/api/books/{id}/rating` | read | Your own 1 to 5, or null to clear |
 | PATCH | `/api/books/{id}/ownership` | write | Whether a copy is physically here |
+| PATCH | `/api/books/{id}/collection` | write | File this copy into a collection, or `null` for none. **400** for an unknown collection |
 | PATCH | `/api/books/{id}/discuss` | read | Offer to talk about this book, or withdraw the offer |
 | POST | `/api/books/{id}/enrich` | write | Fill gaps from Google Books |
 | GET | `/api/books/{id}/enrich/candidates` | read | Other editions, for picking the right one |
@@ -141,6 +142,13 @@ flow is built around.
 
 `lending` accepts `happy`, `in_use` or `never`, and matches nothing on a book nobody has
 answered for: null is not one of the three.
+
+`collection_id` and `unfiled` are **two parameters for two questions**, and sending both is
+a **422** rather than one silently winning. "Books in collection 3" and "books in no
+collection" are alternatives, and a caller that asked for both has made a mistake worth
+being told about: choosing one for them is how a filter quietly shows the wrong shelf. An
+id no collection has selects nothing, rather than answering 404: this is a filter, not a
+lookup.
 
 `discuss=true` lists books **somebody** has offered to talk about, not the caller's own
 offers. That is deliberate and matches what the grid draws: the marker is on every book
@@ -292,6 +300,49 @@ listing a book three times is an artefact of the export rather than evidence of 
 paperbacks. Restore the whole library from `/api/backup` instead, which carries `copy_group`
 with the rows and reproduces the groups exactly.
 
+### Collections
+
+A collection is a named part of the shelf: physical and ebook, kept and sold, one person's
+and another's. A book is in **one** or in none.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/collections` | user | Every collection, with the caller's own `book_count` |
+| POST | `/api/collections` | user | **201**. A name that already exists returns that collection |
+| PATCH | `/api/collections/{id}` | user | Rename. **409** if another collection has that name |
+| DELETE | `/api/collections/{id}` | **admin** | 204. Its books are unfiled, never deleted |
+
+Names are unique **case insensitively**, enforced by an index on `lower(name)`. Creating one
+with a name already in use returns the existing row rather than an error, because somebody
+typing a name that is there means that collection; renaming **onto** an occupied name is a
+409, because that would silently merge two shelves.
+
+Deleting is admin only, the same asymmetry as `DELETE /api/books/tags/{id}` and for the same
+reason: creating is additive and undone by deleting, while deleting strips a label off every
+book in the house at once with no undo.
+
+**A collection is shelving, never permission.** Filing a book into one changes nothing about
+who can see it: `is_private` remains the only access control on content. Every count here is
+filtered by the caller's visibility, because the count is the one thing a household-wide
+label could otherwise disclose.
+
+`BookOut` carries `collection_id` and `collection_name`. The name is a projection of the row
+the id names, assembled per request in one statement for the whole page, so a rename is
+visible on the next fetch and nothing has to be migrated.
+
+Two interactions worth knowing.
+
+**Per copy.** Two copies of one title are two objects, and each carries its own collection.
+`POST /api/books/{id}/copies` does not inherit it: a new copy is unfiled unless the payload
+names one. `copy_count` still counts the whole group across collections, so a library
+filtered to one collection can show a book whose card reads 2: it answers "how many do we
+own", not "how many are on this screen".
+
+**Not a duplicate rule.** `/duplicates` ignores collections, and the unique ISBN index is
+table-wide rather than per collection. A **merge** fills the survivor's empty collection
+from a loser's, like `location`, and never overrides one it already has. Adding "the same book" to a second collection is
+therefore a **copy**, made with the copies endpoint, not a second ungrouped row.
+
 ### Bulk actions
 
 `POST /bulk` takes `{book_ids, action, value}` and answers with a three-way count:
@@ -307,6 +358,7 @@ with the rows and reproduces the groups exactly.
 | `set_status` | a reading status |
 | `set_ownership` | an ownership status |
 | `set_location` | free text; an empty string clears |
+| `set_collection` | a collection id; null or an empty string unfiles them |
 | `delete` | none |
 
 One endpoint rather than six, because every verb shares the same three steps: resolve the

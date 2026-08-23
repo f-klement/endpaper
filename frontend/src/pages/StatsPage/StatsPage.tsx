@@ -131,6 +131,19 @@ export default function StatsPage() {
         labelWidthClass="w-24"
       />
 
+      {/* Named collections only, so this section disappears for a household
+          that has not divided its shelf. The unfiled books are the difference
+          between these and the total above, and the library's own filter is
+          where somebody goes to see them. */}
+      <StatSection
+        title={t("stats.byCollection")}
+        rows={(stats.by_collection ?? []).map((row) => ({
+          label: row.name,
+          count: row.count,
+        }))}
+        colorClass="bg-accent-400"
+      />
+
       {TAG_CATEGORY_ORDER.map((category) => (
         <StatSection
           key={category}

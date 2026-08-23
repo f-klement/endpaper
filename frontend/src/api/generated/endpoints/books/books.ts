@@ -40,6 +40,7 @@ import type {
   BookStatusUpdate,
   BulkRequest,
   BulkResult,
+  CollectionAssign,
   CopyCreate,
   CoverBackfillOut,
   DuplicateGroup,
@@ -2754,6 +2755,105 @@ export const useUpdateBookDetails = <
   TContext
 > => {
   return useMutation(getUpdateBookDetailsMutationOptions(options), queryClient);
+};
+export const getSetCollectionUrl = (bookId: number) => {
+  return `/api/books/${bookId}/collection`;
+};
+
+/**
+ * File this book into a collection, or take it out of one.
+ *
+ * `BookForWrite`, not `BookForOwner`. A collection is shelving, and a public
+ * book is a shared shelf that any member may curate, exactly like its tags
+ * and its location. Privacy is the one thing reserved to the owner, and this
+ * is deliberately not that: filing a book changes nothing about who can see
+ * it.
+ *
+ * **Per book row, so per copy.** Filing one paperback does not file the
+ * other, which is the point of two rows: see `models.Book.collection_id`.
+ * @summary Set Collection
+ */
+export const setCollection = async (
+  bookId: number,
+  collectionAssign: CollectionAssign,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getSetCollectionUrl(bookId), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(collectionAssign),
+  });
+};
+
+export const getSetCollectionMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setCollection>>,
+    TError,
+    { bookId: number; data: CollectionAssign },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setCollection>>,
+  TError,
+  { bookId: number; data: CollectionAssign },
+  TContext
+> => {
+  const mutationKey = ["setCollection"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setCollection>>,
+    { bookId: number; data: CollectionAssign }
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return setCollection(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetCollectionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setCollection>>
+>;
+export type SetCollectionMutationBody = CollectionAssign;
+export type SetCollectionMutationError = HTTPValidationError;
+
+/**
+ * @summary Set Collection
+ */
+export const useSetCollection = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setCollection>>,
+      TError,
+      { bookId: number; data: CollectionAssign },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setCollection>>,
+  TError,
+  { bookId: number; data: CollectionAssign },
+  TContext
+> => {
+  return useMutation(getSetCollectionMutationOptions(options), queryClient);
 };
 export const getListCopiesUrl = (bookId: number) => {
   return `/api/books/${bookId}/copies`;

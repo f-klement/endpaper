@@ -23,6 +23,8 @@ export interface RestoreResult {
   /** @minimum 0 */
   books: number;
   /** @minimum 0 */
+  collections?: number;
+  /** @minimum 0 */
   covers: number;
   /** @minimum 0 */
   loans: number;

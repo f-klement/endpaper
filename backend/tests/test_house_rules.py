@@ -9,6 +9,8 @@ again".
 import ast
 from pathlib import Path
 
+import pytest
+
 BACKEND = Path(__file__).resolve().parent.parent
 
 
@@ -22,6 +24,70 @@ def _python_sources() -> list[Path]:
         and ".venv" not in path.parts
         and "__pycache__" not in path.parts
     ]
+
+
+#: Callables that carry a validation bound, whatever the layer: a query
+#: parameter, a path parameter, a header, a body field.
+BOUNDING_CALLS = frozenset(
+    {"Query", "Path", "PathParam", "Body", "Header", "Cookie", "Form", "Field"}
+)
+LOWER_BOUNDS = frozenset({"ge", "gt"})
+UPPER_BOUNDS = frozenset({"le", "lt"})
+ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+
+
+def _is_bounding_call(node: ast.AST) -> bool:
+    """A call to one of the bounding helpers carrying both a floor and a
+    ceiling. Both halves, because a floor alone is the older hole."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else (
+        func.attr if isinstance(func, ast.Attribute) else None
+    )
+    if name not in BOUNDING_CALLS:
+        return False
+    keywords = {keyword.arg for keyword in node.keywords if keyword.arg}
+    return bool(keywords & LOWER_BOUNDS) and bool(keywords & UPPER_BOUNDS)
+
+
+def _mentions_int(annotation: ast.AST | None) -> bool:
+    """Whether an annotation carries an `int` anywhere inside it.
+
+    `int`, `int | None` and `list[int]` all count. A name that merely *aliases*
+    an int does not, which is why the alias table exists.
+    """
+    if annotation is None:
+        return False
+    return any(
+        isinstance(child, ast.Name) and child.id == "int"
+        for child in ast.walk(annotation)
+    )
+
+
+def _preceding_comment_block(lines: list[str], lineno: int) -> str:
+    """The statement's line plus the contiguous comment lines above it.
+
+    Walked upward rather than a fixed number of lines, so an opt-out reason can
+    be as long as it needs to be. A fixed window is not a style choice here: the
+    four-line one this replaced silently failed to see the `# unbounded ok:` on
+    `BulkRequest.value`, whose reason runs to six lines, and the rule then
+    reported a field that had been answered. `tests/test_models.py` walks
+    upward for exactly this reason.
+    """
+    start = lineno - 1
+    while start > 0 and lines[start - 1].lstrip().startswith("#"):
+        start -= 1
+    return "\n".join(lines[start:lineno])
+
+
+def _is_route_handler(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Decorated `@<something>.get/post/put/patch/delete(...)`."""
+    for decorator in node.decorator_list:
+        call = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(call, ast.Attribute) and call.attr in ROUTE_METHODS:
+            return True
+    return False
 
 
 class TestEveryNumericQueryParamIsBoundedBothWays:
@@ -38,6 +104,13 @@ class TestEveryNumericQueryParamIsBoundedBothWays:
     which is exactly why the missing one was easy to miss.
 
     A parameter may opt out with a `# unbounded ok:` comment giving the reason.
+
+    **Kept beside the wider rule below rather than folded into it**, because the
+    two catch different things and this one is the narrower. It fires on any
+    numeric `Query` with a floor and no ceiling, whatever the type, so it still
+    covers a float. It cannot fire on a parameter with no bound at all, and it
+    never looked at `Path`, which is how twelve path ids stayed bare: that is
+    what `TestEveryIntParameterFromTheOutsideIsBounded` is for.
     """
 
     #: Keywords that make a parameter numeric. A `str` bound by `pattern` or
@@ -83,6 +156,591 @@ class TestEveryNumericQueryParamIsBoundedBothWays:
         )
 
 
+class TestEveryIntParameterFromTheOutsideIsBounded:
+    """Every int a **caller** supplies is bounded at both ends, wherever it
+    arrives from.
+
+    This is the same defect as the class above and it has now been found three
+    times in two days, each time in a place the previous lint could not see. A
+    Python int has no ceiling and SQLite's does, so an unbounded one passes
+    validation, reaches the driver and raises `OverflowError` from inside the
+    query: a **500** answered to a value the caller chose.
+
+    The two holes this class exists to close, both real:
+
+    * The rule above only inspects `Query(...)`, so it could not see a **path**
+      parameter at all. `GET /api/books/{id}`, `DELETE /api/books/tags/{id}` and
+      both new collection routes each answered 500 to `2**63`.
+    * It only fires on a parameter that has a lower bound and no upper one, so a
+      parameter with **no bounds whatsoever** passed it silently. That is the
+      shape every path parameter had.
+
+    What counts as bounded: a bounding call (`Query`, `Path`, `PathParam`, ...)
+    carrying one of `ge`/`gt` **and** one of `le`/`lt`, in the annotation or in
+    the default; or an annotation naming a module-level alias that is itself
+    bounded that way, which is how `dependencies.RowId` passes.
+
+    What is inspected: route handlers (anything decorated `@<name>.get`,
+    `.post`, `.put`, `.patch` or `.delete`) and every function named inside a
+    `Depends(...)`, because a dependency's parameters are request parameters
+    too: `book_for_read(book_id)` is where `{book_id}` is actually declared.
+
+    A parameter may opt out with a `# unbounded ok:` comment giving the reason.
+    """
+
+    def _int_aliases(self, trees: dict[Path, ast.Module]) -> dict[str, bool]:
+        """Module-level `Annotated[...]` aliases **that carry an int**, and
+        whether each one is bounded at both ends.
+
+        Two facts and not one, and collecting only the bounded ones is the bug
+        this signature exists to prevent. `book_id: RowId` is `Name('RowId')`,
+        which mentions no `int` at all, so a scope test that only looks for the
+        literal name skips the parameter entirely: the alias then passes because
+        it is never examined, and loosening `RowId` itself to `ge=1` leaves the
+        whole lint green over twelve ids. The name has to bring the parameter
+        **into** scope, and boundedness has to be the separate answer.
+
+        Restricted to aliases whose value mentions `int`, or every
+        `Annotated[User, Depends(...)]` in `dependencies.py` would be dragged
+        into scope and reported for having no numeric bound.
+
+        Collected across the whole tree rather than per file, because the alias
+        is declared once (`dependencies.RowId`) and used in five other modules.
+
+        **Resolved to a fixed point**, because `Loose2 = Loose` carries no `int`
+        of its own: registering only what mentions `int` literally leaves the
+        second name unknown, so a parameter annotated with it is skipped and the
+        rule goes quiet again. That is the same hole as the dead branch above,
+        one indirection further out, and a loop is the whole of the fix. It
+        terminates because both facts only ever grow: a name is never
+        un-registered, and `bounded` only moves False to True as more aliases
+        become known.
+
+        An alias of a bounded alias **inherits the bound**. `Tight2 = Tight` is
+        as bounded as `Tight`, and saying otherwise would report a name that is
+        in fact safe.
+        """
+        assignments: list[tuple[list[str], ast.expr]] = []
+        for tree in trees.values():
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    targets, value = node.targets, node.value
+                elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                    targets, value = [node.target], node.value
+                else:
+                    continue
+                names = [t.id for t in targets if isinstance(t, ast.Name)]
+                if names:
+                    assignments.append((names, value))
+
+        aliases: dict[str, bool] = {}
+        changed = True
+        while changed:
+            changed = False
+            for names, value in assignments:
+                named = {
+                    child.id for child in ast.walk(value) if isinstance(child, ast.Name)
+                }
+                if not (_mentions_int(value) or named & aliases.keys()):
+                    continue
+                bounded = any(
+                    _is_bounding_call(child) for child in ast.walk(value)
+                ) or any(aliases.get(name, False) for name in named)
+                for name in names:
+                    if aliases.get(name) is not bounded:
+                        aliases[name] = bounded
+                        changed = True
+        return aliases
+
+    def _depends_targets(self, trees: dict[Path, ast.Module]) -> set[str]:
+        """Every function named inside a `Depends(...)`."""
+        names: set[str] = set()
+        for tree in trees.values():
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                called = func.id if isinstance(func, ast.Name) else (
+                    func.attr if isinstance(func, ast.Attribute) else None
+                )
+                if called != "Depends":
+                    continue
+                for argument in node.args:
+                    if isinstance(argument, ast.Name):
+                        names.add(argument.id)
+        return names
+
+    def _offenders(self, sources: dict[Path, str]) -> list[str]:
+        """The rule itself, over source text rather than over the tree.
+
+        Separated so the guard tests below drive **this** function rather than
+        its helpers. Asserting on `_is_bounding_call` and `_mentions_int`
+        individually is what let the alias branch sit unreachable while every
+        helper it depended on passed its own test.
+        """
+        trees = {path: ast.parse(text) for path, text in sources.items()}
+        aliases = self._int_aliases(trees)
+        dependencies = self._depends_targets(trees)
+        offenders: list[str] = []
+
+        for path, tree in trees.items():
+            lines = sources[path].splitlines()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                if not (_is_route_handler(node) or node.name in dependencies):
+                    continue
+
+                arguments = node.args.args + node.args.kwonlyargs
+                defaults = dict(
+                    zip(
+                        node.args.args[len(node.args.args) - len(node.args.defaults):],
+                        node.args.defaults,
+                        strict=True,
+                    )
+                )
+                for argument in arguments:
+                    annotation = argument.annotation
+                    if annotation is None:
+                        continue
+                    named = {
+                        child.id
+                        for child in ast.walk(annotation)
+                        if isinstance(child, ast.Name)
+                    }
+                    # In scope when the annotation carries an int itself **or**
+                    # names an int alias. The second half is what makes the
+                    # acceptance below reachable at all.
+                    if not (_mentions_int(annotation) or named & aliases.keys()):
+                        continue
+                    if any(
+                        _is_bounding_call(child) for child in ast.walk(annotation)
+                    ):
+                        continue
+                    if any(aliases.get(name, False) for name in named):
+                        continue
+                    default = defaults.get(argument)
+                    if default is not None and _is_bounding_call(default):
+                        continue
+
+                    if "unbounded ok:" in _preceding_comment_block(
+                        lines, argument.lineno
+                    ):
+                        continue
+                    offenders.append(
+                        f"{path.relative_to(BACKEND)}:{argument.lineno} ({node.name}.{argument.arg})"
+                    )
+
+        return sorted(offenders)
+
+    def test_every_caller_supplied_int_is_bounded_at_both_ends(self) -> None:
+        offenders = self._offenders(
+            {path: path.read_text() for path in _python_sources()}
+        )
+
+        assert not offenders, (
+            "These int parameters come from a caller and are not bounded at both ends, "
+            "so a value past SQLite's INTEGER reaches the driver and turns into a 500:\n  "
+            + "\n  ".join(offenders)
+            + "\nAnnotate them `RowId` (dependencies.py), or with a Query/Path carrying "
+            "ge and le, or add an `# unbounded ok:` comment saying why not."
+        )
+
+    #: A route handler and its alias declaration, as two files, because the
+    #: alias really is declared in another module in this tree.
+    PROBE = BACKEND / "probe.py"
+    ALIASES = BACKEND / "probe_aliases.py"
+
+    def _probe(self, annotation: str, alias: str | None = None) -> list[str]:
+        sources = {
+            self.PROBE: (
+                "@router.get('/{book_id}')\n"
+                f"def probe(book_id: {annotation}) -> None: ...\n"
+            )
+        }
+        if alias is not None:
+            sources[self.ALIASES] = f"{alias}\n"
+        return self._offenders(sources)
+
+    def test_the_guard_would_notice_a_bare_path_parameter(self) -> None:
+        """A guard that cannot fail is not a guard. This is the exact shape
+        every path parameter in this app had until it was measured: a bare
+        `int`, on a real route, with nothing to stop `2**63` reaching the
+        driver."""
+        assert self._probe("int") == ["probe.py:2 (probe.book_id)"]
+
+    def test_the_guard_would_notice_an_alias_that_lost_its_ceiling(self) -> None:
+        """**The mutation that discriminates**, and the one this class failed
+        before it was written.
+
+        Loosening the shared alias is the realistic regression: it is one edit,
+        in a file nobody associates with twelve routes, and every id annotated
+        with it silently stops being bounded. A scope test that only looks for
+        the literal name `int` skips `book_id: RowId` before ever asking whether
+        the alias is bounded, so the whole acceptance branch was dead and the
+        lint stayed green through exactly this change.
+        """
+        assert self._probe(
+            "LooseId", "LooseId = Annotated[int, PathParam(ge=1)]"
+        ) == ["probe.py:2 (probe.book_id)"]
+
+    def test_the_guard_accepts_a_bounded_alias(self) -> None:
+        """The other half, or the rule above could be satisfied by rejecting
+        every alias, which would make `RowId` unusable."""
+        assert (
+            self._probe("TightId", "TightId = Annotated[int, PathParam(ge=1, le=9)]")
+            == []
+        )
+
+    def test_the_guard_would_notice_an_alias_of_a_loosened_alias(self) -> None:
+        """One hop further out than the case above, and invisible without the
+        fixed point: `Loose2 = Loose` mentions no `int` itself, so a collector
+        that registers only what carries one literally never learns the second
+        name, and the parameter annotated with it is skipped exactly as
+        `book_id: RowId` used to be."""
+        assert self._probe(
+            "Loose2",
+            "Loose = Annotated[int, PathParam(ge=1)]\nLoose2 = Loose",
+        ) == ["probe.py:2 (probe.book_id)"]
+
+    def test_the_guard_accepts_an_alias_of_a_bounded_alias(self) -> None:
+        """The other half: an alias of a bounded alias inherits the bound, or
+        the rule above would be satisfied by reporting every indirection."""
+        assert (
+            self._probe(
+                "Tight2",
+                "Tight = Annotated[int, PathParam(ge=1, le=9)]\nTight2 = Tight",
+            )
+            == []
+        )
+
+    def test_the_guard_leaves_a_non_numeric_alias_alone(self) -> None:
+        """`CurrentUser` and `DbSession` are `Annotated[..., Depends(...)]` with
+        no int in them. Dragging every alias into scope rather than only the int
+        ones would report each of them for having no numeric bound."""
+        assert (
+            self._probe("CurrentUser", "CurrentUser = Annotated[User, Depends(get_it)]")
+            == []
+        )
+
+
+class TestEveryRequestBodyRowIdIsBounded:
+    """The same rule again, through the door the parameter lint cannot see.
+
+    A row id in a **pydantic body field** is neither a handler parameter nor a
+    dependency, so `TestEveryIntParameterFromTheOutsideIsBounded` walks straight
+    past it. Three endpoints answered **500** to `2**63` for exactly that
+    reason, all member reachable and all older than collections:
+    `POST /api/books/bulk`, `POST /api/books/merge` and `POST /api/loans`.
+
+    **Scoped to models a route actually accepts**, not to every model under
+    `schemas/`. Response models are full of ints that come from the database
+    rather than from a caller (`BookOut.id`, `Page.total`, every `count`), and
+    bounding those would be noise standing in front of the rule. A model is in
+    scope when a route handler annotates a parameter with it, plus any model
+    reached from an in-scope model's own fields, which is how a nested body
+    would be caught.
+
+    What counts as bounded is what counts everywhere else: a `Field(...)` or
+    equivalent carrying one of `ge`/`gt` and one of `le`/`lt`, directly or
+    through `RowIdField`. `# unbounded ok:` opts out, and `BulkRequest.value`
+    uses it: it is genuinely not a row id, and its handlers range-check per verb.
+
+    Only int-shaped fields are the question. A `str` bound by `max_length` is a
+    different rule, and a `float` cannot overflow the driver.
+
+    Measured on the tree as it stands: 54 models under `schemas/`, 22 of them
+    reachable from a request.
+    """
+
+    def _model_bases(self, node: ast.ClassDef) -> set[str]:
+        return {base.id for base in node.bases if isinstance(base, ast.Name)}
+
+    def _schema_models(self, sources: dict[Path, str]) -> dict[str, ast.ClassDef]:
+        """Every pydantic model under `schemas/`, by name.
+
+        **A subclass of a model is a model**, resolved to a fixed point, and
+        that is not hypothetical tidiness: `CollectionUpdate(CollectionCreate)`
+        is the body of `PATCH /api/collections/{id}` and has `BaseModel` nowhere
+        in its bases, so a literal test for that name leaves it out of the rule
+        entirely. It carries one string today, which is the only reason nothing
+        escaped through it.
+
+        Same shape as the alias chain above and the same fix. It terminates for
+        the same reason: the set only grows.
+        """
+        candidates: dict[str, ast.ClassDef] = {}
+        for path, text in sources.items():
+            if "schemas" not in path.parts:
+                continue
+            for node in ast.walk(ast.parse(text)):
+                if isinstance(node, ast.ClassDef):
+                    candidates[node.name] = node
+
+        models: dict[str, ast.ClassDef] = {}
+        changed = True
+        while changed:
+            changed = False
+            for name, node in candidates.items():
+                if name in models:
+                    continue
+                bases = self._model_bases(node)
+                if "BaseModel" in bases or bases & models.keys():
+                    models[name] = node
+                    changed = True
+        return models
+
+    def _body_models(
+        self, sources: dict[Path, str], models: dict[str, ast.ClassDef]
+    ) -> set[str]:
+        """Models a route handler takes as a parameter, transitively.
+
+        Transitive through **fields**, because a body model may hold another one
+        and a field on the inner model is as reachable from a request as a field
+        on the outer; and through **bases**, because a subclass body inherits
+        every field its parent declares and those arrive in the same JSON.
+        Nothing in the tree nests one today; the worklist is three lines and the
+        alternative is a rule that silently stops applying the first time
+        somebody does.
+        """
+        reached: set[str] = set()
+        pending: list[str] = []
+
+        for _path, text in sources.items():
+            for node in ast.walk(ast.parse(text)):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                if not _is_route_handler(node):
+                    continue
+                for argument in node.args.args + node.args.kwonlyargs:
+                    for child in ast.walk(argument.annotation) if argument.annotation else ():
+                        if isinstance(child, ast.Name) and child.id in models:
+                            pending.append(child.id)
+
+        while pending:
+            name = pending.pop()
+            if name in reached:
+                continue
+            reached.add(name)
+            pending.extend(self._model_bases(models[name]) & models.keys())
+            for statement in models[name].body:
+                if not isinstance(statement, ast.AnnAssign) or statement.annotation is None:
+                    continue
+                for child in ast.walk(statement.annotation):
+                    if isinstance(child, ast.Name) and child.id in models:
+                        pending.append(child.id)
+        return reached
+
+    def _offenders(self, sources: dict[Path, str]) -> list[str]:
+        """The rule itself, over source text rather than over the tree.
+
+        Separated for the reason the parameter rule was: the guards below have
+        to drive **this**, not its collectors. Asserting that a collector holds
+        a name is how the first hole survived a test that passed.
+        """
+        models = self._schema_models(sources)
+        in_scope = self._body_models(sources, models)
+        offenders: list[str] = []
+
+        for path, text in sources.items():
+            if "schemas" not in path.parts:
+                continue
+            lines = text.splitlines()
+            for node in ast.walk(ast.parse(text)):
+                if not isinstance(node, ast.ClassDef) or node.name not in in_scope:
+                    continue
+                for statement in node.body:
+                    if not isinstance(statement, ast.AnnAssign):
+                        continue
+                    annotation = statement.annotation
+                    if not _mentions_int(annotation):
+                        continue
+                    named = {
+                        child.id
+                        for child in ast.walk(annotation)
+                        if isinstance(child, ast.Name)
+                    }
+                    if "RowIdField" in named:
+                        continue
+                    assigned = statement.value
+                    if any(
+                        _is_bounding_call(child) for child in ast.walk(annotation)
+                    ) or (assigned is not None and _is_bounding_call(assigned)):
+                        continue
+                    if "unbounded ok:" in _preceding_comment_block(
+                        lines, statement.lineno
+                    ):
+                        continue
+                    field = statement.target
+                    label = field.id if isinstance(field, ast.Name) else "?"
+                    offenders.append(
+                        f"{path.relative_to(BACKEND)}:{statement.lineno} ({node.name}.{label})"
+                    )
+        return sorted(offenders)
+
+    def test_every_int_a_request_body_carries_is_bounded(self) -> None:
+        offenders = self._offenders(
+            {path: path.read_text() for path in _python_sources()}
+        )
+
+        assert not offenders, (
+            "These request-body ints are unbounded, so a value past SQLite's INTEGER "
+            "reaches the driver and turns into a 500:\n  "
+            + "\n  ".join(offenders)
+            + "\nUse `RowIdField` (schemas/common.py) for a row id, a Field with ge and "
+            "le otherwise, or add an `# unbounded ok:` comment saying why not."
+        )
+
+    #: A router module and a schemas module, because a model is declared in one
+    #: and accepted in the other, which is what the two fixed points are for.
+    ROUTER = BACKEND / "probe_router.py"
+    SCHEMAS = BACKEND / "schemas" / "probe_schemas.py"
+
+    def _probe(self, models: str, body: str = "Body") -> list[str]:
+        return self._offenders(
+            {
+                self.SCHEMAS: models + "\n",
+                self.ROUTER: (
+                    "@router.post('/thing')\n"
+                    f"def probe(payload: {body}) -> None: ...\n"
+                ),
+            }
+        )
+
+    def test_the_guard_would_notice_an_unbounded_body_int(self) -> None:
+        """A guard that cannot fail is not a guard. This is the shape three
+        endpoints had when they answered 500 to `2**63`."""
+        assert self._probe("class Body(BaseModel):\n    book_id: int") == [
+            "schemas/probe_schemas.py:2 (Body.book_id)"
+        ]
+
+    def test_the_guard_would_notice_one_inherited_from_a_model_subclass(self) -> None:
+        """The case the fixed point exists for. `Body(Parent)` names no
+        `BaseModel`, so a literal test for that base leaves the body out of
+        scope altogether and every field it declares goes unchecked. This is
+        `CollectionUpdate(CollectionCreate)`, which is a real request body.
+        """
+        assert self._probe(
+            "class Parent(BaseModel):\n    pass\n\n"
+            "class Body(Parent):\n    book_id: int"
+        ) == ["schemas/probe_schemas.py:5 (Body.book_id)"]
+
+    def test_the_guard_checks_the_fields_a_body_inherits(self) -> None:
+        """The other direction of the same edge: a subclass body arrives
+        carrying its parent's fields, so the parent is in scope too even though
+        no handler names it."""
+        assert self._probe(
+            "class Parent(BaseModel):\n    book_id: int\n\n"
+            "class Body(Parent):\n    pass"
+        ) == ["schemas/probe_schemas.py:2 (Parent.book_id)"]
+
+    def test_the_guard_accepts_a_bounded_body_int(self) -> None:
+        """Or the rule above could be satisfied by reporting every field."""
+        assert (
+            self._probe(
+                "class Body(BaseModel):\n    book_id: int = Field(ge=1, le=9)"
+            )
+            == []
+        )
+
+    def test_the_guard_leaves_a_response_model_alone(self) -> None:
+        """No handler takes it as a parameter, so its ints come from the
+        database rather than from a caller. Scoping this wrongly would bury the
+        rule in `BookOut.id` and every count in the app."""
+        assert (
+            self._probe(
+                "class Body(BaseModel):\n    pass\n\n"
+                "class Out(BaseModel):\n    id: int"
+            )
+            == []
+        )
+
+    def test_the_guard_sees_the_models_a_route_takes(self) -> None:
+        """The scope is the load-bearing half: too narrow and the rule inspects
+        nothing, which is a green test that checks the empty set."""
+        sources = {path: path.read_text() for path in _python_sources()}
+        models = self._schema_models(sources)
+        in_scope = self._body_models(sources, models)
+
+        assert {
+            "BulkRequest",
+            "MergeRequest",
+            "LoanCreate",
+            "BookCreate",
+            # Subclass of `CollectionCreate`, and absent from this set until the
+            # base-class fixed point landed.
+            "CollectionUpdate",
+        } <= in_scope
+        # And not the response models, which is what keeps the rule readable.
+        assert "BookOut" not in in_scope
+        assert "Page" not in in_scope
+
+
+class TestProvenanceColumnsAreNeverRead:
+    """A column recorded only so somebody can be asked later is never consulted
+    by code.
+
+    One entry, and it is here because three places in the tree say of
+    `collections.created_by_user_id` that "no query consults it, which is what
+    keeps that true rather than merely intended" while nothing kept it true. A
+    claim of mechanism with no mechanism is worse than no claim: the next reader
+    believes it.
+
+    What it protects is the separation the collections feature turns on. A
+    collection is shelving and never permission, and the way that quietly stops
+    being true is somebody filtering or authorising on who made one. The privacy
+    rule itself is pinned by `tests/test_models.py`; this pins the weaker
+    promise beside it.
+
+    **Attribute access is the test**, not the name. Writing the column is a
+    keyword argument (`Collection(created_by_user_id=...)`) and declaring it is
+    an assignment target, so neither is an `ast.Attribute`; every read of it,
+    whether `row.created_by_user_id` or `Collection.created_by_user_id` in a
+    filter, is one. If a genuine reason to read one ever arrives, delete the
+    entry here and the three sentences it stands for, in the same commit.
+    """
+
+    #: Column, and where the promise about it is written down.
+    #: The match is by **name, across the whole tree**, and deliberately so: an
+    #: instance read (`row.created_by_user_id`) has no statically resolvable
+    #: owner, so keying on the model would miss the dominant shape. The cost is
+    #: that a second model given this conventional column name inherits the rule
+    #: and fails with a message pointing at `Collection`. That is a rename or an
+    #: entry here, not a bug, and knowing it is the difference between a
+    #: two-minute fix and an afternoon.
+    PROVENANCE_COLUMNS = {
+        "created_by_user_id": "models.Collection, docs/decisions.md, docs/data-model.md",
+    }
+
+    def test_no_module_reads_a_provenance_column(self) -> None:
+        offenders: list[str] = []
+
+        for path in _python_sources():
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Attribute):
+                    continue
+                if node.attr not in self.PROVENANCE_COLUMNS:
+                    continue
+                offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno} ({node.attr})")
+
+        assert not offenders, (
+            "These read a column recorded as provenance only, and something in the tree "
+            "promises nothing does:\n  "
+            + "\n  ".join(sorted(offenders))
+            + "\nEither stop reading it, or delete the promise where "
+            + "; ".join(f"{column}: {where}" for column, where in self.PROVENANCE_COLUMNS.items())
+            + "."
+        )
+
+    def test_the_column_is_still_there_to_be_unread(self) -> None:
+        """The rule above passes just as well if somebody deletes the column, so
+        this says which absence would be the wrong one."""
+        from models import Collection
+
+        assert "created_by_user_id" in Collection.__table__.columns
+
+
 class TestTheBoundsActuallyRefuse:
     """The rule above is a lint; these are the behaviours it stands for.
 
@@ -97,6 +755,88 @@ class TestTheBoundsActuallyRefuse:
             headers=admin["headers"],
         )
         assert response.status_code == 422
+
+    #: A path segment past SQLite's INTEGER. Every one of these answered **500**
+    #: before the parameters were bounded, measured on the runner.
+    TOO_BIG = 9_223_372_036_854_775_808
+
+    #: One case per route rather than a loop, so a failure names the route in
+    #: the test id instead of stopping at the first one and hiding the rest.
+    #: Worth the four lines: this exact test was reported failing in a whole
+    #: file run and passing alone, and a loop makes that report unactionable.
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("get", "/api/books/{id}"),
+            ("delete", "/api/books/tags/{id}"),
+            ("patch", "/api/collections/{id}"),
+            ("delete", "/api/collections/{id}"),
+        ],
+    )
+    def test_a_path_id_past_the_databases_range_is_refused_not_a_500(
+        self, client, admin, method: str, path: str
+    ) -> None:
+        """Each id reaches `db.get()` or a filter, and an int past 2**63-1
+        raises `OverflowError` from inside it. Two of these predate collections
+        and were found by the same review."""
+        url = path.format(id=self.TOO_BIG)
+        request = getattr(client, method)
+        response = (
+            request(url, json={"name": "Ebooks"}, headers=admin["headers"])
+            if method == "patch"
+            else request(url, headers=admin["headers"])
+        )
+
+        assert response.status_code == 422, response.text
+
+    def test_the_largest_accepted_id_still_reaches_the_handler(
+        self, client, admin
+    ) -> None:
+        """The bound must refuse what the database cannot hold and nothing else.
+        No row has this id, so the honest answer is 404, not 422."""
+        from schemas.common import MAX_ROW_ID
+
+        response = client.get(f"/api/books/{MAX_ROW_ID}", headers=admin["headers"])
+
+        assert response.status_code == 404
+
+    #: `{book}` is filled in with a real book's id where the route needs one.
+    #: Parametrised for the reason above.
+    @pytest.mark.parametrize(
+        ("url", "payload"),
+        [
+            (
+                "/api/books/bulk",
+                {"book_ids": [TOO_BIG], "action": "set_status", "value": "read"},
+            ),
+            ("/api/books/merge", {"book_ids": ["{book}", TOO_BIG], "keep_id": "{book}"}),
+            ("/api/loans", {"book_id": TOO_BIG, "loaned_to_name": "a neighbour"}),
+            ("/api/books/{book}/enrich/apply", {"title": "Dune", "year": TOO_BIG}),
+        ],
+    )
+    def test_a_body_row_id_past_the_databases_range_is_refused_not_a_500(
+        self, client, admin, make_book, url: str, payload: dict
+    ) -> None:
+        """The other door. Each of these was measured as an `OverflowError` and
+        a 500, reachable by any member, and none of them is a path parameter or
+        a query parameter, so the lint above walks straight past them."""
+        book = make_book(admin["headers"], title="Dune")
+        filled = {
+            key: (
+                book["id"]
+                if value == "{book}"
+                else [book["id"] if item == "{book}" else item for item in value]
+                if isinstance(value, list)
+                else value
+            )
+            for key, value in payload.items()
+        }
+
+        response = client.post(
+            url.format(book=book["id"]), json=filled, headers=admin["headers"]
+        )
+
+        assert response.status_code == 422, response.text
 
     def test_the_largest_accepted_page_still_works(self, client, admin) -> None:
         from dependencies import MAX_PAGE_NUMBER

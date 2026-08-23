@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { OwnershipStatus } from "../../../../src/api/generated/model";
+import { makeCollection } from "../../../factories";
 import SelectionBar from "../../../../src/pages/Home/components/SelectionBar";
 import { renderLocalised } from "../../../utils";
 
@@ -17,6 +18,7 @@ function renderBar(
     result: null,
     error: null,
     tags: [],
+    collections: [],
     onSelectAll: vi.fn(),
     onRun: vi.fn(),
     onClear: vi.fn(),
@@ -182,6 +184,46 @@ describe("SelectionBar extra actions", () => {
     await user.click(screen.getByRole("button", { name: "Set location" }));
 
     expect(props.onRun).not.toHaveBeenCalled();
+  });
+
+  it("offers no collection picker until the household has one", async () => {
+    renderBar();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /More actions/ }));
+
+    expect(
+      screen.queryByLabelText("Put in a collection"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("files the selection into a collection", async () => {
+    const props = renderBar({
+      collections: [makeCollection({ id: 3, name: "Ebooks" })],
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /More actions/ }));
+
+    await user.selectOptions(screen.getByLabelText("Put in a collection"), "3");
+
+    expect(props.onRun).toHaveBeenCalledWith("set_collection", 3);
+  });
+
+  it("sends an empty value to take them out of every collection", async () => {
+    // The placeholder is already the empty string, so clearing needs an option
+    // of its own. It has to reach the API as the empty value all the same.
+    const props = renderBar({
+      collections: [makeCollection({ id: 3, name: "Ebooks" })],
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /More actions/ }));
+
+    await user.selectOptions(
+      screen.getByLabelText("Put in a collection"),
+      "none",
+    );
+
+    expect(props.onRun).toHaveBeenCalledWith("set_collection", "");
   });
 
   it("sends an empty location as a deliberate clear", async () => {

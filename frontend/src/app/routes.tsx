@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import type { AuthMode, UserOut } from "../api/generated/model";
 import AppearancePage from "../pages/AppearancePage";
 import BookDetail from "../pages/BookDetail";
+import CollectionsPage from "../pages/CollectionsPage";
 import DuplicatesPage from "../pages/DuplicatesPage";
 import { NotFoundPage } from "../pages/errors";
 import Home from "../pages/Home";
@@ -36,6 +37,7 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       <Route path="/book/:id" element={<BookDetail currentUser={user} />} />
       <Route path="/loans" element={<LoansPage />} />
       <Route path="/series" element={<SeriesPage />} />
+      <Route path="/collections" element={<CollectionsPage />} />
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
       <Route

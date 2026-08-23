@@ -10,6 +10,7 @@ import {
   ReadStatus,
   TagCategory,
   type BookOut,
+  type CollectionOut,
   type LoanOut,
   type NoteOut,
   type PageBookOut,
@@ -108,6 +109,12 @@ export function makeNote(overrides: Partial<NoteOut> = {}): NoteOut {
     author: makeUser(),
     ...overrides,
   };
+}
+
+export function makeCollection(
+  overrides: Partial<CollectionOut> = {},
+): CollectionOut {
+  return { id: id(), name: "Ebooks", book_count: 0, ...overrides };
 }
 
 export function makeStats(overrides: Partial<StatsOut> = {}): StatsOut {

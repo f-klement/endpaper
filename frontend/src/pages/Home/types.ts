@@ -21,6 +21,16 @@ export interface BookFilters {
   /** Would the household lend it. Nothing to do with whether it is out now. */
   lending: LendingWillingness | null;
   /**
+   * Which collection to show, `"unfiled"` for the books in none, or null for
+   * all of them.
+   *
+   * Three states in one field rather than an id plus a boolean, because the
+   * three are alternatives: the API refuses a request naming both a collection
+   * and the unfiled books, so a shape that can express both is a shape the UI
+   * can put into an error.
+   */
+  collection: number | "unfiled" | null;
+  /**
    * Only books somebody has offered to talk about.
    *
    * **Anybody's offer, not the reader's own.** It is a boolean rather than a
@@ -40,6 +50,7 @@ export const DEFAULT_FILTERS: BookFilters = {
   location: null,
   format: null,
   lending: null,
+  collection: null,
   discuss: false,
   sort: BookSort.title_asc,
   tagIds: [],
@@ -150,6 +161,7 @@ export function hasActiveFilters(filters: BookFilters): boolean {
     filters.location ||
     filters.format ||
     filters.lending ||
+    filters.collection !== null ||
     filters.discuss ||
     filters.tagIds.length,
   );

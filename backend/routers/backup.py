@@ -87,12 +87,14 @@ async def restore_backup(
         # says exactly what is wrong with it.
         raise HTTPException(status_code=400, detail=str(error)) from error
 
+    # Built from the schema's own field names rather than enumerated by hand,
+    # because the hand-written version is how a table gets counted and then
+    # silently dropped on the way out. `collections` was added to `_TABLES` and
+    # to `RestoreResult`, was populated by `restore()`, and still reported 0
+    # here, which is precisely the "reads as a clean restore" failure the field
+    # exists to prevent. `restore()` keys its counts by table name and the
+    # fields are named after those tables; a field with no matching key reads 0,
+    # which is what the enumeration did anyway.
     return RestoreResult(
-        books=restored.get("books", 0),
-        users=restored.get("users", 0),
-        notes=restored.get("notes", 0),
-        loans=restored.get("loans", 0),
-        covers=restored.get("covers", 0),
-        user_books=restored.get("user_books", 0),
-        reading_progress=restored.get("reading_progress", 0),
+        **{name: restored.get(name, 0) for name in RestoreResult.model_fields}
     )

@@ -868,6 +868,190 @@ is worse than a slightly untidy one that grows. `GET /api/books/locations` retur
 actually in use, which the UI offers as suggestions, because free text with *no*
 suggestions becomes six spellings of "living room" inside a week.
 
+### Every row id a caller supplies is bounded at both ends
+
+A Python int has no ceiling and SQLite's does. An id past 2**63-1 passes
+validation, reaches the driver and raises `OverflowError` from inside the query,
+which lands in the unhandled-exception handler and answers **500**: the app
+calling its own code buggy over a value the caller chose. 422 is the honest
+answer.
+
+This has now been found four times, in four different places, because each fix
+closed one door and the reviewer had to find the next one by hand:
+
+| Door | Where the bound lives |
+|---|---|
+| Query parameter (`?after_id=`, `?collection_id=`) | `Query(ge=..., le=MAX_ROW_ID)` at the parameter |
+| Path parameter (twelve of them) | `dependencies.RowId`, one alias |
+| Request body field (`book_ids`, `keep_id`, `book_id`, `year`) | `schemas.common.RowIdField` |
+| A loosely typed body value (`BulkRequest.value`) | the handler, per verb |
+
+**Two lints, not one, and they are not redundant.**
+`TestEveryIntParameterFromTheOutsideIsBounded` covers route handlers and
+dependency functions, which is where path and query parameters are declared;
+`TestEveryRequestBodyRowIdIsBounded` covers pydantic fields on the models a
+route accepts as a body, which the first cannot see at all. The older
+`TestEveryNumericQueryParamIsBoundedBothWays` is kept beside them because it
+still catches a floor-without-ceiling on a non-int parameter.
+
+**Both lints resolve their tables to a fixed point**, and that is the same hole
+one hop further out rather than a flourish. `Loose2 = Loose` carries no `int` of
+its own, so a collector that registers only what mentions one literally never
+learns the second name and skips every parameter annotated with it;
+`CollectionUpdate(CollectionCreate)` names no `BaseModel`, so a literal test for
+that base leaves a real request body out of the rule entirely. Neither was live
+when it was found, which is the point: the rule exists so the fifth instance of
+this class is caught by a test rather than by a reviewer.
+
+**The alias has to bring a parameter into scope, not just satisfy the check.**
+The first version of the parameter lint tested for the literal name `int`, so
+`book_id: RowId` was skipped before boundedness was ever asked about: the alias
+branch was unreachable, and loosening `RowId` itself to `ge=1` left the lint
+green across twelve routes. The scope test now admits a parameter that mentions
+`int` **or** names an int alias, and the guard test that discriminates is the
+one that loosens an alias rather than the one that bares a parameter.
+
+**`BulkRequest.value` is the one deliberate exemption.** It is `str | int | None`
+because which field it fills depends on the verb, so it cannot be typed as a row
+id; the handlers that read it as one range-check it themselves before it reaches
+the database. That is why `_checked_collection` carries an explicit range check
+that looks redundant beside its schema bounds, and it is not.
+
+### A book belongs to one collection, not many
+
+A household separates physical from ebook, kept from sold, and one person's shelf from
+another's. All three are **partitions**: a book is in exactly one side of each. So the
+collection is a column on `books` and not a join table.
+
+A join table would answer "which collection is this in" with a list, and every filter,
+sort, export cell and payload field downstream would then need a rule for a book that is in
+three of them at once. It would also be a second tag system with a worse picker, because
+tags are already the many-to-many axis here and they are where an overlapping label
+belongs. If a household wants "Ebooks" and "Holiday reads" on the same book, the second one
+is a tag.
+
+The cost of the column, stated plainly, and it is two costs rather than one.
+
+**Two objects: use two rows.** A household that wants the paperback in Physical and the
+epub in Ebooks has two objects, and says so the way the data model already says it. That is
+the copies feature, and it is the right answer.
+
+**One object on two axes: use a tag.** This is the one the feature's own pitch creates and
+it is not answered by copies. Collections are sold on three splits (physical from ebook,
+kept from sold, one person's from another's), each of which is a separate axis, and one
+column holds one axis. An epub that is both "Ebooks" and "Sold" is a **single object**, so
+there is no second row to put it in: the household picks one axis for the collection and
+puts the other on a tag, which is what tags are and why this column is not a join table.
+Somebody who instead makes four collections will discover the swap by using the picker,
+which is the worst possible place to learn it, so it is said in the empty state as well as
+here.
+
+### Every book that existed before collections is unfiled, and no default was invented
+
+`books.collection_id` is nullable and the migration backfills nothing. The alternative was a
+default collection created by the migration and every existing row moved into it, which
+sounds tidier and is worse in three ways. It needs a name chosen here, in one language,
+for a household that has not asked for the feature. It puts a concept in front of everybody
+who never wanted it. And renaming a seeded string later means a migration, which this
+repository has already had to write once (`95b6a61d6668`).
+
+So "in no collection" is a permanent, ordinary state, in the same family as a null
+`format`, `condition` or `lending`: an unanswered question is not an answer. The API says
+so out loud rather than leaving it implicit: `GET /api/books?unfiled=true` is its own
+parameter, and the library filter offers it as its own option, because "what have I not
+filed yet" is the question the feature creates.
+
+### A collection is per household, and is never a privacy boundary
+
+Any member may make one, rename it, and file any book they can write to into it. Filing a
+book changes **nothing** about who can see it.
+
+This is the decision with the sharpest failure mode in the batch, which is why it is
+recorded rather than left obvious. `visible_to()` is already a scoping predicate, and a
+second scoping axis that looks like it but is not enforced everywhere is how a privacy rule
+gets weakened by accident: the moment a collection sometimes hides rows, somebody will read
+it as permission, and the first "private collection" feature request would arrive with half
+an implementation already in the tree.
+
+So the separation is kept mechanical rather than intended. `visible_to()` is not given a
+collection to consult. `Collection.created_by_user_id` is recorded for provenance and no
+query reads it, which is what keeps the previous sentence true rather than merely meant.
+Every count served with a collection applies `visible_to` (`routers/collections._counts`,
+the `by_collection` statistic), because the count is the one thing a household-wide label
+could disclose: a member who files a private book onto a shared shelf must not thereby
+announce it to everybody as a number.
+
+A member who wants a shelf nobody else sees already has one: mark the books private. That
+is one rule, enforced in one predicate, tested by an AST walk over every module.
+
+Two asymmetries follow the tag rules exactly, for the reasons recorded there. Creating and
+renaming are open to any member: both are additive or reversible. **Deleting is admin
+only**, because it strips a label off every book in the house at once with no undo.
+
+### Deleting a collection unfiles its books, and the database is what says so
+
+`ON DELETE SET NULL`, not a cascade, and not a handler loop. A shelf label is not the books
+on it, so destroying the label must never destroy them.
+
+It is a database rule rather than application code because a restore and a hand-edited row
+both reach the table without passing any handler, and a row left pointing at a destroyed
+collection is a dangling foreign key. That also makes `PRAGMA foreign_keys=ON` load bearing
+here in a way it was not before: without it the clause is decorative.
+`tests/test_models.py` exercises it through Core, so the ORM's own nulling of loaded
+children cannot be what passes the test.
+
+### A copy carries its own collection, and the group spans them
+
+Two copies of one title are two objects, and which part of the shelf each lives on is
+exactly the kind of fact that differs between them: the paperback in the living room and the
+epub on a reader are the household's physical and ebook collections respectively. So
+`collection_id` is per row, like `location`, and `POST /api/books/{id}/copies` does **not**
+inherit it: the new copy starts unfiled unless the payload says otherwise.
+
+That is deliberately unlike `is_private`, which a copy does inherit, and the difference is
+the test for any future per-copy field. Privacy is inherited because getting it wrong
+discloses a book. A collection is not, because getting it wrong files a book on the wrong
+shelf, which is visible and one press to correct, and because the household that owns both
+formats wants them apart.
+
+Two consequences worth having written down.
+
+`copy_count` still counts the whole group, across collections. It answers "how many do we
+own", not "how many are on this screen", so a library filtered to Ebooks can show a book
+whose card reads 2. The alternative, scoping the count to the current filter, would make the
+same book report different numbers on different screens and would require `BookOut` to know
+what was being asked, which it deliberately does not.
+
+A **merge** does absorb it, unlike `copy_group`. `collection_id` is in `_MERGEABLE_FIELDS`
+for the same reason `location` is: merging two entries for one book, one of them filed,
+should leave the survivor on that shelf. It fills a gap and never overrides, so a keeper
+already in a collection stays where its owner put it. That is safe in a way absorbing
+`copy_group` is not, because a collection makes no claim about other rows.
+
+`/duplicates` ignores collections entirely. Two ungrouped rows naming the same book are
+still offered for merge even when they sit in different collections, because a collection is
+not a statement that a second row was deliberate: the `copy_group` token is, and it is the
+only thing that is. The unique ISBN index is table-wide for the same reason, and is
+**not** scoped per collection: making it per collection would let "add this book to Ebooks
+too" quietly create a second ungrouped row with the same ISBN, which is precisely the state
+the constraint exists to refuse.
+
+### A collection is not an import option, and not a grant scope
+
+Two places it deliberately does not appear.
+
+**The CSV importer does not take one.** Filing an import into "Ebooks" is a real wish, and
+it is already served: the import lands, the result links into the library, and the bulk verb
+`set_collection` files the selection in one press. A second path to the same state would be
+a second thing to keep in step with the first.
+
+**Peer sync does not carry it.** A collection is shelf taxonomy, which `implementation_plan.md`
+§9 already refuses to send for `location`, and a collection named after a member would leak
+a household member's name besides. It is also not a *scope* for a grant: scopes come from
+the stored grant and there are exactly two, and a third keyed on a household-wide label that
+any member can rename or delete would silently widen or narrow what a peer sees through an
+edit made for shelving reasons. The amendment recording this is A5 in that document.
+
 ### A copy is a row, not a count column
 
 `books.isbn` was `unique=True`, so a household that owned two paperbacks of one title could

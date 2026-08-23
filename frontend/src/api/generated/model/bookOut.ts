@@ -20,6 +20,8 @@ export interface BookOut {
   added_by?: UserOut | null;
   author: string | null;
   categories?: string[];
+  collection_id?: number | null;
+  collection_name?: string | null;
   condition?: BookCondition | null;
   copy_count?: number;
   cover_url: string | null;

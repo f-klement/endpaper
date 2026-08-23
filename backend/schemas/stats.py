@@ -14,6 +14,19 @@ class TagStat(BaseModel):
     count: int = Field(ge=0)
 
 
+class CollectionStat(BaseModel):
+    """One named collection and how much of it the caller can see.
+
+    Named collections only. Unfiled books are not a bucket here, because they
+    are not a collection: `total` minus the sum of these is how many there are,
+    and the library's own unfiled filter is where somebody goes to look at
+    them.
+    """
+
+    name: str
+    count: int = Field(ge=0)
+
+
 class MonthStat(BaseModel):
     # A "YYYY-MM" bucket key, produced by SQLite's strftime.
     month: str = Field(pattern=r"^\d{4}-\d{2}$")
@@ -32,6 +45,10 @@ class StatsOut(BaseModel):
     total: int = Field(ge=0)
     per_user: list[PerUserStat]
     by_tag: list[TagStat]
+    # Named collections, largest first. A shelf split into physical and ebook
+    # wants the split counted; a household that never made one gets an empty
+    # list and the section is not drawn.
+    by_collection: list[CollectionStat] = []
     by_month: list[MonthStat]
     # Books the *requesting member* finished, by month. Personal rather than
     # shared, unlike every other series here: "we added 12 books in March" is a

@@ -21,5 +21,6 @@ export const BulkAction = {
   set_status: "set_status",
   set_ownership: "set_ownership",
   set_location: "set_location",
+  set_collection: "set_collection",
   delete: "delete",
 } as const;

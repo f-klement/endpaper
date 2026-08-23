@@ -24,12 +24,30 @@ needs no separate private-book branch.
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Query, status
+from fastapi import Path as PathParam
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from auth import get_current_user, get_current_user_for_cover
 from database import get_db
 from models import Book, User, in_trash_for, visible_to
-from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID
+
+#: A row id read out of the URL path, bounded at both ends.
+#:
+#: **Bounded is the whole point.** A Python int has no ceiling and SQLite's
+#: does, so `2**63` in a path segment passes validation, reaches `db.get()` and
+#: raises `OverflowError` from inside the query: a **500** answered to a value
+#: the caller chose, which is the app calling its own code buggy. Measured on
+#: `GET /api/books/{id}` and `DELETE /api/books/tags/{id}` before this existed.
+#:
+#: One alias rather than the bounds retyped at twelve call sites.
+#: `tests/test_house_rules.py::TestEveryIntParameterFromTheOutsideIsBounded`
+#: resolves it by name: it collects module-level names assigned a bounded
+#: `Annotated[...]`, accepts any parameter annotated with one, and fails a
+#: parameter annotated with a bare `int` on a route handler or a dependency.
+#: `PathParam` rather than `Path` because `pathlib.Path` is the other one,
+#: exactly as `routers/covers.py` already spells it.
+RowId = Annotated[int, PathParam(ge=1, le=MAX_ROW_ID)]
 
 # Absent and forbidden are reported identically on purpose: a 403 would confirm
 # that a book with this id exists, which is exactly what privacy withholds.
@@ -37,7 +55,7 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book n
 
 
 def book_for_read(
-    book_id: int,
+    book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Book:
@@ -58,7 +76,7 @@ def book_for_read(
 
 
 def book_for_cover(
-    book_id: int,
+    book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user_for_cover)],
 ) -> Book:
@@ -83,7 +101,7 @@ def book_for_cover(
 
 
 def book_in_trash(
-    book_id: int,
+    book_id: RowId,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Book:

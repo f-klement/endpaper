@@ -26,6 +26,7 @@ import type { LendingWillingness } from "./lendingWillingness.ts";
  * added it, so `PATCH /api/books/{id}/privacy` can change it afterwards.
  */
 export interface CopyCreate {
+  collection_id?: number | null;
   condition?: BookCondition | null;
   format?: BookFormat | null;
   lending?: LendingWillingness | null;

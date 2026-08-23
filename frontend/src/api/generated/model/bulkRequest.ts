@@ -19,6 +19,8 @@ export interface BulkRequest {
   /**
    * @minItems 1
    * @maxItems 500
+   * @items.minimum 1
+   * @items.maximum 9223372036854776000
    */
   book_ids: number[];
   value?: string | number | null;

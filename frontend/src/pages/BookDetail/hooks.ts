@@ -37,6 +37,7 @@ import {
   useRefreshMetadata,
   useRestoreBook,
   useRemoveBookTag,
+  useSetCollection,
   useSetDiscuss,
   useSetOwnership,
   useSetPrivacy,
@@ -45,6 +46,11 @@ import {
   useUpdateStatus,
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
+import {
+  getListCollectionsQueryKey,
+  useCreateCollection,
+  useListCollections,
+} from "../../api/generated/endpoints/collections/collections";
 import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
 import {
   useCreateLoan,
@@ -57,6 +63,7 @@ import { useTranslation } from "../../i18n";
 import type {
   BookMatch,
   BookDetailsUpdate,
+  CollectionOut,
   LocationOut,
   BookEnrichmentOut,
   BookOut,
@@ -88,6 +95,8 @@ export interface UseBookResult {
   users: UserOut[];
   /** Existing shelf locations, offered as suggestions when editing one. */
   locations: LocationOut[];
+  /** The household's collections, for the picker. */
+  collections: CollectionOut[];
   isLoading: boolean;
   error: unknown;
   refetch: () => void;
@@ -100,12 +109,14 @@ export function useBook(bookId: number): UseBookResult {
   // Cached longer than the book: the set of shelves in a house changes far
   // less often than the book being looked at.
   const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
+  const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
 
   return {
     book: book.data,
     tags: tags.data ?? [],
     users: users.data ?? [],
     locations: locations.data ?? [],
+    collections: collections.data ?? [],
     isLoading: book.isPending,
     error: book.error,
     refetch: () => void book.refetch(),
@@ -125,6 +136,11 @@ export interface UseBookActionsResult {
   uploadCover: (file: File) => void;
   refreshMetadata: () => void;
   setOwnership: (ownership: OwnershipStatus) => void;
+  /** File this copy into a collection, or take it out of one with null. */
+  setCollection: (collectionId: number | null) => void;
+  /** Invent a collection and file this copy into it in one step. */
+  createCollection: (name: string) => void;
+  isFiling: boolean;
   setRating: (rating: number | null) => void;
   /** Offer to talk about this book, or withdraw the offer. */
   setDiscuss: (wantsToDiscuss: boolean) => void;
@@ -177,6 +193,22 @@ export function useBookActions(
   const cover = useUploadCover({ mutation });
   const refresh = useRefreshMetadata({ mutation });
   const ownership = useSetOwnership({ mutation });
+  const collection = useSetCollection({ mutation });
+
+  const createCollection = useCreateCollection({
+    mutation: {
+      onSuccess: (created) => {
+        // Straight onto the book, like `createTag`: somebody typing a
+        // collection name while looking at a book means "this one goes there".
+        collection.mutate({ bookId, data: { collection_id: created.id } });
+        // Its own cache entry, and the new collection has to appear in every
+        // other picker and in the library filter too.
+        void queryClient.invalidateQueries({
+          queryKey: getListCollectionsQueryKey(),
+        });
+      },
+    },
+  });
   const rating = useSetRating({ mutation });
   const discuss = useSetDiscuss({ mutation });
   const details = useUpdateBookDetails({ mutation });
@@ -240,6 +272,12 @@ export function useBookActions(
     isSavingDetails: details.isPending,
     setOwnership: (value) =>
       ownership.mutate({ bookId, data: { ownership: value } }),
+    setCollection: (collectionId) =>
+      collection.mutate({ bookId, data: { collection_id: collectionId } }),
+    createCollection: (name) => createCollection.mutate({ data: { name } }),
+    // One flag for both, because they are one action from the reader's side:
+    // the second half of creating a collection here is filing the book into it.
+    isFiling: collection.isPending || createCollection.isPending,
     remove: () => remove.mutate({ bookId }),
 
     // Refresh reports separately: it is slow (two upstream lookups) and its
@@ -253,6 +291,8 @@ export function useBookActions(
       removeTag.error ??
       cover.error ??
       ownership.error ??
+      collection.error ??
+      createCollection.error ??
       rating.error ??
       discuss.error ??
       details.error ??

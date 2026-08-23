@@ -18,6 +18,7 @@ import LoanPanel from "./components/LoanPanel";
 import NoteList from "./components/NoteList";
 import OwnershipPicker from "./components/OwnershipPicker";
 import ProgressPanel from "./components/ProgressPanel";
+import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import EnrichPicker from "./components/EnrichPicker";
@@ -50,7 +51,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const { t } = useTranslation();
   const bookId = Number(id);
 
-  const { book, tags, users, locations, isLoading, error, refetch } =
+  const { book, tags, users, locations, collections, isLoading, error, refetch } =
     useBook(bookId);
   const actions = useBookActions(bookId, () => navigate("/"));
   const notes = useBookNotes(bookId);
@@ -167,6 +168,16 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           knownLocations={locations}
           isSaving={actions.isSavingDetails}
           onSave={actions.updateDetails}
+        />
+
+        {/* Under the shelf, because both answer "where does this one live":
+            one physically, one in the household's own filing. */}
+        <CollectionPicker
+          book={book}
+          collections={collections}
+          isSaving={actions.isFiling}
+          onChange={actions.setCollection}
+          onCreate={actions.createCollection}
         />
 
         <CopyPanel

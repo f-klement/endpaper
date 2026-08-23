@@ -31,10 +31,15 @@ from enums import TagCategory
 from errors import register_error_handlers
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import Tag
+
+# `collections` here is `routers/collections.py`, not the standard library's.
+# The `from collections.abc import ...` above binds only the names it lists, so
+# the two coexist; writing `collections.abc` anywhere in this module would not.
 from routers import (
     auth,
     backup,
     books,
+    collections,
     covers,
     imports,
     loans,
@@ -289,6 +294,7 @@ register_error_handlers(app)
 app.include_router(auth.router)
 app.include_router(backup.router)
 app.include_router(books.router)
+app.include_router(collections.router)
 app.include_router(imports.router)
 app.include_router(loans.router)
 app.include_router(settings.router)

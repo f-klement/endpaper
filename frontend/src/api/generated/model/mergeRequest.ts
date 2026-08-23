@@ -17,7 +17,13 @@ export interface MergeRequest {
   /**
    * @minItems 2
    * @maxItems 20
+   * @items.minimum 1
+   * @items.maximum 9223372036854776000
    */
   book_ids: number[];
+  /**
+   * @minimum 1
+   * @maximum 9223372036854776000
+   */
   keep_id: number;
 }

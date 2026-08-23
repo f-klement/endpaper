@@ -722,6 +722,105 @@ class TestRestoreEndsLiveSessions:
         assert client.get("/auth/me", headers=admin["headers"]).status_code == 401
 
 
+class TestCollectionsSurvive:
+    """Added after `FORMAT_VERSION` 1, so an archive predating them restores as
+    a library with none rather than being refused."""
+
+    def test_a_round_trip_returns_the_collection_and_its_books(
+        self, client, admin, library, db
+    ):
+        from models import Collection
+
+        shelf = client.post(
+            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
+        ).json()
+        client.patch(
+            f"/api/books/{library['book']['id']}/collection",
+            json={"collection_id": shelf["id"]},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        client.delete(f"/api/collections/{shelf['id']}", headers=admin["headers"])
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert [row.name for row in db.query(Collection).all()] == ["Ebooks"]
+        assert db.get(Book, library["book"]["id"]).collection_id is not None
+
+    def test_the_report_counts_them(self, client, admin, library):
+        """A **non-zero** assertion, deliberately. The sibling test below asks
+        for 0 from an archive that has none, and it passed identically whether
+        or not the handler wired the field up at all: `RestoreResult.collections`
+        defaults to 0, so the endpoint reported a clean restore while dropping
+        every shelf label. Only a count that has to arrive can catch that.
+        """
+        client.post("/api/collections", json={"name": "Ebooks"}, headers=admin["headers"])
+        client.post("/api/collections", json={"name": "Sold"}, headers=admin["headers"])
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        body = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        ).json()
+
+        assert body["collections"] == 2
+
+    def test_an_archive_written_before_collections_existed_still_restores(
+        self, client, admin, library
+    ):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        del manifest["tables"]["collections"]
+        for row in manifest["tables"]["books"]:
+            row.pop("collection_id", None)
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["collections"] == 0
+
+
+class TestTheRestoreReportCannotSilentlyDropATable:
+    """The report says a number for every field it declares, and each of those
+    numbers has to have been counted.
+
+    The handler builds the result from `RestoreResult.model_fields`, which stops
+    a counted table being dropped on the way out. It does **not** stop the
+    mirror image: `restored.get(name, 0)` defaults a field the restore never
+    counts to 0, and a 0 that was never measured is indistinguishable from a
+    table that restored empty. That is the original bug's exact shape, in the
+    other direction, and `collections` reported exactly that 0 for a while.
+
+    So the subset is asserted rather than the wiring. Adding a field to the
+    schema without teaching `restore()` to count it fails here.
+    """
+
+    def test_every_reported_field_is_actually_counted(self, client, admin, library, db):
+        from schemas import RestoreResult
+
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        counted = backup.restore(db, data)
+
+        missing = set(RestoreResult.model_fields) - set(counted)
+        assert not missing, (
+            f"RestoreResult declares {sorted(missing)}, which `backup.restore()` never "
+            "counts, so the endpoint reports 0 for them whatever the archive held."
+        )
+
+
 class TestReadingProgressSurvives:
     """The newest table in the archive, and the one an older archive lacks."""
 

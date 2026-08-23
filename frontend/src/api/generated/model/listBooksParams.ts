@@ -24,6 +24,14 @@ export type ListBooksParams = {
   series?: string | null;
   location?: string | null;
   /**
+   * Only books filed in this collection
+   */
+  collection_id?: number | null;
+  /**
+   * Only books in no collection at all
+   */
+  unfiled?: boolean;
+  /**
    * Only books you have not rated
    */
   unrated?: boolean;

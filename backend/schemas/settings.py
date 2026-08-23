@@ -180,3 +180,7 @@ class RestoreResult(BaseModel):
     #: the household's entire reading history read as a clean one.
     user_books: int = Field(default=0, ge=0)
     reading_progress: int = Field(default=0, ge=0)
+    #: The household's shelf labels. Here for the reason above: losing them
+    #: silently restores every book unfiled, which reads as a clean restore
+    #: until somebody opens the library and finds their shelves gone.
+    collections: int = Field(default=0, ge=0)

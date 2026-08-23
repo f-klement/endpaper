@@ -48,6 +48,59 @@ book_tags = Table(
 )
 
 
+#: Longer than a shelf name and shorter than a title. A collection is a heading
+#: somebody reads down a list of, so a name that does not fit on one line is
+#: already the wrong name.
+COLLECTION_NAME_MAX = 80
+
+
+class Collection(Base):
+    """A named part of the household's shelf.
+
+    What it is for is the three splits the field sells it for: physical from
+    ebook, kept from sold, one person's shelf from another's. All three are
+    **partitions**, which is why a book carries one collection rather than a
+    list of them: see `Book.collection_id`.
+
+    **Household wide, and never a privacy boundary.** Any member may make one,
+    rename it or delete it, and filing a book into one changes nothing about
+    who can see it. `visible_to()` remains the only access control on content,
+    and this is deliberately not a second scoping axis beside it: a label that
+    sometimes hides rows is a label somebody will eventually mistake for
+    permission, and the mistake is silent. `docs/decisions.md` records the
+    argument.
+
+    `created_by_user_id` is provenance and nothing else. No query consults it,
+    which is what keeps the previous paragraph true rather than merely
+    intended. Nullable, so deleting an account does not cascade away the
+    household's shelving.
+    """
+
+    __tablename__ = "collections"
+
+    # Case-insensitively unique. "Ebooks" and "ebooks" as two separate shelves
+    # is a typo rather than an intention, and a household that acquires both
+    # has no way to tell them apart in a picker. A functional index rather than
+    # a stored lowercase column, so there is one name and not a copy of it that
+    # can fall out of step.
+    __table_args__ = (
+        Index("uq_collections_name_nocase", text("lower(name)"), unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(COLLECTION_NAME_MAX), nullable=False)
+    # Deliberately **not** indexed, like `loans.loaned_by_user_id`: nothing
+    # queries by it, and there is no delete-account path whose child check it
+    # would speed up. An index is a write cost, and this one would have no read
+    # behind it.
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    books: Mapped[list[Book]] = relationship("Book", back_populates="collection")
+
+
 class Tag(Base):
     __tablename__ = "tags"
 
@@ -203,6 +256,43 @@ class Book(Base):
     # filter and the distinct-values list stay cheap.
     location: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
 
+    # Which named part of the shelf this **object** belongs to, or null while
+    # it belongs to none.
+    #
+    # One collection, not many, and that is a product decision rather than a
+    # storage one. The splits collections exist for (physical from ebook, kept
+    # from sold, one person's shelf from another's) are partitions: a book is
+    # in exactly one of each. A join table would answer "which collection is
+    # this in" with a list, which every filter, export cell and sort would then
+    # need a rule for, and it would be a second tag system with a worse picker.
+    # Tags are already the many-to-many axis, and they are where an overlapping
+    # label belongs.
+    #
+    # Per row rather than per copy group, for the same reason `location` is:
+    # two copies of one title are two objects, and which shelf each lives on is
+    # exactly the kind of fact that differs between them. A household with an
+    # Ebooks collection and a physical copy of the same title wants them apart,
+    # not together.
+    #
+    # Nullable, with no default collection invented by the migration. An
+    # unfiled book is a real and permanent state, like `format` and `lending`
+    # being null: a name chosen for somebody by an upgrade is a name in one
+    # language that nobody picked, and every household that never wanted the
+    # feature would carry it forever.
+    #
+    # `SET NULL`, never a cascade. Deleting a shelf label must not delete the
+    # books on it, and the database is where that is settled: three delete
+    # paths would otherwise each have to remember.
+    #
+    # Indexed because filtering the library by collection is a browse action
+    # over the whole catalogue rather than a search.
+    collection_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("collections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # What kind of object this copy is. Nullable rather than defaulted to
     # paperback: a scan cannot tell, and guessing wrong on every imported book
     # is worse than admitting the answer is not known. Indexed because "have we
@@ -308,6 +398,7 @@ class Book(Base):
     )
 
     added_by: Mapped[User | None] = relationship("User", back_populates="books_added")
+    collection: Mapped[Collection | None] = relationship("Collection", back_populates="books")
     user_books: Mapped[list[UserBook]] = relationship(
         "UserBook", back_populates="book", cascade="all, delete-orphan"
     )

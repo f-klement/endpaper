@@ -5,6 +5,7 @@
  * Catalogue, lend and track a household's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { CollectionStat } from "./collectionStat.ts";
 import type { MonthStat } from "./monthStat.ts";
 import type { PerUserStat } from "./perUserStat.ts";
 import type { TagStat } from "./tagStat.ts";
@@ -19,6 +20,7 @@ import type { TagStat } from "./tagStat.ts";
  */
 export interface StatsOut {
   average_rating?: number | null;
+  by_collection?: CollectionStat[];
   by_month: MonthStat[];
   by_tag: TagStat[];
   finished_by_month?: MonthStat[];

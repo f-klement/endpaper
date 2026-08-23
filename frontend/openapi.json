@@ -205,6 +205,19 @@
             ],
             "title": "Author"
           },
+          "collection_id": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
           "cover_url": {
             "anyOf": [
               {
@@ -836,6 +849,8 @@
           "page_count": {
             "anyOf": [
               {
+                "maximum": 100000.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -896,6 +911,8 @@
           "suggested_tag_ids": {
             "default": [],
             "items": {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
               "type": "integer"
             },
             "title": "Suggested Tag Ids",
@@ -915,6 +932,8 @@
           "year": {
             "anyOf": [
               {
+                "maximum": 2200.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -972,6 +991,28 @@
             },
             "title": "Categories",
             "type": "array"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "collection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Name"
           },
           "condition": {
             "anyOf": [
@@ -1378,6 +1419,7 @@
           "set_status",
           "set_ownership",
           "set_location",
+          "set_collection",
           "delete"
         ],
         "title": "BulkAction",
@@ -1391,6 +1433,8 @@
           },
           "book_ids": {
             "items": {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -1447,9 +1491,119 @@
         "title": "BulkResult",
         "type": "object"
       },
+      "CollectionAssign": {
+        "description": "Which collection a book belongs to, or `null` for none.\n\nIts own endpoint rather than a field on `BookDetailsUpdate`, so the picker\ncan save the moment somebody chooses. An explicit null is how a book is\ntaken out of a collection without being put in another one.",
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          }
+        },
+        "title": "CollectionAssign",
+        "type": "object"
+      },
+      "CollectionCreate": {
+        "description": "A collection the household is inventing.\n\nAny member may make one. A collection is shelving rather than permission,\nso there is nothing here to restrict to an admin.",
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CollectionCreate",
+        "type": "object"
+      },
+      "CollectionOut": {
+        "description": "A named part of the shelf, and how much of it the caller can see.\n\n`book_count` is filtered by `visible_to`, like every other count this API\nserves. An unfiltered one would announce, on a label everybody can read,\nthat somebody's private books exist and how many of them there are.",
+        "properties": {
+          "book_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CollectionOut",
+        "type": "object"
+      },
+      "CollectionStat": {
+        "description": "One named collection and how much of it the caller can see.\n\nNamed collections only. Unfiled books are not a bucket here, because they\nare not a collection: `total` minus the sum of these is how many there are,\nand the library's own unfiled filter is where somebody goes to look at\nthem.",
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "CollectionStat",
+        "type": "object"
+      },
+      "CollectionUpdate": {
+        "description": "A rename. The name is the only thing a collection has.",
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CollectionUpdate",
+        "type": "object"
+      },
       "CopyCreate": {
         "description": "Another copy of a book already in the catalogue.\n\nCarries only what differs between two copies of one title. Everything about\nthe *work* (title, author, ISBN, cover, series, description) is taken from\nthe book being copied rather than accepted here, because a payload that\ncould restate them is a payload that can disagree with them, and two rows\nclaiming to be copies of each other while naming different books is a state\nnothing else in this app knows how to render.\n\n`is_private` is absent for a sharper reason: it is inherited from the\nsource. A copy of somebody's private book that came back public would\ndisclose the book, and this is the one field where the caller getting their\nway is a privacy leak rather than a preference. The copy belongs to whoever\nadded it, so `PATCH /api/books/{id}/privacy` can change it afterwards.",
         "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
           "condition": {
             "anyOf": [
               {
@@ -1843,6 +1997,8 @@
             "type": "boolean"
           },
           "book_id": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
             "title": "Book Id",
             "type": "integer"
           },
@@ -1873,6 +2029,8 @@
           "loaned_to_user_id": {
             "anyOf": [
               {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -2070,6 +2228,8 @@
         "properties": {
           "book_ids": {
             "items": {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 1.0,
               "type": "integer"
             },
             "maxItems": 20,
@@ -2078,6 +2238,8 @@
             "type": "array"
           },
           "keep_id": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
             "title": "Keep Id",
             "type": "integer"
           }
@@ -2493,6 +2655,12 @@
             "title": "Books",
             "type": "integer"
           },
+          "collections": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Collections",
+            "type": "integer"
+          },
           "covers": {
             "minimum": 0.0,
             "title": "Covers",
@@ -2741,6 +2909,14 @@
               }
             ],
             "title": "Average Rating"
+          },
+          "by_collection": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CollectionStat"
+            },
+            "title": "By Collection",
+            "type": "array"
           },
           "by_month": {
             "items": {
@@ -3249,6 +3425,38 @@
                 }
               ],
               "title": "Location"
+            }
+          },
+          {
+            "description": "Only books filed in this collection",
+            "in": "query",
+            "name": "collection_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 9223372036854775807,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only books filed in this collection",
+              "title": "Collection Id"
+            }
+          },
+          {
+            "description": "Only books in no collection at all",
+            "in": "query",
+            "name": "unfiled",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only books in no collection at all",
+              "title": "Unfiled",
+              "type": "boolean"
             }
           },
           {
@@ -3943,6 +4151,8 @@
             "name": "tag_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Tag Id",
               "type": "integer"
             }
@@ -4076,6 +4286,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4114,6 +4326,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4160,6 +4374,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4208,6 +4424,66 @@
         ]
       }
     },
+    "/api/books/{book_id}/collection": {
+      "patch": {
+        "description": "File this book into a collection, or take it out of one.\n\n`BookForWrite`, not `BookForOwner`. A collection is shelving, and a public\nbook is a shared shelf that any member may curate, exactly like its tags\nand its location. Privacy is the one thing reserved to the owner, and this\nis deliberately not that: filing a book changes nothing about who can see\nit.\n\n**Per book row, so per copy.** Filing one paperback does not file the\nother, which is the point of two rows: see `models.Book.collection_id`.",
+        "operationId": "set_collection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionAssign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Collection",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/copies": {
       "get": {
         "description": "Every copy of this title the caller may see, this one included.\n\nA one-element list for almost every book in the catalogue, and that is the\nhonest answer rather than an empty one: the book in hand is a copy, it is\njust the only one.\n\nOrdered by id, which is the order they were added. There is no first copy\nin the data model and this does not invent one; it is the order that stays\nthe same between two reads.",
@@ -4218,6 +4494,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4268,6 +4546,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4325,6 +4605,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4383,6 +4665,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4441,6 +4725,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4501,6 +4787,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4571,6 +4859,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4623,6 +4913,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4672,6 +4964,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4729,6 +5023,8 @@
             "name": "note_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Note Id",
               "type": "integer"
             }
@@ -4738,6 +5034,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4776,6 +5074,8 @@
             "name": "note_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Note Id",
               "type": "integer"
             }
@@ -4785,6 +5085,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4842,6 +5144,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4900,6 +5204,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4940,6 +5246,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -4998,6 +5306,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5048,6 +5358,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5106,6 +5418,8 @@
             "name": "progress_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Progress Id",
               "type": "integer"
             }
@@ -5115,6 +5429,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5156,6 +5472,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5213,6 +5531,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5261,6 +5581,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5309,6 +5631,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5366,6 +5690,8 @@
             "name": "tag_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Tag Id",
               "type": "integer"
             }
@@ -5375,6 +5701,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5420,6 +5748,8 @@
             "name": "tag_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Tag Id",
               "type": "integer"
             }
@@ -5429,6 +5759,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }
@@ -5464,6 +5796,183 @@
         "summary": "Add Book Tag",
         "tags": [
           "books"
+        ]
+      }
+    },
+    "/api/collections": {
+      "get": {
+        "description": "Every collection in the household, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.",
+        "operationId": "list_collections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CollectionOut"
+                  },
+                  "title": "Response List Collections",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Collections",
+        "tags": [
+          "collections"
+        ]
+      },
+      "post": {
+        "description": "Invent a collection.\n\nAny member, like `POST /api/books/tags` and for the same reason: a shelf\nonly an admin can divide up is one nobody divides up.\n\nA name that already exists returns the existing collection rather than a\n409. Somebody typing a name that is already there means that collection,\nand an error would send them off to find it by hand. Renaming is the\nopposite case and does answer 409, because a rename onto an occupied name\nwould silently merge two shelves.",
+        "operationId": "create_collection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Collection",
+        "tags": [
+          "collections"
+        ]
+      }
+    },
+    "/api/collections/{collection_id}": {
+      "delete": {
+        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the household's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.",
+        "operationId": "delete_collection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Collection",
+        "tags": [
+          "collections"
+        ]
+      },
+      "patch": {
+        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.",
+        "operationId": "rename_collection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Rename Collection",
+        "tags": [
+          "collections"
         ]
       }
     },
@@ -5819,6 +6328,8 @@
             "name": "loan_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Loan Id",
               "type": "integer"
             }
@@ -6476,6 +6987,8 @@
             "name": "book_id",
             "required": true,
             "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
               "title": "Book Id",
               "type": "integer"
             }

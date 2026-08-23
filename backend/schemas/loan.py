@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, model_validator
 
+from schemas.common import RowIdField
 from schemas.user import UserOut
 
 if TYPE_CHECKING:
@@ -18,9 +19,9 @@ MAX_BORROWER_NAME = 120
 
 
 class LoanCreate(BaseModel):
-    book_id: int
+    book_id: RowIdField
     #: A member of the household...
-    loaned_to_user_id: int | None = None
+    loaned_to_user_id: RowIdField | None = None
     #: ...or somebody with no account at all. Exactly one of the two.
     loaned_to_name: str | None = Field(default=None, max_length=MAX_BORROWER_NAME)
     # Optional. Most household lending has no deadline, and demanding one would

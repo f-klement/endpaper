@@ -1,6 +1,6 @@
 # Data model
 
-Nine tables in `backend/models.py`. Seven entities, one association table, and one key/value
+Ten tables in `backend/models.py`. Eight entities, one association table, and one key/value
 store for runtime settings.
 
 ```
@@ -14,6 +14,8 @@ store for runtime settings.
                  │     (to / by)           │  │
                  └──── Note ───────────────┘  │
                                               └── active loan = the Loan with returned_at IS NULL
+
+      Collection ◄──── collection_id ───── Book       (one collection, or none)
 ```
 
 ## Tables
@@ -81,6 +83,9 @@ group collapsed rather than trimming the list to what fits on a screen.
 book drops its tag links without touching the tags themselves. That cascade did nothing
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
+
+**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. Household
+wide, one per book or none, and never a privacy boundary. See *Collections* below.
 
 **`user_books`.** Per-person read status, rating, reading dates (`unread` / `want_to_read` /
 `reading` / `read` / `did_not_finish`) and the "ask me about this book" flag. This is the table
@@ -243,6 +248,10 @@ own shelf taxonomy before they start, and a wrong vocabulary imposed up front is
 a slightly untidy one that grows. `GET /api/books/locations` returns what is in use, which
 the UI offers as suggestions rather than as a closed list.
 
+`collection_id` is the other half of "where does this live", and it is the opposite shape: a
+real row, because a typo would otherwise make a second shelf rather than a second spelling.
+See *Collections* below.
+
 ## Copies
 
 A household that genuinely owns two paperbacks of one title has two objects, and the whole
@@ -279,6 +288,67 @@ The restore would then fail on a button that has nothing to do with copies.
 a copy is a book row, so "one is lent out and one is on the shelf" is already expressible. A
 copy **count** column could not have said that, which is why this is rows: see
 [decisions.md](decisions.md).
+
+## Collections
+
+**`collections`.** A named part of the shelf: physical and ebook, kept and sold, one
+person's and another's. `books.collection_id` is nullable and points at one of them.
+
+**One collection per book, not many.** All three splits above are partitions, so the answer
+is a column rather than a join table. A list would need a rule in every filter, sort, export
+cell and payload field for a book in three at once, and it would be a second tag system with
+a worse picker: tags are already the many-to-many axis, and an overlapping label belongs
+there.
+
+**One column holds one axis**, and the three splits above are three axes. Two objects on
+different shelves are two rows (see *With copies* below). A **single** object that is both
+"Ebooks" and "Sold" has no second row to occupy: pick one axis for the collection and put
+the other on a tag. That is the case the multi-axis pitch creates and the one copies does
+not answer.
+
+**Null means unfiled, and no collection was ever invented for existing books.** The
+migration backfills nothing. A default collection would need a name chosen in one language
+for households that never asked for the feature, and renaming a seeded string later means a
+migration. So "in no collection" is an ordinary permanent state, like a null `format` or
+`lending`, and the API names it: `GET /api/books?unfiled=true`.
+
+**Household wide, and never a privacy boundary.** Any member may create one, rename it, and
+file any book they can write to. Filing changes nothing about who can see the book:
+`visible_to()` remains the only access control on content, and it is not given a collection
+to consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
+what keeps that true rather than merely intended.
+
+The one thing a household-wide label could disclose is a **count**, so every count is
+filtered: `routers/collections._counts` and the `by_collection` statistic both apply
+`visible_to`. A member filing a private book onto a shared shelf does not thereby tell
+everybody it exists.
+
+**Deleting a collection unfiles its books and destroys none.** `ON DELETE SET NULL` in the
+database rather than a loop in the handler, because a restore and a hand-edited row reach
+the table without passing through one, and a row pointing at a destroyed collection is a
+dangling foreign key. That makes `PRAGMA foreign_keys=ON` load bearing here.
+
+**The name is unique case insensitively**, through `uq_collections_name_nocase`, a
+functional index on `lower(name)`. "Ebooks" and "ebooks" as two shelves is a typo nothing
+downstream can tell apart. A functional index rather than a stored lowercase column, so
+there is one name and not a copy of it to fall out of step.
+
+### With copies
+
+`collection_id` is **per row, so per copy**, exactly like `location`: the paperback and the
+epub of one title are two objects and belong on different shelves. A group therefore spans
+collections, and `POST /api/books/{id}/copies` does not inherit the field, unlike
+`is_private`, which it does. The difference is the test for any future per-copy field:
+privacy is inherited because getting it wrong discloses a book, and a collection is not
+because getting it wrong is visible and one press to correct.
+
+`copy_count` still counts the whole group across collections. It answers "how many do we
+own", not "how many are on this screen".
+
+The unique ISBN index stays **table-wide** rather than gaining a collection scope. Scoping
+it would let "add this book to Ebooks too" create a second ungrouped row with the same ISBN,
+which is the exact state the constraint exists to refuse. Putting one title in two
+collections is a copy, made deliberately, with a token.
 
 ## Three axes, not one
 
@@ -322,7 +392,8 @@ scanned the barcode on its back cover.
 ## Cascades
 
 Deleting a book removes its `user_books`, `loans`, `notes` and `book_tags` rows. Books,
-tags and users are never cascade-deleted by anything else. There is no delete-account
+tags, collections and users are never cascade-deleted by anything else: deleting a
+collection sets `books.collection_id` to null and leaves every book where it was. There is no delete-account
 endpoint, test accounts included: removing a member means deciding what happens to the
 books they added, the loans they are in and the notes they wrote.
 
@@ -385,6 +456,9 @@ columns:
   point of the flag rather than an oversight. See *What `user_books` carries* above.
 - `my_progress_page`, `my_progress_percent`, `my_progress_recorded_at`: the caller's newest
   row from `reading_progress`. The percentage is the derived one.
+- `collection_name`: the name of the collection `collection_id` points at, or null. A
+  projection of that row rather than a second copy of it, batched in one statement for the
+  page, so a rename is visible on the next fetch and nothing is migrated.
 - `copy_count`: how many copies of this title the caller may see, this row included. 1 for
   almost every book, and it counts only visible rows for the same reason everything else
   here does.
@@ -437,6 +511,12 @@ the scan flow still looks an ISBN up on every add: the index is the lookup, the 
 is the rule. `deleted_at` is deliberately **not** in the predicate. A trashed row keeps its
 claim on the ISBN, which is the trap `_create_book` frees the holders to resolve, and excluding
 trashed rows here would move that trap rather than remove it.
+
+**One name per collection, case insensitively** (migration `c2f95a80d417`).
+`uq_collections_name_nocase`, a unique index on the **expression** `lower(name)` rather than
+on the column. A stored lowercase column would be the same name written twice, with the two
+free to disagree. `books.collection_id` is indexed beside it, because filtering the library
+by collection is a browse over the whole catalogue rather than a search.
 
 **Lending willingness** (migration `d1a7f36b9c58`). `ix_books_lending`, for the same reason
 `ix_books_format` exists: "what could we lend the book club" is a filter over the whole

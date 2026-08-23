@@ -83,8 +83,10 @@ export default function Home() {
         onLendingChange={library.setLending}
         onDiscussChange={library.setDiscuss}
         onLocationChange={library.setLocation}
+        onCollectionChange={library.setCollection}
         onSeriesClear={() => library.setSeries(null)}
         locations={library.locations}
+        collections={library.collections}
         onSortChange={library.setSort}
         onToggleTag={library.toggleTag}
         onClearTags={library.clearTags}
@@ -167,6 +169,7 @@ export default function Home() {
           result={selection.result}
           error={selection.error}
           tags={library.tags}
+          collections={library.collections}
           // Only the books actually loaded into the grid. "Select all" cannot
           // honestly mean rows the reader has not paged in yet.
           onSelectAll={() =>

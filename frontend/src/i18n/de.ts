@@ -251,6 +251,7 @@ export const de: Messages = {
   "stats.byGenre": "Nach Genre",
   "stats.byAge": "Nach Alter",
   "stats.byCustomTag": "Nach euren Schlagwörtern",
+  "stats.byCollection": "Nach Sammlung",
   "stats.finishedByMonth": "Gelesen, nach Monat",
   "stats.finishedTotal": "Bücher gelesen",
   "stats.pagesByMonth":
@@ -481,6 +482,31 @@ export const de: Messages = {
     "Bleibt für das nächste Buch stehen, damit ein ganzes Regal nur einmal getippt wird.",
   "location.batchLabel": "Regal für alles aus diesem Durchgang",
 
+  // ── Sammlungen ──────────────────────────────────────────────────────────
+  "collections.title": "Sammlungen",
+  "collections.label": "Sammlung",
+  "collections.none": "In keiner Sammlung",
+  "collections.filterAll": "Alle Sammlungen",
+  "collections.filterUnfiled": "In keiner Sammlung",
+  "collections.bookCount": "{count} Bücher",
+  "collections.empty": "Noch keine Sammlungen",
+  "collections.emptyHint":
+    "Eine Sammlung teilt das Regal auf: gedruckt und digital, behalten und verkauft, deins und meins. Ein Buch liegt in genau einer Sammlung, also nimm die wichtigste Aufteilung und für alles andere Schlagwörter.",
+  "collections.explain":
+    "Eine Sammlung gruppiert Bücher. Sie versteckt keines: wer ein Buch sehen kann, hängt weiterhin davon ab, ob es privat ist.",
+  "collections.newName": "Name",
+  "collections.newPlaceholder": "E-Books",
+  "collections.create": "Sammlung anlegen",
+  "collections.creating": "Wird angelegt...",
+  "collections.rename": "Umbenennen",
+  "collections.renamePrompt": "Wie soll diese Sammlung heißen?",
+  "collections.delete": "Löschen",
+  "collections.deleteConfirm":
+    '"{name}" löschen? Die {count} Bücher darin bleiben in der Bibliothek, dann ohne Sammlung.',
+  "collections.browse": "Diese Bücher anzeigen",
+  "collections.couldNotLoad": "Die Sammlungen konnten nicht geladen werden.",
+  "collections.saving": "Wird einsortiert...",
+
   // ── Doppelte Einträge ───────────────────────────────────────────────────
   "duplicates.title": "Mögliche Doppelte",
   "duplicates.none": "Keine Doppelten gefunden",
@@ -501,6 +527,8 @@ export const de: Messages = {
   "bulk.removeTag": "Schlagwort entfernen",
   "bulk.setStatus": "Lesestatus setzen",
   "bulk.setLocation": "Standort setzen",
+  "bulk.setCollection": "In eine Sammlung legen",
+  "bulk.clearCollection": "Aus jeder Sammlung nehmen",
   "bulk.delete": "Löschen",
   "bulk.deleteConfirm":
     "{count} Bücher löschen? Das lässt sich nicht rückgängig machen.",

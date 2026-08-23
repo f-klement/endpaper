@@ -863,7 +863,7 @@ class TestExport:
         assert header == [
             "Title", "Author", "ISBN", "Publisher", "Year",
             "Description", "Tags", "My Status", "Date Added", "Added By",
-            "Format", "Condition", "Location", "Purchase Price",
+            "Format", "Condition", "Location", "Collection", "Purchase Price",
             "Purchase Currency", "Purchased On", "Purchased From",
         ]
 

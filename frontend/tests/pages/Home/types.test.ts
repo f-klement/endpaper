@@ -43,6 +43,9 @@ describe("hasActiveFilters", () => {
     ["a tag", { tagIds: [1] }],
     ["a lending answer", { lending: LendingWillingness.happy }],
     ["the talk-about-it filter", { discuss: true }],
+    ["a collection", { collection: 3 }],
+    // Both spellings of the field narrow the view, so both count.
+    ["the unfiled books", { collection: "unfiled" as const }],
   ])("is true with %s", (_label, overrides) => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, ...overrides })).toBe(true);
   });

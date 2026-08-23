@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
 from enums import ReadStatus
-from models import Book, Loan, ReadingProgress, Tag, User, UserBook, visible_to
+from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook, visible_to
 from schemas import BookOut, LoanOut, UserOut
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
@@ -186,6 +186,32 @@ def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str
     return {token: count for token, count in rows if token is not None}
 
 
+def _collection_names(books: list[Book], db: Session) -> dict[int, str]:
+    """The name of each collection this page's books are filed in.
+
+    One statement for the page, and none at all when nothing on it is filed,
+    which is every page in a household that has not made a collection.
+
+    Read here rather than through `Book.collection`, which is a lazy
+    relationship: serialising a page of 25 filed books would otherwise issue 25
+    SELECTs, the same N+1 this module exists to avoid, arrived at through a
+    relationship instead of through a loop. Batching it here also means no
+    caller has to remember a `joinedload`, unlike `Book.added_by`, whose cost
+    depends on who fetched the rows.
+
+    **No `visible_to`.** It filters books, and there is not a book in this
+    query: it reads the label a row already in the caller's hands points at.
+    The collection list itself is household wide by design, so a name is not a
+    disclosure; the **count** is, and that one is filtered where it is served
+    (`routers/collections._counts`).
+    """
+    ids = {book.collection_id for book in books if book.collection_id is not None}
+    if not ids:
+        return {}
+    rows = db.query(Collection.id, Collection.name).filter(Collection.id.in_(ids)).all()
+    return {row.id: row.name for row in rows}
+
+
 def books_to_out(books: list[Book], current_user: User, db: Session) -> list[BookOut]:
     """Serialise a page of books, adding the per-request fields.
 
@@ -205,6 +231,16 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     **Seven when the page holds a copy.** `_copy_counts` issues its statement
     only when some book on the page carries a `copy_group`, which almost none
     do, and it is one statement for the whole page whatever it finds.
+
+    **One more again when the page holds a book filed in a collection.**
+    `_collection_names` is the same shape: nothing at all until a household
+    makes a collection and puts something in it, then one statement for the
+    page however many collections it spans. Measured directly on this function
+    over a page of 25 with five books filed across two collections, against the
+    identical page with none filed: **8 statements against 7**, a delta of
+    exactly one. (Both runs paid one statement to reload the author, whose row
+    a preceding commit had expired, which is the 7 rather than 6 in the table
+    below.)
 
     **Plus one per distinct `added_by` author the session has not already
     loaded**, and that one is not this function's: `BookOut.model_validate`
@@ -227,7 +263,9 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     `joinedload(Book.added_by)`, so none of them pays any of it: `GET
     /api/books` measures a flat **11 SELECTs** end to end at 5 and 25 books and
     at one, two and three authors, and `books_to_out` on rows fetched with the
-    option is a flat 6 at 1, 5 and 25 books.
+    option is a flat 6 at 1, 5 and 25 books. Both figures are for a page
+    holding neither a copy nor a filed book, and the two conditional statements
+    above are what a page holding either costs on top.
 
     A new caller that fetches books without that option gets the per-author
     cost back. That is the trap this paragraph exists to name.
@@ -273,12 +311,20 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # Only when something on the page is a copy, so the ordinary library pays
     # nothing for a feature almost no book uses.
     copy_counts = _copy_counts(books, current_user, db)
+    # Same conditional shape, same reason: a household with no collections pays
+    # nothing for the feature.
+    collection_names = _collection_names(books, db)
 
     results: list[BookOut] = []
     for book in books:
         out = BookOut.model_validate(book)
         if book.copy_group is not None:
             out.copy_count = copy_counts.get(book.copy_group, 1)
+        if book.collection_id is not None:
+            # `.get`, not indexing: the row can vanish between the two
+            # statements, and a name nobody can look up is a null rather than a
+            # 500 in the middle of a listing.
+            out.collection_name = collection_names.get(book.collection_id)
         loan = active_loans.get(book.id)
         out.active_loan = loan_summary(loan) if loan else None
 

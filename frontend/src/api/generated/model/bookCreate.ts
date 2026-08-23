@@ -9,6 +9,7 @@ import type { BookFormat } from "./bookFormat.ts";
 
 export interface BookCreate {
   author?: string | null;
+  collection_id?: number | null;
   cover_url?: string | null;
   description?: string | null;
   format?: BookFormat | null;

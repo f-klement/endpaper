@@ -275,4 +275,7 @@ class BulkAction(StrEnum):
     SET_STATUS = "set_status"
     SET_OWNERSHIP = "set_ownership"
     SET_LOCATION = "set_location"
+    # File a selection into a collection, or out of one: an empty value clears
+    # it, the same way SET_LOCATION's empty string unpacks a box.
+    SET_COLLECTION = "set_collection"
     DELETE = "delete"

@@ -14,6 +14,7 @@ from enums import (
     ReadStatus,
 )
 from google_books import split_categories
+from schemas.common import RowIdField
 from schemas.tag import TagOut
 from schemas.user import UserOut
 
@@ -75,6 +76,10 @@ class BookCreate(BaseModel):
     series_name: str | None = Field(default=None, max_length=255)
     series_index: float | None = Field(default=None, ge=0, le=1000)
     location: str | None = Field(default=None, max_length=120)
+    #: Which collection to file it into, or absent for none. Refused with a 400
+    #: when no such collection exists, rather than surfacing the foreign key as
+    #: a 500. Bounded like every other caller-supplied row id: see MAX_ROW_ID.
+    collection_id: RowIdField | None = None
     language: str | None = Field(default=None, max_length=16)
     page_count: int | None = Field(default=None, ge=1, le=100_000)
     # The one collector field offered at add time. Somebody scanning a book is
@@ -138,6 +143,13 @@ class CopyCreate(BaseModel):
     """
 
     location: str | None = Field(default=None, max_length=120)
+    #: Deliberately **not** inherited from the book being copied, unlike the
+    #: work fields and unlike `is_private`. Which collection a copy belongs to
+    #: is a fact about the object, like its shelf and its condition: the
+    #: household with an Ebooks collection buying the paperback wants the two
+    #: apart, and inheriting would put them together and call it a default.
+    #: A copy starts unfiled unless this says otherwise.
+    collection_id: RowIdField | None = None
     format: BookFormat | None = None
     condition: BookCondition | None = None
     lending: LendingWillingness | None = None
@@ -184,6 +196,17 @@ class BookOut(BaseModel):
     series_name: str | None = None
     series_index: float | None = None
     location: str | None = None
+
+    #: Which collection this **object** is filed in, or null for none. Per row
+    #: rather than per copy group: see `models.Book.collection_id`.
+    collection_id: int | None = None
+    #: Its name, filled in by `serialisation.books_to_out` in one statement for
+    #: the whole page. A projection of the row the id names, not a second copy
+    #: of it: nothing writes this, and a client that renamed a collection reads
+    #: the new name on the next fetch. Present so a card can show where a book
+    #: lives without every consumer fetching the collection list to join
+    #: against.
+    collection_name: str | None = None
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
@@ -287,9 +310,15 @@ class BookMatch(BaseModel):
     subtitle: str | None = None
     author: str | None = None
     publisher: str | None = None
-    year: int | None = None
+    # Bounded because this model is a **request body**, not only a response:
+    # `POST /api/books/{id}/enrich/apply` accepts one and `merge_into` writes
+    # these two straight onto the book. Unbounded, `{"year": 2**63}` raised
+    # `OverflowError` on the commit and answered 500 to any member. Measured.
+    # The bounds are the same as `BookCreate`'s, because the value ends up in
+    # the same column.
+    year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = None
-    page_count: int | None = None
+    page_count: int | None = Field(default=None, ge=1, le=100_000)
     language: str | None = None
     categories: str | None = None
     cover_url: str | None = None
@@ -300,7 +329,11 @@ class BookMatch(BaseModel):
     # become a new book and the tag guess saves the person picking them by
     # hand. Left empty by the enrichment candidates endpoint, where the book
     # already exists and its tags are a deliberate choice not to overwrite.
-    suggested_tag_ids: list[int] = []
+    #
+    # Row ids, so bounded like every other one, even though `apply_enrichment`
+    # excludes this field from the merge today: a body field is caller supplied
+    # whether or not this year's handler reads it.
+    suggested_tag_ids: list[RowIdField] = []
 
 
 class BookStatusUpdate(BaseModel):
@@ -410,8 +443,8 @@ class MergeRequest(BaseModel):
     row sorted first.
     """
 
-    book_ids: list[int] = Field(min_length=2, max_length=20)
-    keep_id: int
+    book_ids: list[RowIdField] = Field(min_length=2, max_length=20)
+    keep_id: RowIdField
 
 
 class OwnershipUpdate(BaseModel):
@@ -426,8 +459,14 @@ class BulkRequest(BaseModel):
     carrying six mutually exclusive optional fields.
     """
 
-    book_ids: list[int] = Field(min_length=1, max_length=500)
+    book_ids: list[RowIdField] = Field(min_length=1, max_length=500)
     action: BulkAction
+    # unbounded ok: not a row id, and it cannot be typed as one. Which field it
+    # fills depends on the verb, so a tag id, an ownership status, a shelf name
+    # and a collection id all arrive here. Every handler that reads it as an id
+    # validates the range itself before the value reaches the database
+    # (`_require_tag`, `_checked_collection`), which is why that check in
+    # `_checked_collection` is written out rather than left to the schema.
     value: str | int | None = None
 
 

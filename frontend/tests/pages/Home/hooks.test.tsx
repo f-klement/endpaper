@@ -20,7 +20,13 @@ import {
   useLibrary,
   useUnconfirmedCount,
 } from "../../../src/pages/Home/hooks";
-import { makeBook, makeBookPage, makeTagSet, resetIds } from "../../factories";
+import {
+  makeBook,
+  makeBookPage,
+  makeCollection,
+  makeTagSet,
+  resetIds,
+} from "../../factories";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
 
 function renderLibrary(route = "/") {
@@ -33,6 +39,7 @@ beforeEach(() => {
   resetIds();
   api = mockApi();
   api.on("/api/books/tags", { body: makeTagSet() });
+  api.on("/api/collections", { body: [] });
   api.on(/\/api\/books(\?|$)/, {
     body: makeBookPage([makeBook({ title: "Dune" })]),
   });
@@ -258,6 +265,68 @@ describe("useLibrary ownership filter", () => {
       act(() => result.current.setOwnership(null));
 
       await waitFor(() => expect(result.current.filters.ownership).toBeNull());
+    });
+  });
+});
+
+describe("useLibrary collection filter", () => {
+  it("omits the filter by default", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    expect(lastQuery().has("collection_id")).toBe(false);
+    expect(lastQuery().has("unfiled")).toBe(false);
+  });
+
+  it("sends the chosen collection", async () => {
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    act(() => result.current.setCollection(3));
+
+    await waitFor(() => expect(lastQuery().get("collection_id")).toBe("3"));
+  });
+
+  it("asks for the unfiled books with their own parameter", async () => {
+    // Never both: the API answers 422 to a request naming a collection and the
+    // unfiled books at once, so one field has to produce one or the other.
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+    act(() => result.current.setCollection("unfiled"));
+
+    await waitFor(() => expect(lastQuery().get("unfiled")).toBe("true"));
+    expect(lastQuery().has("collection_id")).toBe(false);
+  });
+
+  it("offers the household's collections to the filter", async () => {
+    api.on("/api/collections", { body: [makeCollection({ name: "Ebooks" })] });
+    const { result } = renderLibrary();
+
+    await waitFor(() => expect(result.current.collections).toHaveLength(1));
+  });
+
+  describe("seeded from the URL", () => {
+    it("starts on the collection the link names", async () => {
+      const { result } = renderLibrary("/?collection=3");
+      await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+      expect(lastQuery().get("collection_id")).toBe("3");
+    });
+
+    it("starts on the unfiled books", async () => {
+      const { result } = renderLibrary("/?collection=unfiled");
+      await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+      expect(lastQuery().get("unfiled")).toBe("true");
+    });
+
+    it("ignores a value that is neither", async () => {
+      const { result } = renderLibrary("/?collection=everything");
+      await waitFor(() => expect(result.current.books).toHaveLength(1));
+
+      expect(lastQuery().has("collection_id")).toBe(false);
+      expect(lastQuery().has("unfiled")).toBe(false);
     });
   });
 });

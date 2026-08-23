@@ -336,3 +336,38 @@ class TestApplyingAChosenEdition:
             f"/api/books/{book['id']}/enrich/apply", json=self.choice()
         )
         assert res.status_code == 401
+
+
+class TestAnEnrichmentBodyCannotOverflowTheDatabase:
+    """`POST /{id}/enrich/apply` takes a `BookMatch` as its body, and
+    `merge_into` writes `year` and `page_count` onto the book. Unbounded, a
+    value past SQLite's INTEGER raises `OverflowError` on the commit: a 500 for
+    any member, from a plain JSON field.
+
+    Found by `tests/test_house_rules.py::TestEveryRequestBodyRowIdIsBounded`
+    rather than by a person, which is the point of that lint.
+    """
+
+    TOO_BIG = 9_223_372_036_854_775_808
+
+    def test_an_absurd_year_is_refused(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune")
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json={"title": "Dune", "year": self.TOO_BIG},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text
+
+    def test_an_absurd_page_count_is_refused(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune")
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json={"title": "Dune", "page_count": self.TOO_BIG},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422, res.text

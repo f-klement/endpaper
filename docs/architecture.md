@@ -125,7 +125,7 @@ Everything mutable lives under `DATA_DIR`:
 
 ```
 $DATA_DIR/
-├── library.db          SQLite: all seven tables
+├── library.db          SQLite: every table
 └── covers/
     ├── 12.jpg          uploaded cover, named by book id
     └── login_bg.png    the admin-set login background

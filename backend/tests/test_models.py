@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from models import (
     Book,
+    Collection,
     Loan,
     Note,
     Tag,
@@ -20,6 +22,7 @@ from models import (
     UserBook,
     is_switch_target,
     switch_targets,
+    visible_to,
 )
 
 
@@ -182,6 +185,91 @@ class TestBook:
 
     def test_optional_metadata_starts_empty(self, db, book):
         assert (book.author, book.publisher, book.year, book.description) == (None, None, None, None)
+
+
+class TestCollection:
+    """A collection is a label on the shelf. It groups books and it hides none."""
+
+    def test_the_name_is_unique_case_insensitively(self, db):
+        db.add(Collection(name="Ebooks"))
+        db.commit()
+        db.add(Collection(name="EBOOKS"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_two_different_names_coexist(self, db):
+        db.add_all([Collection(name="Ebooks"), Collection(name="Sold")])
+        db.commit()
+        assert db.query(Collection).count() == 2
+
+    def test_a_book_starts_unfiled(self, db, book):
+        assert book.collection_id is None
+
+    def test_deleting_a_collection_unfiles_its_books_rather_than_deleting_them(
+        self, db, book
+    ):
+        """A shelf label is not the books on it. This is the ORM path, which is
+        the one the handler takes; the test below is the database's own rule."""
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        book.collection_id = shelf.id
+        db.commit()
+
+        db.delete(shelf)
+        db.commit()
+        db.refresh(book)
+
+        assert db.query(Book).count() == 1
+        assert book.collection_id is None
+
+    def test_deleting_a_book_leaves_the_collection(self, db, book):
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        book.collection_id = shelf.id
+        db.commit()
+
+        db.delete(book)
+        db.commit()
+
+        assert db.query(Collection).count() == 1
+
+    def test_the_database_unfiles_them_even_without_the_orm(self, db, book):
+        """`ON DELETE SET NULL`, exercised through Core so the ORM's own
+        nulling of loaded children cannot be what passes the test. A restore
+        and a hand-run statement both reach the table this way, and a row left
+        pointing at a destroyed collection would be a dangling foreign key.
+
+        This is also what makes `PRAGMA foreign_keys=ON` load bearing here: the
+        rule is decorative without it.
+        """
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        book.collection_id = shelf.id
+        db.commit()
+        shelf_id, book_id = shelf.id, book.id
+        # Detached before the delete, so the assertion below reads the row back
+        # from the database rather than an instance the ORM nulled in memory.
+        db.expunge_all()
+
+        db.execute(delete(Collection).where(Collection.id == shelf_id))
+        db.commit()
+
+        assert db.get(Book, book_id).collection_id is None
+
+    def test_a_collection_is_not_a_privacy_boundary(self, db, user):
+        """The one thing this feature must never become. `visible_to` is not
+        given a collection to consult, so filing a book changes nothing about
+        who may see it: this pins that the predicate ignores the column."""
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        db.add(Book(title="Filed", collection_id=shelf.id))
+        db.commit()
+
+        assert db.query(Book).filter(visible_to(user.id)).count() == 1
 
 
 class TestTagAssociation:

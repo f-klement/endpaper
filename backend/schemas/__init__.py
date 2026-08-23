@@ -34,7 +34,13 @@ from schemas.book import (
     PurgeResult,
     SeriesOut,
 )
-from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page
+from schemas.collection import (
+    CollectionAssign,
+    CollectionCreate,
+    CollectionOut,
+    CollectionUpdate,
+)
+from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, Page
 from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.loan import LoanCreate, LoanOut
 from schemas.note import NoteCreate, NoteOut
@@ -47,7 +53,7 @@ from schemas.settings import (
     SettingsOut,
     SettingsUpdate,
 )
-from schemas.stats import MonthStat, PerUserStat, StatsOut, TagStat
+from schemas.stats import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
 from schemas.tag import TagCreate, TagOut
 from schemas.user import (
     AppearanceOut,
@@ -66,6 +72,7 @@ LoanOut.model_rebuild()
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "MAX_ROW_ID",
     "AppearanceOut",
     "AppearanceUpdate",
     "AuthConfigOut",
@@ -79,6 +86,11 @@ __all__ = [
     "BookStatusUpdate",
     "BulkRequest",
     "BulkResult",
+    "CollectionAssign",
+    "CollectionCreate",
+    "CollectionOut",
+    "CollectionStat",
+    "CollectionUpdate",
     "CopyCreate",
     "CoverBackfillOut",
     "DuplicateGroup",

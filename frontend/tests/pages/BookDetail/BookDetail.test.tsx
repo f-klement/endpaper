@@ -73,6 +73,7 @@ function stubLoad({
   // the only one, and that is what the endpoint answers.
   api.on("/api/books/1/copies", { body: [book] });
   api.on("/api/books/tags", { body: tags });
+  api.on("/api/collections", { body: [] });
   api.on("/api/users", { body: users });
   api.on("/api/settings/features", {
     body: {

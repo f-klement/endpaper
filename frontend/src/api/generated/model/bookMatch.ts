@@ -27,6 +27,10 @@ export interface BookMatch {
   series_name?: string | null;
   source?: string;
   subtitle?: string | null;
+  /**
+   * @items.minimum 1
+   * @items.maximum 9223372036854776000
+   */
   suggested_tag_ids?: number[];
   title?: string | null;
   year?: number | null;

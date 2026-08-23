@@ -4,8 +4,8 @@ from fastapi import APIRouter
 from sqlalchemy import func
 
 from dependencies import CurrentUser, DbSession
-from models import Book, ReadingProgress, Tag, User, UserBook, book_tags, visible_to
-from schemas import MonthStat, PerUserStat, StatsOut, TagStat
+from models import Book, Collection, ReadingProgress, Tag, User, UserBook, book_tags, visible_to
+from schemas import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -83,6 +83,19 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         .all()
     )
 
+    # Named collections only, and joined to Book so the same privacy predicate
+    # applies: a shelf holding one member's private books must not report them
+    # as a number to everybody else. Unfiled books are deliberately not a row
+    # here; `total` minus the sum of these is how many there are.
+    by_collection = (
+        db.query(Collection.name, func.count(Book.id).label("count"))
+        .join(Book, Book.collection_id == Collection.id)
+        .filter(visible)
+        .group_by(Collection.id)
+        .order_by(func.count(Book.id).desc(), Collection.name)
+        .all()
+    )
+
     by_month = (
         db.query(
             func.strftime("%Y-%m", Book.added_at).label("month"),
@@ -141,6 +154,9 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         per_user=[PerUserStat(username=username, count=count) for username, count in per_user],
         by_tag=[
             TagStat(name=name, category=category, count=count) for name, category, count in by_tag
+        ],
+        by_collection=[
+            CollectionStat(name=name, count=count) for name, count in by_collection
         ],
         by_month=[MonthStat(month=month, count=count) for month, count in by_month],
         finished_by_month=[

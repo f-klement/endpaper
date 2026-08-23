@@ -38,7 +38,18 @@ import covers
 import settings_store
 from config import COVERS_DIR
 from database import Base
-from models import Book, Loan, Note, ReadingProgress, Setting, Tag, User, UserBook, book_tags
+from models import (
+    Book,
+    Collection,
+    Loan,
+    Note,
+    ReadingProgress,
+    Setting,
+    Tag,
+    User,
+    UserBook,
+    book_tags,
+)
 
 logger = logging.getLogger("endpaper.backup")
 
@@ -68,6 +79,11 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
     for name, model in (
         ("users", User),
         ("tags", Tag),
+        # Before books, which carry a foreign key into it. Absent from
+        # `_REQUIRED_TABLES` on purpose: an archive taken before collections
+        # existed restores with none, which is exactly the state it was
+        # written in.
+        ("collections", Collection),
         ("books", Book),
         ("user_books", UserBook),
         # After user_books, which is the other per-member table, and before

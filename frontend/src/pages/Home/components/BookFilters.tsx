@@ -1,4 +1,8 @@
-import type { LocationOut, TagOut } from "../../../api/generated/model";
+import type {
+  CollectionOut,
+  LocationOut,
+  TagOut,
+} from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
 import type { LibraryView } from "../../../lib/libraryView";
 import { TagPicker } from "../../components";
@@ -21,11 +25,13 @@ interface BookFiltersProps {
   onStatusChange: (status: Filters["status"]) => void;
   onOwnershipChange: (ownership: Filters["ownership"]) => void;
   onLocationChange: (location: Filters["location"]) => void;
+  onCollectionChange: (collection: Filters["collection"]) => void;
   onFormatChange: (format: Filters["format"]) => void;
   onLendingChange: (lending: Filters["lending"]) => void;
   onDiscussChange: (discuss: boolean) => void;
   onSeriesClear: () => void;
   locations: LocationOut[];
+  collections: CollectionOut[];
   onSortChange: (sort: Filters["sort"]) => void;
   onToggleTag: (tagId: number) => void;
   onClearTags: () => void;
@@ -45,8 +51,10 @@ export default function BookFilters({
   onLendingChange,
   onDiscussChange,
   onLocationChange,
+  onCollectionChange,
   onSeriesClear,
   locations,
+  collections,
   onSortChange,
   onToggleTag,
   onClearTags,
@@ -197,6 +205,54 @@ export default function BookFilters({
           {t("discuss.badge")}
         </button>
       </div>
+
+      {/* Only once a household has divided its shelf: a picker offering one
+          option, "Any collection", is a control that cannot do anything.
+          **Or whenever a collection is being filtered on**, which is not the
+          same condition and is the one that bites. An admin deleting the
+          collection somebody else is browsing empties the list while the id
+          stays in filter state and keeps being sent, so on `length > 0` alone
+          the picker vanishes and leaves an empty grid with no control to clear
+          it. The location filter three blocks down has always had this second
+          clause; this one was missing it.
+
+          Deliberately **not** clearing a filter whose id is absent from the
+          list, which is the other obvious fix and is wrong: `collections` is
+          `[]` while the query is in flight, so it would wipe a `?collection=4`
+          deep link on first render. The grid's empty state already says
+          "adjust your filters", because `hasActiveFilters` counts this one. */}
+      {(collections.length > 0 || filters.collection !== null) && (
+        <div className="mt-2">
+          <select
+            value={
+              filters.collection === null ? "" : String(filters.collection)
+            }
+            onChange={(event) => {
+              const chosen = event.target.value;
+              onCollectionChange(
+                chosen === ""
+                  ? null
+                  : chosen === "unfiled"
+                    ? "unfiled"
+                    : Number(chosen),
+              );
+            }}
+            aria-label={t("collections.label")}
+            className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
+          >
+            <option value="">{t("collections.filterAll")}</option>
+            {collections.map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {collection.name} ({collection.book_count})
+              </option>
+            ))}
+            {/* Last, and separate: "in none of them" is not one of them. It is
+                how somebody finds what they have not filed yet, which is the
+                job the whole feature creates. */}
+            <option value="unfiled">{t("collections.filterUnfiled")}</option>
+          </select>
+        </div>
+      )}
 
       {(locations.length > 0 || filters.location) && (
         <div className="mt-2">

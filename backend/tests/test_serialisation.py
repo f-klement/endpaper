@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import event
 
 from enums import ReadStatus
-from models import Book, Loan, Tag, User, UserBook
+from models import Book, Collection, Loan, Tag, User, UserBook
 from serialisation import book_to_out, books_to_out, loan_summary, match_subjects_to_tags
 
 
@@ -203,6 +203,68 @@ class TestCopyCount:
             event.remove(db.get_bind(), "before_cursor_execute", record)
 
         assert with_copies == without + 1
+
+
+class TestCollectionName:
+    """The name is a projection of the row `collection_id` points at, batched
+    for the page. Nothing writes it, so a rename is visible on the next fetch
+    without anything being migrated."""
+
+    def test_an_unfiled_book_carries_no_name(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        out = book_to_out(two_books[0], user, db)
+
+        assert out.collection_id is None
+        assert out.collection_name is None
+
+    def test_a_filed_book_carries_the_name(self, db, admin, two_books):
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        two_books[0].collection_id = shelf.id
+        db.commit()
+        user = db.get(User, admin["user"]["id"])
+
+        assert book_to_out(two_books[0], user, db).collection_name == "Ebooks"
+
+    def test_it_costs_exactly_one_extra_statement(self, db, admin, two_books):
+        """The measurement behind the count in `books_to_out`'s docstring, and
+        the reason the name is not read through `Book.collection`: a lazy
+        relationship would issue one statement per filed book on the page.
+
+        Prepared the same way as the copy-count measurement above, and for the
+        same reason: a commit inside the measured window would be counted as a
+        query when the session opens its next savepoint.
+        """
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+        filed = [
+            Book(title="One", collection_id=shelf.id),
+            Book(title="Two", collection_id=shelf.id),
+        ]
+        db.add_all(filed)
+        db.commit()
+        user = db.get(User, admin["user"]["id"])
+        for book in [*two_books, *filed]:
+            _ = book.title
+
+        statements: list[str] = []
+
+        @event.listens_for(db.get_bind(), "before_cursor_execute")
+        def record(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        try:
+            books_to_out(two_books, user, db)
+            without = len(statements)
+            statements.clear()
+            books_to_out(filed, user, db)
+            with_collections = len(statements)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", record)
+
+        assert with_collections == without + 1
 
 
 class TestWhoWantsToBeAsked:

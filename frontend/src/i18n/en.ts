@@ -255,6 +255,7 @@ export const en = {
   "stats.byGenre": "By Genre",
   "stats.byAge": "By Age",
   "stats.byCustomTag": "By Household Tags",
+  "stats.byCollection": "By Collection",
   "stats.finishedByMonth": "Finished, by Month",
   "stats.finishedTotal": "books finished",
   "stats.pagesByMonth": "Pages Read, by Month (books tracked by page)",
@@ -485,6 +486,31 @@ export const en = {
     "Kept for the next book, so a whole shelf is typed once.",
   "location.batchLabel": "Shelf for everything in this run",
 
+  // ── Collections ─────────────────────────────────────────────────────────
+  "collections.title": "Collections",
+  "collections.label": "Collection",
+  "collections.none": "Not in a collection",
+  "collections.filterAll": "Any collection",
+  "collections.filterUnfiled": "Not in a collection",
+  "collections.bookCount": "{count} books",
+  "collections.empty": "No collections yet",
+  "collections.emptyHint":
+    "A collection splits the shelf: physical from ebook, kept from sold, yours from mine. A book is in one collection, so pick the split that matters most and use tags for the rest.",
+  "collections.explain":
+    "A collection groups books. It never hides them: who can see a book is still up to whether it is private.",
+  "collections.newName": "Name",
+  "collections.newPlaceholder": "Ebooks",
+  "collections.create": "Add collection",
+  "collections.creating": "Adding...",
+  "collections.rename": "Rename",
+  "collections.renamePrompt": "What should this collection be called?",
+  "collections.delete": "Delete",
+  "collections.deleteConfirm":
+    'Delete "{name}"? The {count} books in it stay in the library, with no collection.',
+  "collections.browse": "Show these books",
+  "collections.couldNotLoad": "Could not load the collections.",
+  "collections.saving": "Filing...",
+
   // ── Duplicates ──────────────────────────────────────────────────────────
   "duplicates.title": "Possible duplicates",
   "duplicates.none": "No duplicates found",
@@ -505,6 +531,8 @@ export const en = {
   "bulk.removeTag": "Remove tag",
   "bulk.setStatus": "Set reading status",
   "bulk.setLocation": "Set location",
+  "bulk.setCollection": "Put in a collection",
+  "bulk.clearCollection": "Take out of every collection",
   "bulk.delete": "Delete",
   "bulk.deleteConfirm": "Delete {count} books? This cannot be undone.",
   "bulk.chooseTag": "Choose a tag",

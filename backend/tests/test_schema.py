@@ -554,3 +554,140 @@ class TestUpgradingStoredCovers:
         schema.upgrade_to_head()
 
         assert self.cover_of(title) is None
+
+
+class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
+    """Revision c2f95a80d417, which rewrites the books table.
+
+    The rewrite is the point of these tests rather than the new column. Batch
+    mode rebuilds a SQLite table by reflecting it, and `uq_books_isbn_single_copy`
+    is a **partial** unique index: coming back plain, it would forbid a second
+    copy of any title on every upgraded database, silently, since nothing else
+    in the app would notice.
+
+    `d5c31b7a09fe` had to drop and recreate `uq_loans_one_open_per_book` around
+    exactly this step because that reflection was lossy. It is not lossy here on
+    alembic 1.19.1 with SQLAlchemy 2.0.52, which is why this migration does no
+    such dance, and which is what these tests hold: `conftest.py` builds the
+    schema with `create_all`, so **no other test in the suite puts `books`
+    through this migration at all**, and `renovate.json` automerges minor and
+    patch releases of both libraries.
+    """
+
+    PREVIOUS = "b1e7c94a2d05"
+
+    def build_database_with_two_copies(self) -> None:
+        """A household owning two paperbacks of one title, before collections.
+
+        Both rows carry the same ISBN and the same `copy_group`, which is the
+        state the partial index exists to permit and a plain unique index would
+        have refused.
+        """
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            for _ in range(2):
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, isbn, copy_group, added_by_user_id) "
+                        "VALUES ('Dune', '9780441013593', 'abc123', 1)"
+                    )
+                )
+            connection.commit()
+
+    def test_the_collection_column_arrives(self):
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        columns = {column["name"] for column in inspect(engine).get_columns("books")}
+        assert "collection_id" in columns
+
+    def test_existing_books_are_unfiled_rather_than_given_a_collection(self):
+        """No backfill and no invented name: see the migration's docstring."""
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT COUNT(*) FROM books WHERE collection_id IS NOT NULL")
+                ).scalar()
+                == 0
+            )
+            assert connection.execute(text("SELECT COUNT(*) FROM collections")).scalar() == 0
+
+    def test_the_copies_survive_the_table_rewrite(self):
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT COUNT(*) FROM books")).scalar() == 2
+
+    def test_the_isbn_index_is_still_partial(self):
+        """The regression this class exists for. A plain unique index here makes
+        a second copy of any title impossible, on every database that upgraded."""
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, isbn, copy_group, added_by_user_id) "
+                    "VALUES ('Dune', '9780441013593', 'abc123', 1)"
+                )
+            )
+            connection.commit()
+            assert connection.execute(text("SELECT COUNT(*) FROM books")).scalar() == 3
+
+    def test_a_second_uncopied_book_with_one_isbn_is_still_refused(self):
+        """The other half, and the reason the index was made partial rather than
+        dropped: a re-scan of a book already on the shelf is still a collision."""
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, isbn, added_by_user_id) "
+                    "VALUES ('Neuromancer', '9780441569595', 1)"
+                )
+            )
+            connection.commit()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, isbn, added_by_user_id) "
+                    "VALUES ('Neuromancer again', '9780441569595', 1)"
+                )
+            )
+
+    def test_deleting_a_collection_unfiles_its_books_on_an_upgraded_database(self):
+        """`ON DELETE SET NULL` reaches an upgraded database too. The constraint
+        is added inside the batch rewrite, which is the step most likely to drop
+        it, and `PRAGMA foreign_keys=ON` is what makes it do anything."""
+        self.build_database_with_two_copies()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("INSERT INTO collections (name) VALUES ('Ebooks')"))
+            connection.execute(text("UPDATE books SET collection_id = 1"))
+            connection.execute(text("DELETE FROM collections WHERE id = 1"))
+            connection.commit()
+            assert connection.execute(text("SELECT COUNT(*) FROM books")).scalar() == 2
+            assert (
+                connection.execute(
+                    text("SELECT COUNT(*) FROM books WHERE collection_id IS NOT NULL")
+                ).scalar()
+                == 0
+            )

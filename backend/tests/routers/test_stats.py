@@ -78,6 +78,51 @@ class TestByTag:
         assert by_tag == {"Fantasy": 1, "Adult": 1}
 
 
+class TestByCollection:
+    def test_counts_books_per_collection(self, client, admin, make_book, stats):
+        shelf = client.post(
+            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
+        ).json()
+        for title in ("A", "B"):
+            book = make_book(admin["headers"], title=title)
+            client.patch(
+                f"/api/books/{book['id']}/collection",
+                json={"collection_id": shelf["id"]},
+                headers=admin["headers"],
+            )
+
+        assert stats()["by_collection"] == [{"name": "Ebooks", "count": 2}]
+
+    def test_an_empty_collection_has_no_row(self, client, admin, stats):
+        client.post("/api/collections", json={"name": "Ebooks"}, headers=admin["headers"])
+        assert stats()["by_collection"] == []
+
+    def test_unfiled_books_are_not_a_bucket(self, admin, make_book, stats):
+        """`total` minus the sum of these is how many there are, and a nameless
+        row here would need a name to render."""
+        make_book(admin["headers"], title="Loose")
+
+        assert stats()["by_collection"] == []
+        assert stats()["total"] == 1
+
+    def test_another_members_private_book_is_not_counted(
+        self, client, admin, member, make_book, stats
+    ):
+        """A shelf label everybody can read must not report how many private
+        books somebody has put on it."""
+        shelf = client.post(
+            "/api/collections", json={"name": "Ebooks"}, headers=admin["headers"]
+        ).json()
+        hidden = make_book(admin["headers"], title="Secret", is_private=True)
+        client.patch(
+            f"/api/books/{hidden['id']}/collection",
+            json={"collection_id": shelf["id"]},
+            headers=admin["headers"],
+        )
+
+        assert stats(member["headers"])["by_collection"] == []
+
+
 class TestByMonth:
     def test_groups_books_into_a_year_month_bucket(self, admin, make_book, stats):
         make_book(admin["headers"], title="A")

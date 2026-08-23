@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 import notifications
 from auth import require_admin
-from dependencies import CurrentUser, DbSession, Paging
+from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness
 from models import Book, Loan, User, visible_to
 from schemas import LoanCreate, LoanOut, OverdueNotifyResult, Page
@@ -233,7 +233,7 @@ async def notify_overdue(
 
 
 @router.put("/{loan_id}/return", response_model=LoanOut)
-def return_loan(loan_id: int, db: DbSession, current_user: CurrentUser) -> LoanOut:
+def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> LoanOut:
     """Recording a return is a shelf action, not an ownership one, so any member
     may do it, for any book they can see."""
     loan = (
