@@ -115,8 +115,7 @@ discloses nothing but liveness.
 
 ## Supporting it
 
-* **Ko-fi**, for a one off: `https://ko-fi.com/REPLACE_ME`
-* **Patreon**, for something monthly: `https://patreon.com/REPLACE_ME`
+* **Ko-fi**: [ko-fi.com/fklement](https://ko-fi.com/fklement)
 
 The money pays for one thing: running the shared relay that lets two households reach each
 other when neither is reachable from the internet. It is not a paid tier and no feature

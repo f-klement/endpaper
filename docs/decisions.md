@@ -2652,8 +2652,8 @@ page holds no more DOM than the flat column it replaced.
 
 ### Funding is two links in the README, and nothing in the app
 
-Ko-fi for a one off and Patreon for something recurring, because they answer different
-questions: somebody who found this useful once, and a household that wants the relay to
+Ko-fi only, at `ko-fi.com/fklement`. Patreon was dropped: a second platform is a
+second thing to maintain, for an audience that has not asked for it.
 still be there next year.
 
 **They live in `README.md` and on the Docker Hub page, and nowhere in the UI.** No banner,

@@ -211,8 +211,7 @@ Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs
 
 ## Supporting it
 
-* **Ko-fi**, for a one off: `https://ko-fi.com/REPLACE_ME`
-* **Patreon**, for something monthly: `https://patreon.com/REPLACE_ME`
+* **Ko-fi**: [ko-fi.com/fklement](https://ko-fi.com/fklement)
 
 **What the money is for, stated rather than implied.** One thing: running the shared relay
 that lets two households reach each other when neither is reachable from the internet.
