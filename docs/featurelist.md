@@ -2,8 +2,13 @@
 
 A catalogue of the books a household owns, and a record of who has them.
 
-This is the current feature set, not a roadmap. Where a feature has a limit or a
-deliberate omission, it is stated here rather than discovered later.
+This is the current feature set, not a roadmap.
+
+**The README's Features section is the summary; this is the complete list.** The
+difference that matters is the last section: what this app deliberately does not
+do. Somebody deciding whether to run it should learn that here rather than by
+trying it. If the two ever disagree, this file is wrong, because the README is
+what people read first and gets corrected first.
 
 ## The catalogue
 
@@ -13,14 +18,21 @@ cover, page count, language, categories, series name and index, format
 
 **Adding a book** by ISBN, by barcode scan in the browser, by free text search,
 or by hand. ISBN lookup chains several sources so a European or pre-ISBN book
-still resolves rather than failing at one provider.
+still resolves rather than failing at one provider, and English, German, French,
+Spanish and Portuguese titles all resolve.
+
+**Rapid mode** scans a whole shelf without stopping between books. The batch is
+reviewed before anything is written, so a misread barcode is caught before it
+becomes a row.
 
 **Enrichment** fills a sparse record from an external catalogue on request. It is
 always a choice: nothing is fetched in the background, and a field is only
 overwritten when you say so.
 
-**Covers are stored here**, not hotlinked. A cover survives the source going
-away, and fetching is restricted to an allowlist of hosts.
+**Covers are stored here**, not hotlinked. Every candidate image is fetched and
+checked before it is offered, so a broken link never becomes a book's cover, and
+a stored cover survives the source going away. Fetching is restricted to an
+allowlist of hosts.
 
 **Import and export** as CSV, and a full backup and restore.
 
@@ -33,7 +45,12 @@ be saved as a view.
 **Card or table.** The table carries nineteen columns and sorts on what the
 server can genuinely order by. The choice is remembered.
 
-**Series** and **author** pages group the shelf by what it already knows.
+**Series** and **author** pages group the shelf by what it already knows, and a
+series page works out which volumes are missing rather than making you notice.
+
+**A saved view** keeps a filter combination under a name, including a wishlist:
+books you want but do not own, which is the same data as ownership rather than a
+second list to maintain.
 Authors can be **merged** when one person arrives spelled several ways: the merge
 records a decision and never rewrites a book, so it is reversible and survives a
 re-import.
@@ -43,8 +60,12 @@ title and author rather than ISBN, so different printings are caught.
 
 ## Reading and lending
 
-**Reading status**: unread, reading, read, and did not finish. Progress is
-recorded per member with a page number and a history.
+**Reading status**: unread, want to read, reading, read, and did not finish, per
+person rather than per book.
+
+**Reading progress** records the page you reached, or a percentage for an
+audiobook, as many times as you like. Recording progress on a book you had
+abandoned returns it to reading; nothing deletes the log.
 
 **Notes** and **quotes** hang off a book. A quote is verbatim text with an
 optional page and your own remark beside it, kept separate so one is not
@@ -69,10 +90,14 @@ lending state. The ISBN uniqueness rule applies to single copies only.
 
 **Ownership** distinguishes what the household owns from what it wants.
 
+**Bulk edits** tag, re-shelve, set a status or delete a whole selection at once,
+so a shelf reorganised in life does not take an evening to reorganise here.
+
 ## People and privacy
 
-**One account per person.** Authentication is local, LDAP, or a reverse proxy
-that has already authenticated the reader.
+**One account per person**, and the first account created becomes the admin,
+whichever way you sign in. Authentication is local, LDAP, or a reverse proxy that
+has already authenticated the reader.
 
 **A private book is visible only to the member who added it.** This is enforced
 in one place and asserted by a test that walks every backend module: an
@@ -80,6 +105,18 @@ unfiltered query fails the build rather than leaking quietly. An invisible book
 answers 404, never 403, because a 403 confirms the id exists.
 
 **Trash** holds a deleted book until it is purged, so a mistake is recoverable.
+
+## Knowing what you have
+
+**Statistics**: what is on the shelf, who reads what, what got finished when, and
+how the year compares to the last. Every count obeys the privacy rule, so a
+household total is not a way to learn what somebody keeps private.
+
+## Running it
+
+**One container**, a single SQLite file and a directory of covers. `GET
+/api/healthz` answers container probes and genuinely touches storage, so a pod
+whose volume vanished reports unhealthy rather than staying green.
 
 ## The interface
 

@@ -2685,3 +2685,30 @@ second connection, or state that has to outlive a commit. The list and the reaso
 are in [testing.md](testing.md). The rule is to opt out and say why rather than to force a
 file into the transaction: a test that passes alone and fails in a suite costs more than
 the seconds it saves.
+
+## Reference implementations: what may be read, and what may not be copied
+
+Endpaper's features were designed against prior art rather than invented, and
+two of those sources carry licences that make copying a legal problem rather
+than a stylistic one. Recorded here because the document that held it was a
+session plan and session plans are deleted.
+
+**BookWyrm is ACSL v1.4**, which is not OSI approved and is compatible with
+neither GPL nor MIT. It is the best worked example of quotes from books in the
+field, and it is the one that must not be borrowed from literally. Read it for
+design; do not copy code without checking the terms. The quotes feature here was
+argued in its own words for exactly this reason.
+
+**Koha is GPL.** This project is not, so Koha is a source to read for behaviour
+and not a source to lift from. Its value was always the holds queue and
+notification model, which is the part deliberately scoped out.
+
+**Reusable, and used as such:** Jelu (MIT) for author pages and merging, BookLogr
+(Apache-2.0) for quotes beside notes. Where a design here departs from Jelu, the
+departure is argued in the author entries above rather than assumed.
+
+**Two features had no useful reference.** Collections and multiple copies are
+shaped by this codebase rather than by the field: what decides them is
+`visible_to()`, the sync payload in `implementation_plan.md`, and `books.isbn`
+being unique. Reading a competitor will not tell you what breaking that
+constraint costs here.

@@ -27,39 +27,22 @@ docker compose up --build
 Then open **server-ip:port** you set in your yml in your browser (or your local IP on your phone).
 
 ## Features
-
-### Getting books in
-
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
-- **Rapid mode**: scan a whole shelf without stopping, review the batch, then commit it
 - **Auto metadata**: title, author, publisher, page count, language and cover art, merged
   from four catalogues (the German National Library, K10plus, Open Library, Google Books)
-- **Covers that are actually there**: every candidate image is fetched and checked before
-  it is saved, so you get a cover rather than a broken one
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
   a shelf does not go blank when an image service moves a URL. Settings has a button that
   fetches the ones already missing, and your browser never tells a third party which books
   the household owns
-- **Add without a barcode**: search by title across the same catalogues and pick the
-  edition, including books printed before ISBNs existed. Works with no API key
-- **Five languages resolve**: English, German, French, Spanish and Portuguese titles, from
-  the national catalogues that actually hold them
 - **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
   Libib or Openreads. The columns are worked out for you and shown before anything is saved
-
-### Living with a shared shelf
-
 - **Per-book privacy**: a book can be yours alone inside a shared household catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
 - **Reading status**: per-person "unread / want to read / reading / read / did not finish",
   with ratings, notes and the dates you started and finished. A book you gave up on keeps
   the date you started it and is never counted as finished
-- **Reading progress**: record the page you reached, or a percentage for an audiobook, as
-  often as you like. It is a log, not one number, so it can say how much you read in March
-  as well as where you are now. Recording a page starts the book for you
 - **Quotes**: copy out a passage worth keeping, with the page it is on and a line about
   why. Every quote the household can see is on one page, newest first
-- **On the shelf or not**: what you own, tracked separately from what you have read
 - **More than one copy**: two paperbacks of the same title are two objects, each with its
   own shelf, condition, price and loan. Scanning a book you already own still asks before
   it adds anything, so a mis-scan is caught and a real second copy is one more press
@@ -71,45 +54,20 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Overdue reminders**: Endpaper can POST a digest of every overdue loan to a webhook you
   choose, on a schedule you set, signed so the receiver can check it came from here.
   Private books are never included: a webhook goes to a channel with no account behind it
-- **Multiple accounts**: the first account is admin, whichever way you sign in
-
-### Keeping it tidy
-
-- **Series gaps**: which volumes of a series you are missing, worked out for you
-- **Duplicate detection and merge**: fold two records into one, keeping the best of both
-- **Undo a delete**: deleted books go to a trash and come back whole, with their notes,
-  quotes, tags, loans and reading history
-- **Bulk edits**: tag, re-shelve, set a status or delete a whole selection at once
 - **Two ways to look at it**: a grid of covers whose cards fold out for the details, or a
   table of nineteen metadata columns. Your choice is remembered in your browser
 - **Backup and restore**: download the whole library, covers included, and put it back
-
-### Finding things again
-
-- **Tags**: 105 curated ones in three categories, plus any your household invents
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
-- **Saved views**: keep a filter combination under a name, including a wishlist of books
-  you want but do not own
 - **Author pages**: everybody your shelf credits, with their books behind one click. Where
   one person has ended up under two spellings, fold them together: your books are never
   edited, and any fold can be undone
-- **Statistics**: what is on the shelf, who reads what, what got finished when, and how
-  many pages you read each month
-
-### Running it
-
 - **PWA installable**: "Add to Home Screen" on iOS and Android
-- **German and English**: switch in Settings; new visitors follow their browser
-- **Seven palettes and ten wallpapers**: pick a palette, light or dark, and a background
-  pattern, or a different one every visit. Chosen on a screen of its own, where the preview
-  is your own shelf rather than invented sample books
-- **Light and dark**: follows the system unless you say otherwise, and every part of the
-  look is saved to your account rather than to the browser, so it follows you between
-  devices
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
-- **Health endpoint**: `GET /api/healthz` for container probes. It runs a query and stats
-  the data directory under its own timeout, so it fails when the database or the storage
-  does rather than when the web server does
+
+**That is the shape of it. The complete list, including what Endpaper
+deliberately does not do**, is in [`docs/featurelist.md`](docs/featurelist.md):
+no public catalogue, no offline mode, no circulation desk. Worth knowing before
+you install it rather than after.
 
 ## Local Development
 

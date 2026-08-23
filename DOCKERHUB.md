@@ -8,6 +8,11 @@ One container. It serves the API and the compiled web client together, so there 
 second web server and no CORS to configure. Storage is a single SQLite file plus a
 directory of cover images.
 
+**Source, issues and the full feature list:**
+[github.com/f-klement/endpaper](https://github.com/f-klement/endpaper). This page
+covers running it; what it actually does, and what it deliberately does not do, is
+in [`docs/featurelist.md`](https://github.com/f-klement/endpaper/blob/main/docs/featurelist.md).
+
 ## Run it
 
 ```bash
@@ -47,6 +52,15 @@ volumes:
 | `GOOGLE_BOOKS_API_KEY` | none | Optional. Metadata works without it: the German National Library, K10plus and Open Library are queried first and need no key |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret check and nothing else |
 | `CORS_ORIGINS` | none | Only needed if you serve the client from a different origin, which this image does not |
+
+### Overdue reminders
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ENABLE_OVERDUE_TICKER` | `true` | The hourly digest runs in-process. **Set it `false` if you run more than one web process**, and drive `POST /api/loans/overdue/notify` from cron instead: the ticker assumes exactly one process, which the shipped image guarantees and a scaled deployment does not. |
+
+Where the digest is posted, how often a loan is chased, and whether the feature is
+on at all are settings in the app rather than environment variables.
 
 ### Authentication
 

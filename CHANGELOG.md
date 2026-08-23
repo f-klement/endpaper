@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.6.0
+
+_2026-08-23_
+
+Five features, and a bug that had been hiding under a comment saying it was
+fixed.
+
+**More than one copy of a title.** Two paperbacks of one book are two objects,
+each with its own condition, location and lending state. This meant breaking the
+rule that an ISBN is unique, which every other feature here assumed, so it went
+first: uniqueness now applies to single copies only, through a partial index.
+
+**Collections.** Named parts of a shelf, one per book: physical from ebook, kept
+from sold, yours from mine. Filing a book changes nothing about who may see it,
+which is deliberate. A collection is shelving, not permission.
+
+**Author pages, and merging.** Everybody your shelf credits, with their books
+behind one click. When one person arrives spelled three ways you can fold them
+together, and the merge writes nothing to any book: it records the decision, so
+it is reversible, it survives a re-import that would otherwise split the name
+again, and it can express a spelling no book carries.
+
+**Quotes.** A passage worth keeping, with the page it is on and your own line
+about it beside it. Kept separate from notes because one is meant to be verbatim
+and the other is not.
+
+**The book page folds.** Seventeen panels in one column became six collapsible
+groups plus a heading that never folds. What arrives open depends on the book: a
+loan section opens on a book that is out, copies on a book with more than one.
+Your own choice to open or close a section wins over that, permanently, on that
+device.
+
+**The endless spinner is fixed, and it was two faults.** The client did not tell
+the server it wanted JSON, so a portal answered an expired session with a
+redirect rather than a 401; the service worker then served the cached shell to
+the reload, so the reload never reached the portal. Round and round. Both are
+closed, and a guard now makes a second reload in one page load impossible: a
+loop degrades to a page that says what happened.
+
+**Deep links survived nothing before this.** `/book/12` and every other client
+route answered 404 on refresh, with a valid session, and had since v0.2.0. Five
+documents said otherwise, one of them published. The shell is now served for an
+unmatched path that is not an API route, that accepts HTML, and that is not an
+asset, so a bookmark works, a refresh works, and a shared link works. `/login`
+was 404ing too, which behind a portal is invisible and in the default local mode
+is the sign-in form.
+
+**Cache headers.** The shell revalidates, hashed assets do not. A reader holding
+yesterday's page no longer asks for a script that a deploy deleted.
+
+**Five migrations run on start**, in this order: `d1a7f36b9c58` adds lending
+willingness, `b1e7c94a2d05` makes a second copy legal, `c2f95a80d417` creates
+`collections`, `a9c4e7b21d03` creates `author_aliases`, and `d3f6b81c9a27`
+creates `quotes`. All additive, all with a working downgrade, and none touches an
+existing row's data. The copies one is the only one that changes a constraint:
+it replaces the unique index on `books.isbn` with a partial one, so a downgrade
+fails rather than silently dropping the second copy of anything.
+
+**Dropped, so nobody goes looking.** Linking a physical book to an ebook: the
+useful half of it already exists, since a copy can be marked as an ebook format
+and two copies of one title are now two rows. MARC import and export, and
+printable reports.
+
 ## v0.5.0
 
 _2026-08-22_
