@@ -1,6 +1,10 @@
 [project]
 name = "endpaper-backend"
-version = "0.6.0"
+# Not the release version, which is derived from the git tag at build time: see
+# "The version is derived, not declared" in docs/decisions.md. Nothing reads this
+# field, there is no [build-system] and nothing is published to an index, so a real
+# number here would only rot into a second answer to "what am I running".
+version = "0.0.0"
 description = "Endpaper backend (FastAPI)"
 license = "Apache-2.0"
 requires-python = ">=3.14"

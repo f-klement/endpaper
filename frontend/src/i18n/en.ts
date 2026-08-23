@@ -769,6 +769,14 @@ export const en = {
   "covers.remaining": "{remaining} books still to go. Run it again to carry on.",
   "covers.allDone": "Every book that could have a cover has one.",
 
+  // ── About ───────────────────────────────────────────────────────────────────
+  "about.title": "About Endpaper",
+  "about.version": "Version {version}",
+  "about.source": "Source code",
+  "about.support":
+    "If you like Endpaper and want to support my work, buy me a coffee.",
+  "about.kofiAlt": "Support Endpaper on Ko-fi",
+
   // ── Saved views ─────────────────────────────────────────────────────────
   "saved.saveThisView": "Save this view",
   "saved.nameLabel": "Name for this view",

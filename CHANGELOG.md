@@ -8,9 +8,25 @@ flag: the built files stay on disk, unused. With it set, a path outside the API
 is a plain 404 rather than the app shell, which is correct, because a host
 serving no frontend has no client routes for the shell to rescue.
 
-**Funding links**, in `README.md` and on the Docker Hub page and deliberately
-nowhere in the app. The money is for running a shared relay. It is not a paid
-tier and no feature sits behind it.
+**Settings folds.** Eleven cards, the same disclosure and the same per device
+memory the book page uses, against a fixed rule: a card that answers "what is
+this set to" arrives open, a card that starts a job (import, cover backfill,
+overdue reminders, test accounts, backup) arrives closed. Your own choice wins
+after that, and is remembered per card.
+
+**An About card** at the foot of Settings: the version you are running, a link
+to the source, and one sentence asking whether you would like to buy the author
+a coffee. The Ko-fi button is served from your own deployment, so opening
+Settings tells Ko-fi nothing.
+
+**Funding links**, in `README.md`, on the Docker Hub page and in that one
+sentence. The money is for running a shared relay. It is not a paid tier and no
+feature sits behind it.
+
+**The version on that card is now the tag you released**, derived at build time
+rather than typed into a file first. Nothing is bumped before tagging: a release
+shows `0.7.0`, a working build shows `0.6.0-14-gbbdf755` and cannot be mistaken
+for one.
 
 ## v0.6.0
 

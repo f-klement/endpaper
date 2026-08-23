@@ -2650,22 +2650,159 @@ so collapsing by accident would lose a note. The `hidden` attribute keeps the pa
 the accessibility tree and out of the tab order, which is the part that matters, and the
 page holds no more DOM than the flat column it replaced.
 
-### Funding is two links in the README, and nothing in the app
+### The settings page folds against a fixed table, not a condition
+
+The book page keys each section's default on the book in front of the reader. Settings has
+no equivalent fact to test, so `SETTINGS_SECTION_DEFAULTS` is a table, and the rule behind
+it is what a card is for: **open when the current setting is the whole of the card and
+reading it is why you are here, closed when it starts a job or holds a form.** Language,
+appearance, the Goodreads toggle, the default language and About are the first kind;
+import, the cover backfill, the overdue webhook form, test accounts and backup are the
+second, and a deliberate arrival is what a fold costs least.
+
+**`googleBooks` is an exception and is stated as one.** By the rule it belongs with the
+second group: it holds a toggle, an API key field with show, save and clear, and three
+hint paragraphs, the same shape as the overdue form and the tallest open card on the page
+at roughly 309px. It is open anyway, because the toggle is the setting and the key is its
+configuration, and because closing it would put five closed handles in a row through the
+middle of the page. A rule with a silent exception is what this repository keeps getting
+bitten by, so the exception is named in `SETTINGS_SECTION_DEFAULTS` too.
+
+Six of eleven arrive open **for an admin**. The plan this shipped from proposed the
+opposite default, folding everything except appearance and the feature toggles. It was
+overruled for one measured reason: a member who is not an admin is shown five of these
+cards, three of them open, so folding the language switch would leave that reader four
+closed handles and nothing to read.
+
+The ids are named after what a card is, not after its title: `appearance`, not
+`theme.label`; `overdue`, not `reminders`. The id is what reaches storage, so a renamed
+title is free and a renamed id forgets what every reader said.
+
+### The section store is a parameter, because two pages have an `about`
+
+`readSectionChoices` and `writeSectionChoice` take a `SectionStore`. One shared
+`localStorage` key would have made closing a book's blurb close the app's own About card,
+with nothing wrong on either page. `SectionStore` is a union of the two key names rather
+than a `string`, so a third folding page has to name its store and a typo is a compile
+error.
+
+### Folding settings kept the card, and that is why `CollapsibleSection` has a variant
+
+`SettingsSection`'s whole reason for being shared is that `/settings/appearance` must not
+look like a different app from the page that links to it. Folding by adopting the book
+page's row chrome would have broken exactly that, so the disclosure grew a `card` variant
+instead: same surface, same icon badge, one behaviour. The badge is its own component,
+`components/SectionIcon.tsx`, so the two headings cannot drift apart. `SettingsSection`
+stays for the appearance screen, which does not fold because it is arrived at
+deliberately.
+
+One thing the fold broke and the fix is worth keeping: the panel is a `role="group"`
+labelled by its handle, so the two language pickers' own `role="group"` wrappers became a
+second element with the same accessible name and `getByRole` found two. The wrappers went.
+
+### Funding is one link, in the README and in an About card
 
 Ko-fi only, at `ko-fi.com/fklement`. Patreon was dropped: a second platform is a
 second thing to maintain, for an audience that has not asked for it.
-still be there next year.
 
-**They live in `README.md` and on the Docker Hub page, and nowhere in the UI.** No banner,
-no menu entry, no dismissible card. A member cataloguing their own books on a server their
-own household runs is not an audience to ask for money, and a self hosted app that begs is
-one more thing to patch out. Somebody deciding whether to run this reads the README;
-somebody using it does not need to be asked again.
+**It was nowhere in the app until 2026-08-23, when the owner decided otherwise.** What
+replaced the old rule is narrower rather than looser: one sentence and one button, in an
+About card at the foot of Settings, and nothing anywhere else. No banner, no menu entry,
+no dismissible card, no mention on any screen somebody passes through while cataloguing.
 
-The money is for one thing, running the shared relay, which is why the statement of what it
-pays for sits beside the links rather than being left implied. It is not a paid tier and no
-capability sits behind it: every feature stays available to somebody who runs their own
-relay, and if that ever stops being true it is a different project.
+**Nowhere is it a pitch, and that is the whole of the wording rule.** The README and the
+Docker Hub page ask in one sentence and add two facts: it pays for the shared relay, and
+it is not a paid tier with anything behind it. The card asks in the same sentence and adds
+nothing, because its reader is already inside the app. Earlier drafts of both argued the
+case at length and read as one; the argument was cut from all three places on the same
+day.
+
+**The card's size is what does the work, and the defaults only help an admin.** About is
+open unless explicitly closed. An admin has five other open cards beside it and About is
+the eleventh of eleven, roughly 1,400px down a long page: the count defends it there. A
+member who is not an admin sees five cards, three of them open, and every extra open card
+an admin counts (Google Books, Goodreads, the default language) is admin only. **On that
+page nothing except About's own height can keep it from dominating**, which is why the
+card is two short lines and a button rather than a paragraph: the version and the source
+link on one line, one sentence asking, the button.
+
+**Measured, because "shorter" is not a number.** Computed from the class list at
+`max-w-2xl` with Tailwind's default type scale rather than in a browser, and the same
+model reproduces the design seat's figure for the first draft (286px against their 284px),
+which is what makes the rest of these comparable.
+
+| Member page (five cards, three open) | About | painted card | share |
+|---|---|---|---|
+| First draft, with a sentence describing the app | 286px | 788px | 36% |
+| That sentence cut | 246px | 748px | 33% |
+| **Shipped: version and source on one line** | **210px** | **712px** | **29.5%** |
+
+About is still the tallest card there by 40px, against 170px for language and 160px for
+appearance, and that is where it stops. It is last on the page and one card among five,
+and the remaining 40px cannot be bought with words: the only lever left was tightening
+this card's `space-y-4` into a block for 24px, and **that was refused**, because it would
+give one card a rhythm no other card has, immediately after the same change gave the page
+a consistent one. The German support sentence wraps to two lines at this width, which is
+20px more (230px); that is a fact about German rather than a design failure.
+
+The six expanded handles are still asserted, because a later change that folded everything
+else away would leave About alone on an admin's page:
+`SettingsPage.test.tsx::leaves About one open card among six, not the page's only one`
+counts them, and `SettingsPage/hooks.test.ts::leaves a member who is not an admin
+something to read` pins the member's three. What changed is which of the two is load
+bearing.
+
+**The button is served from this deployment** (`frontend/public/kofi-button.png`), not
+from `storage.ko-fi.com`. The CSP's `img-src` is derived from `covers.COVER_HOSTS`, so a
+hotlinked button would mean widening the policy for a decoration, and it would report the
+address of a private household server to Ko-fi every time somebody opened Settings.
+`rel="noopener noreferrer"` keeps the same true of following the link.
+
+**The artwork is Ko-fi's trademark, not this project's.** It is their published button
+image, vendored unchanged and used as their button guidance intends, and it is not covered
+by this repository's Apache-2.0 licence: the licence grants nothing over somebody else's
+mark, and a fork that wants a different funding link should replace the file rather than
+assume it came with the code. The same reasoning `theming.md` applies to the Morris and Co
+pattern names: a trademark question rather than a copyright one.
+
+The card also names the version and links the source, which is the half of it that is not
+about money at all: a version number is what somebody quotes in a bug report, and the
+source link is what an Apache-2.0 reader goes looking for.
+
+### The version is derived, not declared
+
+The card first read its version from `package.json`. That is one file to remember before
+every tag, plus `backend/pyproject.toml`, and a mobile manifest once the React Native
+client exists. On 2026-08-23 both were still on 0.5.0 while v0.6.0 was being cut, which is
+what a number maintained by memory does.
+
+A guard was written first: fail the release when the declared versions disagree with the
+tag. It was thrown away the same day, because it does not remove the chore, it only
+converts a forgotten edit into a failed pipeline and a re-tag. Making the release *more*
+ceremonial is the wrong direction.
+
+`vite.config.ts` now substitutes `__APP_VERSION__`: `CI_COMMIT_TAG` minus the `v` on a
+release, `git describe --tags --always --dirty` otherwise. So a development build reads
+`0.6.0-14-gbbdf755` and cannot be mistaken for a release, and nothing is edited before a
+tag. The remaining `version` fields in `package.json` and `pyproject.toml` are package
+metadata that no screen reads; neither is published to a registry that consumes them.
+
+**The frontend is built inside a Docker stage with no `.git` and no CI variables**, so the
+tag cannot be discovered there and is handed in as `--build-arg APP_VERSION`
+(`Dockerfile`, `.gitlab-ci.yml` `release:build`). Without that the release image would
+show `unknown`, which is exactly why the fallback is that word rather than a number
+that looks real. It is one token deliberately: a version never contains a space, so a
+test can assert the shape of one.
+
+A sentence describing what the app is was written and cut. Somebody reading this card is
+already inside the app.
+
+The money is for one thing, running the shared relay, and the two facts that survive the
+trim are the two a reader needs: what it pays for, and that no capability sits behind it.
+Every feature stays available to somebody who runs their own relay, and if that ever stops
+being true it is a different project. Publishing what the relay costs and what came in was
+promised in an earlier draft of these texts and is promised in none of them now; it is
+unshipped work in `implementation_plan.md` A0, waiting on a relay to have a cost.
 
 ## Tooling
 

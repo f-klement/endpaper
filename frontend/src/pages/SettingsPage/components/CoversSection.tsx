@@ -1,8 +1,16 @@
-import { Button, ErrorState, Icon } from "../../../components";
+import {
+  Button,
+  CollapsibleSection,
+  ErrorState,
+  Icon,
+} from "../../../components";
 import { useTranslation } from "../../../i18n";
-import { SettingsSection } from "../../components";
 
 interface CoversSectionProps {
+  /** The fold is the page's to decide, so it is passed in rather than held here. */
+  isOpen: boolean;
+  onToggle: () => void;
+
   result: {
     examined: number;
     stored: number;
@@ -28,6 +36,8 @@ interface CoversSectionProps {
  * which reads as a clean no-op in exactly the situation this exists for.
  */
 export default function CoversSection({
+  isOpen,
+  onToggle,
   result,
   isRunning,
   error,
@@ -36,7 +46,14 @@ export default function CoversSection({
   const { t } = useTranslation();
 
   return (
-    <SettingsSection title={t("covers.title")} icon="book">
+    <CollapsibleSection
+      variant="card"
+      icon="book"
+      id="covers"
+      title={t("covers.title")}
+      isOpen={isOpen}
+      onToggle={onToggle}
+    >
       <p className="text-sm text-paper-600 dark:text-paper-400">
         {t("covers.explain")}
       </p>
@@ -78,6 +95,6 @@ export default function CoversSection({
           </p>
         </div>
       )}
-    </SettingsSection>
+    </CollapsibleSection>
   );
 }

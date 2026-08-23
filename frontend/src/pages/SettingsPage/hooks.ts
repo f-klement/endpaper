@@ -4,6 +4,9 @@
  * Everything the page needs, exposed as intent-shaped hooks. Nothing outside
  * this file imports from `api/generated`, so regenerating the client cannot
  * ripple into the components.
+ *
+ * `useSettingsSections` is the one exception to the title: it holds no server
+ * state, only which cards this device has folded away.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +14,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError, downloadFile } from "../../api/mutator";
+import {
+  readSectionChoices,
+  resolveOpen,
+  writeSectionChoice,
+  type SectionChoices,
+} from "../../lib/sectionState";
 import { useSwitchAccount as useSwitchAccountMutation } from "../../api/generated/endpoints/auth/auth";
 import {
   getListTestAccountsQueryKey,
@@ -339,5 +348,122 @@ export function useOverdueDigest() {
     },
     isSending: mutation.isPending,
     error: mutation.error,
+  };
+}
+
+/**
+ * This page's own localStorage entry. See `lib/sectionState.ts`: the book page
+ * has a section called `about` too, and one shared key would merge them.
+ */
+const STORE = "settingsSections";
+
+/**
+ * The collapsible cards, in the order they are drawn.
+ *
+ * The ids are what reaches storage, so they are named after what a section is
+ * rather than after its current title: `appearance`, not `theme.label`, and
+ * `overdue`, not `reminders`. Renaming a title is then free; renaming an id
+ * forgets what every reader said about that section.
+ */
+export const SETTINGS_SECTIONS = [
+  "language",
+  "appearance",
+  "import",
+  "covers",
+  "googleBooks",
+  "goodreads",
+  "defaultLanguage",
+  "overdue",
+  "testAccounts",
+  "backup",
+  "about",
+] as const;
+
+export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
+
+/**
+ * Which cards arrive open, before anybody has said otherwise.
+ *
+ * The book page keys its defaults on the book. Settings has no equivalent fact
+ * to test, so the rule is about what a section is for: **open when the current
+ * setting is the whole of it and reading it is why you are here, closed when it
+ * starts a job or holds a form.** Language, appearance, the Goodreads toggle
+ * and the default language answer "what is this set to" in one glance; import,
+ * the cover backfill, the webhook form, test accounts and backup are errands
+ * somebody arrives at deliberately, and a deliberate arrival is what a fold
+ * costs least.
+ *
+ * **`googleBooks` is the one exception, named here rather than left to be
+ * noticed.** By the rule it should be closed: it holds a toggle, an API key
+ * field with show, save and clear, and three hint paragraphs, which is the same
+ * shape as `overdue` and the tallest open card on the page. It stays open
+ * because the toggle *is* the setting and the key is its configuration, and
+ * because closing it would put five closed handles in a row through the middle
+ * of the page. A rule with a silent exception is worse than a rule with a
+ * stated one.
+ *
+ * `about` is open under the same rule, and its openness is also the reason it
+ * is not the only thing open. It carries a donation link, and a settings page
+ * whose one expanded card asks for money is a donation prompt wearing a
+ * settings page. Six open of eleven is what keeps it one card among many for an
+ * admin.
+ *
+ * **A member who is not an admin sees five cards** (language, appearance,
+ * import, covers, about), of which three are open, so the split matters most
+ * there: folding `language` as well would leave that reader four closed handles
+ * and nothing to read. It is also why About's own height is capped rather than
+ * balanced against other cards: on that page there are no other cards to
+ * balance it against, and every one of the extra open cards is admin only.
+ *
+ * A `Record` over every id rather than a partial, so adding a section without
+ * deciding its default is a compile error rather than a silently closed panel.
+ */
+export const SETTINGS_SECTION_DEFAULTS: Record<SettingsSectionId, boolean> = {
+  language: true,
+  appearance: true,
+  import: false,
+  covers: false,
+  googleBooks: true,
+  goodreads: true,
+  defaultLanguage: true,
+  overdue: false,
+  testAccounts: false,
+  backup: false,
+  about: true,
+};
+
+export interface UseSettingsSectionsResult {
+  isOpen: (section: SettingsSectionId) => boolean;
+  toggle: (section: SettingsSectionId) => void;
+}
+
+/**
+ * Open or closed, per card, remembered per device.
+ *
+ * The three state rule `resolveOpen()` holds, with a fixed table where the book
+ * page has a conditional one: absence follows the table, and a stored choice
+ * beats it forever. Nothing here is frozen per arrival, because no default
+ * depends on data that can change while the page is open.
+ */
+export function useSettingsSections(): UseSettingsSectionsResult {
+  // Read once, on mount: storage is a starting point, and re-reading it on
+  // every render would fight the state this component already holds.
+  const [choices, setChoices] = useState<SectionChoices>(() =>
+    readSectionChoices(STORE),
+  );
+
+  const isOpen = (section: SettingsSectionId) =>
+    resolveOpen(choices[section], SETTINGS_SECTION_DEFAULTS[section]);
+
+  return {
+    isOpen,
+    toggle: (section: SettingsSectionId) => {
+      const next = !isOpen(section);
+      writeSectionChoice(STORE, section, next);
+      setChoices((current) => ({
+        ...current,
+        [section]: next ? "open" : "closed",
+      }));
+    },
   };
 }

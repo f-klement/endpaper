@@ -19,6 +19,8 @@ describe("CoversSection", () => {
   it("offers to fetch the covers that are missing", () => {
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={null}
         isRunning={false}
         error={null}
@@ -35,6 +37,8 @@ describe("CoversSection", () => {
     const onRun = vi.fn();
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={null}
         isRunning={false}
         error={null}
@@ -42,7 +46,9 @@ describe("CoversSection", () => {
       />,
     );
 
-    await userEvent.setup().click(screen.getByRole("button"));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Fetch missing covers/ }));
 
     expect(onRun).toHaveBeenCalledOnce();
   });
@@ -50,6 +56,8 @@ describe("CoversSection", () => {
   it("says how many it stored and how many have no cover anywhere", () => {
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={NOTHING_LEFT}
         isRunning={false}
         error={null}
@@ -68,6 +76,8 @@ describe("CoversSection", () => {
     // reader the job is unfinished.
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={{ ...NOTHING_LEFT, remaining: 480 }}
         isRunning={false}
         error={null}
@@ -81,6 +91,8 @@ describe("CoversSection", () => {
   it("says the job is done when nothing is left", () => {
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={NOTHING_LEFT}
         isRunning={false}
         error={null}
@@ -98,6 +110,8 @@ describe("CoversSection", () => {
     // the other counts reports a clean no-op in exactly that situation.
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={{ ...NOTHING_LEFT, stored: 0, unreachable: 12, still_missing: 0 }}
         isRunning={false}
         error={null}
@@ -113,6 +127,8 @@ describe("CoversSection", () => {
   it("says nothing about unreachable covers when there were none", () => {
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={NOTHING_LEFT}
         isRunning={false}
         error={null}
@@ -126,6 +142,8 @@ describe("CoversSection", () => {
   it("reports a failure rather than looking like it worked", () => {
     renderLocalised(
       <CoversSection
+        isOpen
+        onToggle={() => {}}
         result={null}
         isRunning={false}
         error={new Error("nope")}

@@ -412,3 +412,45 @@ rule lives. Without the third state, closing the loan section on a borrowed book
 last exactly until the next visit. The entries are per section and not per book, so a
 reader's first tap on a section ends its conditional default on every book on that
 device.
+
+**The store is a parameter, and the reason is a real collision.** Both folding pages have
+a section called `about`, so one shared key would let closing a book's blurb close the
+app's own about card. `readSectionChoices` and `writeSectionChoice` take a `SectionStore`,
+which is a union of the two key names rather than a `string`: a third folding page has to
+name its store there, and a typo is a compile error instead of a silently shared entry.
+
+## The settings page folds too
+
+Eleven cards, the same disclosure and the same storage, with one difference: settings has
+no equivalent of a book to key a default on, so `SETTINGS_SECTION_DEFAULTS` in the page's
+`hooks.ts` is a fixed table. The rule it encodes: **open when the current setting is the
+whole of the card and reading it is why you are here, closed when it starts a job or holds
+a form.** Language, appearance, the Goodreads toggle, the default language and About
+arrive open; import, the cover backfill, overdue reminders, test accounts and backup
+arrive closed. **Google Books is a stated exception**: by the rule it belongs with the
+closed group, since it holds a key field with save and clear, and it is open because the
+toggle is the setting and closing it would put five closed handles in a row mid-page.
+
+**A member who is not an admin sees five of the eleven, three of them open**, and that is
+the case the defaults are really tuned for. Folding the language switch as well would
+leave that reader four closed handles and nothing to read, and the six open cards an admin
+counts are no defence there, because three of them are admin only. On that page the only
+thing that keeps the About card from dominating is its own height, which is why it is two
+short lines and a button: the version and the source link on one line, one sentence
+asking, and the Ko-fi button. Measured from the class list at `max-w-2xl`, 210px of 712px
+of painted card, against 170px for the language card.
+
+The ids are named after what a card is rather than after its title (`appearance`, not
+`theme.label`; `overdue`, not `reminders`), because the id is what reaches storage and a
+title is free to change.
+
+**The chrome is the settings card, not the book page's rows.** `CollapsibleSection` takes
+a `variant`, and `card` draws the same surface and icon badge `SettingsSection` does; the
+badge itself is `components/SectionIcon.tsx` so the two cannot drift. `SettingsSection`
+stays for `/settings/appearance`, which does not fold: it is arrived at deliberately, from
+a link that already says what is set.
+
+**One fold made a duplicate accessible name.** The panel is a `role="group"` labelled by
+its handle, so the two language pickers' own `role="group"` wrappers became a second
+element answering to the same name and `getByRole` found two. The wrappers went; the
+panel is the group.

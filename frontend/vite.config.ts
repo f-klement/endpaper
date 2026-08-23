@@ -10,7 +10,43 @@ import { VitePWA } from "vite-plugin-pwa";
 // rolldown panicked with "Failed to get current dir". A docblock cannot do that,
 // because it changes one file's environment rather than how workers are spawned.
 
+import { execSync } from "node:child_process";
+
+/**
+ * The version the app shows, derived rather than declared.
+ *
+ * **Nothing is bumped before a tag.** `package.json` used to be the source, which
+ * meant remembering to edit it, and `backend/pyproject.toml`, and later a mobile
+ * manifest as well, every time. Both sat at 0.5.0 while v0.6.0 was being prepared
+ * on 2026-08-23, which is what a number maintained by memory does. A guard that
+ * failed the release on a mismatch was written first and then thrown away: it
+ * turned one forgotten edit into a failed pipeline and a re-tag, which is more
+ * ceremony rather than less.
+ *
+ * On a tag pipeline the tag is the answer, minus the `v`. Everywhere else
+ * `git describe` says where you are, so a development build reads something like
+ * `0.6.0-14-gbbdf755` and can never be mistaken for a release. If git is absent,
+ * which is true inside the Docker build's frontend stage and in the test container,
+ * the fallback is `unknown`: a plain marker rather than a number that looks real.
+ * One token, never a space, so a version string can always be matched as one.
+ */
+function appVersion(): string {
+  const tag = process.env.CI_COMMIT_TAG;
+  if (tag) return tag.replace(/^v/, "");
+  try {
+    return execSync("git describe --tags --always --dirty", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim()
+      .replace(/^v/, "");
+  } catch {
+    return "unknown";
+  }
+}
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     react(),
     // Tailwind 4 runs as a Vite plugin; there is no postcss.config.js any more.

@@ -120,4 +120,44 @@ describe("CollapsibleSection", () => {
       screen.getByRole("heading", { name: "Lending this copy" }),
     ).toBeInTheDocument();
   });
+
+  describe("as a settings card", () => {
+    it("keeps the icon out of the handle's name", () => {
+      // The badge is decoration beside a title that already says what the
+      // section is. Announcing it would make the name differ from the label.
+      renderLocalised(
+        <CollapsibleSection
+          variant="card"
+          icon="inbox"
+          id="backup"
+          title="Backup"
+          isOpen={false}
+          onToggle={vi.fn()}
+        >
+          <p>a whole library</p>
+        </CollapsibleSection>,
+      );
+
+      expect(
+        screen.getByRole("button", { name: "Backup" }),
+      ).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("folds the same way the rows do", () => {
+      renderLocalised(
+        <CollapsibleSection
+          variant="card"
+          icon="inbox"
+          id="backup"
+          title="Backup"
+          isOpen={false}
+          onToggle={vi.fn()}
+        >
+          <p>a whole library</p>
+        </CollapsibleSection>,
+      );
+
+      expect(screen.getByText("a whole library")).not.toBeVisible();
+    });
+  });
 });

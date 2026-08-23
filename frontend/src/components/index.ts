@@ -16,6 +16,7 @@ export { default as HelpButton } from "./HelpButton";
 export { default as Icon } from "./Icon";
 export type { IconName } from "./Icon";
 export { default as Modal } from "./Modal";
+export { default as SectionIcon } from "./SectionIcon";
 export { default as Skeleton } from "./Skeleton";
 export { default as StarRating } from "./StarRating";
 export { default as Spinner } from "./Spinner";

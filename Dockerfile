@@ -12,6 +12,13 @@ RUN bun install --frozen-lockfile
 
 COPY frontend/ .
 # `build` runs `tsc --noEmit` first, so a type error fails the image build.
+# The version the About card shows. The frontend is built here, in a stage with no
+# .git and no CI variables, so the tag cannot be discovered and has to be handed in.
+# Empty on a local build, which is correct: vite.config falls back to git describe,
+# and to `unknown` when there is no git either.
+ARG APP_VERSION=""
+ENV CI_COMMIT_TAG=$APP_VERSION
+
 RUN bun run build
 
 # ── Stage 2: FastAPI server with uv ────────────────────────────────────────

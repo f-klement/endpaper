@@ -115,12 +115,9 @@ discloses nothing but liveness.
 
 ## Supporting it
 
-* **Ko-fi**: [ko-fi.com/fklement](https://ko-fi.com/fklement)
-
-The money pays for one thing: running the shared relay that lets two households reach each
-other when neither is reachable from the internet. It is not a paid tier and no feature
-sits behind it. This image is the complete app, a relay is optional, and nothing in it
-asks a reader for money.
+If you like Endpaper and want to support my work, [buy me a
+coffee](https://ko-fi.com/fklement). It helps pay for the public server that can mediate
+between households.
 
 ## Licence
 

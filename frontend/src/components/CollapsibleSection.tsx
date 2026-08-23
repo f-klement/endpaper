@@ -1,15 +1,28 @@
 import type { ReactNode } from "react";
 
-import Icon from "./Icon";
+import Icon, { type IconName } from "./Icon";
+import SectionIcon from "./SectionIcon";
 
-interface CollapsibleSectionProps {
+/**
+ * How the section is framed, and the two shapes are not interchangeable.
+ *
+ * A card carries an icon because every settings card has one; a row on the
+ * book page carries none, and passing one there would be the settings look
+ * arriving on a page that does not use it. Expressed as a union rather than
+ * two optional props so both mistakes are compile errors rather than a card
+ * with a hole where the badge goes.
+ */
+type Chrome =
+  { variant?: "rows"; icon?: never } | { variant: "card"; icon: IconName };
+
+type CollapsibleSectionProps = {
   /** Unique on the page. Wires the handle to the panel it controls. */
   id: string;
   title: string;
   isOpen: boolean;
   onToggle: () => void;
   children: ReactNode;
-}
+} & Chrome;
 
 /**
  * A labelled group of controls that can be folded away.
@@ -28,6 +41,12 @@ interface CollapsibleSectionProps {
  * replaces. `hidden` keeps it out of the accessibility tree and out of the tab
  * order, which is the part that matters.
  *
+ * **Two framings, one disclosure.** `rows` is the book page: sections stacked
+ * inside one surface, separated by a rule. `card` is the settings pages, where
+ * each section is its own card with an icon, and it exists so folding settings
+ * does not mean drawing them a second way; `SettingsSection` draws the same
+ * card for the appearance screen, which does not fold.
+ *
  * The chevron is decorative: the state is already on the button.
  */
 export default function CollapsibleSection({
@@ -35,13 +54,22 @@ export default function CollapsibleSection({
   title,
   isOpen,
   onToggle,
+  variant = "rows",
+  icon,
   children,
 }: CollapsibleSectionProps) {
   const panelId = `${id}-panel`;
   const handleId = `${id}-handle`;
+  const isCard = variant === "card";
 
   return (
-    <section className="border-b border-paper-100 last:border-b-0 dark:border-paper-800">
+    <section
+      className={
+        isCard
+          ? "card p-5"
+          : "border-b border-paper-100 last:border-b-0 dark:border-paper-800"
+      }
+    >
       {/* The heading wraps the button so the section is a landmark in the
           document outline as well as a control. */}
       <h2>
@@ -53,9 +81,14 @@ export default function CollapsibleSection({
           onClick={onToggle}
           // min-h-11 is 44px, the smallest thing a thumb hits reliably. This is
           // the control a phone reader uses most on this page.
-          className="w-full min-h-11 flex items-center justify-between gap-3 py-3 text-left text-sm font-semibold text-paper-900 hover:text-accent-700 transition-colors dark:text-paper-100 dark:hover:text-accent-300"
+          className={`w-full min-h-11 flex items-center justify-between gap-3 text-left text-sm font-semibold text-paper-900 hover:text-accent-700 transition-colors dark:text-paper-100 dark:hover:text-accent-300 ${
+            isCard ? "" : "py-3"
+          }`}
         >
-          <span>{title}</span>
+          <span className="flex items-center gap-2.5">
+            {icon && <SectionIcon name={icon} />}
+            {title}
+          </span>
           <Icon
             name="chevron"
             className={`w-4 h-4 text-paper-600 transition-transform dark:text-paper-400 ${
@@ -70,7 +103,7 @@ export default function CollapsibleSection({
         role="group"
         aria-labelledby={handleId}
         hidden={!isOpen}
-        className="pb-5 space-y-5"
+        className={isCard ? "pt-4 space-y-4" : "pb-5 space-y-5"}
       >
         {children}
       </div>

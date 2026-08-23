@@ -211,19 +211,9 @@ Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs
 
 ## Supporting it
 
-* **Ko-fi**: [ko-fi.com/fklement](https://ko-fi.com/fklement)
-
-**What the money is for, stated rather than implied.** One thing: running the shared relay
-that lets two households reach each other when neither is reachable from the internet.
-That is a VPS, roughly 4 euro a month, and a project that cannot cover it either does not
-offer the relay or offers it until the maintainer tires of it, which is worse.
-
-It is not a paid tier and there is no feature behind it. The app is self hosted and
-complete without a relay, every capability stays available to somebody who runs their own,
-and nothing in the app itself will ever ask you for money while you catalogue your own
-books. What the relay costs and what came in belongs in the open, including the months
-when the answer is nothing: a relay people trust with sealed envelopes is one whose
-funding they can see.
+If you like Endpaper and want to support my work, [buy me a
+coffee](https://ko-fi.com/fklement). It helps pay for the public server that can mediate
+between households.
 
 ## Licence
 

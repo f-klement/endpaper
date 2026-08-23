@@ -750,6 +750,14 @@ export const de: Messages = {
   "covers.remaining": "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
   "covers.allDone": "Jedes Buch, das ein Cover haben kann, hat eines.",
 
+  // ── Über ──────────────────────────────────────────────────────────────────
+  "about.title": "Über Endpaper",
+  "about.version": "Version {version}",
+  "about.source": "Quelltext",
+  "about.support":
+    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee.",
+  "about.kofiAlt": "Endpaper auf Ko-fi unterstützen",
+
   // ── Gespeicherte Ansichten ──────────────────────────────────────────────
   "saved.saveThisView": "Ansicht speichern",
   "saved.nameLabel": "Name für diese Ansicht",

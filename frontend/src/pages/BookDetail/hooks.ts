@@ -637,6 +637,15 @@ export function useBookProgress(bookId: number): UseBookProgressResult {
 }
 
 /**
+ * This page's own localStorage entry.
+ *
+ * Named here rather than inside `sectionState`, because the settings page also
+ * has a section called `about`: one shared key would let a reader close the
+ * blurb on a book and find the app's about card closed too.
+ */
+const STORE = "bookDetailSections";
+
+/**
  * The collapsible groups, in the order they are drawn.
  *
  * The ids are what reaches storage, so renaming one forgets what readers said
@@ -732,7 +741,7 @@ export function useBookSections(
   // Read once, on mount: storage is a starting point, and re-reading it on
   // every render would fight the state this component already holds.
   const [choices, setChoices] = useState<SectionChoices>(() =>
-    readSectionChoices(),
+    readSectionChoices(STORE),
   );
 
   // Frozen per book, because the defaults describe the book *on arrival*. Left
@@ -759,7 +768,7 @@ export function useBookSections(
     isOpen,
     toggle: (section: BookSection) => {
       const next = !isOpen(section);
-      writeSectionChoice(section, next);
+      writeSectionChoice(STORE, section, next);
       setChoices((current) => ({
         ...current,
         [section]: next ? "open" : "closed",

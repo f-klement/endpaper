@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthMode, Locale } from "../../../src/api/generated/model";
 import SettingsPage from "../../../src/pages/SettingsPage";
+import { SETTINGS_SECTIONS } from "../../../src/pages/SettingsPage/hooks";
 import { WALLPAPER_OFF, type Appearance } from "../../../src/theme";
 import {
   LIGHT_APPEARANCE,
@@ -31,6 +32,24 @@ function renderSettings(
     <SettingsPage mode={AuthMode.local} onSignIn={() => {}} {...props} />,
     { appearance },
   );
+}
+
+/**
+ * Make sure a card is open, by its handle.
+ *
+ * A closed panel is `hidden`, which takes everything inside it out of the
+ * accessibility tree, so a test that reaches for a control by role has to open
+ * its card first, exactly as a reader does.
+ *
+ * **Idempotent on purpose.** A test about the Google Books key is not a test
+ * about the defaults table, so it says what it needs rather than what today's
+ * table happens to give it: moving a card from open to closed, or back, must
+ * not break a test that has nothing to do with folding.
+ */
+async function openSection(title: string) {
+  const handle = await screen.findByRole("button", { name: title });
+  if (handle.getAttribute("aria-expanded") === "true") return;
+  await userEvent.setup().click(handle);
 }
 
 const SETTINGS = {
@@ -114,7 +133,9 @@ describe("SettingsPage", () => {
       });
 
       expect(link).toHaveAttribute("href", "/settings/appearance");
-      expect(screen.queryByRole("button", { name: "Dark" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Dark" }),
+      ).not.toBeInTheDocument();
     });
 
     it("does not print a wallpaper this build no longer has as though it were pinned", async () => {
@@ -125,7 +146,9 @@ describe("SettingsPage", () => {
       renderSettings({}, { ...LIGHT_APPEARANCE, wallpaper: "hollyhock" });
 
       expect(
-        await screen.findByRole("link", { name: /Endpaper, Light, Surprise me/ }),
+        await screen.findByRole("link", {
+          name: /Endpaper, Light, Surprise me/,
+        }),
       ).toBeInTheDocument();
     });
 
@@ -139,7 +162,9 @@ describe("SettingsPage", () => {
 
     it("says nothing about the wallpaper while it is on", async () => {
       renderSettings();
-      await screen.findByRole("link", { name: /Endpaper/ });
+      // Named tightly: the About card links to Ko-fi, so /Endpaper/ alone now
+      // matches two links.
+      await screen.findByRole("link", { name: /Endpaper, Light/ });
 
       expect(screen.queryByText(/wallpaper is off/)).not.toBeInTheDocument();
     });
@@ -194,6 +219,7 @@ describe("SettingsPage", () => {
         "PUT",
       );
       renderSettings();
+      await openSection("Google Books");
 
       await userEvent
         .setup()
@@ -208,6 +234,7 @@ describe("SettingsPage", () => {
 
     it("says when no key is stored", async () => {
       renderSettings();
+      await openSection("Google Books");
       expect(await screen.findByText("No key stored yet.")).toBeInTheDocument();
     });
 
@@ -220,6 +247,7 @@ describe("SettingsPage", () => {
         },
       });
       renderSettings();
+      await openSection("Google Books");
 
       expect(
         await screen.findByText("A key is stored (AIza...9f2c)."),
@@ -231,9 +259,12 @@ describe("SettingsPage", () => {
     it("saves a typed key", async () => {
       api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
       renderSettings();
+      await openSection("Google Books");
       const user = userEvent.setup();
 
-      fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "  secret-key  " } });
+      fireEvent.change(await screen.findByLabelText("API key"), {
+        target: { value: "  secret-key  " },
+      });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -247,6 +278,7 @@ describe("SettingsPage", () => {
       // An empty string means "clear the key", which is the Remove button's
       // job. Saving nothing must not silently wipe the stored one.
       renderSettings();
+      await openSection("Google Books");
       expect(
         await screen.findByRole("button", { name: "Save" }),
       ).toBeDisabled();
@@ -255,9 +287,12 @@ describe("SettingsPage", () => {
     it("empties the box after saving, so the key is not left on screen", async () => {
       api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
       renderSettings();
+      await openSection("Google Books");
       const user = userEvent.setup();
 
-      fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "secret-key" } });
+      fireEvent.change(await screen.findByLabelText("API key"), {
+        target: { value: "secret-key" },
+      });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
@@ -267,6 +302,7 @@ describe("SettingsPage", () => {
 
     it("offers removal only when there is something to remove", async () => {
       renderSettings();
+      await openSection("Google Books");
       await screen.findByText("No key stored yet.");
       expect(
         screen.queryByRole("button", { name: "Remove stored key" }),
@@ -282,6 +318,7 @@ describe("SettingsPage", () => {
         },
       });
       renderSettings();
+      await openSection("Google Books");
 
       await userEvent
         .setup()
@@ -357,6 +394,7 @@ describe("SettingsPage", () => {
   it("confirms a successful save", async () => {
     api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
     renderSettings();
+    await openSection("Google Books");
 
     await userEvent
       .setup()
@@ -374,6 +412,7 @@ describe("SettingsPage", () => {
       "PUT",
     );
     renderSettings();
+    await openSection("Google Books");
 
     await userEvent
       .setup()
@@ -386,6 +425,7 @@ describe("SettingsPage", () => {
 describe("SettingsPage API key handling", () => {
   it("masks the typed key by default", async () => {
     renderSettings();
+    await openSection("Google Books");
     expect(await screen.findByLabelText("API key")).toHaveAttribute(
       "type",
       "password",
@@ -396,8 +436,11 @@ describe("SettingsPage API key handling", () => {
     // Only ever the value the admin just entered: the server never returns a
     // stored key, so there is nothing else here to reveal.
     renderSettings();
+    await openSection("Google Books");
     const user = userEvent.setup();
-    fireEvent.change(await screen.findByLabelText("API key"), { target: { value: "typed-key" } });
+    fireEvent.change(await screen.findByLabelText("API key"), {
+      target: { value: "typed-key" },
+    });
 
     await user.click(screen.getByRole("button", { name: "Show" }));
 
@@ -406,6 +449,7 @@ describe("SettingsPage API key handling", () => {
 
   it("hides it again", async () => {
     renderSettings();
+    await openSection("Google Books");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Show" }));
 
@@ -419,6 +463,7 @@ describe("SettingsPage API key handling", () => {
 
   it("offers the explanation next to the field", async () => {
     renderSettings();
+    await openSection("Google Books");
 
     await userEvent
       .setup()
@@ -442,6 +487,7 @@ describe("SettingsPage API key handling", () => {
     it("disables the field", async () => {
       api.on(/\/api\/settings$/, { body: FROM_ENV });
       renderSettings();
+      await openSection("Google Books");
 
       expect(await screen.findByLabelText("API key")).toBeDisabled();
     });
@@ -451,6 +497,7 @@ describe("SettingsPage API key handling", () => {
       // managed outside the app.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
       renderSettings();
+      await openSection("Google Books");
 
       await screen.findByLabelText("API key");
       expect(
@@ -461,6 +508,7 @@ describe("SettingsPage API key handling", () => {
     it("explains where it comes from", async () => {
       api.on(/\/api\/settings$/, { body: FROM_ENV });
       renderSettings();
+      await openSection("Google Books");
 
       expect(
         await screen.findByText(/supplied by the server's configuration/),
@@ -472,6 +520,7 @@ describe("SettingsPage API key handling", () => {
       // control that cannot ever become enabled is just clutter.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
       renderSettings();
+      await openSection("Google Books");
 
       await screen.findByLabelText("API key");
       expect(
@@ -486,6 +535,7 @@ describe("SettingsPage API key handling", () => {
       // The key is fixed; whether the feature is on is still a local decision.
       api.on(/\/api\/settings$/, { body: FROM_ENV });
       renderSettings();
+      await openSection("Google Books");
 
       expect(
         await screen.findByLabelText("Enable extra book details"),
@@ -504,6 +554,7 @@ describe("SettingsPage API key handling", () => {
     it("lists them for an admin", async () => {
       api.on("/api/users/test-accounts", { body: [TESTER] });
       renderSettings();
+      await openSection("Test accounts");
 
       expect(await screen.findByText("tester")).toBeInTheDocument();
     });
@@ -525,35 +576,48 @@ describe("SettingsPage API key handling", () => {
     it("creates one and asks for the list again", async () => {
       api.on("/api/users/test-accounts", { body: [] });
       renderSettings();
+      await openSection("Test accounts");
       const user = userEvent.setup();
 
-      fireEvent.change(await screen.findByLabelText("Username"), { target: { value: "tester" } });
-      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw12345678" } });
+      fireEvent.change(await screen.findByLabelText("Username"), {
+        target: { value: "tester" },
+      });
+      fireEvent.change(screen.getByLabelText("Password"), {
+        target: { value: "pw12345678" },
+      });
       api.on("/api/users/test-accounts", { status: 201, body: TESTER }, "POST");
       await user.click(
         screen.getByRole("button", { name: "Create test account" }),
       );
 
       await waitFor(() =>
-        expect(
-          api.lastCall("/api/users/test-accounts", "POST")?.body,
-        ).toEqual({ username: "tester", password: "pw12345678" }),
+        expect(api.lastCall("/api/users/test-accounts", "POST")?.body).toEqual({
+          username: "tester",
+          password: "pw12345678",
+        }),
       );
     });
 
     it("switches with the password the admin supplies", async () => {
       api.on("/api/users/test-accounts", { body: [TESTER] });
       api.on("/auth/switch", {
-        body: { access_token: "switch-token", token_type: "bearer", user: TESTER },
+        body: {
+          access_token: "switch-token",
+          token_type: "bearer",
+          user: TESTER,
+        },
       });
       const onSignIn = vi.fn();
       renderSettings({ onSignIn });
+      await openSection("Test accounts");
       const user = userEvent.setup();
 
       await user.click(
         await screen.findByRole("button", { name: "Switch to tester" }),
       );
-      fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "pw12345678" } });
+      fireEvent.change(screen.getByLabelText("Password for tester"), {
+        target: { value: "pw12345678" },
+      });
       await user.click(screen.getByRole("button", { name: "Switch" }));
 
       await waitFor(() =>
@@ -573,12 +637,15 @@ describe("SettingsPage API key handling", () => {
       });
       const onSignIn = vi.fn();
       renderSettings({ onSignIn });
+      await openSection("Test accounts");
       const user = userEvent.setup();
 
       await user.click(
         await screen.findByRole("button", { name: "Switch to tester" }),
       );
-      fireEvent.change(screen.getByLabelText("Password for tester"), { target: { value: "wrong" } });
+      fireEvent.change(screen.getByLabelText("Password for tester"), {
+        target: { value: "wrong" },
+      });
       await user.click(screen.getByRole("button", { name: "Switch" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -586,5 +653,155 @@ describe("SettingsPage API key handling", () => {
       );
       expect(onSignIn).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * Every card on this page folds, and which ones arrive open is the design.
+ *
+ * The rule: open when the current setting is the whole of the card and reading
+ * it is why you are here, closed when it starts a job or holds a form. The
+ * table itself is asserted in hooks.test.ts; what is checked here is that the
+ * page draws it, and that About is one open card among several rather than the
+ * page's only expanded thing.
+ */
+describe("SettingsPage folds", () => {
+  const OPEN = ["Language", "Appearance", "Google Books", "About Endpaper"];
+  const CLOSED = [
+    "Bring a library across",
+    "Covers",
+    "Overdue reminders",
+    "Test accounts",
+    "Backup",
+  ];
+
+  /** Every card, in draw order. Also the accessible name of its handle. */
+  const HANDLES = [
+    "Language",
+    "Appearance",
+    "Bring a library across",
+    "Covers",
+    "Google Books",
+    "Goodreads",
+    "Default language for new visitors",
+    "Overdue reminders",
+    "Test accounts",
+    "Backup",
+    "About Endpaper",
+  ];
+
+  it("opens the cards that answer a question", async () => {
+    renderSettings();
+    await screen.findByRole("button", { name: "Google Books" });
+
+    for (const title of OPEN) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    }
+  });
+
+  it("closes the cards that start a job", async () => {
+    renderSettings();
+    await screen.findByRole("button", { name: "Backup" });
+
+    for (const title of CLOSED) {
+      expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    }
+  });
+
+  it("keeps a closed card's controls out of reach until it is opened", async () => {
+    renderSettings();
+    await screen.findByRole("button", { name: "Backup" });
+    expect(
+      screen.queryByRole("button", { name: "Download a backup" }),
+    ).not.toBeInTheDocument();
+
+    await openSection("Backup");
+
+    expect(
+      screen.getByRole("button", { name: "Download a backup" }),
+    ).toBeInTheDocument();
+  });
+
+  it("remembers a fold on the next visit", async () => {
+    // Clicked directly rather than through `openSection`, which only ever
+    // opens: this test is about closing a card the table opens.
+    const first = renderSettings();
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Language" }));
+    first.unmount();
+
+    renderSettings();
+
+    expect(
+      await screen.findByRole("button", { name: "Language" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("draws the cards in the order its own id list gives", async () => {
+    // The list in hooks.ts claims a draw order that the JSX actually decides,
+    // so it is asserted rather than trusted. This is also what pins About last.
+    renderSettings();
+    await screen.findByRole("button", { name: "Google Books" });
+
+    const ids = [
+      ...document.querySelectorAll("h2 > button[aria-expanded]"),
+    ].map((handle) => handle.id);
+
+    expect(ids).toEqual(
+      SETTINGS_SECTIONS.map((section) => `${section}-handle`),
+    );
+  });
+
+  it("gives every card a handle no other control answers to", async () => {
+    // Two controls sharing a name is how a reader following a screen reader
+    // ends up on the wrong one. Measured on the rendered page, including the
+    // controls inside closed panels, which is where a collision would hide.
+    renderSettings();
+    await screen.findByRole("button", { name: "Backup" });
+
+    for (const title of HANDLES) {
+      expect(
+        screen.getAllByRole("button", { name: title, hidden: true }),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("leaves About one open card among six, not the page's only one", async () => {
+    // A settings page whose one expanded card asks for money is a donation
+    // prompt wearing a settings page.
+    renderSettings();
+    // The admin cards, four of the six, arrive with the settings request.
+    await screen.findByRole("button", { name: "Google Books" });
+
+    const expanded = screen
+      .getAllByRole("button", { expanded: true })
+      .map((handle) => handle.textContent);
+
+    expect(expanded).toHaveLength(6);
+    expect(expanded).toContain("About Endpaper");
+  });
+});
+
+describe("SettingsPage About card", () => {
+  it("is there for a member who is not an admin", async () => {
+    // Outside the admin block: it says what this app is, which is not an
+    // admin's business alone.
+    api.on(
+      /\/api\/settings$/,
+      { status: 403, body: { detail: "Admins only" } },
+      "GET",
+    );
+    renderSettings();
+
+    expect(
+      await screen.findByRole("img", { name: "Support Endpaper on Ko-fi" }),
+    ).toBeInTheDocument();
   });
 });

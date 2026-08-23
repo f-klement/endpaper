@@ -6,9 +6,8 @@ import {
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../api/generated/model";
-import { ErrorState, Icon } from "../../../components";
+import { CollapsibleSection, ErrorState, Icon } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
-import { SettingsSection } from "../../components";
 import ToggleField from "./ToggleField";
 
 /**
@@ -27,6 +26,10 @@ const REASON_LABELS: Record<OverdueNotifyReason, MessageKey> = {
 };
 
 interface OverdueSectionProps {
+  /** The fold is the page's to decide, so it is passed in rather than held here. */
+  isOpen: boolean;
+  onToggle: () => void;
+
   settings: SettingsOut;
   isSaving: boolean;
   onSave: (patch: SettingsUpdate) => void;
@@ -50,6 +53,8 @@ interface OverdueSectionProps {
  * while the browser has no use at all for the signing secret.
  */
 export default function OverdueSection({
+  isOpen,
+  onToggle,
   settings,
   isSaving,
   onSave,
@@ -77,7 +82,14 @@ export default function OverdueSection({
       : null;
 
   return (
-    <SettingsSection title={t("settings.overdue")} icon="handshake">
+    <CollapsibleSection
+      variant="card"
+      icon="handshake"
+      id="overdue"
+      title={t("settings.overdue")}
+      isOpen={isOpen}
+      onToggle={onToggle}
+    >
       <ToggleField
         label={t("settings.overdueEnable")}
         hint={t("settings.overdueHint")}
@@ -275,6 +287,6 @@ export default function OverdueSection({
           />
         )}
       </div>
-    </SettingsSection>
+    </CollapsibleSection>
   );
 }

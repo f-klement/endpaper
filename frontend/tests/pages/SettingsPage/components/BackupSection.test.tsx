@@ -16,6 +16,9 @@ function renderSection(
   overrides: Partial<React.ComponentProps<typeof BackupSection>> = {},
 ) {
   const props = {
+    // The page owns the fold; these tests are about what is inside it.
+    isOpen: true,
+    onToggle: vi.fn(),
     isDownloading: false,
     downloadError: null,
     onDownload: vi.fn(),

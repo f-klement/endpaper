@@ -37,6 +37,8 @@ function renderSection(
   const onSendNow = vi.fn();
   const rendered = renderLocalised(
     <OverdueSection
+      isOpen
+      onToggle={() => {}}
       settings={makeSettings(settings)}
       isSaving={false}
       onSave={onSave}

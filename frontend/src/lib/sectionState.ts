@@ -18,12 +18,20 @@
  *
  * One entry per section, not one for the page: a single flag could only ever
  * mean "collapse everything", which throws away the conditional defaults.
+ *
+ * **The store is a parameter because two pages fold, and their ids collide.**
+ * Both the book page and the settings page have a section called `about`. One
+ * shared key would make closing the blurb on a book close the app's own about
+ * card, and neither page would show anything wrong. `SectionStore` is a union
+ * rather than a `string`, so a third page has to name its store here and a typo
+ * is a compile error rather than a silently shared entry.
  */
 
 /** Bumped when the stored shape changes. Anything else is dropped, not read. */
 const VERSION = 1;
 
-const STORAGE_KEY = "bookDetailSections";
+/** One localStorage key per folding page. See the note above about `about`. */
+export type SectionStore = "bookDetailSections" | "settingsSections";
 
 /** What a reader said about one section. Absence is the third state. */
 export type SectionChoice = "open" | "closed";
@@ -54,9 +62,9 @@ function isChoice(value: unknown): value is SectionChoice {
  * what the reader last said. Only values that are not "open" or "closed" are
  * dropped, so a corrupt entry cannot make a section open itself.
  */
-export function readSectionChoices(): SectionChoices {
+export function readSectionChoices(store: SectionStore): SectionChoices {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(store);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Stored;
     if (parsed.version !== VERSION || typeof parsed.sections !== "object")
@@ -76,13 +84,18 @@ export function readSectionChoices(): SectionChoices {
  *
  * Merged against what is stored rather than against what this tab holds in
  * memory, so a second tab open on another book does not overwrite a choice made
- * here. Silent on failure, for the reason above.
+ * here. Only this page's own store is read and rewritten, so the other page's
+ * entries cannot be lost to a merge. Silent on failure, for the reason above.
  */
-export function writeSectionChoice(id: string, isOpen: boolean): void {
+export function writeSectionChoice(
+  store: SectionStore,
+  id: string,
+  isOpen: boolean,
+): void {
   try {
-    const sections = { ...readSectionChoices(), [id]: choiceFor(isOpen) };
+    const sections = { ...readSectionChoices(store), [id]: choiceFor(isOpen) };
     localStorage.setItem(
-      STORAGE_KEY,
+      store,
       JSON.stringify({ version: VERSION, sections } satisfies Stored),
     );
   } catch {

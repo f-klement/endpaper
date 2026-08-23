@@ -1,10 +1,13 @@
 import { useRef, useState } from "react";
 
-import { Button, ErrorState, Icon } from "../../../components";
+import { Button, CollapsibleSection, ErrorState, Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
-import { SettingsSection } from "../../components";
 
 interface BackupSectionProps {
+  /** The fold is the page's to decide, so it is passed in rather than held here. */
+  isOpen: boolean;
+  onToggle: () => void;
+
   isDownloading: boolean;
   downloadError: unknown;
   onDownload: () => void;
@@ -23,6 +26,8 @@ interface BackupSectionProps {
  * buttons side by side where the wrong one is a slip of the thumb.
  */
 export default function BackupSection({
+  isOpen,
+  onToggle,
   isDownloading,
   downloadError,
   onDownload,
@@ -36,7 +41,14 @@ export default function BackupSection({
   const [pending, setPending] = useState<File | null>(null);
 
   return (
-    <SettingsSection title={t("backup.title")} icon="inbox">
+    <CollapsibleSection
+      variant="card"
+      icon="inbox"
+      id="backup"
+      title={t("backup.title")}
+      isOpen={isOpen}
+      onToggle={onToggle}
+    >
       <p className="text-sm text-paper-600 dark:text-paper-400">
         {t("backup.explain")}
       </p>
@@ -107,6 +119,6 @@ export default function BackupSection({
           })}
         </p>
       )}
-    </SettingsSection>
+    </CollapsibleSection>
   );
 }
