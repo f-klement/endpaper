@@ -164,6 +164,7 @@ Environment variables:
 | `AUTH_MODE` | `local` | `local`, `ldap` or `proxy`. See below. |
 | `GOOGLE_BOOKS_API_KEY` | none | Supplies the key from the deployment instead of the settings screen |
 | `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
+| `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
 
 **Where the Google Books key lives.** By default an admin pastes it into Settings and it is
 stored in the database. Setting `GOOGLE_BOOKS_API_KEY` instead hands that job to the
@@ -207,3 +208,24 @@ signed in as a real member this way.
 and open Settings. The API key is stored in the database and never shown again after saving.
 
 Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
+
+## Supporting it
+
+* **Ko-fi**, for a one off: `https://ko-fi.com/REPLACE_ME`
+* **Patreon**, for something monthly: `https://patreon.com/REPLACE_ME`
+
+**What the money is for, stated rather than implied.** One thing: running the shared relay
+that lets two households reach each other when neither is reachable from the internet.
+That is a VPS, roughly 4 euro a month, and a project that cannot cover it either does not
+offer the relay or offers it until the maintainer tires of it, which is worse.
+
+It is not a paid tier and there is no feature behind it. The app is self hosted and
+complete without a relay, every capability stays available to somebody who runs their own,
+and nothing in the app itself will ever ask you for money while you catalogue your own
+books. What the relay costs and what came in belongs in the open, including the months
+when the answer is nothing: a relay people trust with sealed envelopes is one whose
+funding they can see.
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).

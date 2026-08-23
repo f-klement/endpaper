@@ -1,7 +1,7 @@
 # Backend test coverage
 
-**2048 tests**, in 49 files. Line coverage was last measured at **96%** (4303 statements,
-186 missed) when the suite held 1571, which is 454 tests ago, and has not been re-measured
+**2065 tests**, in 49 files. Line coverage was last measured at **96%** (4303 statements,
+186 missed) when the suite held 1571, which is 494 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
 
@@ -33,7 +33,7 @@ is why the helper uses regexes.
 | File | Tests | Covers |
 |---|---:|---|
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
-| `test_config.py` | 41 | Settings resolution, the startup secret guard, upload limits |
+| `test_config.py` | 52 | Settings resolution, the startup secret guard, upload limits, the frontend switch |
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `test_backup.py` | 63 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
 | `test_metadata.py` | 82 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
@@ -51,7 +51,7 @@ is why the helper uses regexes.
 | `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
-| `test_main.py` | 51 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, and the shell that has to answer a client route |
+| `test_main.py` | 57 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route, and `SERVE_FRONTEND=false` taking both away |
 | `test_house_rules.py` | 29 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed |
 | `test_serialisation.py` | 28 | Assembling `BookOut`: the per-request fields, and that the copy count and the collection name each cost one statement for a page rather than one per book |
 | `test_schema.py` | 40 | Alembic: create, adopt a pre-Alembic database, upgrade, and that two table rewrites left their partial unique indexes partial |

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+**Headless.** `SERVE_FRONTEND=false` runs the API without mounting the compiled
+frontend, for a host that has no reader to serve a page to. One image and one
+flag: the built files stay on disk, unused. With it set, a path outside the API
+is a plain 404 rather than the app shell, which is correct, because a host
+serving no frontend has no client routes for the shell to rescue.
+
+**Funding links**, in `README.md` and on the Docker Hub page and deliberately
+nowhere in the app. The money is for running a shared relay. It is not a paid
+tier and no feature sits behind it.
+
 ## v0.6.0
 
 _2026-08-23_

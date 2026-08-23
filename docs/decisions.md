@@ -266,6 +266,31 @@ renders the login page for `path="*"`. And `reauthenticateAtEdge`'s `reload()` w
 had to become `assign("/")` for the same reason. Both are unnecessary now, and `reload()`
 is better than `assign("/")` because the reader lands back where they were.
 
+### `SERVE_FRONTEND=false` is a flag on one image, not a second image
+
+Half of headless already existed by accident: the mount happens only when
+`backend/static/` is a directory, which is how the dev server runs while Vite serves the
+frontend. The shipped image always contains that directory, so absence never happened in
+production and there was no way to ask for it.
+
+A host with no reader is the case that wants it. It has no members, no library and nobody
+to show a page to, so the shell, the asset routes, the SPA fallback and the cache policy
+that goes with them are attack surface with no user.
+
+**With the frontend off the SPA fallback never engages, and an unmatched path is a plain
+404 again. That is correct rather than a regression**, and it is asserted
+(`TestTheFrontendCanBeSwitchedOff`) so nobody repairs it back: the fallback exists so a
+*client route* survives a refresh, and a host serving no frontend has no client routes.
+
+Not a second image, not a build target, not a stripped dependency set. The compiled files
+sit on disk unused, which costs nothing that is not already paid for by shipping one image.
+If image size ever becomes the reason to do it properly, that is a separate argument with
+a separate cost.
+
+The two ways to end up API-only are logged apart, because in a running container a relay
+that was meant to serve the frontend and a build that failed to copy look identical
+otherwise.
+
 ### The health probe touches the database, and that was not enough
 
 The original reasoning stands and is left here because it is right as far as it goes. The
@@ -2624,6 +2649,23 @@ dangling id. Unmounting would also throw away whatever is half typed inside the 
 so collapsing by accident would lose a note. The `hidden` attribute keeps the panel out of
 the accessibility tree and out of the tab order, which is the part that matters, and the
 page holds no more DOM than the flat column it replaced.
+
+### Funding is two links in the README, and nothing in the app
+
+Ko-fi for a one off and Patreon for something recurring, because they answer different
+questions: somebody who found this useful once, and a household that wants the relay to
+still be there next year.
+
+**They live in `README.md` and on the Docker Hub page, and nowhere in the UI.** No banner,
+no menu entry, no dismissible card. A member cataloguing their own books on a server their
+own household runs is not an audience to ask for money, and a self hosted app that begs is
+one more thing to patch out. Somebody deciding whether to run this reads the README;
+somebody using it does not need to be asked again.
+
+The money is for one thing, running the shared relay, which is why the statement of what it
+pays for sits beside the links rather than being left implied. It is not a paid tier and no
+capability sits behind it: every feature stays available to somebody who runs their own
+relay, and if that ever stops being true it is a different project.
 
 ## Tooling
 

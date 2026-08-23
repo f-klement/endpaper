@@ -52,6 +52,7 @@ volumes:
 | `GOOGLE_BOOKS_API_KEY` | none | Optional. Metadata works without it: the German National Library, K10plus and Open Library are queried first and need no key |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret check and nothing else |
 | `CORS_ORIGINS` | none | Only needed if you serve the client from a different origin, which this image does not |
+| `SERVE_FRONTEND` | `true` | Set `false` to run the API alone. The image still contains the compiled frontend; it is simply not mounted, and every path outside the API answers 404 |
 
 ### Overdue reminders
 
@@ -111,3 +112,18 @@ discloses nothing but liveness.
 * **Privacy is per book.** A book marked private is visible only to the member who added
   it, in every listing, search, export and statistic.
 * Images are published for `linux/amd64` and `linux/arm64`.
+
+## Supporting it
+
+* **Ko-fi**, for a one off: `https://ko-fi.com/REPLACE_ME`
+* **Patreon**, for something monthly: `https://patreon.com/REPLACE_ME`
+
+The money pays for one thing: running the shared relay that lets two households reach each
+other when neither is reachable from the internet. It is not a paid tier and no feature
+sits behind it. This image is the complete app, a relay is optional, and nothing in it
+asks a reader for money.
+
+## Licence
+
+Apache-2.0. Source at
+[github.com/f-klement/endpaper](https://github.com/f-klement/endpaper).

@@ -1,5 +1,8 @@
 """Tests for backend/main.py: app wiring, seeding and the ad-hoc migration."""
 
+import logging
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -305,23 +308,32 @@ NAVIGATION = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*
 SCRIPT_LOAD = {"Accept": "*/*"}
 
 
+def build_output(directory: Path) -> Path:
+    """A directory shaped like a `vite build`: hashed assets, stable rest.
+
+    A function rather than a fixture because two tests need the directory
+    without the mount: what `SERVE_FRONTEND=false` has to prove is that a build
+    which is present is still not served.
+    """
+    (directory / "assets").mkdir()
+    (directory / "assets" / "index-Bx7Kd2p9.js").write_text("console.log(1)")
+    (directory / "index.html").write_text(f"<!doctype html>{SHELL_MARKER}")
+    (directory / "manifest.json").write_text("{}")
+    (directory / "sw.js").write_text("// service worker")
+    (directory / "registerSW.js").write_text("// registration")
+    return directory
+
+
 @pytest.fixture
 def spa(tmp_path) -> TestClient:
-    """A directory shaped like a `vite build`: hashed assets, stable rest.
+    """The build above, mounted.
 
     Mounted through `main.mount_spa`, not a mount of our own: the point is to
     measure the wiring production uses, so swapping the class back for a plain
     StaticFiles fails here rather than passing against a private copy.
     """
-    (tmp_path / "assets").mkdir()
-    (tmp_path / "assets" / "index-Bx7Kd2p9.js").write_text("console.log(1)")
-    (tmp_path / "index.html").write_text(f"<!doctype html>{SHELL_MARKER}")
-    (tmp_path / "manifest.json").write_text("{}")
-    (tmp_path / "sw.js").write_text("// service worker")
-    (tmp_path / "registerSW.js").write_text("// registration")
-
     app = FastAPI()
-    main.mount_spa(app, tmp_path)
+    main.mount_spa(app, build_output(tmp_path))
     return TestClient(app)
 
 
@@ -479,3 +491,69 @@ class TestTheShellServesClientRoutes:
         assert "CachePolicyStaticFiles" not in res.text
         assert res.status_code == 200
         assert SHELL_MARKER in res.text
+
+
+class TestTheFrontendCanBeSwitchedOff:
+    """`SERVE_FRONTEND=false`, which is how a relay asks for API-only.
+
+    Driven through `main.mount_frontend_if_enabled`, the function the module
+    calls on import, so a flag that stopped being read fails here.
+    """
+
+    def test_a_build_is_mounted_by_default(self, monkeypatch, tmp_path):
+        """Nothing changes for an ordinary deployment."""
+        monkeypatch.delenv("SERVE_FRONTEND", raising=False)
+        app = FastAPI()
+        assert main.mount_frontend_if_enabled(app, build_output(tmp_path)) is True
+        assert SHELL_MARKER in TestClient(app).get("/").text
+
+    def test_false_leaves_a_build_that_is_there_unserved(self, monkeypatch, tmp_path):
+        """The directory exists, which in the shipped image it always does. The
+        flag is the only thing that can make absence happen in production."""
+        monkeypatch.setenv("SERVE_FRONTEND", "false")
+        app = FastAPI()
+        assert main.mount_frontend_if_enabled(app, build_output(tmp_path)) is False
+        assert TestClient(app).get("/").status_code == 404
+
+    def test_an_unmatched_path_is_a_plain_404_again(self, monkeypatch, tmp_path):
+        """**The v0.6.0 interaction, asserted so nobody repairs it back.** With
+        the frontend off the SPA fallback never engages, so a navigation to a
+        client route gets a 404 and not the shell. That is correct: the fallback
+        exists so a client route survives a refresh, and a headless instance has
+        no client routes."""
+        monkeypatch.setenv("SERVE_FRONTEND", "false")
+        app = FastAPI()
+        main.mount_frontend_if_enabled(app, build_output(tmp_path))
+        res = TestClient(app).get("/settings", headers=NAVIGATION)
+        assert res.status_code == 404
+        assert SHELL_MARKER not in res.text
+
+    def test_the_api_still_answers(self, monkeypatch, tmp_path):
+        """The flag takes away the mount and nothing else. A relay is an API."""
+        monkeypatch.setenv("SERVE_FRONTEND", "false")
+        app = FastAPI()
+
+        @app.get("/api/healthz")
+        def healthz() -> dict[str, str]:
+            return {"status": "ok"}
+
+        main.mount_frontend_if_enabled(app, build_output(tmp_path))
+        assert TestClient(app).get("/api/healthz").json() == {"status": "ok"}
+
+    def test_a_missing_directory_is_still_api_only(self, monkeypatch, tmp_path):
+        """How the dev server has always worked, and it keeps working."""
+        monkeypatch.delenv("SERVE_FRONTEND", raising=False)
+        assert main.mount_frontend_if_enabled(FastAPI(), tmp_path / "nothing") is False
+
+    def test_the_two_ways_to_be_api_only_are_logged_apart(
+        self, monkeypatch, tmp_path, caplog
+    ):
+        """A relay that was meant to serve the frontend and a build that failed
+        to copy look identical in a running container otherwise."""
+        with caplog.at_level(logging.INFO, logger="endpaper"):
+            monkeypatch.setenv("SERVE_FRONTEND", "false")
+            main.mount_frontend_if_enabled(FastAPI(), build_output(tmp_path))
+            monkeypatch.delenv("SERVE_FRONTEND", raising=False)
+            main.mount_frontend_if_enabled(FastAPI(), tmp_path / "nothing")
+        assert "SERVE_FRONTEND=false" in caplog.text
+        assert "No ./static directory" in caplog.text

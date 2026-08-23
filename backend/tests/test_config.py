@@ -68,6 +68,32 @@ class TestPaths:
         assert config.COVERS_DIR.is_dir()
 
 
+class TestServeFrontend:
+    """`SERVE_FRONTEND=false` is how a relay asks for API-only."""
+
+    def test_defaults_to_true_when_unset(self, monkeypatch):
+        monkeypatch.delenv("SERVE_FRONTEND", raising=False)
+        assert config.serve_frontend() is True
+
+    @pytest.mark.parametrize("value", ["false", "FALSE", "False", " false "])
+    def test_false_in_any_casing_or_padding_switches_it_off(self, monkeypatch, value):
+        monkeypatch.setenv("SERVE_FRONTEND", value)
+        assert config.serve_frontend() is False
+
+    @pytest.mark.parametrize("value", ["true", "yes", "1", "", "no"])
+    def test_anything_other_than_false_keeps_serving(self, monkeypatch, value):
+        """Fails towards the ordinary deployment: only the literal string
+        "false" takes the frontend away."""
+        monkeypatch.setenv("SERVE_FRONTEND", value)
+        assert config.serve_frontend() is True
+
+    def test_is_re_read_on_every_call(self, monkeypatch):
+        monkeypatch.setenv("SERVE_FRONTEND", "true")
+        assert config.serve_frontend() is True
+        monkeypatch.setenv("SERVE_FRONTEND", "false")
+        assert config.serve_frontend() is False
+
+
 class TestAllowedImageExtensions:
     def test_covers_the_formats_browsers_render(self):
         assert {"jpg", "jpeg", "png", "webp"} == config.ALLOWED_IMAGE_EXTENSIONS

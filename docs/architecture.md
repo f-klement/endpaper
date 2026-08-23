@@ -21,6 +21,14 @@ member's private book cover by counting. `routers/covers.py` applies the same
 Mount order in `main.py` is load-bearing. The SPA is mounted **last**, at `/`, so every
 router wins over it.
 
+**`SERVE_FRONTEND=false` skips that mount**, leaving the API on its own. The shipped image
+always contains `static/`, so absence never happens in production and this is the only way
+to ask for it. It is one flag on one image rather than a second image: the compiled files
+sit on disk unused. With it set, the whole last row of the table above is gone and an
+unmatched path is a plain 404 rather than the shell. That is correct rather than a
+regression: the fallback below exists so a *client route* survives a refresh, and a host
+serving no frontend has no client routes.
+
 **`html=True` alone does not make it a catch-all**, and believing it did was a real bug:
 Starlette serves `index.html` for `/` and for a directory, and answers anything else 404.
 Measured in the running container, with a valid session, `/book/12`, `/settings` and

@@ -82,6 +82,25 @@ def overdue_ticker_enabled() -> bool:
     return os.getenv("ENABLE_OVERDUE_TICKER", "true").strip().lower() != "false"
 
 
+def serve_frontend() -> bool:
+    """Whether the compiled SPA is mounted at `/`.
+
+    On by default, because an ordinary deployment is one container serving the
+    API and the bundle from one origin. `SERVE_FRONTEND=false` is for a host
+    with no reader: a relay stores sealed envelopes and has no members, no
+    library and nobody to show a page to, so the shell, the asset routes, the
+    SPA fallback and the cache policy that goes with them are attack surface
+    with no user.
+
+    With it false an unmatched path is a plain 404 rather than the shell. That
+    is correct, not a regression: the fallback exists so a client route
+    survives a refresh, and a headless instance has no client routes.
+
+    One image, one flag. The frontend files stay on disk unused.
+    """
+    return os.getenv("SERVE_FRONTEND", "true").strip().lower() != "false"
+
+
 def cors_origins() -> list[str]:
     """Browser origins allowed to make credentialed calls.
 

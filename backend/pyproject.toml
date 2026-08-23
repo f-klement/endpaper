@@ -1,7 +1,8 @@
 [project]
 name = "endpaper-backend"
-version = "0.5.0"
+version = "0.6.0"
 description = "Endpaper backend (FastAPI)"
+license = "Apache-2.0"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115.8",

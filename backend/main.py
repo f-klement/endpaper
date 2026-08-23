@@ -27,6 +27,7 @@ from config import (
     cors_origins,
     ensure_data_dirs,
     overdue_ticker_enabled,
+    serve_frontend,
     validate_auth_config,
     validate_secret_key,
 )
@@ -689,8 +690,28 @@ def mount_spa(app: FastAPI, directory: Path) -> None:
     )
 
 
-static_dir = Path(__file__).parent / "static"
-if static_dir.is_dir():
-    mount_spa(app, static_dir)
-else:
-    logger.info("No ./static directory, running API-only (frontend served by Vite).")
+def mount_frontend_if_enabled(app: FastAPI, directory: Path) -> bool:
+    """Mount the SPA unless it is switched off or is not there. Says which.
+
+    Two ways to end up API-only, and they are not the same thing. A dev run has
+    no `static/` because Vite is serving it; a relay has one and does not want
+    it (`SERVE_FRONTEND=false`), because a host with no reader should not carry
+    the shell, the asset routes and the SPA fallback. The shipped image always
+    contains the directory, so without the flag the second case cannot happen.
+
+    A function with one caller in the app, the line below it, and six in the
+    suite, so the tests drive the decision production makes: an inlined `if`
+    could only be tested by a copy, and a copy keeps passing after this stops
+    being wired up.
+    """
+    if not serve_frontend():
+        logger.info("SERVE_FRONTEND=false, running API-only (headless).")
+        return False
+    if not directory.is_dir():
+        logger.info("No ./static directory, running API-only (frontend served by Vite).")
+        return False
+    mount_spa(app, directory)
+    return True
+
+
+mount_frontend_if_enabled(app, Path(__file__).parent / "static")
