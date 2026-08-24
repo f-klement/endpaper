@@ -109,25 +109,50 @@ def open_library_miss():
 
 
 #: One DNB SRU record, trimmed to the fields the parser reads. The awkward
-#: shapes are the real ones: the title statement carries the original title in
-#: brackets, the subtitle after a colon and the authors after a slash, and each
-#: creator is tagged with a role that decides whether it is an author at all.
+#: shapes are the real ones: the translator sits in 700 with a relator that
+#: keeps him out of the credit line, and the subject heading carries a GND
+#: number where the Dewey number in 082 carries none.
 DNB_RECORD = """<?xml version="1.0" encoding="UTF-8"?>
 <searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
  <numberOfRecords>1</numberOfRecords>
  <records><record><recordData>
-  <dc xmlns="http://www.openarchives.org/OAI/2.0/oai_dc/"
-      xmlns:dc="http://purl.org/dc/elements/1.1/">
-   <dc:title>[Docker: up &amp; running] ; Praxiswissen Docker : Grundlagen und Best \
-Practices / Sean P. Kane mit Karl Matthias</dc:title>
-   <dc:creator>Kane, Sean P. [Verfasser]</dc:creator>
-   <dc:creator>Demmig, Thomas [\u00dcbersetzer]</dc:creator>
-   <dc:publisher>Heidelberg : O'Reilly</dc:publisher>
-   <dc:date>2024</dc:date>
-   <dc:language>ger</dc:language>
-   <dc:subject>004 Informatik</dc:subject>
-   <dc:format>390 Seiten</dc:format>
-  </dc>
+  <record xmlns="http://www.loc.gov/MARC21/slim">
+   <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9783960092353</subfield>
+   </datafield>
+   <datafield tag="041" ind1=" " ind2=" ">
+    <subfield code="a">ger</subfield>
+   </datafield>
+   <datafield tag="082" ind1="7" ind2="4">
+    <subfield code="a">004</subfield>
+   </datafield>
+   <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="a">Kane, Sean P.</subfield>
+    <subfield code="4">aut</subfield>
+   </datafield>
+   <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Praxiswissen Docker</subfield>
+    <subfield code="b">Grundlagen und Best Practices</subfield>
+    <subfield code="c">Sean P. Kane mit Karl Matthias</subfield>
+   </datafield>
+   <datafield tag="264" ind1=" " ind2="1">
+    <subfield code="a">Heidelberg</subfield>
+    <subfield code="b">O'Reilly</subfield>
+    <subfield code="c">2024</subfield>
+   </datafield>
+   <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">390 Seiten</subfield>
+   </datafield>
+   <datafield tag="650" ind1=" " ind2="7">
+    <subfield code="0">(DE-588)4026894-9</subfield>
+    <subfield code="a">Informatik</subfield>
+    <subfield code="2">gnd</subfield>
+   </datafield>
+   <datafield tag="700" ind1="1" ind2=" ">
+    <subfield code="a">Demmig, Thomas</subfield>
+    <subfield code="4">trl</subfield>
+   </datafield>
+  </record>
  </recordData></record></records>
 </searchRetrieveResponse>
 """

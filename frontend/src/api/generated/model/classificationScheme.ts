@@ -14,14 +14,29 @@
  * Library of Congress notation. A row whose scheme nobody recognises is a
  * number with no reading.
  *
- * Both are produced today. DDC comes from the DNB (`dc:subject`, headings
- * like `004 Informatik`), from K10plus (MARC 082) and from the Library of
- * Congress (`classification authority="ddc"`); LCC comes from the Library of
- * Congress alone (`authority="lcc"`).
+ * All three are produced today. DDC comes from the DNB and K10plus (MARC
+ * 082) and from the Library of Congress (`classification authority="ddc"`);
+ * LCC comes from the Library of Congress alone (`authority="lcc"`); GND comes
+ * from the DNB's subject fields, 650, 651, 655, 689 and 600.
  *
- * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. LCC is stored
- * because a catalogue heading is worth keeping whole, not because anything
- * reads it yet.
+ * **GND is an authority file rather than a shelf order, and it still belongs
+ * here.** What the column called `number` holds is the scheme's own identifier
+ * for a heading, which is the half that does not change while the caption
+ * does. For Dewey that was measured: `004` is Informatik in a German record
+ * and Computing in an English one. For GND it is a property of the identifier
+ * rather than something this app will see, the DNB being its only supplier
+ * here and German its only caption: `4203576-4` names one heading whatever a
+ * record calls it. What differs is that a Dewey number also sorts, and a GND
+ * number does not, which costs nothing because nothing here sorts on it.
+ *
+ * **A person's identifier is not one of these**, though the DNB writes it in
+ * the same `$0`: `100 $0` says who wrote the book, and every scheme here says
+ * what the book is about. See `docs/decisions.md`, "The author's GND is read
+ * by nothing".
+ *
+ * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other two
+ * are stored because a catalogue heading is worth keeping whole, not because
+ * anything reads them yet.
  */
 export type ClassificationScheme =
   (typeof ClassificationScheme)[keyof typeof ClassificationScheme];
@@ -29,4 +44,5 @@ export type ClassificationScheme =
 export const ClassificationScheme = {
   ddc: "ddc",
   lcc: "lcc",
+  gnd: "gnd",
 } as const;

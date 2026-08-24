@@ -29,10 +29,16 @@ from typing import Final
 
 #: A DDC notation: three digits, optionally a decimal fraction. Three is the
 #: floor because a Dewey number always has three, and that bound is load
-#: bearing: the DNB emits `20. Jahrhundert` and `B Belletristik` as subject
-#: headings too, and a looser pattern reads the first as the number `20.` with
-#: the caption `Jahrhundert`. That is not a classification and must not become
-#: one.
+#: bearing: the DNB writes its own Sachgruppe letter into the same 082 as the
+#: number (`$a=830 $a=B`, live on 9783446249974), and K10plus 082 values are not
+#: all notations either. A looser pattern would store `B` as a classification.
+#:
+#: It used to guard something else, which is worth knowing because the guard is
+#: now somewhere else: `dc:subject` mixed headings like `20. Jahrhundert` in
+#: with the Dewey ones, and a looser pattern read that as the number `20.` with
+#: the caption `Jahrhundert`. Nothing hands this a subject heading any more.
+#: `metadata._dnb_subjects` says why that separation is structural rather than
+#: left to this regex.
 _NOTATION: Final = re.compile(r"^\d{3}(?:\.\d+)?$")
 
 #: A heading is one token then, optionally, a caption. The token is put through

@@ -844,21 +844,38 @@ any column outside this table.
 one-constant change. Nobody has found one. Until then this paragraph is the point: an
 undocumented plaintext source is read as a guarantee it never made.
 
-### Catalogue XML is parsed with entity expansion on, and no response size cap
+### Catalogue XML refuses a doctype, and still has no response size cap
 
-All six catalogue parses are `ElementTree.fromstring(response.text)`. `xml.etree` expands
-nested internal entities (measured on this project's own Python 3.14.7: three levels of
-nesting expanded to 1,000 characters), and nothing caps the body read from any source.
+Two risks were recorded here as one in round 1. **The first is closed.** All six catalogue
+parses go through `metadata._parsed`, which refuses a body carrying `<!DOCTYPE` and raises
+`ParseError`, which every one of those callers already caught. `xml.etree` expands nested
+internal entities (measured on this project's own Python 3.14.7: three levels of nesting
+expanded to 1,000 characters, so six is a million), and that was the only term in this
+module's memory use not bounded by the response size. It costs nothing measurable: 225 live
+DNB and K10plus responses cached 2026-08-24 carry no doctype, nor does a live BnF or Library
+of Congress answer.
 
-A hostile or substituted response is therefore a memory exhaustion, in a pod limited to
-512Mi, where a 1.8 GB peak has already caused an OOMKill once (see the backup upload cap,
-which exists for the same reason from the other direction).
+**The second is unchanged: nothing caps the body read from any source.** A hostile or
+substituted response is a memory exhaustion in a pod limited to 512Mi, where a 1.8 GB peak
+has already caused an OOMKill once (see the backup upload cap, which exists for the same
+reason from the other direction). Measured 2026-08-24: parsing retains 15.28x the wire
+bytes, so the largest honest page this app asks for peaks around 9 MB.
 
-**Pre-existing, and deliberately not fixed in the round that noticed it.** The fix is a
-capped read plus either `defusedxml` or a refusal of any body carrying a `<!DOCTYPE`, and
-it touches all six sources plus their fixtures. Doing that inside a feature round is how a
-transport change ships untested. It is written down here so the next round that touches
-outbound fetching starts with it rather than rediscovering it.
+**Still deliberately not fixed, and now for a narrower reason.** The cap has to be on the
+wire bytes rather than the parsed size, which turns six `client.get` calls into streamed
+reads with their own fixtures. That is a transport change, and shipping one inside a feature
+round is how it goes untested. The doctype refusal was taken because it closes its half
+independently, in three lines, with no fixture touched. 1 MB is the right order for the cap
+when somebody sizes it.
+
+**Moving the DNB to MARC21 made it worth sooner.** An honest page of search results went
+from 51 KB to between 438 and 588 KB, measured over four `WOE=` queries at the 50 record
+ceiling on 2026-08-24; the largest was `geschichte deutschland` at 587,810 bytes. That is
+not itself a risk (0.60s against 0.37s, parsed and dropped), and it does mean any cap chosen
+later has to be set against a page of MARC rather than a page of Dublin Core, on the wire
+bytes rather than the parsed size: measured retention is 15.28x the body, and the honest
+lookup body grew 45x rather than 9x because `maximumRecords` went from 1 to 5 alongside the
+schema. 1 MB is the right order for a 50 record page.
 
 ### Classifications are in the backup and not in the CSV
 
@@ -870,11 +887,95 @@ row per book for reading in a spreadsheet and for importing from another service
 of those services emits a classification. A heading is re-fetched by running enrichment,
 which costs one request and produces the same rows.
 
-### Only DDC is projected, though LCC is stored
+### Only DDC is projected, though LCC and GND are stored
 
 LCC has no published list short enough to ship as a mapping, and the household vocabulary it
 would project onto is the same one Dewey already covers. So an LCC number is stored whole,
 because a catalogue heading is worth keeping whole, and read by nothing yet.
+
+GND is a different reason for the same answer. `4203576-4` is an authority record number
+rather than a place in a schedule, so no arithmetic takes it to a division the way `005.133`
+goes to `000`. What a GND heading does bring is its caption, and the caption reaches
+`subjects`, where the existing substring match against tag names already reads it.
+
+### The DNB is read as MARC21, and Dublin Core cost a caption to leave
+
+`metadata.py` asked for `oai_dc` because it was already the shape this app wanted, where
+MARC meant writing a subfield parser for the same five values. What that missed is that the
+crosswalk into Dublin Core drops every identifier the record holds. Measured against ISBN
+9783446249974 on 2026-08-23:
+
+| schema | bytes | GND identifiers |
+|---|---|---|
+| `oai_dc` | 1,713 | none at all |
+| `MARC21-xml` | 15,502 | 100, 600, 650, 651, 655, 689, 710 |
+
+**The switch cost one field: the DDC caption.** `dc:subject` reads `830 Deutsche Literatur`,
+MARC 082 carries `830` alone, and no other MARC field supplies the words: grepped over 85
+live records, the German captions appear in the Dublin Core responses and in none of the
+MARC ones. Filling it in from `ddc.DIVISION_TAGS` was refused, because that column records
+what the scheme said and this would put our word in it. Nothing is lost from the tag
+suggestion, which reads the number.
+
+What it bought, over those 85 records: 187 GND identified subject headings where Dublin Core
+carried none, a title and subtitle already split, and an extent on 85 of 85 records where
+`dc:format` was present on 51 of 74.
+
+**Four defects that only a live comparison could find**, all invisible in a fixture written
+from the new parser, and all fixed:
+
+* MARC21 from the DNB is **NFD** where Dublin Core is NFC, so `Müller` arrives as `u` plus a
+  combining diaeresis: renders identically, compares unequal, and is enough to store one
+  author under two spellings. 83 of 85 live records are affected.
+* MARC brackets a leading article in the **non-sorting delimiters** U+0098 and U+009C, which
+  28 of the 85 records carry and no terminal shows.
+* An older record **never subfielded itself**: `$p` reads
+  `Der Zinker : Kriminalroman / [aus d. Engl. übertr. von Gregor Müller]`, so where MARC
+  supplies no `$b` the title goes through the Dublin Core splitter that already existed.
+* An **edited volume names no author** in MARC: no 100, editors in 700 with `$4=edt`. The
+  Dublin Core parser fell back to every credited person and `_marc_authors` did not, which
+  lost an author on 8 of 53 records.
+
+**The physical book filter became a preference on the lookup path and stayed a refusal on
+search.** `_is_physical_book` never actually ran against the DNB, because `dc:format` is
+absent on an online record; MARC `300 $a` reads "Online-Ressource" and it fires. Refusing
+outright would have turned 21 of 74 live lookups into misses, for records that name the
+scanned ISBN in their own 020 and describe the right book, so `_dnb` ranks a physical record
+above an online one and takes what it has. A search has no ISBN to tell an edition of this
+book from a digitisation of another one, so it refuses, which is what `_k10plus_search`
+already did.
+
+### The author's GND is read by nothing
+
+`100 $0` carries it, and this round deliberately stores it nowhere.
+
+**There is no row for a person here.** Authors are derived from the `books.author` string,
+and `author_aliases` holds "these two spellings are one person" as a decision rather than a
+person. `books.author` is a comma joined credit line, so an identifier on the book would be
+a fact about one of several people stored on the row that holds all of them.
+
+**The two places it could go are the ones §30g says to decide before writing a migration**:
+the alias table grows an authority column, which is odd because an alias is a decision and
+not a person, or authors finally become rows. That is the VIAF question, the owner left VIAF
+in the pool for exactly that reason, and the reason given was that it is expensive to change
+once data exists. A GND identifier is the same question with a German vocabulary, so it gets
+the same answer.
+
+It costs one line to read when there is somewhere to put it.
+`tests/test_metadata.py::TestDnbRecord::test_the_author_identifier_is_read_by_nothing`
+pins the refusal, so it reads as a decision rather than an oversight.
+
+### The DNB's 653 keywords are not read
+
+653 is the publisher's own keyword list, and the DNB passes it through. Measured over 85
+live records on 2026-08-24: 1,403 values, of which 512 (36%) are ONIX and VLB product codes
+(`(Produktform)Electronic book text`, `(BISAC Subject Heading)FIC000000`) and the rest run
+from real subjects to shelf marketing (`gelb`, `reclam hefte`, `lektüre`).
+
+Ten per record of that would swamp the controlled headings in `categories`, and worse:
+`subjects` feeds `match_subjects_to_tags`, which is a **substring** match against tag names,
+so every extra keyword is another chance to suggest a tag nobody meant. The controlled
+fields (650, 651, 655, 689, 600) are read instead, and 653 is left where it is.
 
 ### The Goodreads integration is a CSV import and a link
 

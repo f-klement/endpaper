@@ -28,7 +28,7 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any, Final
@@ -42,6 +42,7 @@ import ddc
 import google_books
 from enums import ClassificationScheme
 from isbn import parse as parse_isbn
+from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
 
@@ -204,6 +205,163 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
     )
 
 
+#: The one construct that makes a response's size a lie. XML spells it exactly
+#: this way and only in the prolog, and character data cannot contain a literal
+#: `<`, so a substring test is exact rather than a heuristic.
+_DOCTYPE: Final = "<!DOCTYPE"
+
+
+def _parsed(body: str) -> ElementTree.Element:
+    """A catalogue's XML, refusing the one thing that unbounds its cost.
+
+    `xml.etree` expands internal entities, so a body carrying a doctype can
+    define an entity worth a thousand times its own bytes: measured on this
+    project's Python 3.14.7, ten characters nested three deep expand to 1,000,
+    and six deep is a million. Everything else this module holds is bounded by
+    the response size; this was not.
+
+    **No catalogue here sends one.** 225 live DNB and K10plus responses cached
+    2026-08-24 carry none, nor does a live BnF or Library of Congress answer. So
+    refusing costs nothing measurable, and the source that would send one is the
+    substituted response `docs/decisions.md` records the Library of Congress as
+    reachable for, over plaintext HTTP.
+
+    Raised as `ParseError` because all six callers already catch it: a catalogue
+    that starts sending a doctype degrades to "this source is unavailable"
+    rather than to a 500.
+
+    **This is one half of what `docs/decisions.md` says would close that
+    entry.** The other half is a cap on the bytes read off the wire, which is
+    not a few lines: it turns six `client.get` calls into streamed reads with
+    their own fixtures. What stays open is therefore an honest body at a
+    measured 15.28x its own size, 9 MB at the largest page this app asks for,
+    which is what that entry accepts.
+    """
+    if _DOCTYPE in body:
+        raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
+    return ElementTree.fromstring(body)
+
+
+# ── MARC21, shared ────────────────────────────────────────────────────────────
+#
+# Two catalogues here speak MARC21: the DNB and K10plus. The primitives that
+# take a record apart live in this block because both read the same subfields.
+# What differs is which fields a catalogue fills in and how it marks a role,
+# and that stays in each source's own section below.
+
+
+class _Subfields(dict[str, str]):
+    """One MARC field's subfields: the first value per code, repeats kept.
+
+    Indexing gives the first occurrence, because a scalar read wants one value
+    and MARC writes the primary one first. `all()` gives every occurrence, and
+    two fields in this file need it. **Remove it and both go quiet rather than
+    failing**, which is why it is a type rather than a call at each site.
+
+    * `082 $a` repeats. The DNB puts the Dewey number and its own Sachgruppe
+      letter in one field, `$a=830 $a=B`, in 10 of 85 live records measured
+      2026-08-24. Keeping the last value reads the number as `B`,
+      `ddc.notation` refuses it, and the record stores no classification at all.
+    * `$0` repeats wherever a heading is authority controlled. The DNB writes
+      `(DE-588)118181505`, then `https://d-nb.info/gnd/118181505`, then
+      `(DE-101)118181505`, so keeping the last takes one library's house number
+      where the GND identifier is the point.
+
+    A `dict[str, str]` subclass rather than `dict[str, list[str]]`, so the
+    scalar reads elsewhere in this file keep working unchanged: repeats are the
+    exception and `entry.get("a")` is the rule.
+    """
+
+    def __init__(self, pairs: Iterable[tuple[str, str]]) -> None:
+        repeats: dict[str, list[str]] = {}
+        for code, value in pairs:
+            repeats.setdefault(code, []).append(value)
+        super().__init__({code: values[0] for code, values in repeats.items()})
+        self._repeats = repeats
+
+    def all(self, code: str) -> list[str]:
+        """Every value under one code, in the order the record wrote them."""
+        return self._repeats.get(code, [])
+
+
+_MARC: Final = "{http://www.loc.gov/MARC21/slim}"
+
+#: MARC's non-sorting delimiters. A record brackets a leading article with
+#: these so a catalogue can file `Die Deutschen und die USA` under D.
+_NON_SORTING: Final = ("\x98", "\x9c")
+
+
+def _marc_text(raw: str | None) -> str:
+    """One subfield's text, as a person would write it.
+
+    Three repairs, all measured against the live DNB on 2026-08-24, and none
+    needed under Dublin Core because that crosswalk had already done them.
+    **All three are invisible in a terminal**, which is why they are done here
+    for every subfield rather than field by field where somebody would
+    eventually read a diff and see nothing wrong.
+
+    * **The non-sorting delimiters are stripped.** They are a filing device and
+      not part of the title, and they carry through into whatever is stored:
+      28 of 85 live records hold at least one.
+    * **Internal whitespace is collapsed.** MARC pads subfields, which
+      `ClassificationIn.tidy_number` already says and already fixes for one
+      column. `245 $a` on the reference record 9783446249974 reads
+      `Reisen im  Licht der Sterne`, a real double space, where that record's
+      own `776 $t` spells it with one.
+    * **The text is normalised to NFC.** The DNB serves MARC21 decomposed and
+      Dublin Core composed, so `Müller` arrives as `u` plus a combining
+      diaeresis: 83 of the same 85 records are affected. It renders identically
+      and compares unequal, which is enough to store two spellings of one
+      author and to defeat `_duplicate_key`, which casefolds and collapses
+      whitespace and does not normalise. Not enough to duplicate a
+      classification: `uq_classifications_book_scheme_number` is on `number`,
+      which is digits in DDC and digits and hyphens in GND.
+    """
+    text = raw or ""
+    for delimiter in _NON_SORTING:
+        text = text.replace(delimiter, "")
+    return " ".join(unicodedata.normalize("NFC", text).split())
+
+
+def _marc_fields(record: ElementTree.Element) -> dict[str, list[_Subfields]]:
+    """One MARC record as `{tag: [subfields]}`."""
+    fields: dict[str, list[_Subfields]] = {}
+    for datafield in record.findall(f"{_MARC}datafield"):
+        tag = datafield.get("tag")
+        if tag is None:
+            continue
+        fields.setdefault(tag, []).append(
+            _Subfields(
+                (subfield.get("code") or "", _marc_text(subfield.text))
+                for subfield in datafield.findall(f"{_MARC}subfield")
+            )
+        )
+    return fields
+
+
+#: The GND's code in MARC's `$0`, which is what says the identifier beside it
+#: is a GND number rather than some other authority file's.
+_GND_PREFIX: Final = "(DE-588)"
+
+
+def _gnd_identifier(entry: _Subfields) -> str | None:
+    """The GND number a field's `$0` carries, or None if it carries none.
+
+    Stored bare. `(DE-588)` is MARC naming the scheme, the scheme is already a
+    column of its own, and keeping the prefix would let one heading arrive
+    under two spellings that `uq_classifications_book_scheme_number` cannot
+    collapse.
+
+    A record without one is ordinary rather than broken: 33 of 70 live 655
+    fields and 21 of 73 live 100 fields carry no `(DE-588)` at all, measured
+    over 85 records on 2026-08-24.
+    """
+    for value in entry.all("0"):
+        if value.startswith(_GND_PREFIX):
+            return value[len(_GND_PREFIX) :].strip() or None
+    return None
+
+
 # ── Deutsche Nationalbibliothek ───────────────────────────────────────────────
 #
 # The legal deposit library for Germany, so it holds essentially everything
@@ -211,14 +369,42 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
 # the two ISBNs that prompted this work, Open Library answered 404 and its
 # search index returned no rows, while the DNB returned a full record for each.
 #
-# The public SRU endpoint needs no key and no registration. `oai_dc` is
-# requested rather than MARC21 because Dublin Core is already the shape we
-# want, where MARC would mean a subfield parser for the same five values.
+# The public SRU endpoint needs no key and no registration.
+#
+# **MARC21 rather than Dublin Core.** This block used to say the opposite: that
+# Dublin Core was already the shape we wanted and MARC would mean a subfield
+# parser for the same five values. That was true as far as it went, and what it
+# missed is that the crosswalk into Dublin Core drops every identifier the
+# record holds. Measured against ISBN 9783446249974 on 2026-08-23:
+#
+#   | schema     | bytes  | GND identifiers                       |
+#   |------------|--------|---------------------------------------|
+#   | oai_dc     |  1,713 | none at all                           |
+#   | MARC21-xml | 15,502 | 100, 600, 650, 651, 655, 689, 710     |
+#
+# **The switch costs one field, and it is the DDC caption.** `dc:subject` reads
+# `830 Deutsche Literatur`; MARC 082 carries `830` and nothing else, because in
+# MARC the printed schedule holds the words. No other MARC field supplies it:
+# grepped over the same 85 records, the German captions appear in the Dublin
+# Core responses and in none of the MARC ones. Filling it in from
+# `ddc.DIVISION_TAGS` would put our word in a column that records theirs, so
+# the caption stays absent and `_union_classifications` takes one from another
+# source if any has it.
+#
+# What it buys, over 85 live records fetched 2026-08-24: 187 GND identified
+# subject headings where Dublin Core carried none, a title and subtitle already
+# split (`245 $a` and `$b`) rather than one statement of responsibility to take
+# apart by hand, and an extent on 85 of 85 records where `dc:format` was
+# present on 51 of 74. That last one matters more than it sounds: the old
+# parser did run `_is_physical_book`, on `dc:format`, and an online record has
+# no `dc:format`, so the one thing it could never reject was the one thing that
+# field exists to reject. `300 $a` says "Online-Ressource" on all 28 of the 85
+# records that are one.
 
 _DNB_URL: Final = "https://services.dnb.de/sru/dnb"
 
+#: Kept because the BnF parser reads Dublin Core. The DNB no longer does.
 _DC: Final = "{http://purl.org/dc/elements/1.1/}"
-_SRW: Final = "{http://www.loc.gov/zing/srw/}"
 
 # ISO 639-2/B, which is what every MARC-derived source emits, to the 639-1
 # codes stored elsewhere. Shared by the DNB and K10plus parsers.
@@ -248,29 +434,16 @@ _LANGUAGES: Final[dict[str, str]] = {
     "lat": "la",
 }
 
-# Creator roles worth keeping as the author. The DNB marks translators and
-# editors the same way, and listing "deutsche Übersetzung von ..." as the
-# author of a book is worse than listing nobody.
-_AUTHOR_ROLES: Final = ("Verfasser", "Autor")
 
+def _dc_title_statement(raw: str) -> tuple[str, str | None]:
+    """Pull a title and subtitle out of a whole Dublin Core title statement.
 
-def _dnb_person(raw: str) -> tuple[str, str]:
-    """Split `Kane, Sean P. [Verfasser]` into a display name and a role."""
-    role_match = re.search(r"\[([^\]]+)\]\s*$", raw)
-    role = role_match.group(1).strip() if role_match else ""
-    name = re.sub(r"\s*\[[^\]]+\]\s*$", "", raw).strip()
-
-    # Catalogue order is "Surname, Forenames". One comma means it is a person;
-    # more than one, or none, means it is something else and is left alone.
-    if name.count(",") == 1:
-        surname, forenames = (part.strip() for part in name.split(","))
-        if surname and forenames:
-            name = f"{forenames} {surname}"
-    return name, role
-
-
-def _dnb_title(raw: str) -> tuple[str, str | None]:
-    """Pull a title and subtitle out of the DNB's whole title statement.
+    **The BnF is the only caller.** This was the DNB parser until the DNB moved
+    to MARC21, where `245 $a` and `$b` arrive already separated and none of
+    this guessing is needed; the BnF still writes the statement of
+    responsibility into `dc:title` the same way, so the parser moved rather
+    than being deleted. The example below is the DNB record it was written
+    against.
 
     A record carries one string holding as much as:
 
@@ -334,117 +507,185 @@ def _is_placeholder_title(title: str) -> bool:
     return not stripped or bool(_PLACEHOLDER_TITLES.match(title.strip()))
 
 
-def _dnb_record(record: ElementTree.Element, isbn: str | None) -> dict[str, Any] | None:
-    """One Dublin Core record as book fields, or None if it is not a book.
+#: Subject fields whose headings are authority controlled, in the order they
+#: are read.
+#:
+#: **689 is the RSWK chain and restates what the others said**, so reading all
+#: five double counts by design and `_dnb_subjects` deduplicates rather than
+#: choosing between them. Choosing would lose headings either way: measured over
+#: 85 live records on 2026-08-24, 10 of the 13 600 fields carry a GND number and
+#: only 3 of those 10 appear in 689 as well, 5 being on records with no 689 at
+#: all. Dropping 689 loses the chains no other field holds; dropping 600 loses
+#: seven personal name subjects in ten.
+#:
+#: 600 is the one beyond the four the round was specified with, and it is the
+#: same kind of assertion as the rest. A person named here is the *subject*, not
+#: the author; the author is 100, and `docs/decisions.md` says why nothing reads
+#: its identifier. 655 is the odd one: it is the **form** of the work rather
+#: than its subject ("Fiktionale Darstellung"), and it is kept because a genre
+#: is what a household would look for.
+#:
+#: **`$2` is not read, and these are not all one vocabulary.** Measured over 85
+#: live records on 2026-08-24, the five fields supply 363 values: 188 declare
+#: `gnd`, 37 `gnd-content`, 18 the DNB's own genre list `gatbeg`, 11 `local`,
+#: and 689 declares nothing at all on 152. The uncontrolled share is accepted
+#: where 653's is refused, and the difference is measurable rather than a
+#: preference: 29 values against 1,403, and they are genre and local subject
+#: terms rather than ONIX product codes. **That 29 counts only the fields that
+#: name another vocabulary.** 689 names none, and while most of its 152 restate
+#: a heading 600, 650 or 651 already carried with a GND number, some are free
+#: strings such as `Geschichte 1889-1894`, so the uncontrolled share is 29 plus
+#: an unmeasured part of 689 rather than 29 exactly. A value with no `(DE-588)`
+#: also cannot become a classification row: `_dnb_subjects` writes one only when
+#: `_gnd_identifier` answers, so the uncontrolled half reaches `subjects` alone,
+#: which is the field documented as weak evidence. Filter on `$2` if that stops
+#: being true.
+_DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
+
+
+def _dnb_subjects(fields: dict[str, list[_Subfields]]) -> dict[str, Any]:
+    """The controlled subject headings, as plain subjects and as GND rows.
+
+    **A subject heading never enters the DDC path**, and that is load bearing
+    rather than tidy. `ddc.parse_heading` accepts any three digit token, so
+    "100 Jahre Bauhaus" as a 650 heading would be stored as DDC 100 and
+    suggest the Philosophy tag. Dublin Core made that unreachable by accident,
+    because `dc:subject` carried only Sachgruppen; MARC puts free text and
+    Dewey in different fields, so the rule is now structural: 082 is the only
+    field this module hands to `ddc`, and the headings here are GND or nothing.
+
+    **The GND number is the half that does not move**, the way a Dewey number
+    is: `(DE-588)4203576-4` names one heading whatever a record captions it.
+    Unlike Dewey that is untested here rather than measured, the DNB being the
+    only supplier and every caption German. It is stored bare, under its own
+    scheme, with the heading text as the caption.
+
+    Deduplicated here rather than downstream, because a single record repeats
+    itself: 689 restates the 600, 650 and 651 headings it was built from, so
+    the reference record 9783446249974 names Stevenson, Samoainseln and Schatz
+    twice each. The lookup path would fold the classifications in `_merge` and
+    `_as_match` folds them on the search path, but neither deduplicates
+    `subjects`, so without this the same three words reach `categories` twice.
+    """
+    subjects: dict[str, None] = {}
+    headings: dict[str, str] = {}
+    for tag in _DNB_SUBJECT_TAGS:
+        for entry in fields.get(tag, []):
+            heading = _strip_marc_punctuation(entry.get("a", ""))
+            if not heading:
+                continue
+            subjects.setdefault(heading, None)
+            number = _gnd_identifier(entry)
+            if number is not None:
+                headings.setdefault(number, heading)
+    return {
+        "subjects": list(subjects),
+        "classifications": [
+            {"scheme": ClassificationScheme.GND, "number": number, "label": heading}
+            for number, heading in headings.items()
+        ],
+    }
+
+
+def _dnb_record(
+    fields: dict[str, list[_Subfields]], isbn: str | None
+) -> dict[str, Any] | None:
+    """One MARC record as book fields, or None if it is not a book.
 
     Shared by the lookup and the search paths. `isbn` is what the lookup
     already knows and verified; the search path has none, so the record's own
-    identifier is read instead.
+    020 is read instead.
+
+    It reads the same subfields `_k10plus_record` does, through the same
+    helpers, and differs in two places. It refuses a title that names a volume
+    slot rather than a work, because the DNB's `num=` index reaches those. And
+    it harvests the GND identified subject headings, which is the reason this
+    parser reads MARC at all.
+
+    **Whether an online record is a book is asked by the caller, not here**,
+    because the two callers want different answers. `_dnb_search` refuses one
+    outright, exactly as `_k10plus_search` does. `_dnb` ranks it below a
+    physical record and takes it rather than reporting a miss: `dc:format` was
+    absent on every online record, so the old parser accepted all of them, and
+    refusing here would have turned 21 of 74 live lookups into misses (measured
+    2026-08-24) for records that name the scanned ISBN in their own 020 and
+    describe the right book.
+
+    **A disc is refused here, on both paths.** It is a different object rather
+    than this book in another form, and the Dublin Core parser refused it too
+    whenever `dc:format` was present, which was 51 of 74 records. Zero of 85
+    live records carry a disc extent, so this costs nothing measurable and
+    stops a scanned ISBN that names a DVD becoming a book.
+
+    **The Dewey number is first in `classifications`**, which costs nothing and
+    is not what makes it survive the per book ceiling: `routers/books._headings`
+    sorts by scheme before it slices, because by the time a list reaches there
+    `_merge` has concatenated up to four catalogues and no parser can order
+    that. Measured over 85 live records on 2026-08-24: one produced 13 entries
+    and every other produced 8 or fewer.
     """
-
-    def text(tag: str) -> str | None:
-        element = record.find(f"{_DC}{tag}")
-        return element.text.strip() if element is not None and element.text else None
-
-    raw_title = text("title")
-    if not raw_title:
+    title_entry = (fields.get("245") or [_Subfields(())])[0]
+    title, subtitle, series_name, series_index = _marc_title(title_entry)
+    if not title:
         return None
-    title, subtitle = _dnb_title(raw_title)
     # A cross-referenced ISBN matched a volume slot, not this book. Reporting a
     # miss is right: some other catalogue may hold the real record, and putting
     # `[Hauptbd.].` in as a title poisons the entry for good.
     if _is_placeholder_title(title):
         return None
 
-    extent = text("format")
-    if not _is_physical_book(extent, title):
+    if _IS_A_DISC.search(_marc_extent(fields) or ""):
         return None
 
-    people = [
-        _dnb_person(element.text)
-        for element in record.findall(f"{_DC}creator")
-        if element.text
-    ]
-    authors = [name for name, role in people if role in _AUTHOR_ROLES]
-    # A record with roles on nobody still names the author first, so falling
-    # back to every listed person beats reporting no author at all.
-    if not authors:
-        authors = [name for name, _ in people]
-
-    # "Heidelberg : O'Reilly" is place and publisher in one field.
-    publisher = text("publisher")
-    if publisher and " : " in publisher:
-        publisher = publisher.split(" : ", 1)[1].strip()
-
-    if isbn is None:
-        isbn = next(
-            (
-                parsed
-                for element in record.findall(f"{_DC}identifier")
-                if element.text
-                for parsed in [parse_isbn(element.text.split()[0])]
-                if parsed is not None
-            ),
-            None,
-        )
-
-    year_match = re.search(r"\d{4}", text("date") or "")
+    isbn = isbn or _marc_isbn(fields)
+    subjects = _dnb_subjects(fields)
 
     return {
         "isbn": isbn,
         "title": title,
         "subtitle": subtitle,
-        "author": ", ".join(authors) or None,
-        "publisher": publisher,
-        "year": int(year_match.group()) if year_match else None,
-        # The DNB catalogues books, not blurbs: there is no description in the
-        # record, and inventing one from the subject headings would be worse
-        # than leaving it empty.
-        "description": None,
-        "language": _LANGUAGES.get((text("language") or "").lower()),
-        "page_count": _pages_from_extent(extent),
-        # No cover either. Open Library serves one by ISBN for a good number of
-        # German books even where it has no edition record, so it is worth the
-        # guess. Built by covers.py, which is the only module allowed to know
-        # an image host: see COVER_HOSTS, which the CSP is derived from.
+        "author": _marc_authors(fields) or _marc_credited_names(fields),
+        "publisher": _marc_publisher(fields),
+        "year": _marc_year(fields),
+        # Through the shared reader rather than hardcoded to None, which is
+        # what this was under Dublin Core. The DNB catalogues books rather than
+        # blurbs and it shows: 520 appears on 1 of 85 live records measured
+        # 2026-08-24. Reading it costs a function call and stops being a
+        # special case that has to be remembered.
+        "description": _marc_description(fields),
+        "language": _marc_language(fields),
+        "page_count": _pages_from_extent(_marc_extent(fields)),
+        # No cover in a MARC record. Open Library serves one by ISBN for a good
+        # number of German books even where it has no edition record, so it is
+        # worth the guess. Built by covers.py, which is the only module allowed
+        # to know an image host: see COVER_HOSTS, which the CSP is derived from.
         "cover_url": covers.open_library_url(isbn) if isbn else None,
-        **_split_dnb_subjects(record),
+        # 245 `$n` and `$p`, the same volume statement K10plus is read for. The
+        # Dublin Core parser had no series at all: the part designation was
+        # inside the title statement and there was no honest way to tell it
+        # from a subtitle.
+        "series_name": series_name,
+        "series_index": series_index,
+        "subjects": subjects["subjects"],
+        "classifications": _marc_ddc(fields) + subjects["classifications"],
     }
 
 
-def _split_dnb_subjects(record: ElementTree.Element) -> dict[str, Any]:
-    """`dc:subject` sorted into classifications and plain subject headings.
-
-    The DNB puts both in the same element. `004 Informatik` is a DDC heading
-    and its number is the language independent half; `B Belletristik` is the
-    DNB's own Sachgruppe letter and `20. Jahrhundert` is a plain heading.
-
-    Both halves are kept. The caption still goes into `subjects`, because the
-    substring match against tag names is what catches an English record, and
-    the number goes into `classifications`, which is what catches a German one.
-    Dropping either narrows the suggestion rather than sharpening it.
-
-    Measured on 2026-08-23 over ten German ISBNs: eight carried a DDC heading,
-    and not one of the eight captions matched a seeded tag name, because every
-    caption was German.
-    """
-    subjects: list[str] = []
-    classifications: list[dict[str, Any]] = []
-    for element in record.findall(f"{_DC}subject"):
-        if not element.text:
-            continue
-        raw = element.text.strip()
-        heading = ddc.parse_heading(raw)
-        if heading is None:
-            subjects.append(raw)
-            continue
-        number, label = heading
-        classifications.append(
-            {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
-        )
-        if label:
-            subjects.append(label)
-    return {"subjects": subjects, "classifications": classifications}
+#: How many records the lookup asks for, where it asked for one until
+#: 2026-08-24. **The extra four are what let the print edition win.** `num=`
+#: matches any identifier anywhere in a record, including the "also published
+#: as" cross reference an ebook record carries for its print edition, so the
+#: catalogue's first answer for a printed book's ISBN is sometimes the ebook.
+#: Under Dublin Core there was no way to tell: `dc:format` is absent on an
+#: online record, so `_is_physical_book` had nothing to test and the ebook was
+#: taken. Measured over 74 live lookups on 2026-08-24: 8 answers held more than
+#: one record, and asking for five rather than one puts a printed edition in
+#: front of an online one twice and changes no other pick.
+#:
+#: Five, the same number `_K10PLUS_RECORDS` uses, for the same reason: several
+#: printings of one book each carry the ISBN somewhere, and the best of them
+#: should win rather than whichever the catalogue happened to sort first.
+_DNB_RECORDS: Final = 5
 
 
 async def _dnb(isbn: str, api_key: str) -> Lookup:
@@ -454,8 +695,8 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
         "version": "1.1",
         "operation": "searchRetrieve",
         "query": f"num={isbn}",
-        "recordSchema": "oai_dc",
-        "maximumRecords": "1",
+        "recordSchema": "MARC21-xml",
+        "maximumRecords": str(_DNB_RECORDS),
     }
     try:
         async with httpx.AsyncClient(
@@ -466,21 +707,39 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
             return Lookup(Outcome.RATE_LIMITED, source="dnb")
         if response.status_code != 200:
             return Lookup(Outcome.UNAVAILABLE, source="dnb")
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("DNB lookup failed for %s", isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="dnb")
 
-    node = root.find(f".//{_DC}title/..")
-    if node is None:
-        return Lookup(Outcome.NOT_FOUND, source="dnb")
-
-    record = _dnb_record(node, isbn)
-    if record is None:
+    books = [
+        (fields, record)
+        for fields in (_marc_fields(node) for node in root.iter(f"{_MARC}record"))
+        for record in [_dnb_record(fields, isbn)]
+        if record is not None
+    ]
+    if not books:
         logger.info("DNB matched %s only as a cross reference or a non-book", isbn)
         return Lookup(Outcome.NOT_FOUND, source="dnb")
 
-    return Lookup(Outcome.FOUND, source="dnb", data=record)
+    # Three questions, in the order they decide. Does the record name this
+    # ISBN in its own 020, which separates the book from the cross references
+    # `num=` also matches. Is it something that can sit on a shelf, so a
+    # printed edition beats the ebook that shares its ISBN in a note. And is
+    # it the fullest, which is the same tie-break `_merge` uses between
+    # catalogues. `sorted` is stable, so records that tie on all three keep the
+    # catalogue's own order and the first answer wins, which is what asking for
+    # a single record used to give.
+    ranked = sorted(
+        books,
+        key=lambda pair: (
+            _marc_claims_isbn(pair[0], isbn),
+            _is_physical_book(_marc_extent(pair[0]), pair[1]["title"]),
+            _completeness(pair[1]),
+        ),
+        reverse=True,
+    )
+    return Lookup(Outcome.FOUND, source="dnb", data=ranked[0][1])
 
 
 # ── K10plus ───────────────────────────────────────────────────────────────────
@@ -500,8 +759,6 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
 
 _K10PLUS_URL: Final = "https://sru.k10plus.de/opac-de-627"
 
-_MARC: Final = "{http://www.loc.gov/MARC21/slim}"
-
 #: Several printings of one book each carry the same ISBN, so the search
 #: returns a handful of near-identical records and the fullest one wins.
 _K10PLUS_RECORDS: Final = 5
@@ -511,23 +768,7 @@ _K10PLUS_RECORDS: Final = 5
 _AUTHOR_RELATORS: Final = ("aut", "cre")
 
 
-def _marc_fields(record: ElementTree.Element) -> dict[str, list[dict[str, str]]]:
-    """One MARC record as `{tag: [{subfield code: value}]}`."""
-    fields: dict[str, list[dict[str, str]]] = {}
-    for datafield in record.findall(f"{_MARC}datafield"):
-        tag = datafield.get("tag")
-        if tag is None:
-            continue
-        fields.setdefault(tag, []).append(
-            {
-                subfield.get("code") or "": (subfield.text or "").strip()
-                for subfield in datafield.findall(f"{_MARC}subfield")
-            }
-        )
-    return fields
-
-
-def _marc_claims_isbn(fields: dict[str, list[dict[str, str]]], isbn: str) -> bool:
+def _marc_claims_isbn(fields: dict[str, list[_Subfields]], isbn: str) -> bool:
     """Whether 020 names this book, rather than merely mentioning it.
 
     Two traps, both hit on real records:
@@ -571,11 +812,20 @@ _BNF_ANY_ROLE: Final = re.compile(
 )
 
 
+#: A trailing initial, which is the one full stop in a name that is part of it.
+#: `Pohl, Robert O.` loses its meaning as `Robert O`, and the ISBD full stop
+#: this strips off `Melville, Herman.` looks exactly the same to a regex.
+#: Measured: 2 of 53 live DNB records credit an author with a trailing initial.
+_TRAILING_INITIAL: Final = re.compile(r"(?:^|[\s.])[A-Za-z]\.$")
+
+
 def _strip_person_noise(raw: str) -> str:
     """Drop life dates and role words from a catalogue person string."""
     cleaned = raw
     for _ in range(3):  # A name can carry both, in either order.
-        stripped = _PERSON_NOISE.sub("", cleaned).strip().rstrip(".,;")
+        stripped = _PERSON_NOISE.sub("", cleaned).strip().rstrip(",;")
+        if stripped.endswith(".") and not _TRAILING_INITIAL.search(stripped):
+            stripped = stripped[:-1].strip()
         if stripped == cleaned:
             break
         cleaned = stripped
@@ -595,7 +845,7 @@ def _flip_catalogue_name(raw: str) -> str:
     return f"{forenames} {surname}" if surname and forenames else name
 
 
-def _marc_authors(fields: dict[str, list[dict[str, str]]]) -> str | None:
+def _marc_authors(fields: dict[str, list[_Subfields]]) -> str | None:
     """The 100 main entry plus any 700 that actually wrote something."""
     names: list[str] = []
     for entry in fields.get("100", []):
@@ -613,7 +863,33 @@ def _marc_authors(fields: dict[str, list[dict[str, str]]]) -> str | None:
     return ", ".join(seen) or None
 
 
-def _marc_title(entry: dict[str, str]) -> tuple[str, str | None, str | None, float | None]:
+def _marc_credited_names(fields: dict[str, list[_Subfields]]) -> str | None:
+    """Every person the record names, whatever role it gives them.
+
+    **The fallback for a record that credits nobody with writing the book**,
+    which is what an edited volume looks like in MARC: no 100 at all, and the
+    editors in 700 with `$4=edt`. `_marc_authors` answers None there, and
+    naming the editors beats naming nobody, which is the same call the Dublin
+    Core parser made when no `dc:creator` carried `[Verfasser]`.
+
+    Measured over 74 live DNB lookups on 2026-08-24: without this, 8 of the 53
+    that still return a record lose an author the Dublin Core path answers with
+    today.
+
+    Used only where `_marc_authors` came back empty. Reading it first would put
+    a translator in the credit line of every book that has one.
+    """
+    names: dict[str, None] = {}
+    for tag in ("100", "700"):
+        for entry in fields.get(tag, []):
+            # `$t` marks an added entry for a *work* rather than a person: the
+            # row links the original title and carries its author's name.
+            if entry.get("a") and "t" not in entry:
+                names.setdefault(_flip_catalogue_name(entry["a"]), None)
+    return ", ".join(names) or None
+
+
+def _marc_title(entry: _Subfields) -> tuple[str, str | None, str | None, float | None]:
     """A 245 field as title, subtitle, series name and series number.
 
     `$n` and `$p` are the part designation and part title, which is how a
@@ -622,6 +898,16 @@ def _marc_title(entry: dict[str, str]) -> tuple[str, str | None, str | None, flo
     somebody is holding, so it becomes the title, and the collective title
     becomes the series. Without this the whole series is catalogued seven times
     under one name.
+
+    **A subfield that was never split gets split here.** An older record puts
+    the whole statement in one subfield, subtitle and statement of
+    responsibility and all: DNB record 900329866 (ISBN 9783442002009) reads
+    `$p=Der Zinker : Kriminalroman / [aus d. Engl. übertr. von Gregor Müller]`.
+    Taking it whole puts a translator credit in the title, which is what the
+    Dublin Core parser existed to prevent, so where MARC supplied no `$b` the
+    title goes through the same splitter. Only where there is no `$b`: a record
+    that did subfield itself has already answered this question, and a title
+    with a colon in it is then the title.
     """
     main = _strip_marc_punctuation(entry.get("a", ""))
     part_title = _strip_marc_punctuation(entry.get("p", ""))
@@ -636,6 +922,9 @@ def _marc_title(entry: dict[str, str]) -> tuple[str, str | None, str | None, flo
         title = part_title
     else:
         title = main
+
+    if subtitle is None:
+        title, subtitle = _dc_title_statement(title)
 
     return _fix_non_filing_space(title), subtitle, series_name, series_index
 
@@ -659,7 +948,7 @@ def _fix_non_filing_space(title: str) -> str:
     return re.sub(r"(\w')\s+(\w)", r"\1\2", title)
 
 
-def _marc_year(fields: dict[str, list[dict[str, str]]]) -> int | None:
+def _marc_year(fields: dict[str, list[_Subfields]]) -> int | None:
     """The publication year, from 264 or the older 260.
 
     `$c` is free text and really does arrive as `2000 (copyright)`, so the
@@ -692,7 +981,7 @@ async def _k10plus(isbn: str, api_key: str) -> Lookup:
             return Lookup(Outcome.RATE_LIMITED, source="k10plus")
         if response.status_code != 200:
             return Lookup(Outcome.UNAVAILABLE, source="k10plus")
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("K10plus lookup failed for %s", isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="k10plus")
@@ -711,7 +1000,76 @@ async def _k10plus(isbn: str, api_key: str) -> Lookup:
     )
 
 
-def _marc_isbn(fields: dict[str, list[dict[str, str]]]) -> str | None:
+def _marc_publisher(fields: dict[str, list[_Subfields]]) -> str | None:
+    """The publisher, from the RDA 264 or the older 260."""
+    return next(
+        (
+            entry["b"].rstrip(",")
+            for tag in ("264", "260")
+            for entry in fields.get(tag, [])
+            if entry.get("b")
+        ),
+        None,
+    )
+
+
+def _marc_language(fields: dict[str, list[_Subfields]]) -> str | None:
+    """The first 041 code this app has a two letter equivalent for."""
+    for entry in fields.get("041", []):
+        language = _LANGUAGES.get(entry.get("a", "").lower())
+        if language:
+            return language
+    return None
+
+
+def _marc_extent(fields: dict[str, list[_Subfields]]) -> str | None:
+    """300 `$a`: the page count, and whether this is a book at all.
+
+    Two readers, and they are not the same question: `_pages_from_extent`
+    wants the number, `_is_physical_book` wants to know whether the string
+    says "Online-Ressource".
+    """
+    return next((entry.get("a") for entry in fields.get("300", [])), None)
+
+
+def _marc_description(fields: dict[str, list[_Subfields]]) -> str | None:
+    """520 `$a`, the summary note, on the rare record that carries one."""
+    return next((entry["a"] for entry in fields.get("520", []) if entry.get("a")), None)
+
+
+def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[dict[str, Any]]:
+    """082 as Dewey headings, and the one field this module hands to `ddc`.
+
+    082 is the Dewey number and normally nothing else: MARC carries the
+    notation and the printed schedule carries the caption, so the label is
+    usually null rather than filled in from our own mapping. A record often
+    holds two numbers at different precisions (`005.133` and `004`, measured
+    2026-08-23), and both are kept: they are two catalogues' answers, not a
+    duplicate.
+
+    Through `ddc.parse_heading` like every other source path, which is what
+    strips MARC's segmentation prime: 53 of 463 live K10plus `$a` values
+    (11.4%, measured 2026-08-23) arrive as `005.13/3` where the DNB stores
+    `005.133`, and storing both spellings makes two rows out of one heading
+    that `uq_classifications_book_scheme_number` cannot collapse.
+
+    **Every `$a` in the field, not the first.** The DNB writes the Dewey
+    number and its own Sachgruppe letter into one 082 (`$a=830 $a=B`, 10 of 85
+    live records measured 2026-08-24). The letter is not a Dewey number and
+    `parse_heading` drops it; reading a single `$a` would drop the number
+    instead on whichever of the two came second.
+    """
+    return [
+        {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
+        for entry in fields.get("082", [])
+        for value in entry.all("a")
+        for heading in [ddc.parse_heading(value)]
+        if heading is not None
+        for number, label in [heading]
+    ]
+
+
+def _marc_isbn(fields: dict[str, list[_Subfields]]) -> str | None:
     """The record's own ISBN, ignoring cross references to other editions."""
     for entry in fields.get("020", []):
         if "q" in entry:
@@ -723,7 +1081,7 @@ def _marc_isbn(fields: dict[str, list[dict[str, str]]]) -> str | None:
 
 
 def _k10plus_record(
-    fields: dict[str, list[dict[str, str]]], isbn: str | None = None
+    fields: dict[str, list[_Subfields]], isbn: str | None = None
 ) -> dict[str, Any]:
     """One MARC record as book fields.
 
@@ -731,24 +1089,8 @@ def _k10plus_record(
     verified. The search path has none, so it is read off 020 instead.
     """
     isbn = isbn or _marc_isbn(fields)
-    title_entry = (fields.get("245") or [{}])[0]
+    title_entry = (fields.get("245") or [_Subfields(())])[0]
     title, subtitle, series_name, series_index = _marc_title(title_entry)
-
-    publisher = next(
-        (
-            entry["b"].rstrip(",")
-            for tag in ("264", "260")
-            for entry in fields.get(tag, [])
-            if entry.get("b")
-        ),
-        None,
-    )
-
-    language = None
-    for entry in fields.get("041", []):
-        language = _LANGUAGES.get(entry.get("a", "").lower())
-        if language:
-            break
 
     subjects = [
         " ".join(part for part in (entry.get("a"), entry.get("x")) if part)
@@ -756,42 +1098,16 @@ def _k10plus_record(
         if entry.get("a")
     ]
 
-    # 082 is the Dewey number and normally nothing else: MARC carries the
-    # notation and the printed schedule carries the caption, so the label is
-    # usually null rather than filled in from our own mapping. A record often
-    # holds two numbers at different precisions (`005.133` and `004`, measured
-    # 2026-08-23), and both are kept: they are two catalogues' answers, not a
-    # duplicate.
-    #
-    # Through `ddc.parse_heading` like every other source path, which is what
-    # strips MARC's segmentation prime: 53 of 463 live `$a` values (11.4%,
-    # measured 2026-08-23) arrive as `005.13/3` where the DNB stores `005.133`,
-    # and storing both spellings makes two rows out of one heading that
-    # `uq_classifications_book_scheme_number` cannot collapse.
-    classifications = [
-        {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
-        for entry in fields.get("082", [])
-        for heading in [ddc.parse_heading(entry.get("a", ""))]
-        if heading is not None
-        for number, label in [heading]
-    ]
-
-    description = next(
-        (entry["a"] for entry in fields.get("520", []) if entry.get("a")), None
-    )
-
     return {
         "isbn": isbn,
         "title": title,
         "subtitle": subtitle,
         "author": _marc_authors(fields),
-        "publisher": publisher,
+        "publisher": _marc_publisher(fields),
         "year": _marc_year(fields),
-        "description": description,
-        "language": language,
-        "page_count": _pages_from_extent(
-            next((entry.get("a") for entry in fields.get("300", [])), None)
-        ),
+        "description": _marc_description(fields),
+        "language": _marc_language(fields),
+        "page_count": _pages_from_extent(_marc_extent(fields)),
         "series_name": series_name,
         "series_index": series_index,
         # No cover in a MARC record. The Open Library cover service answers by
@@ -799,7 +1115,11 @@ def _k10plus_record(
         # which is most pre-1970 printings, gets none.
         "cover_url": covers.open_library_url(isbn) if isbn else None,
         "subjects": subjects,
-        "classifications": classifications,
+        # K10plus is not read for GND identifiers, though its records carry
+        # them in the same `$0`. Doing that is a second catalogue's worth of
+        # live comparison and belongs in its own round, not as a side effect of
+        # the DNB's.
+        "classifications": _marc_ddc(fields),
     }
 
 
@@ -928,11 +1248,13 @@ def _merge(results: list[Lookup], isbn: str) -> dict[str, Any]:
 def _union_classifications(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One entry per scheme and number, keeping the caption if any source had one.
 
-    The captions are what differ: the DNB returns `830 Deutsche Literatur` and
-    K10plus returns `830` bare, and taking the leading source's answer whole
-    would throw away the caption whenever K10plus led. The number decides
-    identity, the caption is filled in from wherever it exists, and a later
-    source never overwrites a caption already found.
+    The captions are what differ. **No source supplies a Dewey caption today**:
+    the DNB returned `830 Deutsche Literatur` until it moved to MARC21 on
+    2026-08-24, and MARC 082 carries the number alone everywhere. The rule is
+    kept because it is the schemes that will, and because the same rule runs in
+    `_write_classifications` against a heading already stored, which is the live
+    path: the number decides identity, the caption is filled in from wherever it
+    exists, and a later source never overwrites a caption already found.
     """
     kept: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in entries:
@@ -1086,11 +1408,22 @@ def _search_terms(query: str) -> list[str]:
 #: Extents that mean the record is not a physical book. A digitised copy of a
 #: novel is a real catalogue record and a wrong answer to "which book am I
 #: holding", and it is the single largest source of noise in both SRU sources.
-_NOT_A_BOOK: Final = re.compile(
-    r"online[- ]?(ressource|resource)|elektronische ressource|streaming|"
-    r"audio disc|sound (disc|recording)|videodisc|dvd|blu-?ray",
-    re.IGNORECASE,
+#:
+#: **Written as two halves on 2026-08-24, because the DNB lookup treats them
+#: differently.** An online resource is this book in another form, and the DNB
+#: answers with one for an ISBN whose printed record it also holds, so `_dnb`
+#: ranks it below a physical record and takes it rather than reporting a miss.
+#: A disc is a different object, so `_dnb_record` refuses it outright. Both
+#: halves are still one refusal everywhere else, `_is_physical_book` being what
+#: the search paths and K10plus ask.
+_ONLINE_FORMS: Final = (
+    r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 )
+_DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
+
+_NOT_A_BOOK: Final = re.compile(f"{_ONLINE_FORMS}|{_DISC_FORMS}", re.IGNORECASE)
+
+_IS_A_DISC: Final = re.compile(_DISC_FORMS, re.IGNORECASE)
 
 
 def _is_physical_book(extent: str | None, title: str) -> bool:
@@ -1129,7 +1462,7 @@ async def _k10plus_search(query: str, limit: int) -> list[dict[str, Any]]:
             response = await client.get(_K10PLUS_URL, params=params)
         if response.status_code != 200:
             return []
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("K10plus search failed for %r", query, exc_info=True)
         return []
@@ -1138,7 +1471,7 @@ async def _k10plus_search(query: str, limit: int) -> list[dict[str, Any]]:
     for node in root.iter(f"{_MARC}record"):
         fields = _marc_fields(node)
         record = _k10plus_record(fields)
-        extent = next((entry.get("a") for entry in fields.get("300", [])), None)
+        extent = _marc_extent(fields)
         if not record["title"] or not _is_physical_book(extent, record["title"]):
             continue
         results.append(_as_match(record, "k10plus"))
@@ -1151,6 +1484,16 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
     `WOE` is the index that takes several words and requires all of them, which
     is what a typed search actually means. It is precise to the point of being
     narrow: "clean code martin" is one record.
+
+    **MARC21 costs bandwidth here and it is the one place it is worth naming.**
+    A full page of results is 438 to 588 KB against Dublin Core's 51 KB,
+    measured on 2026-08-24 over four `WOE=` queries at the 50 record ceiling
+    (`clean code` 437,805 bytes, `roman liebe` 449,535, `informatik grundlagen`
+    440,115, `geschichte deutschland` 587,810), for 0.60s against 0.37s. It is
+    paid on a typed search rather than on a scan, the responses are parsed and
+    dropped rather than stored, and `docs/decisions.md` records that no
+    catalogue response is size capped, which this makes worth revisiting sooner
+    than it was.
     """
     terms = _search_terms(query)
     if not terms:
@@ -1160,7 +1503,7 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
         "version": "1.1",
         "operation": "searchRetrieve",
         "query": f"WOE={' '.join(terms)}",
-        "recordSchema": "oai_dc",
+        "recordSchema": "MARC21-xml",
         "maximumRecords": str(min(limit * 3, 50)),
     }
     try:
@@ -1170,15 +1513,22 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
             response = await client.get(_DNB_URL, params=params)
         if response.status_code != 200:
             return []
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("DNB search failed for %r", query, exc_info=True)
         return []
 
     results: list[dict[str, Any]] = []
-    for node in root.findall(f".//{_DC}title/.."):
-        record = _dnb_record(node, isbn=None)
-        if record is None:
+    for node in root.iter(f"{_MARC}record"):
+        fields = _marc_fields(node)
+        record = _dnb_record(fields, isbn=None)
+        # Online resources are refused here and merely ranked down in `_dnb`,
+        # and the asymmetry is deliberate: a search has no ISBN to tell an
+        # edition of this book from a digitisation of another one, so it is the
+        # same refusal `_k10plus_search` makes two functions above.
+        if record is None or not _is_physical_book(
+            _marc_extent(fields), record["title"]
+        ):
             continue
         results.append(_as_match(record, "dnb"))
     return results
@@ -1236,7 +1586,7 @@ async def _bnf_search(query: str, limit: int) -> list[dict[str, Any]]:
             response = await client.get(_BNF_URL, params=params)
         if response.status_code != 200:
             return []
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("BnF search failed for %r", query, exc_info=True)
         return []
@@ -1268,7 +1618,7 @@ def _bnf_record(record: ElementTree.Element) -> dict[str, Any] | None:
 
     # The BnF writes the statement of responsibility into the title, the same
     # way the DNB does, so the same parser applies.
-    title, subtitle = _dnb_title(titles[0])
+    title, subtitle = _dc_title_statement(titles[0])
     if _is_placeholder_title(title):
         return None
 
@@ -1353,7 +1703,7 @@ async def _loc_search(query: str, limit: int) -> list[dict[str, Any]]:
             response = await client.get(_LOC_URL, params=params)
         if response.status_code != 200:
             return []
-        root = ElementTree.fromstring(response.text)
+        root = _parsed(response.text)
     except (httpx.HTTPError, ElementTree.ParseError):
         logger.warning("Library of Congress search failed for %r", query, exc_info=True)
         return []
@@ -1555,9 +1905,22 @@ def _as_match(record: dict[str, Any], source: str) -> dict[str, Any]:
         # search path has no merge, so it is applied here or nowhere, and
         # without it the repetition spends the payload's budget of eight twice
         # over on entries that mean nothing.
+        #
+        # **And bounded, because `BookMatch` refuses a ninth entry and nothing
+        # in `main.py` catches a `ValidationError`.** Bounding at each caller
+        # instead is what this round got wrong: the search endpoint was fixed
+        # and `GET /{id}/enrich/candidates`, fed by the same `search`, answered
+        # 500 for the whole response. The bound belongs to the shape this
+        # function builds, so a third caller cannot reintroduce the *count*
+        # half of the hole. It reintroduces the other half: a count bound never
+        # drops an entry the column cannot hold, so a caller skipping
+        # `_match_rows` still 500s on an over-long caption. Measured both ways
+        # while fixing this. `_match_rows` is the layer that stops both.
+        # Measured over four live DNB `WOE=` searches on 2026-08-24: 8 of 189
+        # records carry more than eight headings.
         "classifications": _union_classifications(
             record.get("classifications") or []
-        ),
+        )[:MAX_CLASSIFICATIONS_PER_BOOK],
     }
 
 

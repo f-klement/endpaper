@@ -18,7 +18,8 @@ import pytest
 import respx
 
 from enums import SettingKey
-from tests.helpers import GOOGLE_BOOKS, silence_catalogues
+from schemas import MAX_CLASSIFICATIONS_PER_BOOK
+from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
 
 
 def volume(
@@ -155,6 +156,73 @@ class TestEnrichmentCandidates:
         )
 
         assert res.status_code == 404
+
+    @staticmethod
+    def _catalogue_record(headings: str) -> str:
+        """One K10plus record for the book the test creates, plus `headings`."""
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+            "<zs:records><zs:record><zs:recordData>"
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            '<datafield tag="020"><subfield code="a">9783596294336</subfield>'
+            "</datafield>"
+            '<datafield tag="245"><subfield code="a">Der Zauberberg</subfield>'
+            "</datafield>"
+            '<datafield tag="100"><subfield code="a">Mann, Thomas</subfield>'
+            '<subfield code="4">aut</subfield></datafield>'
+            '<datafield tag="300"><subfield code="a">992 Seiten</subfield></datafield>'
+            f"{headings}"
+            "</record></zs:recordData></zs:record></zs:records>"
+            "</zs:searchRetrieveResponse>"
+        )
+
+    def _candidates(self, client, admin, make_book, headings: str):
+        book = make_book(
+            admin["headers"], title="Der Zauberberg", author="Thomas Mann"
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=sru_response(self._catalogue_record(headings))
+            )
+            silence_catalogues(mock)
+            return client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+    def test_a_record_over_the_heading_ceiling_does_not_lose_the_response(
+        self, client, admin, make_book, google_enabled
+    ):
+        """This endpoint had no guard at all, where the search endpoint had one.
+
+        `BookMatch` refuses a ninth heading and `main.py` has no
+        `ValidationError` handler, so a record the schema refused answered 500
+        for **every** candidate rather than costing one row. Measured over four
+        live DNB searches on 2026-08-24: 8 of 189 records carry more than eight
+        headings.
+        """
+        nine = "".join(
+            f'<datafield tag="082"><subfield code="a">{100 + index}</subfield>'
+            "</datafield>"
+            for index in range(9)
+        )
+        res = self._candidates(client, admin, make_book, nine)
+
+        assert res.status_code == 200
+        assert len(res.json()[0]["classifications"]) == MAX_CLASSIFICATIONS_PER_BOOK
+
+    def test_a_heading_the_column_could_not_hold_costs_the_heading(
+        self, client, admin, make_book, google_enabled
+    ):
+        """The other half of the guard, which the count bound does not cover: a
+        caption longer than the column is dropped rather than answered with."""
+        long_caption = '<datafield tag="082"><subfield code="a">004 '
+        long_caption += "x" * 400 + "</subfield></datafield>"
+        res = self._candidates(client, admin, make_book, long_caption)
+
+        assert res.status_code == 200
+        assert res.json()[0]["classifications"] == []
 
 
 class TestCategoriesSerialisation:

@@ -465,6 +465,13 @@ unique among uncopied rows so writing one could collide with a book already here
 The candidates endpoint deliberately carries no `suggested_tag_ids`: that book already has
 tags, and they are somebody's deliberate choice.
 
+**A catalogue record the response schema refuses costs one row, on this endpoint and on
+`/api/books/search` alike.** Both answer with the same model built straight from a
+catalogue, and both go through one builder for that reason: a record carrying more headings
+than a book may hold loses the ninth rather than the whole result, and a caption longer than
+the column loses that heading. The headings are ordered by scheme before the cut, so a Dewey
+number outranks a subject heading whichever catalogue supplied it.
+
 **Classifications are the exception, and are added rather than merged.** `overwrite` does
 not reach them: a heading is a catalogue's citation, not a value somebody typed, so there is
 nothing here to overrule. Enrichment adds the ones the book does not already carry, fills in
@@ -566,7 +573,10 @@ A 404 means every one of them was asked and none holds the ISBN. The ranking and
 measurements behind it are in `backend/metadata.py`.
 
 The response carries `classifications`, each a scheme, a number and the caption the
-catalogue gave it (`ddc`, `004`, `Informatik`), and `suggested_tag_ids`.
+catalogue gave it, and `suggested_tag_ids`. Three schemes are produced: `ddc` and `lcc`
+arrive with no caption (MARC carries the notation and the printed schedule carries the
+words), and `gnd`, the German subject authority file, arrives as an authority record number
+with the heading text as its caption (`gnd`, `4203576-4`, `Schatz`).
 
 **The suggestion has two routes and they fail on opposite records.** One compares the
 sources' subject strings against the seeded tag names, which works on an English record and
@@ -585,13 +595,17 @@ The response is not a book and nothing is persisted. The client posts it back to
 and a row is written for each.
 
 **A book carries at most 8 classifications, and that is a bound on the book rather than on
-a payload.** `max_length` caps one request; both writers of the table (the add and enrich
-paths, and the merge) count the rows already there and stop, because they are additive
+a payload.** `max_length` caps one request; both capped writers of the table (the add and
+enrich paths, and the merge; a backup restore is the third and is deliberately uncapped) count the rows already there and stop, because they are additive
 across requests and neither `POST /{id}/enrich/apply` nor `POST /merge` carries a rate
 limiter. At the ceiling an incoming heading is dropped rather than a stored one evicted,
-and a caption still fills in on a heading already held. The reason the number matters:
+and a caption still fills in on a heading already held. **Which one is dropped is decided by
+order**: the list is sorted by scheme before it is cut, so a Dewey number outranks a subject
+heading whichever catalogue supplied it. The reason the number matters:
 `BookOut.classifications` is on every listing row, so an inflated book is paid for on every
-page that contains it.
+page that contains it. Measured on 2026-08-24 against one catalogue, which is not the whole
+of what a book can carry: 3.07 headings per record over 85 DNB lookups, and 8 of 189 records
+from four DNB searches above eight.
 
 `PUT /{id}/refresh` re-runs the same lookup and overwrites the stored fields, with one
 exception: a cover the member uploaded (a `/covers/` URL) is never replaced by a remote one.

@@ -372,15 +372,17 @@ class TestValidation:
 
 def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
          extent: str = "992 Seiten", isbn: str = "9783596294336",
-         extra: str = "") -> str:
-    """One MARCXML record, as K10plus returns it."""
+         subtitle: str = "", extra: str = "") -> str:
+    """One MARCXML record, as K10plus and the DNB both return it."""
+    part_b = f'<subfield code="b">{subtitle}</subfield>' if subtitle else ""
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
         "<zs:records><zs:record><zs:recordData>"
         '<record xmlns="http://www.loc.gov/MARC21/slim">'
         f'<datafield tag="020"><subfield code="a">{isbn}</subfield></datafield>'
-        f'<datafield tag="245"><subfield code="a">{title}</subfield></datafield>'
+        f'<datafield tag="245"><subfield code="a">{title}</subfield>'
+        f"{part_b}</datafield>"
         f'<datafield tag="100"><subfield code="a">{author}</subfield>'
         '<subfield code="4">aut</subfield></datafield>'
         '<datafield tag="264"><subfield code="b">Fischer</subfield>'
@@ -393,23 +395,15 @@ def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
     )
 
 
-def dublin_core(title: str = "Der Zauberberg : Roman / Thomas Mann",
-                *, creator: str = "Mann, Thomas [Verfasser]",
-                extent: str = "992 Seiten") -> str:
-    """One Dublin Core record, as the DNB returns it."""
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
-        "<records><record><recordData>"
-        '<dc xmlns="http://www.openarchives.org/OAI/2.0/oai_dc/"'
-        ' xmlns:dc="http://purl.org/dc/elements/1.1/">'
-        f"<dc:title>{title}</dc:title>"
-        f"<dc:creator>{creator}</dc:creator>"
-        "<dc:publisher>Frankfurt : Fischer</dc:publisher>"
-        "<dc:date>2024</dc:date><dc:language>ger</dc:language>"
-        f"<dc:format>{extent}</dc:format>"
-        "</dc></recordData></record></records></searchRetrieveResponse>"
-    )
+def dnb_marc(title: str = "Der Zauberberg", *, subtitle: str = "Roman",
+             creator: str = "Mann, Thomas", extent: str = "992 Seiten") -> str:
+    """One MARC21 record, as the DNB returns it since 2026-08-24.
+
+    The same schema K10plus answers in, which is why this builds on `marc()`
+    rather than beside it: what differs between the two sources is which fields
+    they fill in, and the search assertions here are about the fields both do.
+    """
+    return marc(title, author=creator, extent=extent, subtitle=subtitle)
 
 
 def bnf_record(title: str = "L'etranger / Albert Camus",
@@ -468,7 +462,7 @@ class TestEveryCatalogueAnswers:
         assert match["page_count"] == 992
 
     def test_the_dnb_contributes(self, client, admin):
-        [match] = self._search(client, admin["headers"], **{DNB: dublin_core()})
+        [match] = self._search(client, admin["headers"], **{DNB: dnb_marc()})
         assert match["title"] == "Der Zauberberg"
         assert match["subtitle"] == "Roman"
         assert match["source"] == "dnb"
@@ -493,7 +487,7 @@ class TestEveryCatalogueAnswers:
 
     def test_two_catalogues_holding_one_book_produce_one_row(self, client, admin):
         matches = self._search(
-            client, admin["headers"], **{K10PLUS: marc(), DNB: dublin_core()}
+            client, admin["headers"], **{K10PLUS: marc(), DNB: dnb_marc()}
         )
         assert len(matches) == 1
         assert set(matches[0]["source"].split("+")) == {"dnb", "k10plus"}
@@ -506,6 +500,20 @@ class TestEveryCatalogueAnswers:
                 client,
                 admin["headers"],
                 **{K10PLUS: marc(extent="1 Online-Ressource (992 Seiten)")},
+            )
+            == []
+        )
+
+    def test_a_digitised_copy_is_not_offered_by_the_dnb_either(self, client, admin):
+        """The lookup ranks an online record down and takes it when nothing
+        better answers; a search has no ISBN to tell an edition of this book
+        from a digitisation of another one, so it refuses. Nothing pinned the
+        DNB half of that before."""
+        assert (
+            self._search(
+                client,
+                admin["headers"],
+                **{DNB: dnb_marc(extent="Online-Ressource, 992 Seiten")},
             )
             == []
         )
@@ -586,6 +594,12 @@ class TestOneBadRecordCostsOneResult:
     record tripping any bound answered 500 and lost every other row on the page.
 
     The lookup path answers the same problem the same way, in `_headings`.
+
+    **The classifications no longer reach that guard at all.** They go through
+    `_headings` first, like the lookup path, so an unusable heading costs its
+    own row and a ninth heading costs the ninth heading. Everything else in the
+    record still costs the whole result, `year` being the reachable one: MARC
+    writes 9999 for a continuing resource and `MAX_YEAR` is 2200.
     """
 
     def _search(self, client, headers, **routes):
@@ -603,7 +617,9 @@ class TestOneBadRecordCostsOneResult:
         subfields = f'<subfield code="a">{number}{caption}</subfield>'
         return f'<datafield tag="082">{subfields}</datafield>'
 
-    def _two_records(self, first_extra: str, second_title: str) -> str:
+    def _two_records(
+        self, first_extra: str, second_title: str, first_extent: str = "992 Seiten"
+    ) -> str:
         """One K10plus response holding two books, the first one poisoned.
 
         Two records from one source rather than two sources, because the
@@ -611,16 +627,24 @@ class TestOneBadRecordCostsOneResult:
         `_merge_matches` would fold them into a single row carrying the bad
         field, which is not the case under test.
         """
-        head, _, tail = marc(extra=first_extra).partition("<zs:records>")
+        head, _, tail = marc(extra=first_extra, extent=first_extent).partition(
+            "<zs:records>"
+        )
         second = marc(title=second_title, isbn="9783596294343")
         _, _, body = second.partition("<zs:records>")
         return head + "<zs:records>" + tail.replace(
             "</zs:records></zs:searchRetrieveResponse>", ""
         ) + body
 
-    def test_a_caption_the_column_could_not_hold_drops_the_row(self, client, admin):
-        """400 characters against a 200 character column. The lookup path has
-        the same test; this endpoint is fed by the same records and had none."""
+    def test_a_caption_the_column_could_not_hold_costs_the_heading_not_the_row(
+        self, client, admin
+    ):
+        """400 characters against a 200 character column.
+
+        It used to drop the whole result, because the headings went straight
+        into `BookMatch`. They go through `_headings` now, which is what the
+        lookup path always did with the same record.
+        """
         res = self._search(
             client,
             admin["headers"],
@@ -628,19 +652,75 @@ class TestOneBadRecordCostsOneResult:
         )
 
         assert res.status_code == 200
-        assert res.json() == []
+        assert [match["classifications"] for match in res.json()] == [[]]
 
-    def test_the_rest_of_the_page_survives_it(self, client, admin):
+    def test_a_record_with_more_headings_than_the_ceiling_keeps_its_row(
+        self, client, admin
+    ):
+        """The bound is a bound, not a cliff.
+
+        `_as_match` deduplicates and does not slice, `BookMatch` refuses a
+        ninth entry, and the handler in `search_books` drops the whole row on a
+        `ValidationError`. So before this fix a well catalogued record vanished
+        from the search page. Measured over four live DNB `WOE=` searches on
+        2026-08-24: 8 of 189 records carry more than eight headings, and the
+        worst query lost 6 of its 50 results.
+        """
+        nine = "".join(self._ddc(f"{100 + index}") for index in range(9))
+        [match] = self._search(
+            client, admin["headers"], **{K10PLUS: marc(extra=nine)}
+        ).json()
+
+        assert match["title"] == "Der Zauberberg"
+        assert len(match["classifications"]) == 8
+
+    def test_the_dewey_number_is_the_one_kept_at_the_ceiling(self, client, admin):
+        """The entry a tag suggestion is projected from survives the cut, even
+        though the record writes its subject headings first.
+
+        This pins the parser's own ordering end to end and **not** the sort in
+        `_headings`, which cannot show here: a search result comes from one
+        record, so the Dewey number is already at index 0 by the time it
+        arrives. The sort is what makes this true of a merged book, and
+        `tests/routers/test_books_classifications.py::TestTheLookup::
+        test_a_second_catalogues_dewey_number_survives_the_ceiling` is the test
+        that fails without it.
+        """
+        headings = "".join(
+            f'<datafield tag="650"><subfield code="0">(DE-588)400000{index}-1'
+            f'</subfield><subfield code="a">Thema {index}</subfield></datafield>'
+            for index in range(9)
+        )
+        [match] = self._search(
+            client,
+            admin["headers"],
+            **{DNB: marc(extra=headings + self._ddc("830"))},
+        ).json()
+
+        assert match["classifications"][0] == {
+            "scheme": "ddc",
+            "number": "830",
+            "label": None,
+        }
+        assert len(match["classifications"]) == 8
+
+    def test_the_rest_of_the_page_survives_a_bad_record(self, client, admin):
         """The point of dropping rather than raising: one bad record must not
         take the other results on the page with it. Before the guard this
-        answered 500 and lost both."""
+        answered 500 and lost both.
+
+        On the page count rather than on a caption, which no longer reaches the
+        guard: `MAX_PAGE_NUMBER_IN_A_BOOK` is 100,000 and a catalogue really
+        does write an extent this parser reads a larger number out of.
+        """
         res = self._search(
             client,
             admin["headers"],
             **{
                 K10PLUS: self._two_records(
-                    self._ddc("004", " " + "x" * 400),
+                    "",
                     "Der Zauberberg Kommentar",
+                    first_extent="999999 Seiten",
                 )
             },
         )

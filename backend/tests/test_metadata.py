@@ -37,13 +37,16 @@ import metadata
 from enums import ClassificationScheme
 from metadata import (
     Outcome,
-    _dnb_person,
-    _dnb_title,
+    _dc_title_statement,
+    _flip_catalogue_name,
     _is_placeholder_title,
     _loc_record,
+    _marc_fields,
     _pages_from_extent,
+    _parsed,
     lookup,
 )
+from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import silence_covers
 
 OPEN_LIBRARY = "https://openlibrary.org/"
@@ -54,22 +57,68 @@ K10PLUS = "https://sru.k10plus.de/opac-de-627"
 GERMAN_ISBN = "9783960092353"
 ENGLISH_ISBN = "9780743273565"
 
+#: One DNB MARC21 record, in the shape the live endpoint returns since the
+#: switch away from Dublin Core. Copied from ISBN 9783446249974's real response
+#: and re-labelled onto the book the rest of this file uses, so the subfields,
+#: the repeated `$0`, the repeated `082 $a` and the non-sorting delimiters are
+#: the catalogue's own and not a guess about them.
 DNB_RECORD = """<?xml version="1.0" encoding="UTF-8"?>
 <searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
  <records><record><recordData>
-  <dc xmlns="http://www.openarchives.org/OAI/2.0/oai_dc/"
-      xmlns:dc="http://purl.org/dc/elements/1.1/">
-   <dc:title>[Docker: up &amp; running] ; Praxiswissen Docker : Grundlagen \
-und Best Practices / Sean P. Kane mit Karl Matthias</dc:title>
-   <dc:creator>Kane, Sean P. [Verfasser]</dc:creator>
-   <dc:creator>Matthias, Karl [Verfasser]</dc:creator>
-   <dc:creator>Demmig, Thomas [Uebersetzer]</dc:creator>
-   <dc:publisher>Heidelberg : O'Reilly</dc:publisher>
-   <dc:date>2024</dc:date>
-   <dc:language>ger</dc:language>
-   <dc:subject>004 Informatik</dc:subject>
-   <dc:format>390 Seiten</dc:format>
-  </dc>
+  <record xmlns="http://www.loc.gov/MARC21/slim" type="Bibliographic">
+   <leader>00000nam a2200000uc 4500</leader>
+   <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9783960092353</subfield>
+   </datafield>
+   <datafield tag="041" ind1=" " ind2=" ">
+    <subfield code="a">ger</subfield>
+   </datafield>
+   <datafield tag="082" ind1="7" ind2="4">
+    <subfield code="a">004</subfield>
+    <subfield code="a">B</subfield>
+    <subfield code="2">23sdnb</subfield>
+   </datafield>
+   <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="0">(DE-588)1042243212</subfield>
+    <subfield code="0">https://d-nb.info/gnd/1042243212</subfield>
+    <subfield code="0">(DE-101)1042243212</subfield>
+    <subfield code="a">Kane, Sean P.</subfield>
+    <subfield code="e">Verfasser</subfield>
+    <subfield code="4">aut</subfield>
+   </datafield>
+   <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Praxiswissen Docker</subfield>
+    <subfield code="b">Grundlagen und Best Practices</subfield>
+    <subfield code="c">Sean P. Kane mit Karl Matthias</subfield>
+   </datafield>
+   <datafield tag="264" ind1=" " ind2="1">
+    <subfield code="a">Heidelberg</subfield>
+    <subfield code="b">O'Reilly</subfield>
+    <subfield code="c">2024</subfield>
+   </datafield>
+   <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">390 Seiten</subfield>
+   </datafield>
+   <datafield tag="650" ind1=" " ind2="7">
+    <subfield code="0">(DE-588)4026894-9</subfield>
+    <subfield code="0">https://d-nb.info/gnd/4026894-9</subfield>
+    <subfield code="a">Informatik</subfield>
+    <subfield code="2">gnd</subfield>
+   </datafield>
+   <datafield tag="689" ind1="0" ind2="0">
+    <subfield code="0">(DE-588)4026894-9</subfield>
+    <subfield code="D">s</subfield>
+    <subfield code="a">Informatik</subfield>
+   </datafield>
+   <datafield tag="700" ind1="1" ind2=" ">
+    <subfield code="a">Matthias, Karl</subfield>
+    <subfield code="4">aut</subfield>
+   </datafield>
+   <datafield tag="700" ind1="1" ind2=" ">
+    <subfield code="a">Demmig, Thomas</subfield>
+    <subfield code="4">trl</subfield>
+   </datafield>
+  </record>
  </recordData></record></records>
 </searchRetrieveResponse>
 """
@@ -141,6 +190,14 @@ def _marc_record(
 
 K10PLUS_RECORD = _marc(_marc_record())
 K10PLUS_EMPTY = _marc()
+
+
+def _marc_element(datafields: str) -> ElementTree.Element:
+    """One MARC record element, built from the datafields a test cares about."""
+    return ElementTree.fromstring(
+        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+        f"{datafields}</record>"
+    )
 
 
 def _xml(body: str) -> httpx.Response:
@@ -431,7 +488,12 @@ class TestCache:
 
 
 class TestDnbRecord:
-    """The DNB packs a whole catalogue statement into each field."""
+    """The DNB record, read as MARC21 since 2026-08-24.
+
+    Dublin Core packed a whole catalogue statement into each field and carried
+    no identifier at all. What is pinned here is that the fields that worked
+    under it still work, and that the identifiers it never had now arrive.
+    """
 
     @pytest.mark.asyncio
     async def test_maps_the_record_onto_book_fields(self):
@@ -468,8 +530,8 @@ class TestDnbRecord:
         assert result.data["author"] == "Sean P. Kane, Karl Matthias"
 
     @pytest.mark.asyncio
-    async def test_strips_the_ddc_number_from_a_subject(self):
-        """"004 Informatik" cannot match a tag named "Informatik"."""
+    async def test_the_subject_heading_is_the_caption_without_its_number(self):
+        """A heading reaches `subjects` as words, so a tag name can match it."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=K10PLUS).mock(
@@ -481,6 +543,226 @@ class TestDnbRecord:
 
         assert result.data is not None
         assert result.data["subjects"] == ["Informatik"]
+
+    @pytest.mark.asyncio
+    async def test_the_same_heading_in_650_and_689_is_one_subject(self):
+        """A record restates its 650 headings in the 689 chain."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert len(result.data["classifications"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_the_subject_heading_arrives_with_its_gnd_number(self):
+        """The identifier is the whole reason this source reads MARC."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert {
+            "scheme": ClassificationScheme.GND,
+            "number": "4026894-9",
+            "label": "Informatik",
+        } in result.data["classifications"]
+
+    @pytest.mark.asyncio
+    async def test_the_dewey_number_comes_before_the_subject_headings(self):
+        """`_headings` keeps the first eight, and the Dewey number is the one
+        a tag suggestion is projected from."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"][0] == {
+            "scheme": ClassificationScheme.DDC,
+            "number": "004",
+            "label": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_sachgruppe_letter_does_not_hide_the_dewey_number(self):
+        """082 carries `$a=004` and `$a=B` in one field, in that order.
+
+        Reading a single `$a` per field would take whichever came second.
+        """
+        record = DNB_RECORD.replace(
+            '<subfield code="a">004</subfield>\n    <subfield code="a">B</subfield>',
+            '<subfield code="a">B</subfield>\n    <subfield code="a">004</subfield>',
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(record))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert [
+            entry["number"]
+            for entry in result.data["classifications"]
+            if entry["scheme"] is ClassificationScheme.DDC
+        ] == ["004"]
+
+    @pytest.mark.asyncio
+    async def test_a_free_text_heading_starting_with_three_digits_is_not_dewey(self):
+        """"100 Jahre Bauhaus" is a subject heading, and `ddc.parse_heading`
+        would read it as Dewey 100 with the caption "Jahre Bauhaus".
+
+        The floor in `ddc` cannot tell the two apart, so the separation is
+        structural: 082 is the only field handed to `ddc`, and a subject field
+        never is. Remove that and this book is filed under Philosophy.
+        """
+        record = DNB_RECORD.replace(
+            '<subfield code="a">Informatik</subfield>',
+            '<subfield code="a">100 Jahre Bauhaus</subfield>',
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(record))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert [
+            entry["number"]
+            for entry in result.data["classifications"]
+            if entry["scheme"] is ClassificationScheme.DDC
+        ] == ["004"]
+        assert {
+            "scheme": ClassificationScheme.GND,
+            "number": "4026894-9",
+            "label": "100 Jahre Bauhaus",
+        } in result.data["classifications"]
+
+    @staticmethod
+    def _two_records(first: str, second: str) -> str:
+        """One DNB answer holding two records, which `maximumRecords=5` allows.
+
+        No fixture held more than one before, so the ranking in `_dnb` was
+        exercised by nothing.
+        """
+        head, _, tail = DNB_RECORD.partition("<records>")
+        body = tail.replace("</records>\n</searchRetrieveResponse>\n", "")
+        return (
+            head
+            + "<records>"
+            + body.replace('<subfield code="a">390 Seiten</subfield>', first)
+            + body.replace('<subfield code="a">390 Seiten</subfield>', second)
+            + "</records>\n</searchRetrieveResponse>\n"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_printed_edition_outranks_the_online_one(self):
+        """`num=` matches the ebook record through its "also published as" note,
+        and the DNB answers with it first. The extra four records are what let
+        the printed edition win."""
+        answer = self._two_records(
+            '<subfield code="a">Online-Ressource</subfield>',
+            '<subfield code="a">390 Seiten</subfield>',
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["page_count"] == 390
+
+    @pytest.mark.asyncio
+    async def test_an_online_record_is_taken_rather_than_reporting_a_miss(self):
+        """Dublin Core carried no `dc:format` on an online record, so every one
+        of them was accepted. Refusing now would turn 21 of 74 live lookups into
+        misses for records that name the scanned ISBN in their own 020."""
+        answer = DNB_RECORD.replace(
+            '<subfield code="a">390 Seiten</subfield>',
+            '<subfield code="a">Online-Ressource</subfield>',
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.outcome is Outcome.FOUND
+        assert result.data is not None
+        assert result.data["title"] == "Praxiswissen Docker"
+
+    @pytest.mark.asyncio
+    async def test_a_disc_is_refused_rather_than_ranked_down(self):
+        """A DVD is a different object, not this book in another form, and the
+        Dublin Core parser refused it whenever `dc:format` was present."""
+        answer = DNB_RECORD.replace(
+            '<subfield code="a">390 Seiten</subfield>',
+            '<subfield code="a">1 DVD-Video</subfield>',
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_the_author_identifier_is_read_by_nothing(self):
+        """`100 $0` is a person, and this app has no person to hang it on.
+
+        Recorded rather than implied: see `docs/decisions.md`, "The author\'s
+        GND is read by nothing". A row here would answer the author identity
+        question `implementation_plan.md` §30g defers, and that answer is
+        expensive to change once data exists.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert "1042243212" not in str(result.data)
 
     @pytest.mark.asyncio
     async def test_an_empty_result_set_is_a_miss_not_an_outage(self):
@@ -503,41 +785,173 @@ class TestDnbRecord:
 
 
 class TestTitleStatement:
+    """The BnF still writes a whole statement into `dc:title`, and so does a
+    MARC record old enough not to have subfielded itself."""
+
     def test_drops_the_statement_of_responsibility(self):
-        assert _dnb_title("Dune / Frank Herbert") == ("Dune", None)
+        assert _dc_title_statement("Dune / Frank Herbert") == ("Dune", None)
 
     def test_splits_the_subtitle_off_the_colon(self):
-        assert _dnb_title("Docker : eine Einfuehrung") == (
+        assert _dc_title_statement("Docker : eine Einfuehrung") == (
             "Docker",
             "eine Einfuehrung",
         )
 
     def test_drops_the_bracketed_original_title_of_a_translation(self):
         """The brackets hold a different book's title, in another language."""
-        assert _dnb_title("[Docker: up and running] ; Praxiswissen Docker") == (
+        assert _dc_title_statement("[Docker: up and running] ; Praxiswissen Docker") == (
             "Praxiswissen Docker",
             None,
         )
 
     def test_keeps_a_colon_that_is_part_of_the_title(self):
         """Only " : " separates a subtitle. A bare colon is punctuation."""
-        assert _dnb_title("Docker: up and running") == ("Docker: up and running", None)
+        assert _dc_title_statement("Docker: up and running") == (
+            "Docker: up and running",
+            None,
+        )
 
     def test_drops_a_second_work_bound_into_the_same_volume(self):
-        assert _dnb_title("Erstes Werk ; Zweites Werk") == ("Erstes Werk", None)
+        assert _dc_title_statement("Erstes Werk ; Zweites Werk") == ("Erstes Werk", None)
+
+
+class TestSearchMatches:
+    """`_as_match` is the shape every search result arrives in."""
+
+    def test_a_match_carries_no_more_headings_than_the_schema_accepts(self):
+        """`BookMatch` refuses a ninth entry and `main.py` catches no
+        `ValidationError`, so an unbounded match is a 500 waiting for the next
+        endpoint that builds one without a guard. That is not hypothetical: it
+        is what `GET /{id}/enrich/candidates` did while the search endpoint was
+        being fixed.
+
+        The routers bound it again, which is deliberate rather than an
+        oversight: this is the bound that travels with the record, and theirs is
+        the one that also drops an entry the column cannot hold.
+        """
+        record = {
+            "title": "Ein Buch",
+            "classifications": [
+                {"scheme": ClassificationScheme.GND, "number": f"{index}", "label": "x"}
+                for index in range(12)
+            ],
+        }
+
+        match = metadata._as_match(record, "dnb")
+
+        assert len(match["classifications"]) == MAX_CLASSIFICATIONS_PER_BOOK
+
+
+class TestCatalogueXml:
+    """Every catalogue response goes through one reader."""
+
+    @pytest.mark.asyncio
+    async def test_a_response_carrying_a_doctype_is_refused(self):
+        """`xml.etree` expands internal entities, so a doctype is a body whose
+        size says nothing about what it costs to parse: ten characters nested
+        three deep expand to 1,000. It degrades to "unavailable", not a 500."""
+        hostile = (
+            '<?xml version="1.0"?>'
+            '<!DOCTYPE searchRetrieveResponse [<!ENTITY a "aaaaaaaaaa">]>'
+            '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+            "<records/></searchRetrieveResponse>"
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(hostile))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.outcome is not Outcome.FOUND
+
+    def test_an_ordinary_response_still_parses(self):
+        """225 live DNB and K10plus responses carry no doctype, so the refusal
+        above costs nothing."""
+        assert _parsed(DNB_RECORD).tag.endswith("searchRetrieveResponse")
+
+
+class TestMarcSubfields:
+    """What a MARC record carries that a Dublin Core crosswalk had cleaned up."""
+
+    def test_a_repeated_subfield_keeps_every_value(self):
+        """082 holds `$a=830 $a=B`, and the letter is not a Dewey number."""
+        fields = _marc_fields(_marc_element('''
+          <datafield tag="082" ind1="7" ind2="4">
+           <subfield code="a">830</subfield><subfield code="a">B</subfield>
+          </datafield>'''))
+        assert fields["082"][0].all("a") == ["830", "B"]
+
+    def test_indexing_a_repeated_subfield_gives_the_first_value(self):
+        """`$0` arrives as the GND number, then two URIs for the same thing."""
+        fields = _marc_fields(_marc_element('''
+          <datafield tag="100" ind1="1" ind2=" ">
+           <subfield code="0">(DE-588)118181505</subfield>
+           <subfield code="0">https://d-nb.info/gnd/118181505</subfield>
+           <subfield code="a">Capus, Alex</subfield>
+          </datafield>'''))
+        assert fields["100"][0]["0"] == "(DE-588)118181505"
+
+    def test_the_non_sorting_delimiters_are_stripped(self):
+        """MARC brackets a leading article so it can be skipped when filing.
+
+        They are invisible in a terminal, and 28 of 85 live records hold one.
+        """
+        fields = _marc_fields(_marc_element(
+            '<datafield tag="245" ind1="1" ind2="0">'
+            '<subfield code="a">\x98Die\x9c Deutschen</subfield></datafield>'
+        ))
+        assert fields["245"][0]["a"] == "Die Deutschen"
+
+    def test_padding_inside_a_subfield_is_collapsed(self):
+        """MARC pads subfields. `245 $a` on the live record 9783446249974 reads
+        `Reisen im  Licht der Sterne`, where that record's own `776 $t` spells
+        it with one space."""
+        fields = _marc_fields(_marc_element(
+            '<datafield tag="245" ind1="1" ind2="0">'
+            '<subfield code="a">Reisen im  Licht der Sterne</subfield>'
+            "</datafield>"
+        ))
+        assert fields["245"][0]["a"] == "Reisen im Licht der Sterne"
+
+    def test_decomposed_text_is_normalised(self):
+        """The DNB serves MARC21 decomposed and Dublin Core composed.
+
+        Two spellings of one author is enough to store the same person twice.
+        """
+        fields = _marc_fields(_marc_element(
+            '<datafield tag="100" ind1="1" ind2=" ">'
+            '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
+        ))
+        assert fields["100"][0]["a"] == "M\u00fcller, Hans"
 
 
 class TestPersonName:
     def test_turns_catalogue_order_into_a_readable_name(self):
-        assert _dnb_person("Kane, Sean P. [Verfasser]") == ("Sean P. Kane", "Verfasser")
+        assert _flip_catalogue_name("Kane, Sean P.") == "Sean P. Kane"
 
-    def test_reports_the_role_so_a_translator_can_be_skipped(self):
-        assert _dnb_person("Demmig, Thomas [Uebersetzer]")[1] == "Uebersetzer"
+    def test_keeps_the_full_stop_that_belongs_to_an_initial(self):
+        """`Pohl, Robert O.` means nothing as `Robert O`, and the ISBD full stop
+        stripped off `Melville, Herman.` looks the same to a regex."""
+        assert _flip_catalogue_name("Pohl, Robert O.") == "Robert O. Pohl"
+
+    def test_drops_the_life_dates_a_catalogue_hangs_off_a_name(self):
+        assert _flip_catalogue_name("Melville, Herman, 1819-1891") == "Herman Melville"
 
     def test_leaves_a_corporate_name_alone(self):
         """Two commas is not "Surname, Forenames" and reordering would mangle it."""
-        name, _ = _dnb_person("Springer Verlag, Berlin, Heidelberg [Verfasser]")
-        assert name == "Springer Verlag, Berlin, Heidelberg"
+        assert (
+            _flip_catalogue_name("Springer Verlag, Berlin, Heidelberg")
+            == "Springer Verlag, Berlin, Heidelberg"
+        )
 
 
 class TestPageCount:
@@ -768,9 +1182,8 @@ class TestCrossReferenceGuard:
         displaced was sitting in the other source all along.
         """
         placeholder = DNB_RECORD.replace(
-            "[Docker: up &amp; running] ; Praxiswissen Docker : Grundlagen "
-            "und Best Practices / Sean P. Kane mit Karl Matthias",
-            "[Hauptbd.].",
+            '<subfield code="a">Praxiswissen Docker</subfield>',
+            '<subfield code="a">[Hauptbd.].</subfield>',
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
@@ -865,6 +1278,11 @@ class TestMerge:
         The caption is what a substring match against an English tag name
         needs; the number is what a German record has instead. Dropping either
         narrows the suggestion rather than sharpening it.
+
+        **What supplies which half moved on 2026-08-24.** Under Dublin Core the
+        DNB captioned its Dewey number, `830 Deutsche Literatur`; MARC 082
+        carries the number alone, and it is the GND subject heading that now
+        arrives with words attached.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
@@ -874,11 +1292,12 @@ class TestMerge:
 
         assert result.data is not None
         assert result.data["classifications"] == [
+            {"scheme": ClassificationScheme.DDC, "number": "004", "label": None},
             {
-                "scheme": ClassificationScheme.DDC,
-                "number": "004",
+                "scheme": ClassificationScheme.GND,
+                "number": "4026894-9",
                 "label": "Informatik",
-            }
+            },
         ]
 
     @pytest.mark.asyncio
@@ -970,30 +1389,26 @@ class TestMerge:
         assert result.data["classifications"] == []
 
     @pytest.mark.asyncio
-    async def test_one_number_from_two_catalogues_keeps_the_caption(self):
-        """K10plus returns the number bare and the DNB returns it captioned.
-        Taking the leading source whole would throw the caption away whenever
-        K10plus led."""
-        with respx.mock(assert_all_called=False) as mock:
-            silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(
-                    _marc(
-                        _marc_record(
-                            isbn=GERMAN_ISBN,
-                            extra=(
-                                '<datafield tag="082"><subfield code="a">004</subfield>'
-                                "</datafield>"
-                            ),
-                        )
-                    )
-                )
-            )
-            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
-            result = await lookup(GERMAN_ISBN)
+    def test_one_number_from_two_sources_keeps_the_caption(self):
+        """Taking the leading source whole would throw a caption away.
 
-        assert result.data is not None
-        assert result.data["classifications"] == [
+        **No live source pair exercises this for DDC any more**, and that is
+        the reason it is pinned at the unit level rather than through a lookup.
+        Until 2026-08-24 the DNB captioned its Dewey number and K10plus did
+        not; both now answer with the number alone, so the case a merge can
+        still meet is a stored heading being re-enriched, which
+        `_write_classifications` resolves with this same rule.
+        """
+        assert metadata._union_classifications(
+            [
+                {"scheme": ClassificationScheme.DDC, "number": "004", "label": None},
+                {
+                    "scheme": ClassificationScheme.DDC,
+                    "number": "004",
+                    "label": "Informatik",
+                },
+            ]
+        ) == [
             {
                 "scheme": ClassificationScheme.DDC,
                 "number": "004",

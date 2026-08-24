@@ -3,22 +3,47 @@
 ## Unreleased
 
 **Classifications are stored whole.** A catalogue heading is a scheme, a number
-and a caption: `DDC`, `004`, `Informatik`. The number used to be stripped off at
-parse time so the caption could substring match a tag by name, which threw away
-the only half that means the same in two languages.
+and a caption: `GND`, `4203576-4`, `Schatz`. The number used to be stripped off
+at parse time so the caption could substring match a tag by name, which threw
+away the only half that means the same in two languages.
 
 **Which is why German records now suggest tags at all.** Measured against the
 DNB over ten German ISBNs: eight carried a DDC heading, and not one of the eight
 captions matched any of the 105 built in tag names, because every caption was
-German. `830 Deutsche Literatur` now suggests Fiction and `004 Informatik`
-suggests Computing, through a mapping of the 100 published Dewey divisions that
-reads the number and never the words.
+German. Dewey `830` now suggests Fiction and `004` suggests Computing, through
+a mapping of the 100 published Dewey divisions that reads the number and never
+the words. Which is just as well, because the catalogues send the number
+without any words at all.
 
 **It stays a suggestion.** The suggested tags arrive ticked on the add form and
 nothing is written until you press the button, so an unwanted one is one click
 away rather than something to find and undo later. Tags are a small curated list
 the household chooses from, and one nobody chose cannot later be told apart from
 one they did.
+
+**German records come back with proper subject headings.** The German National
+Library is now read in the full catalogue format rather than the summary one it
+was asked for before, and the difference is what the summary left out: the
+subject headings a librarian assigned, each with the identifier that names it in
+the national authority file. A book about a treasure hunt in Samoa arrives filed
+under Schatz and Samoainseln rather than under nothing.
+
+**And it fixed things nobody had noticed.** Records for older books had the
+translator credit sitting inside the title. An edited volume had no author at
+all. German umlauts arrived in a form that looks identical on screen and counts
+as a different word, which was enough to file one author under two spellings.
+Titles beginning with an article carried two invisible control characters, and
+one carried a stray double space. Page counts now arrive on 71 of 74 records
+where they used to arrive on 50.
+
+**A well catalogued book no longer disappears from search.** A search result
+carrying more subject headings than a book is allowed to keep was being thrown
+away whole rather than trimmed. It now keeps the eight that matter most, and
+the classification a tag suggestion reads is the one that survives.
+
+**A DVD is no longer offered as a book.** A scanned identifier that names a
+disc is refused rather than catalogued; an ebook edition of a book you are
+holding is still offered, because it is the same book.
 
 **Headless.** `SERVE_FRONTEND=false` runs the API without mounting the compiled
 frontend, for a host that has no reader to serve a page to. One image and one

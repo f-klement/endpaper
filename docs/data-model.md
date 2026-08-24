@@ -22,7 +22,7 @@ association table (`book_tags`), and one key/value store for runtime settings
       Collection ◄──── collection_id ───── Book       (one collection, or none)
                                             │
                                             └──────► Classification
-                                                     (DDC 004 Informatik)
+                                                     (DDC 004, GND 4203576-4 Schatz)
 ```
 
 ## Tables
@@ -128,12 +128,32 @@ book in a published schedule, and only that one means anything to another instit
 | `books.categories` | whatever the publisher claimed |
 | `classifications` | an assertion from a published scheme |
 
+**Three schemes, and `number` means the same thing in all three.** DDC and LCC are shelf
+orders; GND is the German national subject authority file, and what the column holds for it
+is the authority record number (`gnd`, `4203576-4`, `Schatz`). What the three share is the
+job the column does: the identifier is stable and the caption is whatever the supplying
+record wrote. That was measured across languages for Dewey; for GND the DNB is the only
+supplier here, so every caption is German today. What differs is that a Dewey number also
+sorts and a GND number does not, which costs nothing here because nothing sorts on it.
+
+| Scheme | Comes from | Caption |
+|---|---|---|
+| `ddc` | DNB and K10plus MARC 082, Library of Congress MODS | none, since 2026-08-24 |
+| `lcc` | Library of Congress alone | none |
+| `gnd` | DNB MARC 650, 651, 655, 689 and 600 | the heading text |
+
+**An author identifier is not one of these.** The DNB writes it in the same `$0`, and
+`100 $0` says who wrote the book where every scheme here says what the book is about. It is
+deliberately read by nothing: see [decisions.md](decisions.md).
+
 **The number is what gets matched, never the caption.** `004` is Informatik in a German
 record and Computing in an English one, so a rule reading the caption matches on the least
 portable part of the heading. `backend/ddc.py` projects the number onto the household's tag
 vocabulary through the 100 published Dewey divisions. Measured against the DNB over ten
 German ISBNs on 2026-08-23: eight carried a DDC heading, and none of the eight captions
-matched any of the 105 seeded tag names.
+matched any of the 105 seeded tag names. Only DDC is projected: a GND number is an
+identifier rather than a place in a schedule, so there is no arithmetic that takes
+`4203576-4` to a division.
 
 **The projection is a suggestion, and no server path writes a tag from it.** Auto-applying a
 machine derived tag turns a curated list into a generated one nobody can later tell apart,
@@ -142,11 +162,18 @@ so on an ordinary scan they land unless the member unticks them; which of those 
 suggestion" is argued in [decisions.md](decisions.md). See
 `serialisation.suggested_tag_ids`.
 
-**At most 8 per book**, counted by both writers of the table rather than only by the
-request schema: they are additive across requests and neither the enrichment apply endpoint
+**At most 8 per book**, counted by both capped writers of the table rather than only by the
+request schema (`backup.restore` is the third writer and is deliberately uncapped: it
+reinstates a database rather than adding to one): they are additive across requests and neither the enrichment apply endpoint
 nor the merge carries a rate limiter, and `BookOut.classifications` is on every listing row,
 so an inflated book is paid for on every page that contains it. At the ceiling an incoming
-heading is dropped rather than a stored one evicted.
+heading is dropped rather than a stored one evicted, and **which one survives is decided by
+order**: `_headings` sorts by scheme before it slices, so a Dewey number outranks a subject
+heading, and that is done there rather than in a parser because by then `_merge` has
+concatenated up to four catalogues. Re-measured on 2026-08-24, when the subject headings
+started arriving: 3.07 headings per record over 85 DNB lookups and 2.9 over 189 records from
+four DNB searches, with 1 and 8 records respectively above eight. Both are one catalogue's
+figures and this bounds a book several can feed, so neither is headroom for the total.
 
 `number` is a **normalised** notation, not whatever the source sent: every source path goes
 through `ddc.notation`, which strips MARC's segmentation prime (`005.13/3` becomes
@@ -156,7 +183,10 @@ without the strip an eighth of one catalogue's headings are a second spelling th
 index cannot collapse.
 
 `label` is null where the source carried the number alone, which is every MARC 082: the
-field holds the notation and the printed schedule holds the words. Unique per book, scheme
+field holds the notation and the printed schedule holds the words. Since the DNB moved to
+MARC21 on 2026-08-24 **no source supplies a Dewey caption at all**, where `dc:subject` used
+to answer `830 Deutsche Literatur`. A GND heading still arrives captioned, and
+`_union_classifications` still fills a missing caption from any source that has one. Unique per book, scheme
 and number (`uq_classifications_book_scheme_number`), so re-running enrichment against the
 same catalogues fills nothing in twice; **not** unique on the number alone, because a book
 carries a DDC and an LCC at once and often two DDC numbers at two precisions. `ON DELETE

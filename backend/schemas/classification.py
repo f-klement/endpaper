@@ -6,8 +6,9 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: The most headings one book may carry, full stop.
 #:
 #: **Two bounds, and they are not the same bound.** `max_length` on the request
-#: field caps one payload; the two writers of the table count the rows already
-#: on the book and stop there. Only the second makes the name true. Without it
+#: field caps one payload; the two **capped** writers of the table count the
+#: rows already on the book and stop there (`backup.restore` is the third and
+#: is deliberately uncapped, for the reason given below). Only the second makes the name true. Without it
 #: every caller is bounded per request while the writers are additive across
 #: requests, so the per book total is unbounded: `POST /{id}/enrich/apply`
 #: takes a client supplied `BookMatch`, makes no outbound call and so carries
@@ -31,9 +32,23 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: is soft. A new writer of this table has to count too.
 #:
 #: A bound rather than a taste, by the same route `QUOTE_TEXT_MAX` closes.
-#: Generous against what the catalogues actually return: the widest real record
-#: seen on 2026-08-23 carried four (K10plus two DDC numbers, the Library of
-#: Congress a DDC and an LCC), so this is double the observed worst case.
+#: **Re-measured on 2026-08-24, when the DNB started returning GND subject
+#: headings**, which is what a record spends this budget on now.
+#:
+#: | population | records | mean | over eight |
+#: |---|---|---|---|
+#: | ISBN lookups at the DNB | 85 | 3.07 | 1 |
+#: | four `WOE=` searches at the DNB | 189 | 2.9 | 8, worst query 6 of 50 |
+#:
+#: **Both figures are one catalogue's**, and this bounds a book that up to four
+#: catalogues feed, so neither is headroom for the merged total. The overflow is
+#: dropped rather than the number raised, because every stored row is
+#: selectin-loaded onto every listing row.
+#:
+#: **What survives the overflow is decided by order, not by luck**, and the
+#: ordering is applied in `routers/books._headings`, which is the only place it
+#: can be: a parser can order the record in front of it, and by then `_merge`
+#: has concatenated several. See `_SCHEME_ORDER` for which scheme wins and why.
 MAX_CLASSIFICATIONS_PER_BOOK = 8
 
 

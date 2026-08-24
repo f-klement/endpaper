@@ -912,11 +912,23 @@ CLASSIFICATION_LABEL_MAX = 200
 class Classification(Base):
     """One published scheme's assertion about what a book is about.
 
-    `DDC`, `004`, `Informatik`: a scheme, a number and the caption that scheme
-    gave the number. Three columns rather than the one string `"004
-    Informatik"` a catalogue hands over, because that string cannot be sorted,
-    cannot be matched across languages and does not say which scheme it came
-    from.
+    `GND`, `4203576-4`, `Schatz`: a scheme, a number and the caption that scheme
+    gave the number. Three columns rather than the one string
+    `"004 Informatik"` a catalogue used to hand over, because that string cannot
+    be sorted, cannot be matched across languages and does not say which scheme
+    it came from.
+
+    **A Dewey row has no caption at all today**, and that is the shape rather
+    than a gap: MARC 082 carries the notation and the printed schedule carries
+    the words, and every live supplier of a Dewey number here is MARC.
+
+    **`number` is the scheme's own identifier for the heading**, which is a
+    shelf notation in DDC and LCC and an authority record number in GND. What
+    the three have in common is the thing the column exists for: the identifier
+    is stable, and the caption is whatever the supplying record wrote. For Dewey
+    that was measured across languages in round 1; for GND it is one supplier
+    and German captions, so the stability is the identifier's own property
+    rather than something this catalogue has seen tested.
 
     **Not a tag, and not a category.** The three are one store with three jobs,
     and the difference is provenance: a tag is the household's own word, a

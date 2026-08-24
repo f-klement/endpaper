@@ -1713,10 +1713,11 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nBoth are produced today. DDC comes from the DNB (`dc:subject`, headings\nlike `004 Informatik`), from K10plus (MARC 082) and from the Library of\nCongress (`classification authority=\"ddc\"`); LCC comes from the Library of\nCongress alone (`authority=\"lcc\"`).\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. LCC is stored\nbecause a catalogue heading is worth keeping whole, not because anything\nreads it yet.",
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll three are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not, which costs nothing because nothing here sorts on it.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. See `docs/decisions.md`, \"The author's GND is read\nby nothing\".\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other two\nare stored because a catalogue heading is worth keeping whole, not because\nanything reads them yet.",
         "enum": [
           "ddc",
-          "lcc"
+          "lcc",
+          "gnd"
         ],
         "title": "ClassificationScheme",
         "type": "string"

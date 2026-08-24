@@ -276,6 +276,24 @@ def _clipped(value: object) -> str:
     return text if len(text) <= _LOGGED_VALUE_MAX else text[:_LOGGED_VALUE_MAX] + "..."
 
 
+#: Which heading survives a full book, most worth keeping first.
+#:
+#: DDC leads because it is the only scheme a tag suggestion is projected from,
+#: so losing it costs the member something visible. LCC next: a shelf
+#: classification is one assertion per catalogue and the thing a MARC export
+#: needs. GND last because a single record supplies several (2.20 per record,
+#: measured over 85 live DNB records on 2026-08-24), and an eighth subject
+#: heading is worth less than another catalogue's Dewey number.
+#:
+#: A scheme missing from here sorts last rather than raising, so adding one to
+#: `ClassificationScheme` cannot break the ceiling by forgetting this.
+_SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
+    ClassificationScheme.DDC: 0,
+    ClassificationScheme.LCC: 1,
+    ClassificationScheme.GND: 2,
+}
+
+
 def _headings(entries: object) -> list[ClassificationIn]:
     """The classifications in a catalogue record, through the schema a client posts.
 
@@ -290,6 +308,14 @@ def _headings(entries: object) -> list[ClassificationIn]:
     `MAX_CLASSIFICATIONS_PER_BOOK` before the loop would let eight malformed
     entries hide a ninth good one, which is the opposite of what dropping a bad
     entry is for.
+
+    **Ordered by scheme before the slice, and this is the only place that can
+    be.** A parser can only order the record in front of it, and by the time a
+    list reaches here `_merge` has concatenated up to four catalogues: the
+    leading source's subject headings sit in front of the second catalogue's
+    Dewey number and the Library of Congress's call number, which are then the
+    first things dropped. Ordering here is what makes "the Dewey number
+    survives" true of a book rather than of a record.
     """
     if not isinstance(entries, list):
         return []
@@ -299,7 +325,72 @@ def _headings(entries: object) -> list[ClassificationIn]:
             headings.append(ClassificationIn.model_validate(entry))
         except ValidationError:
             logger.info("Discarded an unusable classification: %s", _clipped(entry))
+    # Stable, so within one scheme the catalogues keep the order they answered
+    # in and the leading source still wins.
+    headings.sort(key=lambda heading: _SCHEME_ORDER.get(heading.scheme, len(_SCHEME_ORDER)))
     return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
+
+
+def _match_rows(
+    matches: list[dict[str, Any]], all_tags: list[Tag] | None
+) -> list[BookMatch]:
+    """Catalogue records as search rows, dropping any the schema refuses.
+
+    **The only place a `BookMatch` is built from third party data**, and that
+    is the point of the function rather than a description of it. The two
+    endpoints that answer with one diverged: this guard lived inside the search
+    handler, and `GET /{book_id}/enrich/candidates` built the model in a bare
+    list comprehension off the same `metadata.search`. There is no
+    `ValidationError` handler in `main.py`, so one record the schema refused
+    answered **500 for the whole response** there, where the same record cost
+    one row here. A third endpoint answering with matches now inherits the
+    guard instead of the hole.
+
+    **One bad record costs one result, not the response.** `BookMatch` is a
+    bounded model built straight from third party data, and a single record
+    tripping any bound would throw away every other row on the page. Reachable
+    without any classification: `year` comes from a four digit match against
+    `MAX_YEAR` 2200, and 9999 is MARC's own open ended date for a continuing
+    resource.
+
+    **`_headings` is still called here although `metadata._as_match` now bounds
+    the count**, and the two are not the same job. That bound stops a ninth
+    heading; this drops an entry the column could not hold, so a 400 character
+    caption costs its own heading rather than the row. What it no longer does
+    on this path is the count: `_as_match` has already sliced, so on the search
+    path the parser's own order decides what survives and not `_SCHEME_ORDER`.
+    That is safe only while `_dnb_record` emits the Dewey number first and is
+    the only producer of a second scheme, and it is the sentence that goes
+    wrong first if a parser ever emits one ahead of DDC. The sort still decides
+    for a merged book, which is where several catalogues meet.
+
+    `all_tags` is None where the caller already has a book. The enrichment
+    candidates are other editions of a book that exists, so a tag suggestion
+    there answers a question nobody asked, and `BookMatch.suggested_tag_ids`
+    documents that it is left empty.
+    """
+    rows: list[BookMatch] = []
+    for match in matches:
+        subjects = google_books.split_categories(match.get("categories"))
+        match["classifications"] = _headings(match.get("classifications"))
+        try:
+            row = BookMatch(**match)
+        except ValidationError:
+            logger.info(
+                "Discarded an unusable search result from %r: %s",
+                match.get("source"),
+                _clipped(match),
+            )
+            continue
+        # Derived from the validated rows on the model rather than from the raw
+        # dict, which would run the bounds and the tidying twice and let the
+        # two copies drift.
+        if all_tags is not None:
+            row.suggested_tag_ids = suggested_tag_ids(
+                subjects, row.classifications, all_tags
+            )
+        rows.append(row)
+    return rows
 
 
 def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
@@ -374,36 +465,7 @@ async def search_books(
     # title still returns the English book.
     matches = await metadata.search(q, api_key, limit=limit, prefer_language=lang)
 
-    all_tags = db.query(Tag).all()
-    results: list[BookMatch] = []
-    for match in matches:
-        subjects = google_books.split_categories(match.get("categories"))
-        # Constructed first, then the suggestion is derived from the validated
-        # rows on it. Deriving it from the raw dict instead would run the
-        # bounds and the tidying twice and let the two copies drift.
-        #
-        # **One bad record costs one result, not the response.** `BookMatch` is
-        # a bounded model built straight from third party data, there is no
-        # `ValidationError` handler in `main.py`, and a single record tripping
-        # any bound would answer 500 and throw away every other row on the
-        # page. It is reachable without this round's fields: `year` comes from
-        # a four digit match against `MAX_YEAR` 2200, and 9999 is MARC's own
-        # open ended date for a continuing resource. The lookup path answers
-        # the same problem the same way in `_headings`.
-        try:
-            row = BookMatch(**match)
-        except ValidationError:
-            logger.info(
-                "Discarded an unusable search result from %r: %s",
-                match.get("source"),
-                _clipped(match),
-            )
-            continue
-        row.suggested_tag_ids = suggested_tag_ids(
-            subjects, row.classifications, all_tags
-        )
-        results.append(row)
-    return results
+    return _match_rows(matches, db.query(Tag).all())
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
@@ -936,9 +998,14 @@ def _write_classifications(
     bookkeeping. `enrich_book` and `apply_enrichment` both commit only
     `if updated:`, and `get_db` closes the session in its `finally` without
     committing, so a call that returned `[]` after setting `stored.label` would
-    have the caption rolled back and lost. That is reachable: K10plus answers
-    082 `$a 004` with no caption, so a book already complete in every column
-    gains nothing but the caption when the DNB later answers `004 Informatik`.
+    have the caption rolled back and lost. That is reachable: the DNB answers
+    `650 $0 (DE-588)4026894-9 $a Informatik` where a stored row from an earlier
+    run carries the number and no caption, so a book already complete in every
+    column gains nothing but the caption.
+
+    The example used to be a Dewey one, and it stopped being possible on
+    2026-08-24: no source captions a Dewey number now that the DNB reads MARC
+    082, which carries the notation alone. GND is where a caption arrives.
 
     **Additive, and never a replacement.** Enrichment is re-runnable and the
     catalogues answer the same way every time, so a writer that replaced the
@@ -3258,7 +3325,7 @@ async def enrichment_candidates(
     matches = await metadata.search(
         query, api_key, limit=5, prefer_language=book.language
     )
-    return [BookMatch(**match) for match in matches]
+    return _match_rows(matches, all_tags=None)
 
 
 @router.patch("/{book_id}/ownership", response_model=BookOut)

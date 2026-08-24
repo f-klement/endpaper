@@ -11,25 +11,54 @@ import respx
 
 from models import Book, Classification, Tag
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from tests.helpers import DNB, GOOGLE_BOOKS, silence_catalogues, sru_response
+from tests.helpers import (
+    DNB,
+    GOOGLE_BOOKS,
+    K10PLUS,
+    silence_catalogues,
+    sru_response,
+)
 
 GERMAN_ISBN = "9783960092353"
 
-#: A DNB record whose only subject heading is a DDC one. Shaped after a live
-#: response, which puts the number and the caption in one `dc:subject`.
+#: A DNB record carrying one Dewey number and one GND subject heading. Shaped
+#: after a live MARC21 response: 082 holds the number with no caption, and the
+#: caption arrives on the subject heading instead, with its own identifier.
 DNB_RECORD = """<?xml version="1.0" encoding="UTF-8"?>
 <searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
  <records><record><recordData>
-  <dc xmlns="http://www.openarchives.org/OAI/2.0/oai_dc/"
-      xmlns:dc="http://purl.org/dc/elements/1.1/">
-   <dc:title>Praxiswissen Docker</dc:title>
-   <dc:creator>Kane, Sean P. [Verfasser]</dc:creator>
-   <dc:date>2024</dc:date>
-   <dc:language>ger</dc:language>
-   <dc:subject>004 Informatik</dc:subject>
-   <dc:subject>20. Jahrhundert</dc:subject>
-   <dc:format>390 Seiten</dc:format>
-  </dc>
+  <record xmlns="http://www.loc.gov/MARC21/slim">
+   <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9783960092353</subfield>
+   </datafield>
+   <datafield tag="041" ind1=" " ind2=" ">
+    <subfield code="a">ger</subfield>
+   </datafield>
+   <datafield tag="082" ind1="7" ind2="4">
+    <subfield code="a">004</subfield>
+   </datafield>
+   <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="a">Kane, Sean P.</subfield>
+    <subfield code="4">aut</subfield>
+   </datafield>
+   <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Praxiswissen Docker</subfield>
+   </datafield>
+   <datafield tag="264" ind1=" " ind2="1">
+    <subfield code="c">2024</subfield>
+   </datafield>
+   <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">390 Seiten</subfield>
+   </datafield>
+   <datafield tag="650" ind1=" " ind2="7">
+    <subfield code="0">(DE-588)4026894-9</subfield>
+    <subfield code="a">Informatik</subfield>
+    <subfield code="2">gnd</subfield>
+   </datafield>
+   <datafield tag="653" ind1=" " ind2=" ">
+    <subfield code="a">20. Jahrhundert</subfield>
+   </datafield>
+  </record>
  </recordData></record></records>
 </searchRetrieveResponse>
 """
@@ -146,27 +175,33 @@ class TestTheLookup:
 
         assert res.status_code == 200
         assert res.json()["classifications"] == [
-            {"scheme": "ddc", "number": "004", "label": "Informatik"}
+            {"scheme": "ddc", "number": "004", "label": None},
+            {"scheme": "gnd", "number": "4026894-9", "label": "Informatik"},
         ]
 
     def test_a_german_caption_still_suggests_the_household_tag(
         self, client, admin, db
     ):
         """"Informatik" matches no seeded tag name. `004` maps to Computing,
-        and that is the whole point of storing the number."""
+        and that is the whole point of storing the number.
+
+        Sharper since the MARC switch: the DNB no longer captions its Dewey
+        number at all, so the caption route has nothing to match even by
+        accident and the number is the only thing left that can resolve this.
+        """
         computing = db.query(Tag).filter(Tag.name == "Computing").one()
         res = self._lookup(client, admin["headers"])
 
         assert computing.id in res.json()["suggested_tag_ids"]
 
     def test_a_year_is_not_read_as_a_classification(self, client, admin):
-        """`20. Jahrhundert` is a subject heading and shares the element with
-        the DDC one. A looser parse reads it as the number `20.`."""
+        """`20. Jahrhundert` is a keyword in 653. A looser parse of a field
+        that is not 082 reads it as the number `20.`."""
         numbers = [
             entry["number"] for entry in self._lookup(client, admin["headers"]).json()["classifications"]
         ]
 
-        assert numbers == ["004"]
+        assert numbers == ["004", "4026894-9"]
 
     def test_a_heading_the_column_could_not_hold_is_dropped(self, client, admin):
         """The lookup response is a draft the client posts straight back, so a
@@ -177,7 +212,10 @@ class TestTheLookup:
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=DNB).mock(
                 return_value=sru_response(
-                    DNB_RECORD.replace("004 Informatik", f"004 {long_caption}")
+                    DNB_RECORD.replace(
+                        '<subfield code="a">Informatik</subfield>',
+                        f'<subfield code="a">{long_caption}</subfield>',
+                    )
                 )
             )
             silence_catalogues(mock)
@@ -186,7 +224,63 @@ class TestTheLookup:
             )
 
         assert res.status_code == 200
-        assert res.json()["classifications"] == []
+        # The Dewey number is untouched: one unusable entry costs its own row
+        # and not the record.
+        assert res.json()["classifications"] == [
+            {"scheme": "ddc", "number": "004", "label": None}
+        ]
+
+    def test_a_second_catalogues_dewey_number_survives_the_ceiling(
+        self, client, admin
+    ):
+        """The ordering that decides what survives cannot live in a parser.
+
+        `_merge` puts the leading source's list first and extends it with each
+        other source's, so a DNB record at the ceiling leaves nothing for
+        K10plus's Dewey number or the Library of Congress's call number: they
+        are last in the list and `_headings` cuts the tail. Sorting by scheme
+        before the slice is what makes "the Dewey number survives" true of a
+        book rather than of a record.
+
+        The DNB here supplies nine GND headings and no Dewey number at all
+        (`082 $a=B` is the Sachgruppe letter, which is not a notation), so the
+        only Dewey number in the answer is the one that arrives last.
+        """
+        headings = "".join(
+            f'<datafield tag="650" ind1=" " ind2="7">'
+            f'<subfield code="0">(DE-588)400000{index}-1</subfield>'
+            f'<subfield code="a">Thema {index}</subfield></datafield>'
+            for index in range(8)
+        )
+        dnb = DNB_RECORD.replace(
+            '<subfield code="a">004</subfield>', '<subfield code="a">B</subfield>'
+        ).replace("  </record>", f"{headings}\n  </record>")
+        k10plus = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+            "<zs:records><zs:record><zs:recordData>"
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            f'<datafield tag="020"><subfield code="a">{GERMAN_ISBN}</subfield>'
+            "</datafield>"
+            '<datafield tag="245"><subfield code="a">Praxiswissen Docker</subfield>'
+            "</datafield>"
+            '<datafield tag="082"><subfield code="a">004</subfield></datafield>'
+            "</record></zs:recordData></zs:record></zs:records>"
+            "</zs:searchRetrieveResponse>"
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(return_value=sru_response(dnb))
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=sru_response(k10plus)
+            )
+            silence_catalogues(mock)
+            res = client.get(
+                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
+            )
+
+        headings_out = res.json()["classifications"]
+        assert len(headings_out) == MAX_CLASSIFICATIONS_PER_BOOK
+        assert headings_out[0] == {"scheme": "ddc", "number": "004", "label": None}
 
     def test_the_lookup_writes_no_tag_by_itself(self, client, admin, db):
         """The server offers the ids and writes nothing, not even the book.
@@ -216,7 +310,10 @@ class TestEnrichment:
 
         assert res.status_code == 200
         assert "classifications" in res.json()["updated_fields"]
-        assert [entry.number for entry in headings(book["id"], db)] == ["004"]
+        assert [entry.number for entry in headings(book["id"], db)] == [
+            "004",
+            "4026894-9",
+        ]
 
     def test_running_it_twice_does_not_duplicate_a_heading(
         self, client, admin, make_book, db
@@ -234,7 +331,8 @@ class TestEnrichment:
                     f"/api/books/{book['id']}/enrich", headers=admin["headers"]
                 )
 
-        assert len(headings(book["id"], db)) == 1
+        # The Dewey number and the GND subject heading, once each.
+        assert len(headings(book["id"], db)) == 2
 
     def test_a_caption_already_stored_is_not_overwritten(
         self, client, admin, db
@@ -266,13 +364,17 @@ class TestEnrichment:
 
     def test_a_missing_caption_is_filled_in(self, client, admin, db):
         """The exception to the rule above: a caption where there was none is
-        strictly more than before."""
+        strictly more than before.
+
+        On the GND heading rather than the Dewey one, because since the MARC
+        switch no source supplies a Dewey caption for this to fill in with.
+        """
         created = client.post(
             "/api/books",
             json={
                 "title": "Docker",
                 "isbn": GERMAN_ISBN,
-                "classifications": [{"scheme": "ddc", "number": "004"}],
+                "classifications": [{"scheme": "gnd", "number": "4026894-9"}],
             },
             headers=admin["headers"],
         ).json()
@@ -354,6 +456,7 @@ class TestEnrichment:
         assert res.status_code == 200
         assert sorted(entry.number for entry in headings(created["id"], db)) == [
             "004",
+            "4026894-9",
             "QA76.73.P98",
         ]
 
