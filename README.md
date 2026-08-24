@@ -1,6 +1,17 @@
 # Endpaper
 
+[![license](https://img.shields.io/github/license/f-klement/endpaper)](LICENSE)
+[![release](https://img.shields.io/github/v/tag/f-klement/endpaper?label=release)](https://github.com/f-klement/endpaper/tags)
+[![docker hub](https://img.shields.io/docker/v/fklement/endpaper?label=docker%20hub&logo=docker)](https://hub.docker.com/r/fklement/endpaper)
+[![docker pulls](https://img.shields.io/docker/pulls/fklement/endpaper)](https://hub.docker.com/r/fklement/endpaper)
+![languages](https://img.shields.io/badge/languages-DE%20%7C%20EN-blue)
+
 A self-hosted PWA for cataloging your household's physical book collection.
+
+Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
+server that can mediate between households.
+
+[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/fklement)
 
 ## Quick Start
 
@@ -211,13 +222,3 @@ signed in as a real member this way.
 and open Settings. The API key is stored in the database and never shown again after saving.
 
 Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
-
-## Supporting it
-
-If you like Endpaper and want to support my work, [buy me a
-coffee](https://ko-fi.com/fklement). It helps pay for the public server that can mediate
-between households.
-
-## Licence
-
-Apache-2.0. See [LICENSE](LICENSE).

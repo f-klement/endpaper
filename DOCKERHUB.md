@@ -1,5 +1,16 @@
 # Endpaper
 
+[![license](https://img.shields.io/github/license/f-klement/endpaper)](https://github.com/f-klement/endpaper/blob/main/LICENSE)
+[![release](https://img.shields.io/github/v/tag/f-klement/endpaper?label=release)](https://github.com/f-klement/endpaper/tags)
+[![docker hub](https://img.shields.io/docker/v/fklement/endpaper?label=docker%20hub&logo=docker)](https://hub.docker.com/r/fklement/endpaper)
+[![docker pulls](https://img.shields.io/docker/pulls/fklement/endpaper)](https://hub.docker.com/r/fklement/endpaper)
+![languages](https://img.shields.io/badge/languages-DE%20%7C%20EN-blue)
+
+Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
+server that can mediate between households.
+
+[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/fklement)
+
 Catalogue, lend and track a household's collection of **physical** books. Scan a barcode,
 the book appears with its cover and metadata. Self-hosted, no account anywhere else, no
 telemetry.
@@ -112,14 +123,3 @@ discloses nothing but liveness.
 * **Privacy is per book.** A book marked private is visible only to the member who added
   it, in every listing, search, export and statistic.
 * Images are published for `linux/amd64` and `linux/arm64`.
-
-## Supporting it
-
-If you like Endpaper and want to support my work, [buy me a
-coffee](https://ko-fi.com/fklement). It helps pay for the public server that can mediate
-between households.
-
-## Licence
-
-Apache-2.0. Source at
-[github.com/f-klement/endpaper](https://github.com/f-klement/endpaper).
