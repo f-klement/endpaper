@@ -108,14 +108,16 @@ export const STATUS_FILTERS: { label: MessageKey; value: ReadStatus | null }[] =
   ];
 
 /**
- * Covers or metadata.
+ * Covers, metadata, or dense rows.
  *
- * Two whole words rather than two icons: a grid glyph and a table glyph are
- * near enough identical at 16 pixels that the label is what actually says
- * which is which, and there are only two of them.
+ * Whole words rather than icons: a grid glyph, a table glyph and a list glyph
+ * are near enough identical at 16 pixels that the label is what actually says
+ * which is which. Three of them still fit the strip on a phone, because each
+ * word is one short noun.
  */
 export const VIEW_OPTIONS: { label: MessageKey; value: LibraryView }[] = [
   { label: "library.viewGrid", value: "grid" },
+  { label: "library.viewList", value: "list" },
   { label: "library.viewTable", value: "table" },
 ];
 

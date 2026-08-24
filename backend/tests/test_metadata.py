@@ -1752,3 +1752,563 @@ class TestLibraryOfCongressClassifications:
 
         assert ClassificationScheme.DDC in schemes
         assert "rvk" not in schemes
+
+
+# ── Open Library, deepened ────────────────────────────────────────────────────
+#
+# Open Library is the only source here that clusters printings under a work,
+# and the only one whose subjects are a folksonomy rather than a vocabulary.
+# Both facts are load bearing and both are pinned below.
+
+OL_ISBN = "https://openlibrary.org/isbn/"
+OL_WORKS = "https://openlibrary.org/works/"
+OL_AUTHORS = "https://openlibrary.org/authors/"
+
+#: One edition record, in the shape the live endpoint returns.
+OL_EDITION = {
+    "title": "Introduction to Algorithms",
+    "publishers": ["MIT Press"],
+    "publish_date": "2009",
+    "number_of_pages": 1292,
+    "languages": [{"key": "/languages/eng"}],
+    "works": [{"key": "/works/OL4781294W"}],
+    "authors": [{"key": "/authors/OL23919A"}],
+    "dewey_decimal_class": ["005.1"],
+    # Four spellings of one call number, which is what a live record carries.
+    "lc_classifications": [
+        "QA76.6 .I5858 2009",
+        "QA76.6.I5858 2009",
+        "QA76.6 .C662 2009",
+    ],
+}
+
+OL_WORK = {
+    "title": "Introduction to Algorithms",
+    "subjects": ["Computer algorithms", "Algorithms", "open_syllabus_project"],
+    "authors": [{"author": {"key": "/authors/OL23919A"}}],
+}
+
+OL_AUTHOR = {"name": "Thomas H. Cormen"}
+
+
+def _ol_edition(**overrides: object) -> dict[str, object]:
+    return {**OL_EDITION, **overrides}
+
+
+def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
+    """Register one route per Open Library path shape.
+
+    One catch-all would answer the edition, the work and the author with the
+    same body, which is exactly the confusion these tests exist to rule out.
+    """
+    mock.get(url__startswith=OL_ISBN).mock(
+        return_value=parts.get("edition", httpx.Response(404))
+    )
+    mock.get(url__startswith=OL_AUTHORS).mock(
+        return_value=parts.get("author", httpx.Response(404))
+    )
+    mock.get(url__startswith=OL_WORKS).mock(
+        return_value=parts.get("work", httpx.Response(404))
+    )
+
+
+class TestTheOpenLibraryLookup:
+    """What the edition record, the work record and the author call each add."""
+
+    @staticmethod
+    async def _lookup(mock: respx.Router) -> metadata.Lookup:
+        return await metadata._open_library(ENGLISH_ISBN, "")
+
+    @pytest.mark.asyncio
+    async def test_the_work_record_supplies_the_subjects_the_edition_lacks(self):
+        """Measured over nine live editions: two carried subjects, seven did not
+        while their work did. Reading only the edition is why Open Library used
+        to contribute nothing to the tag suggestion."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.found
+        assert result.data is not None
+        assert result.data["subjects"] == [
+            "Computer algorithms",
+            "Algorithms",
+            "open_syllabus_project",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_subject_list_is_bounded(self):
+        """A live work carries up to 137 subjects, and every one of them is
+        another chance to pre-select a tag nobody meant."""
+        crowded = {"subjects": [f"subject {index}" for index in range(50)]}
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(200, json=crowded),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert len(result.data["subjects"]) == metadata._OPEN_LIBRARY_MAX_SUBJECTS
+
+    @pytest.mark.asyncio
+    async def test_the_editions_own_subjects_come_first(self):
+        """The printing's cataloguer beats the work's crowd where both spoke."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(
+                    200, json=_ol_edition(subjects=["Set theory"])
+                ),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["subjects"][0] == "Set theory"
+
+    @pytest.mark.asyncio
+    async def test_a_subject_is_never_a_classification(self):
+        """The decision this round turned on. Open Library subjects are
+        uncontrolled strings (`open_syllabus_project`, `fiction classics`), and
+        §30i's rule for the store is an assertion from a published scheme."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(
+                    200,
+                    json=_ol_edition(dewey_decimal_class=None, lc_classifications=None),
+                ),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["subjects"]
+        assert result.data["classifications"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_dewey_number_and_one_call_number_become_classifications(self):
+        """The controlled half, and only the first LC value: the repeats are one
+        call number written several ways, not several assertions."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["classifications"] == [
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "005.1",
+                "label": None,
+            },
+            {
+                "scheme": ClassificationScheme.LCC,
+                "number": "QA76.6 .I5858 2009",
+                "label": None,
+            },
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_dewey_value_that_is_not_a_number_is_dropped(self):
+        """Through `ddc.parse_heading` like every other source path."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(
+                    200,
+                    json=_ol_edition(
+                        dewey_decimal_class=["[Fic]"], lc_classifications=None
+                    ),
+                ),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["classifications"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_work_supplies_the_author_the_edition_does_not_credit(self):
+        """Measured over five live lookups: four credited nobody on the edition
+        and every one of the four credited somebody on the work."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition(authors=None)),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["author"] == "Thomas H. Cormen"
+
+    @pytest.mark.asyncio
+    async def test_the_page_count_and_the_language_are_read(self):
+        """Both were missing entirely until this round, so a fallback lookup
+        answered without two of the seven fields `_completeness` scores."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["page_count"] == 1292
+        assert result.data["language"] == "en"
+
+    @pytest.mark.asyncio
+    async def test_a_key_that_is_not_open_librarys_is_never_fetched(self):
+        """A key out of a third party response goes into a URL, and
+        `@example.com/` moves the host rather than the path. The request that
+        would make is ours, from our network position."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(
+                    200,
+                    json=_ol_edition(
+                        authors=[{"key": "@example.com/"}],
+                        works=[{"key": "/works/../../evil"}],
+                    ),
+                ),
+            )
+            elsewhere = mock.get(url__startswith="https://example.com").mock(
+                return_value=httpx.Response(200, json={"name": "Nobody"})
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["author"] is None
+        assert not elsewhere.called
+
+    @pytest.mark.asyncio
+    async def test_a_work_that_will_not_answer_costs_the_subjects_only(self):
+        """A failure in either extra call costs that field, not the record."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(500),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.found
+        assert result.data is not None
+        assert result.data["title"] == "Introduction to Algorithms"
+        assert result.data["subjects"] == []
+
+
+#: An editions listing, in the shape `/works/{key}/editions.json` returns.
+OL_EDITIONS = {
+    "size": 3,
+    "entries": [
+        {
+            "title": "Introduction to Algorithms",
+            "publishers": ["MIT Press"],
+            "publish_date": "2009",
+            "number_of_pages": 1320,
+            "languages": [{"key": "/languages/eng"}],
+            "isbn_13": ["9780262270830"],
+            "authors": [{"key": "/authors/OL23919A"}],
+            "covers": [12345],
+            "dewey_decimal_class": ["005.1"],
+        },
+        {
+            "title": "Algorithmen: Eine Einfuehrung",
+            "publishers": ["Oldenbourg"],
+            "publish_date": "2010",
+            "languages": [{"key": "/languages/ger"}],
+            "isbn_13": ["9783486590029"],
+        },
+        {
+            "title": "Introduction to Algorithms",
+            "publish_date": "1990",
+        },
+    ],
+}
+
+
+class TestTheEditionCluster:
+    """`thingISBN` clustering, without LibraryThing's terms attached."""
+
+    @staticmethod
+    def _routes(mock: respx.Router, listing: object = OL_EDITIONS) -> None:
+        mock.get(url__startswith=OL_ISBN).mock(
+            return_value=httpx.Response(200, json=_ol_edition())
+        )
+        mock.get(url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*").mock(
+            return_value=httpx.Response(200, json=listing)
+        )
+        mock.get(url__startswith=OL_AUTHORS).mock(
+            return_value=httpx.Response(200, json=OL_AUTHOR)
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_cluster_answers_with_the_other_printings(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert [row["isbn13"] for row in rows] == [
+            "9780262270830",
+            "9783486590029",
+            None,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_most_complete_printing_leads(self):
+        """`_completeness`, the same function `_merge` uses to choose between
+        printings: a row with a publisher, a year and a page count is one
+        somebody can recognise their copy from."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert rows[0]["page_count"] == 1320
+        assert rows[-1]["publisher"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_printing_in_another_language_is_not_a_candidate(self):
+        """A work spans translations. An English printing of a German book is
+        the same work and cannot fill in that copy's publisher or page count."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
+
+        assert [row["isbn13"] for row in rows] == ["9783486590029", None]
+
+    @pytest.mark.asyncio
+    async def test_a_printing_declaring_no_language_survives_the_filter(self):
+        """110 of 129 live entries declare one, and both German printings in
+        the Der Zinker cluster are among the 19 that do not."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="fr")
+
+        assert [row["title"] for row in rows] == ["Introduction to Algorithms"]
+        assert rows[0]["language"] is None
+
+    @pytest.mark.asyncio
+    async def test_one_author_request_serves_every_row(self):
+        """A cluster names its authors by key and the keys repeat, so resolving
+        each row's own would be one request per row."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            author = mock.get(url__startswith=OL_AUTHORS).mock(
+                return_value=httpx.Response(200, json=OL_AUTHOR)
+            )
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert author.call_count == 1
+        assert rows[0]["author"] == "Thomas H. Cormen"
+
+    @pytest.mark.asyncio
+    async def test_a_classification_on_a_sibling_printing_is_carried(self):
+        """24 of 129 live entries carry a Dewey number, and a picked one is
+        applied to the book by `POST /{id}/enrich/apply`."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert rows[0]["classifications"] == [
+            {"scheme": ClassificationScheme.DDC, "number": "005.1", "label": None}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_isbn_that_is_not_one_asks_nothing(self):
+        with respx.mock(assert_all_called=False) as mock:
+            edition = mock.get(url__startswith=OL_ISBN).mock(
+                return_value=httpx.Response(200, json=_ol_edition())
+            )
+            rows = await metadata.editions("not-an-isbn", 5)
+
+        assert rows == []
+        assert not edition.called
+
+    @pytest.mark.asyncio
+    async def test_a_book_open_library_does_not_hold_costs_no_rows(self):
+        """Open Library returns 404 for a good deal of German publishing,
+        including round 2's own reference record."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(404))
+            rows = await metadata.editions(GERMAN_ISBN, 5)
+
+        assert rows == []
+
+
+class TestTheCandidates:
+    """The cluster and the search, and the rule between them."""
+
+    @staticmethod
+    def _routes(mock: respx.Router) -> None:
+        TestTheEditionCluster._routes(mock)
+        mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+        mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+        mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+            return_value=httpx.Response(200, json={"docs": []})
+        )
+        mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+            return_value=httpx.Response(500)
+        )
+        mock.get(url__startswith="http://lx2.loc.gov").mock(
+            return_value=httpx.Response(500)
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_cluster_leads(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        assert rows[0]["isbn13"] == "9780262270830"
+
+    @pytest.mark.asyncio
+    async def test_the_cluster_never_takes_the_whole_page(self):
+        """A work merged wrongly must not be the entire answer: the search row
+        underneath it is the way out."""
+        crowded = {
+            "size": 9,
+            "entries": [
+                {"title": f"Printing {index}", "publish_date": str(2000 + index)}
+                for index in range(9)
+            ],
+        }
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(
+                url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*"
+            ).mock(return_value=httpx.Response(200, json=crowded))
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        assert len(rows) == 4
+
+    @pytest.mark.asyncio
+    async def test_a_search_row_sharing_a_title_and_an_author_is_still_a_row(self):
+        """The bug a live run found. `_match_key` is title plus author, and
+        every row on this page shares both by construction, so deduplicating on
+        it collapsed a five row answer to one. Two printings of one book are
+        exactly what this endpoint exists to show."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "docs": [
+                            {
+                                "title": "Introduction to Algorithms",
+                                "author_name": ["Thomas H. Cormen"],
+                                "isbn": ["9780262046305"],
+                            }
+                        ]
+                    },
+                )
+            )
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        assert rows[0]["title"] == rows[-1]["title"]
+        assert "9780262046305" in [row["isbn13"] for row in rows]
+
+    @pytest.mark.asyncio
+    async def test_a_search_row_repeating_a_cluster_isbn_is_dropped(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "docs": [
+                            {
+                                "title": "Introduction to Algorithms",
+                                "author_name": ["Thomas H. Cormen"],
+                                "isbn": ["9780262270830"],
+                            }
+                        ]
+                    },
+                )
+            )
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        assert [row["isbn13"] for row in rows].count("9780262270830") == 1
+
+    @pytest.mark.asyncio
+    async def test_a_book_with_no_isbn_still_gets_the_search(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "docs": [
+                            {"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}
+                        ]
+                    },
+                )
+            )
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=None, limit=5
+            )
+
+        assert [row["isbn13"] for row in rows] == ["9780262046305"]
+
+    @pytest.mark.asyncio
+    async def test_a_slow_cluster_costs_its_rows_and_not_the_response(
+        self, monkeypatch
+    ):
+        """One live editions listing answered in 10.1s against a 0.64s to 2.19s
+        norm, which is what the deadline is for."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "docs": [
+                            {"title": "Introduction to Algorithms", "isbn": ["9780262046305"]}
+                        ]
+                    },
+                )
+            )
+
+            async def _forever(
+                isbn: str, limit: int, prefer_language: str | None = None
+            ) -> list[dict[str, object]]:
+                await asyncio.sleep(30)
+                return []
+
+            monkeypatch.setattr(metadata, "editions", _forever)
+            monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 0.05)
+            rows = await metadata.candidates(
+                "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
+            )
+
+        assert [row["isbn13"] for row in rows] == ["9780262046305"]

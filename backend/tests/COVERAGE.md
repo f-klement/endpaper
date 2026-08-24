@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**2163 tests**, in 51 files. Line coverage was last measured at **96%** (4303 statements,
+**2189 tests**, in 51 files. Line coverage was last measured at **96%** (4303 statements,
 186 missed) when the suite held 1571, which is 568 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
@@ -37,7 +37,7 @@ is why the helper uses regexes.
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number, and that every mapped tag name is a tag that exists |
 | `test_backup.py` | 63 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
-| `test_metadata.py` | 108 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a classification keeps its number, its caption and its scheme, and what a MARC record carries that a Dublin Core crosswalk had cleaned up: repeated subfields, non-sorting delimiters, decomposed text |
+| `test_metadata.py` | 132 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a classification keeps its number, its caption and its scheme, what a MARC record carries that a Dublin Core crosswalk had cleaned up (repeated subfields, non-sorting delimiters, decomposed text), and Open Library's three records: that its subjects never become classifications, that a key out of a response cannot move the host, and that the edition cluster drops a translation |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
@@ -68,7 +68,7 @@ is why the helper uses regexes.
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
 | `routers/test_books_authors.py` | 47 | The author index and its privacy, the `?author=` filter, merging and reversing one, the household wide mapping against the filtered shelf, the flat map, and undoing a merge |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
-| `routers/test_books_google.py` | 24 | Enrichment, the chosen-edition apply and that its body cannot overflow the database, candidates and that a record the schema refuses costs one heading rather than the whole response, the feature gate |
+| `routers/test_books_google.py` | 26 | Enrichment, the chosen-edition apply and that its body cannot overflow the database, candidates and that a record the schema refuses costs one heading rather than the whole response, that the work cluster is asked with the book's own ISBN, the feature gate |
 | `routers/test_books_search.py` | 37 | **Free-text search.** That it works with no API key, that all six catalogues answer, how they merge, that one record failing a bound costs one result rather than the response, and that a record carrying more headings than the ceiling loses the ninth rather than its whole row |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
 | `routers/test_settings.py` | 58 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |

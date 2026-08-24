@@ -41,9 +41,30 @@ carrying more subject headings than a book is allowed to keep was being thrown
 away whole rather than trimmed. It now keeps the eight that matter most, and
 the classification a tag suggestion reads is the one that survives.
 
+**"Other editions of this book" now means it.** The picker used to search
+every catalogue for the title and author, which is a good guess. It now asks
+Open Library for the printings it has merged under the same work, with the
+book's own ISBN, and puts those first: a donation in an unfamiliar printing is
+matched against the actual list of printings rather than against whatever a
+search returned. Editions in another language are left out, because a
+translation cannot tell you what your copy's page count is.
+
+**Open Library answers with far more than it used to.** It is read as three
+records rather than one, and across 35 books that means subjects on 28 of them
+rather than 16, a page count on 20 rather than none, a language on 27 rather
+than none, and a Dewey or Library of Congress number on 12 rather than none. It
+costs a tenth of a second.
+
 **A DVD is no longer offered as a book.** A scanned identifier that names a
 disc is refused rather than catalogued; an ebook edition of a book you are
 holding is still offered, because it is the same book.
+
+**A third way to look at the library.** Beside the covers and the table there
+is now a list: one dense row per book, a tiny cover, and the title, author,
+series, year and reading status beside it. It is for the case the other two are
+bad at, which is finding a book you know you own without reading twenty one
+columns or scrolling past forty covers. Your choice is remembered in your
+browser, as it already was.
 
 **Headless.** `SERVE_FRONTEND=false` runs the API without mounting the compiled
 frontend, for a host that has no reader to serve a page to. One image and one

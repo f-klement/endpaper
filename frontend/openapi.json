@@ -5575,7 +5575,7 @@
     },
     "/api/books/{book_id}/enrich/candidates": {
       "get": {
-        "description": "Other editions of this book, so the right one can be chosen.\n\nUseful when the automatic match picks a different printing: the page count\nand cover of a paperback and its hardback are not the same. Searched across\nevery catalogue, and ranked, so a German edition of a German book is not\nburied under whatever Google happened to return first.",
+        "description": "Other editions of this book, so the right one can be chosen.\n\nUseful when the automatic match picks a different printing: the page count\nand cover of a paperback and its hardback are not the same.\n\n**Two routes, and `metadata.candidates` holds the rule between them.** Open\nLibrary's work cluster answers this exactly, when it has the book; the\nsearch across every catalogue answers it approximately, for everything\nelse, and is ranked so a German edition of a German book is not buried\nunder whatever Google happened to return first.",
         "operationId": "enrichment_candidates",
         "parameters": [
           {

@@ -56,8 +56,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Overdue reminders**: Endpaper can POST a digest of every overdue loan to a webhook you
   choose, on a schedule you set, signed so the receiver can check it came from here.
   Private books are never included: a webhook goes to a channel with no account behind it
-- **Two ways to look at it**: a grid of covers whose cards fold out for the details, or a
-  table of nineteen metadata columns. Your choice is remembered in your browser
+- **Three ways to look at it**: a grid of covers whose cards fold out for the details, a
+  dense list of one line per book, or a table of twenty one metadata columns. Your choice
+  is remembered in your browser
 - **Backup and restore**: download the whole library, covers included, and put it back
 - **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
 - **Author pages**: everybody your shelf credits, with their books behind one click. Where

@@ -94,6 +94,7 @@ export const de: Messages = {
   "library.viewLabel": "Darstellung der Bibliothek",
   "library.viewGrid": "Cover",
   "library.viewTable": "Tabelle",
+  "library.viewList": "Liste",
   "library.loaned": "Verliehen",
 
   "sort.title_asc": "Titel A bis Z",

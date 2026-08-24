@@ -85,14 +85,259 @@ class Lookup:
 
 
 # ── Open Library ──────────────────────────────────────────────────────────────
+#
+# The only source here with no key, no registration and no quota, and the only
+# one that clusters printings: an *edition* record is one printing, a *work*
+# record is the book, and `/works/{key}/editions.json` is every printing of it
+# Open Library has merged. That cluster is the `thingISBN` capability without
+# LibraryThing's terms attached, and it is what `metadata.candidates` answers
+# with.
+#
+# Three request shapes, and each buys something the one before it does not:
+#
+#   /isbn/{isbn}.json                 the printing: title, publisher, pages,
+#                                     and the two classification fields below
+#   /works/{key}.json                 the book: subjects, and the author key
+#   /works/{key}/editions.json        the other printings
+
+_OPEN_LIBRARY: Final = "https://openlibrary.org"
+
+#: A key out of an Open Library response, before it goes into a URL.
+#:
+#: **Not decoration.** Every one of these is concatenated into a host we own
+#: (`f"{_OPEN_LIBRARY}{key}.json"`), and a value such as `@example.com/` moves
+#: the *host* rather than the path: `https://openlibrary.org@example.com/.json`
+#: is a request to somebody else's server, made by ours, with our timeout and
+#: our network position. Matching the documented shape is what stops that.
+_OL_AUTHOR_KEY: Final = re.compile(r"/authors/OL\d+A")
+_OL_WORK_KEY: Final = re.compile(r"/works/OL\d+W")
+
+
+def _open_library_key(value: object, pattern: re.Pattern[str]) -> str | None:
+    """One key, or None where it is not the shape Open Library documents."""
+    if isinstance(value, str) and pattern.fullmatch(value):
+        return value
+    return None
+
+
+#: Where a subject hides on an Open Library record. All four are the same kind
+#: of value: an uncontrolled string somebody typed.
+_OPEN_LIBRARY_SUBJECT_KEYS: Final = (
+    "subjects",
+    "subject_places",
+    "subject_times",
+    "subject_people",
+)
+
+#: How many subjects Open Library may contribute to one record.
+#:
+#: **A bound, not a taste, and the number is what the measurement supports.**
+#: Open Library's work subjects are a folksonomy and they are long: measured
+#: over nine live works on 2026-08-24 the lists ran 0, 0, 3, 36, 65, 82, 101,
+#: 122 and 137 entries. `subjects` is not stored, but it feeds two things that
+#: are: `suggested_tag_ids`, which the web client pre-selects, and
+#: `_as_match`, which joins them into the `categories` column.
+#:
+#: Uncapped, the union of the edition's and the work's subjects pre-selects up
+#: to **16** of the 105 seeded tags on one book (1984: Fiction, Play, Essays,
+#: Classic, Contemporary Fiction, Crime, Dystopian, Fantasy, Satire, Science
+#: Fiction, Short Stories, War, Art, History, Language, Science). At twelve the
+#: worst case over the same nine books is **4**, and the matches are the ones a
+#: person would have picked: Pride and Prejudice resolves to Fiction, Classic
+#: and Romance.
+#:
+#: Edition subjects are taken first, so the printing's own cataloguer beats the
+#: work's crowd where both have something to say.
+_OPEN_LIBRARY_MAX_SUBJECTS: Final = 12
+
+
+def _open_library_subjects(*records: dict[str, Any]) -> list[str]:
+    """Every subject on these records, deduplicated, in order, bounded."""
+    found: dict[str, None] = {}
+    for record in records:
+        for key in _OPEN_LIBRARY_SUBJECT_KEYS:
+            entries = record.get(key)
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                name = entry if isinstance(entry, str) else None
+                if isinstance(entry, dict):
+                    name = entry.get("name")
+                if isinstance(name, str) and name.strip():
+                    found.setdefault(" ".join(name.split()), None)
+    return list(found)[:_OPEN_LIBRARY_MAX_SUBJECTS]
+
+
+def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """`dewey_decimal_class` and `lc_classifications`, which are the controlled half.
+
+    **This is the whole of what Open Library asserts from a published scheme,
+    and its subjects are not part of it.** §30i's rule for the
+    `classifications` table is an assertion from a published scheme; a live
+    Open Library subject list carries `open_syllabus_project`,
+    `fiction classics` and `Fiction, Romance, Historical, Regency`, which are
+    somebody's words rather than a heading another institution can act on. They
+    go to `subjects`, where the publisher's uncontrolled list already lives.
+
+    Measured over 45 live edition records on 2026-08-24: 11 carry a Dewey
+    number, always exactly one, and 17 carry an LC call number, 11 of them one,
+    five two and one three.
+
+    **Only the first LC value.** The repeats are one call number written
+    several ways (`QB45.Z43 1998`, `QB45 .Z43 1998`, `QB45`), not several
+    assertions, and `uq_classifications_book_scheme_number` cannot collapse
+    them because they differ by a character. Storing all three would spend
+    three of a book's eight rows saying one thing.
+
+    Dewey goes through `ddc.parse_heading` like every other source path, which
+    is what strips the segmentation prime and refuses `[Fic]`.
+    """
+    found: list[dict[str, Any]] = []
+    dewey = record.get("dewey_decimal_class")
+    if isinstance(dewey, list):
+        for value in dewey:
+            if not isinstance(value, str):
+                continue
+            heading = ddc.parse_heading(value)
+            if heading is None:
+                continue
+            number, label = heading
+            found.append(
+                {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
+            )
+    call_numbers = record.get("lc_classifications")
+    if isinstance(call_numbers, list) and call_numbers:
+        # No normaliser for LCC, the same as the Library of Congress path: a
+        # call number is alphanumeric and this app has no schedule for it.
+        number = " ".join(str(call_numbers[0]).split())
+        if number:
+            found.append(
+                {"scheme": ClassificationScheme.LCC, "number": number, "label": None}
+            )
+    return found
+
+
+def _open_library_year(raw: object) -> int | None:
+    """A four digit year out of `publish_date`, which is free text.
+
+    Live values include `2018` and `April 10, 1925`, so the year is searched
+    for rather than parsed.
+    """
+    if not isinstance(raw, str):
+        return None
+    match = re.search(r"\d{4}", raw)
+    return int(match.group()) if match else None
+
+
+def _open_library_language(raw: object) -> str | None:
+    """`[{"key": "/languages/eng"}]` as `en`, through the shared table."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    first = raw[0]
+    key = first.get("key") if isinstance(first, dict) else None
+    if not isinstance(key, str):
+        return None
+    return _LANGUAGES.get(key.rsplit("/", 1)[-1].lower())
+
+
+def _open_library_pages(raw: object) -> int | None:
+    """`number_of_pages`, if it is a number of pages."""
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else None
+
+
+def _open_library_author_key(entries: object) -> str | None:
+    """The first credited author's key on an edition record, if it has one.
+
+    73 of 129 live editions listing entries carry one (measured 2026-08-24);
+    the rest credit nobody at all.
+    """
+    if not isinstance(entries, list) or not entries:
+        return None
+    first = entries[0]
+    return _open_library_key(
+        first.get("key") if isinstance(first, dict) else None, _OL_AUTHOR_KEY
+    )
+
+
+def _open_library_description(raw: object) -> str | None:
+    """A description, which is a plain string or `{"value": ...}` depending on age."""
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    return raw.strip() or None if isinstance(raw, str) else None
+
+
+def _open_library_work_author_key(work: dict[str, Any]) -> str | None:
+    """The author on a *work* record, which nests the key one level deeper.
+
+    An edition says `authors: [{"key": "/authors/OL..."}]` and a work says
+    `authors: [{"author": {"key": ...}}]`. Both spellings are needed, because
+    the edition record usually credits nobody: measured over five live
+    lookups on 2026-08-24, four carried no author at all on the edition and
+    every one of the four carried it on the work.
+    """
+    entries = work.get("authors")
+    if not isinstance(entries, list) or not entries:
+        return None
+    first = entries[0]
+    nested = first.get("author") if isinstance(first, dict) else None
+    return _open_library_key(
+        nested.get("key") if isinstance(nested, dict) else None, _OL_AUTHOR_KEY
+    )
+
+
+async def _open_library_author(
+    client: httpx.AsyncClient, key: str | None
+) -> str | None:
+    """One author key resolved to a name, which no other record carries."""
+    if key is None:
+        return None
+    response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+    if response.status_code != 200:
+        return None
+    name = response.json().get("name")
+    return name if isinstance(name, str) else None
+
+
+def _open_library_work_key(entries: object) -> str | None:
+    """The work an edition belongs to, which is the handle on every other printing."""
+    if not isinstance(entries, list) or not entries:
+        return None
+    first = entries[0]
+    return _open_library_key(
+        first.get("key") if isinstance(first, dict) else None, _OL_WORK_KEY
+    )
+
+
+async def _open_library_work(
+    client: httpx.AsyncClient, key: str | None
+) -> dict[str, Any]:
+    """The work record, for the subjects the edition record mostly lacks.
+
+    Measured over nine live editions on 2026-08-24: the edition carried
+    subjects on two of them, the work on seven. Reading only the edition is why
+    Open Library used to contribute nothing to the tag suggestion for books it
+    describes perfectly well.
+    """
+    if key is None:
+        return {}
+    response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+    if response.status_code != 200:
+        return {}
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
 
 
 async def _open_library(isbn: str, api_key: str) -> Lookup:
-    """The edition record, plus one extra call for the author's name.
+    """The edition record, its work, and one call for the author's name.
 
     `?default=false` on the cover URL matters: without it Open Library answers
     every request with a grey placeholder image, so a book with no cover gets
     one that looks like a broken image rather than no cover at all.
+
+    Three requests at worst, and this is the *fallback* source: it is only
+    asked when the DNB and K10plus have both missed, so the cost lands on the
+    lookups that were going to be slow anyway. A failure in either of the two
+    extra calls costs that field and not the record.
     """
     del api_key  # Open Library needs none.
 
@@ -100,7 +345,7 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
         async with httpx.AsyncClient(
             timeout=TIMEOUT_SECONDS, follow_redirects=True
         ) as client:
-            response = await client.get(f"https://openlibrary.org/isbn/{isbn}.json")
+            response = await client.get(f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
             if response.status_code == 429:
                 return Lookup(Outcome.RATE_LIMITED, source="open_library")
             if response.status_code == 404:
@@ -109,38 +354,22 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
                 return Lookup(Outcome.UNAVAILABLE, source="open_library")
             data = response.json()
 
-            author: str | None = None
-            authors_list = data.get("authors", [])
-            if authors_list:
-                author_key = authors_list[0].get("key", "")
-                author_response = await client.get(
-                    f"https://openlibrary.org{author_key}.json"
-                )
-                if author_response.status_code == 200:
-                    author = author_response.json().get("name")
+            # The work first, because it is the fallback for the author: an
+            # edition record names one on a minority of records and the work
+            # behind it almost always does.
+            work = await _open_library_work(
+                client, _open_library_work_key(data.get("works"))
+            )
+            author = await _open_library_author(
+                client,
+                _open_library_author_key(data.get("authors"))
+                or _open_library_work_author_key(work),
+            )
     except (httpx.HTTPError, ValueError):
         logger.warning("Open Library lookup failed for %s", isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source="open_library")
 
     publishers = data.get("publishers", [])
-    publish_dates = data.get("publish_date", "")
-    year_match = re.search(r"\d{4}", publish_dates) if publish_dates else None
-
-    # description is either a plain string or {"value": ...}, depending on age.
-    description_raw = data.get("description", "")
-    description = (
-        description_raw.get("value", "")
-        if isinstance(description_raw, dict)
-        else description_raw
-    )
-
-    subjects: list[str] = []
-    for key in ("subjects", "subject_places", "subject_times", "subject_people"):
-        for entry in data.get(key, []):
-            if isinstance(entry, str):
-                subjects.append(entry)
-            elif isinstance(entry, dict) and "name" in entry:
-                subjects.append(entry["name"])
 
     return Lookup(
         Outcome.FOUND,
@@ -151,10 +380,22 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
             "subtitle": data.get("subtitle"),
             "author": author,
             "publisher": publishers[0] if publishers else None,
-            "year": int(year_match.group()) if year_match else None,
-            "description": description or None,
+            "year": _open_library_year(data.get("publish_date")),
+            "description": _open_library_description(data.get("description")),
             "cover_url": covers.open_library_url(isbn),
-            "subjects": subjects,
+            # Both were missing entirely until 2026-08-24, so a fallback lookup
+            # answered without two of the seven fields `_completeness` scores
+            # and `_merge` had nothing to fill them from.
+            "page_count": _open_library_pages(data.get("number_of_pages")),
+            "language": _open_library_language(data.get("languages")),
+            "subjects": _open_library_subjects(data, work),
+            # The edition record's own, not the cluster's. 24 of 129 live
+            # sibling editions carry a Dewey number where the edition asked
+            # for carries none, so harvesting the cluster here would find
+            # more; it would also cost a fourth request on every fallback
+            # lookup, and the cluster is already fetched where somebody is
+            # choosing an edition. Left as the cheaper half deliberately.
+            "classifications": _open_library_classifications(data),
         },
     )
 
@@ -1296,7 +1537,7 @@ def _union_classifications(entries: list[dict[str, Any]]) -> list[dict[str, Any]
 # piece doing the real work: without it a precise query still puts an obscure
 # 1974 reprint above the edition somebody is holding.
 
-_OPEN_LIBRARY_SEARCH: Final = "https://openlibrary.org/search.json"
+_OPEN_LIBRARY_SEARCH: Final = f"{_OPEN_LIBRARY}/search.json"
 
 #: Only what is used. The default response carries a hundred fields per row.
 _OPEN_LIBRARY_SEARCH_FIELDS: Final = ",".join(
@@ -2300,6 +2541,276 @@ def _merge_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
         register(existing)
 
     return rows
+
+
+# ── Other editions of one work ────────────────────────────────────────────────
+#
+# What a cataloguer reaches for when a donation arrives in an unfamiliar
+# printing, and the one thing on Koha's enrichment list that endpaper did not
+# have: `thingISBN` edition clustering, without LibraryThing's terms attached.
+# Open Library merges printings under a *work* and publishes the cluster.
+#
+# `GET /api/books/{id}/enrich/candidates` used to answer this with a free text
+# search for the book's own title and author, which is a guess that happens to
+# be right most of the time. The cluster is not a guess.
+
+#: How many sibling editions the cluster is asked for.
+#:
+#: The difference between a request and a download: work sizes measured live on
+#: 2026-08-24 run 1, 1, 11, 18, 120, 204, 213, 536 and 4,040 (Pride and
+#: Prejudice). Twenty is four times the five rows the picker shows, which
+#: leaves the completeness sort something to choose from without paying for a
+#: catalogue.
+_OPEN_LIBRARY_EDITIONS: Final = 20
+
+#: How many author records the cluster resolves, for any number of rows.
+#:
+#: An editions listing names its authors by key. Resolving each row's own key
+#: is one request per row; the keys repeat, because a work's printings are by
+#: the same person, so the distinct keys are resolved instead and this bounds
+#: the tail. A row whose key did not make the cap keeps no author rather than
+#: somebody else's.
+_OPEN_LIBRARY_AUTHOR_LOOKUPS: Final = 3
+
+
+async def _open_library_author_names(
+    client: httpx.AsyncClient, entries: list[Any]
+) -> dict[str, str]:
+    """Author key to name, for the whole cluster, in at most three requests."""
+    keys: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = _open_library_author_key(entry.get("authors"))
+        if key is not None and key not in keys:
+            keys.append(key)
+    wanted = keys[:_OPEN_LIBRARY_AUTHOR_LOOKUPS]
+    if not wanted:
+        return {}
+
+    async def _name(key: str) -> tuple[str, str | None]:
+        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        if response.status_code != 200:
+            return key, None
+        found = response.json().get("name")
+        return key, found if isinstance(found, str) else None
+
+    names: dict[str, str] = {}
+    for result in await asyncio.gather(
+        *(_name(key) for key in wanted), return_exceptions=True
+    ):
+        # One author record failing costs that author's name, not the cluster.
+        if isinstance(result, BaseException):
+            continue
+        key, name = result
+        if name:
+            names[key] = name
+    return names
+
+
+def _open_library_edition(
+    entry: dict[str, Any], names: dict[str, str]
+) -> dict[str, Any]:
+    """One entry of an editions listing, in the shape `_as_match` reads.
+
+    Lookup-shaped rather than match-shaped on purpose: `_as_match` is where the
+    classification dedupe and the per book ceiling live, so a row built here
+    inherits both instead of carrying its own copy.
+    """
+    identifiers = [
+        value
+        for key in ("isbn_13", "isbn_10")
+        for value in (entry.get(key) or [])
+        if isinstance(value, str)
+    ]
+    isbn13 = _first_isbn13(identifiers)
+    cover_ids = entry.get("covers")
+    cover_id = (
+        cover_ids[0] if isinstance(cover_ids, list) and cover_ids else None
+    )
+    author_key = _open_library_author_key(entry.get("authors"))
+    publishers = entry.get("publishers")
+    title = entry.get("title")
+    return {
+        "isbn": isbn13,
+        "title": title if isinstance(title, str) else None,
+        "subtitle": entry.get("subtitle"),
+        "author": names.get(author_key) if author_key else None,
+        "publisher": (
+            publishers[0] if isinstance(publishers, list) and publishers else None
+        ),
+        "year": _open_library_year(entry.get("publish_date")),
+        "description": _open_library_description(entry.get("description")),
+        "page_count": _open_library_pages(entry.get("number_of_pages")),
+        "language": _open_library_language(entry.get("languages")),
+        # By Open Library's own cover id where the entry has one, which resolves
+        # for a printing whose ISBN the cover service does not know. 75 of 129
+        # live entries carry a cover id and 69 carry an ISBN, and they are not
+        # the same 69.
+        "cover_url": (
+            covers.open_library_id_url(cover_id)
+            if isinstance(cover_id, int)
+            else covers.open_library_url(isbn13)
+            if isbn13
+            else None
+        ),
+        "series_name": None,
+        "series_index": None,
+        "subjects": _open_library_subjects(entry),
+        "classifications": _open_library_classifications(entry),
+    }
+
+
+async def editions(
+    isbn: str, limit: int, prefer_language: str | None = None
+) -> list[dict[str, Any]]:
+    """Every other printing of this work Open Library has merged.
+
+    Three requests: the ISBN gives the work, the work gives the cluster, and
+    one more resolves the authors the cluster names by key.
+
+    **A translation is dropped, not ranked down**, and this is not a nicety. A
+    work spans translations. The cluster behind `9783442002009` (Der Zinker)
+    holds 11 entries, of which 9 declare English and are printings of *The
+    Squeaker*, measured live on 2026-08-24. Every one is the same work; none
+    can fill in a German printing's publisher, page count or cover, and left in
+    they took four of the five rows the picker shows and pushed the German
+    editions out of it. So where the caller knows the language, an entry in a
+    different one is not a candidate.
+
+    **An entry declaring no language is kept**, and that is what makes this
+    safe rather than destructive: the other 2 of those 11 are the German
+    printings, and both carry an empty `languages`. 110 of 129 live entries
+    across seven works declare one, so refusing the rest would throw away
+    records for a field Open Library simply left blank.
+
+    **Then `_completeness`, not catalogue order**, which is the same function
+    and the same reason `_merge` uses it to choose between printings: an entry
+    with a publisher, a year, a page count and a language is one somebody can
+    recognise their copy from, and Open Library returns the cluster in no
+    useful order. Year descending breaks the tie, because a donation is
+    likelier to be a recent printing than the first edition.
+
+    **Ordered before the slice, never after.** The cluster is asked for twenty
+    entries and the picker shows four, so an ordering applied to the answer
+    would be an ordering applied to whatever twenty Open Library happened to
+    list first.
+
+    Empty rather than raising on every failure path, including an ISBN that is
+    not one: this is an enrichment, and losing it costs a picker some rows.
+    """
+    canonical = parse_isbn(isbn)
+    if canonical is None or limit <= 0:
+        return []
+    try:
+        async with httpx.AsyncClient(
+            timeout=TIMEOUT_SECONDS, follow_redirects=True
+        ) as client:
+            response = await client.get(f"{_OPEN_LIBRARY}/isbn/{canonical}.json")
+            if response.status_code != 200:
+                return []
+            key = _open_library_work_key(response.json().get("works"))
+            if key is None:
+                return []
+            listing = await client.get(
+                f"{_OPEN_LIBRARY}{key}/editions.json",
+                params={"limit": str(_OPEN_LIBRARY_EDITIONS)},
+            )
+            if listing.status_code != 200:
+                return []
+            entries = listing.json().get("entries")
+            if not isinstance(entries, list):
+                return []
+            names = await _open_library_author_names(client, entries)
+    except (httpx.HTTPError, ValueError):
+        logger.warning("Open Library editions failed for %s", isbn, exc_info=True)
+        return []
+
+    records = [
+        _open_library_edition(entry, names)
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+    if prefer_language:
+        records = [
+            record
+            for record in records
+            if record["language"] in (prefer_language, None)
+        ]
+    records.sort(
+        key=lambda record: (_completeness(record), record.get("year") or 0),
+        reverse=True,
+    )
+    return [_as_match(record, "open_library") for record in records[:limit]]
+
+
+async def candidates(
+    query: str,
+    api_key: str = "",
+    isbn: str | None = None,
+    limit: int = 10,
+    prefer_language: str | None = None,
+) -> list[dict[str, Any]]:
+    """Editions to choose between for a book that already exists, cluster first.
+
+    Two answers to one question, and they fail on opposite books. Open
+    Library's work cluster is **certain**: every row is a printing of the same
+    work by Open Library's own merge, so nothing in it needs ranking against
+    the query because nothing in it is a different book. The free text search
+    is **broad**: it is the only answer for a book with no ISBN, for a work
+    Open Library has not merged, and for German publishing, where Open Library
+    frequently holds nothing at all (`9783446249974`, round 2's reference
+    record, is a 404 there while the DNB returns 15,502 bytes).
+
+    So the cluster leads and the search fills. **The cluster is capped one
+    short of the page** so a work merged wrongly is never the entire answer:
+    the search row underneath it is the way out.
+
+    Both are asked at once, and the cluster is held to the search's own
+    deadline, so a slow Open Library costs its rows rather than the response.
+    """
+    cluster, searched = await asyncio.gather(
+        _work_cluster(isbn, max(limit - 1, 0), prefer_language),
+        search(query, api_key, limit=limit, prefer_language=prefer_language),
+    )
+    rows = list(cluster)
+    # **Deduplicated on the ISBN and on nothing else**, which is the one thing
+    # that identifies a printing. `_match_key` is title plus author, and every
+    # row on this page shares both by construction: using it here collapsed a
+    # five row answer to one, live, because five printings of one book are
+    # five rows the picker exists to show. A row with no ISBN is always kept,
+    # for the same reason.
+    seen = {row["isbn13"] for row in rows if row.get("isbn13")}
+    for row in searched:
+        found = row.get("isbn13")
+        if found and found in seen:
+            continue
+        if found:
+            seen.add(found)
+        rows.append(row)
+    return rows[:limit]
+
+
+async def _work_cluster(
+    isbn: str | None, limit: int, prefer_language: str | None
+) -> list[dict[str, Any]]:
+    """`editions`, bounded by the search deadline and never fatal.
+
+    **The same 4.0s the search is held to**, so the endpoint's worst case does
+    not move: both halves are asked at once and neither may exceed it. Measured
+    over 15 live fetches on 2026-08-24 the editions listing answers in 0.64s to
+    2.19s, with one 10.1s outlier, and the outlier is the whole reason this
+    exists.
+    """
+    if not isbn or limit <= 0:
+        return []
+    try:
+        return await asyncio.wait_for(
+            editions(isbn, limit, prefer_language), SEARCH_DEADLINE_SECONDS
+        )
+    except TimeoutError:
+        logger.info("Open Library's edition cluster missed the deadline for %s", isbn)
+        return []
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

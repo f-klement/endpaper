@@ -4237,9 +4237,13 @@ export const getEnrichmentCandidatesUrl = (bookId: number) => {
  * Other editions of this book, so the right one can be chosen.
  *
  * Useful when the automatic match picks a different printing: the page count
- * and cover of a paperback and its hardback are not the same. Searched across
- * every catalogue, and ranked, so a German edition of a German book is not
- * buried under whatever Google happened to return first.
+ * and cover of a paperback and its hardback are not the same.
+ *
+ * **Two routes, and `metadata.candidates` holds the rule between them.** Open
+ * Library's work cluster answers this exactly, when it has the book; the
+ * search across every catalogue answers it approximately, for everything
+ * else, and is ranked so a German edition of a German book is not buried
+ * under whatever Google happened to return first.
  * @summary Enrichment Candidates
  */
 export const enrichmentCandidates = async (

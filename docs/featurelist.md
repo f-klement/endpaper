@@ -52,8 +52,11 @@ allowlist of hosts.
 series, shelf location, format, reading status and ownership. A filter set can
 be saved as a view.
 
-**Card or table.** The table carries nineteen columns and sorts on what the
-server can genuinely order by. The choice is remembered.
+**Card, list or table.** The list is one dense row per book: a tiny cover, the
+title, and the author, series, year and reading status beside it, which is what
+a grid card's face carries plus the two facts it hides in its fold out. The
+table carries twenty one columns and sorts on what the server can genuinely
+order by. The choice is remembered in the browser.
 
 **Series** and **author** pages group the shelf by what it already knows, and a
 series page works out which volumes are missing rather than making you notice.

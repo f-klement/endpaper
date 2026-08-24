@@ -94,6 +94,7 @@ export const en = {
   "library.viewLabel": "How the library is shown",
   "library.viewGrid": "Covers",
   "library.viewTable": "Table",
+  "library.viewList": "List",
   "library.loaned": "Loaned",
 
   "sort.title_asc": "Title A to Z",

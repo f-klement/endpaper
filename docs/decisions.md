@@ -965,6 +965,94 @@ It costs one line to read when there is somewhere to put it.
 `tests/test_metadata.py::TestDnbRecord::test_the_author_identifier_is_read_by_nothing`
 pins the refusal, so it reads as a decision rather than an oversight.
 
+### Open Library's subjects are not classifications, and its two classification fields are
+
+Open Library carries both kinds of value and they go to different places.
+
+**Subjects go to `subjects`, with the publisher's uncontrolled list.** §30i's rule for the
+`classifications` table is an assertion from a **published scheme**. A live Open Library
+work carries `open_syllabus_project`, `fiction classics` and
+`Fiction, Romance, Historical, Regency`: a folksonomy, not a vocabulary, with no scheme to
+name and no identifier to cite. Putting those in a table whose whole point is controlled
+values would make the column meaningless for the thing it exists for, which is a heading
+another institution can act on.
+
+**`dewey_decimal_class` and `lc_classifications` go to `classifications`.** They are DDC
+and LCC, the two schemes round 1 already built, and they arrive with the number alone as
+every MARC 082 does. Measured over 45 live edition records on 2026-08-24: 11 carry a Dewey
+number, always exactly one, and 17 carry an LC call number, 11 of them one, five two and
+one three.
+
+**Only the first LC value is stored.** The repeats are one call number written several
+ways (`QB45.Z43 1998`, `QB45 .Z43 1998`, `QB45`), and `uq_classifications_book_scheme_number`
+cannot collapse them because they differ by a character. Storing all three would spend three
+of a book's eight rows saying one thing.
+
+### Open Library subjects are bounded at twelve, and the bound is what makes them usable
+
+`subjects` is not stored, but it feeds two things that are: `suggested_tag_ids`, which the
+web client pre-selects, and `_as_match`, which joins the list into the `categories` column.
+
+Open Library's work subjects are long. Measured over nine live works on 2026-08-24 the
+lists ran 0, 0, 3, 36, 65, 82, 101, 122 and 137 entries. Unioned with the edition's own and
+left uncapped they pre-select up to **16** of the 105 seeded tags on one book: 1984 resolves
+to Fiction, Play, Essays, Classic, Contemporary Fiction, Crime, Dystopian, Fantasy, Satire,
+Science Fiction, Short Stories, War, Art, History, Language and Science. At twelve the worst
+case over the same nine is **4**, and they are the ones a person would have picked: Pride
+and Prejudice resolves to Fiction, Classic and Romance.
+
+The edition's own subjects are taken first, so the printing's cataloguer beats the work's
+crowd where both spoke.
+
+**A pre-existing defect this measurement surfaced, and did not fix.**
+`match_subjects_to_tags` is a substring match against a joined blob, so the subject
+`Software engineering` matches the tag **War** and `computer science` matches **Science**.
+Reproduced on live data. It is not new and it is not Open Library's: it is why the 653
+decision above refuses a source outright rather than capping it. Fixing it means word
+boundary matching, which loses `classics` matching **Classic** and is a behaviour change
+across every source, so it is a round of its own rather than a line in this one.
+
+### An Open Library key is validated before it goes into a URL
+
+`/isbn/{isbn}.json` answers with `authors: [{"key": "/authors/OL23919A"}]` and
+`works: [{"key": "/works/OL4781294W"}]`, and both are concatenated onto our own host to
+fetch the next record. A key of `@example.com/` makes that
+`https://openlibrary.org@example.com/.json`, which moves the **host** rather than the path:
+a request to somebody else's server, made by ours, from our network position, with our
+timeout.
+
+Two regexes match the documented shape and a key that does not match is not fetched. This
+was already reachable before this round through the author key; it is closed now because
+this round adds a second concatenation.
+`tests/test_metadata.py::TestTheOpenLibraryLookup::test_a_key_that_is_not_open_librarys_is_never_fetched`
+pins it.
+
+### The edition cluster drops a translation rather than ranking it down
+
+Open Library's work cluster is every printing of a work, and a work spans translations.
+The cluster behind `9783442002009` (Der Zinker) holds 11 entries, of which 9 declare
+English and are printings of *The Squeaker*, measured live on 2026-08-24.
+
+Every one of those is the same work. None of them can fill in a German printing's
+publisher, page count or cover, which is what `POST /{id}/enrich/apply` does with the row
+somebody clicks. Left in, they took four of the five rows the picker shows and pushed the
+German editions out of it entirely.
+
+So where the caller knows the language, an entry in a different one is not a candidate.
+**An entry declaring no language is kept**, and that is what makes this safe rather than
+destructive: the other 2 of those 11 are the German printings and both carry an empty
+`languages`. 110 of 129 live entries across seven works declare one.
+
+### The candidates page deduplicates on the ISBN and on nothing else
+
+`_match_key` is a title and a first author, which is the right key for a search page where
+two catalogues describe the same book. It is the wrong key here: every row on this page is
+a printing of one book, so it collapsed a five row answer to one. Measured live before it
+was fixed.
+
+An ISBN identifies a printing, which is what this page lists. A row with no ISBN is always
+kept, because "no ISBN" is not an identity two rows can share.
+
 ### The DNB's 653 keywords are not read
 
 653 is the publisher's own keyword list, and the DNB passes it through. Measured over 85
@@ -2292,6 +2380,54 @@ household invented reading as theirs is a distinction with a reason behind it.
 The table stays keyed by category rather than collapsing to a default and one
 exception, so a category added to the backend enum is a compile error here
 instead of an unstyled pill.
+
+### The list row holds the grid card's face, plus two facts from its fold out
+
+A third view is only worth having if it is not the other two, and a dense row
+repeating the table's twenty one columns is a worse table. So the row is decided
+against them rather than in isolation:
+
+| Held | Why |
+|---|---|
+| cover, title, author, reading status | exactly what a grid card's **face** carries |
+| series | the fact the card hides in its fold out that somebody scanning a list is looking for: it is what says the next one is missing |
+| year | tells two printings apart, which is the other thing a person recognises a book by |
+
+Everything else stays in the table, which exists for reading metadata. The three
+optional values are joined into one line rather than laid out in columns: a
+column grid with three optional values leaves holes on most rows, and a row with
+holes reads as missing data rather than as data a book does not have.
+
+**The status is plain muted text, not the card's coloured pill.** One pill among
+covers is a marker; thirty stacked is a colour field with no signal, and that
+ramp's own contrast is recorded above as below the 4.5 floor on three palettes.
+The word carries the same information either way.
+
+**The whole row is one link**, where the table links only the title. The table's
+reason is that a reader copying a publisher out of a cell should not navigate; a
+list row holds nothing to copy, and one target per row is what makes it usable
+on a phone.
+
+### Every cover in the list loads lazily, and carries no accessible name
+
+A list fits roughly three times as many rows on a screen as the grid fits cards,
+so a 200 row page would fetch 200 images at once without `loading="lazy"`. It is
+on every one, and a test asserts it rather than a comment claiming it.
+
+The `alt` is empty because the title sits beside the cover inside the same link,
+and a duplicate label is noise in a screen reader's control list: the quotes
+round found exactly this defect twice on the book page. An empty `alt` also takes
+the image out of the accessibility tree, which is why the test queries the DOM
+rather than the role.
+
+### A selection forces the grid, and that is tested before the view is read
+
+The checkbox lives on a card. Neither the table nor the list has one, so a
+selection offered from either would be a selection that does nothing.
+
+The condition used to read `view === "table" && !isSelecting`, which put the
+selection second. It now tests the selection **first**, so a fourth view cannot
+reintroduce the hole by forgetting to mention itself.
 
 ### The palettes are CSS, and the catalogue is TypeScript
 

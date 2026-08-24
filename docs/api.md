@@ -456,6 +456,24 @@ edition is clicked**, because choosing automatically is wrong often enough to ma
 paperback and its hardback are the same book, different page counts and different covers,
 and a catalogue will happily return the other one.
 
+**The candidates come from two places, and the rule between them is worth knowing.** Open
+Library merges printings under a *work*, and `GET /{id}/enrich/candidates` asks that
+cluster with the book's own ISBN: every row in it is a printing of the same book by Open
+Library's own merge rather than by a title match. Underneath it sits the free text search
+across all six catalogues, which is the only answer for a book with no ISBN, for a work
+Open Library has not merged, and for a good deal of German publishing, where Open Library
+returns 404.
+
+Three rules hold that together:
+
+* **The cluster leads, and never fills the page.** It is capped one row short, so a work
+  merged wrongly is never the whole answer.
+* **A printing in another language is dropped, not ranked down.** A work spans
+  translations, and an English printing cannot fill in a German copy's publisher or page
+  count. An entry declaring no language is kept.
+* **Rows are deduplicated on the ISBN alone.** Every row here shares a title and an
+  author by construction, so anything looser collapses the page to one row.
+
 `POST /enrich` keeps the automatic behaviour for a caller that wants it. Both share the
 merge rule, and it is the server's rather than the client's: only empty fields are filled
 unless `overwrite=true`, so a publisher somebody typed by hand is never quietly replaced.
@@ -565,9 +583,16 @@ nothing overwritten, so a page count from one and a subject heading from the oth
 the same book.
 
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then
-**Google Books**. Open Library is the broadest source and the thinnest, and at 1.6s the
-slowest by five times; Google is the only one with a key, a quota and a bill attached.
-An ordinary lookup therefore spends no quota at all.
+**Google Books**. Open Library is the broadest source, and at 1.6s the slowest by five
+times; Google is the only one with a key, a quota and a bill attached. An ordinary lookup
+therefore spends no quota at all.
+
+Open Library is read as three records rather than one: the **edition** for the printing,
+the **work** behind it for the subjects and the author the edition mostly omits, and one
+call for the author's name. Measured over 35 live ISBNs on 2026-08-24 against what shipped
+before, with no losses: subjects on 28 records rather than 16 (178 entries rather than 36),
+a page count on 20 rather than 0, a language on 27 rather than 0, an author on 35 rather
+than 34, and classifications on 12 rather than 0. The cost is 1.34s where it was 1.24s.
 
 A 404 means every one of them was asked and none holds the ISBN. The ranking and the
 measurements behind it are in `backend/metadata.py`.

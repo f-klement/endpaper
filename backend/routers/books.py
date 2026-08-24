@@ -3310,9 +3310,13 @@ async def enrichment_candidates(
     """Other editions of this book, so the right one can be chosen.
 
     Useful when the automatic match picks a different printing: the page count
-    and cover of a paperback and its hardback are not the same. Searched across
-    every catalogue, and ranked, so a German edition of a German book is not
-    buried under whatever Google happened to return first.
+    and cover of a paperback and its hardback are not the same.
+
+    **Two routes, and `metadata.candidates` holds the rule between them.** Open
+    Library's work cluster answers this exactly, when it has the book; the
+    search across every catalogue answers it approximately, for everything
+    else, and is ranked so a German edition of a German book is not buried
+    under whatever Google happened to return first.
     """
     metadata_limiter.check(current_user.username)
     api_key = (
@@ -3322,8 +3326,12 @@ async def enrichment_candidates(
     )
     query = " ".join(part for part in (book.title, book.author) if part)
 
-    matches = await metadata.search(
-        query, api_key, limit=5, prefer_language=book.language
+    matches = await metadata.candidates(
+        query,
+        api_key,
+        isbn=book.isbn,
+        limit=5,
+        prefer_language=book.language,
     )
     return _match_rows(matches, all_tags=None)
 

@@ -7,6 +7,7 @@ import { Page, PageCount, PageHeader } from "../components";
 import { useTranslation } from "../../i18n";
 import BookFilters from "./components/BookFilters";
 import BookGrid from "./components/BookGrid";
+import BookList from "./components/BookList";
 import BookTable from "./components/BookTable";
 import SavedSearches from "./components/SavedSearches";
 import SearchBar from "./components/SearchBar";
@@ -134,10 +135,26 @@ export default function Home() {
             aria-busy={library.isStale}
           >
             {/* Selecting forces the grid: the checkbox lives on a card, and
-                a table of nineteen columns is not where somebody ticks twenty
-                books off. Starting a selection therefore shows the covers
-                again, rather than offering a selection that does nothing. */}
-            {library.view === "table" && !selection.isSelecting ? (
+                neither a table of twenty one columns nor a dense list is where
+                somebody ticks twenty books off. Starting a selection therefore
+                shows the covers again, rather than offering a selection that
+                does nothing.
+
+                Tested first for that reason: it wins over the remembered view
+                whichever one that is, so a third view could not reintroduce a
+                selection with nothing to tick. */}
+            {selection.isSelecting || library.view === "grid" ? (
+              <BookGrid
+                books={library.books}
+                isLoading={library.isLoading}
+                hasMore={library.hasMore}
+                isLoadingMore={library.isLoadingMore}
+                onLoadMore={library.loadMore}
+                isSelecting={selection.isSelecting}
+                isSelected={selection.isSelected}
+                onToggleSelect={selection.toggle}
+              />
+            ) : library.view === "table" ? (
               <BookTable
                 books={library.books}
                 sort={library.filters.sort}
@@ -148,15 +165,12 @@ export default function Home() {
                 onLoadMore={library.loadMore}
               />
             ) : (
-              <BookGrid
+              <BookList
                 books={library.books}
                 isLoading={library.isLoading}
                 hasMore={library.hasMore}
                 isLoadingMore={library.isLoadingMore}
                 onLoadMore={library.loadMore}
-                isSelecting={selection.isSelecting}
-                isSelected={selection.isSelected}
-                onToggleSelect={selection.toggle}
               />
             )}
           </div>

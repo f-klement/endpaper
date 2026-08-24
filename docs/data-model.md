@@ -138,9 +138,14 @@ sorts and a GND number does not, which costs nothing here because nothing sorts 
 
 | Scheme | Comes from | Caption |
 |---|---|---|
-| `ddc` | DNB and K10plus MARC 082, Library of Congress MODS | none, since 2026-08-24 |
-| `lcc` | Library of Congress alone | none |
+| `ddc` | DNB and K10plus MARC 082, Library of Congress MODS, Open Library `dewey_decimal_class` | none, since 2026-08-24 |
+| `lcc` | Library of Congress, Open Library `lc_classifications` | none |
 | `gnd` | DNB MARC 650, 651, 655, 689 and 600 | the heading text |
+
+**Open Library's `subjects` are not on this list, and that is the decision rather than an
+omission.** They are uncontrolled strings somebody typed (`open_syllabus_project`,
+`fiction classics`), so they go to `subjects` with the publisher's own list. Only the two
+fields above name a published scheme. Argued in [`decisions.md`](decisions.md).
 
 **An author identifier is not one of these.** The DNB writes it in the same `$0`, and
 `100 $0` says who wrote the book where every scheme here says what the book is about. It is

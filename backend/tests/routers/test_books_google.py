@@ -157,6 +157,50 @@ class TestEnrichmentCandidates:
 
         assert res.status_code == 404
 
+    def test_the_work_cluster_is_asked_with_the_books_own_isbn(
+        self, client, admin, make_book, google_enabled
+    ):
+        """Other printings of this work, rather than a guess from the title.
+
+        Open Library merges printings under a work and `/isbn/{isbn}.json` is
+        the only handle on it, so this is the difference between the endpoint
+        answering what a cataloguer asked and answering what a search engine
+        thought they meant.
+        """
+        book = make_book(admin["headers"], isbn="9780262033848")
+        with respx.mock(assert_all_called=False) as mock:
+            cluster = mock.get(
+                url__startswith="https://openlibrary.org/isbn/"
+            ).mock(return_value=httpx.Response(404))
+            silence_catalogues(mock)
+            res = client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200
+        assert cluster.called
+        assert "9780262033848" in str(cluster.calls[0].request.url)
+
+    def test_a_book_with_no_isbn_asks_no_cluster(
+        self, client, admin, make_book, google_enabled
+    ):
+        """There is no handle on the work without one, and the search is the
+        whole answer for that book."""
+        book = make_book(admin["headers"])
+        with respx.mock(assert_all_called=False) as mock:
+            cluster = mock.get(
+                url__startswith="https://openlibrary.org/isbn/"
+            ).mock(return_value=httpx.Response(404))
+            silence_catalogues(mock)
+            res = client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200
+        assert not cluster.called
+
     @staticmethod
     def _catalogue_record(headings: str) -> str:
         """One K10plus record for the book the test creates, plus `headings`."""

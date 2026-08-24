@@ -28,6 +28,13 @@ describe("readLibraryView", () => {
     expect(readLibraryView()).toBe("table");
   });
 
+  it("remembers the dense rows", () => {
+    /** A third view was one entry in `LIBRARY_VIEWS`, and the type, the
+     * validation and the storage followed from it. */
+    writeLibraryView("list");
+    expect(readLibraryView()).toBe("list");
+  });
+
   it("ignores a value it does not know", () => {
     // A value written by a future version, or by hand.
     localStorage.setItem("libraryView", "carousel");

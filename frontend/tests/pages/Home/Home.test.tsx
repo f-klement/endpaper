@@ -199,6 +199,17 @@ describe("Home's view toggle", () => {
     expect(localStorage.getItem("libraryView")).toBe("table");
   });
 
+  it("switches the grid for dense rows", async () => {
+    renderWithProviders(<Home />);
+    await screen.findByText("Dune");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "List" }));
+
+    expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(localStorage.getItem("libraryView")).toBe("list");
+  });
+
   it("shows the covers again while selecting", async () => {
     // The checkbox lives on a card, so a selection offered from a table would
     // be a selection that does nothing.
@@ -209,6 +220,19 @@ describe("Home's view toggle", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Select" }));
 
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("shows the covers again while selecting from the list", async () => {
+    // The same rule, and the reason the selection is tested before the view
+    // rather than beside it: a third view must not reintroduce a selection
+    // with nothing to tick.
+    localStorage.setItem("libraryView", "list");
+    renderWithProviders(<Home />);
+    await screen.findByRole("list");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Select" }));
+
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
 });
 
