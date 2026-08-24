@@ -312,8 +312,8 @@ def _headings(entries: object) -> list[ClassificationIn]:
     **An upstream catalogue is no more trusted than a browser.** The lookup
     response is a draft the client posts straight back, so a caption longer than
     the column or a number longer than `CLASSIFICATION_NUMBER_MAX` has to be
-    refused here
-    rather than accepted into a payload that then 422s on the way in. Nothing
+    refused here rather than accepted into a payload that then 422s on the way
+    in. Nothing
     in a record is worth failing the whole lookup for, so a bad entry is
     dropped and logged and the rest of the record is answered.
 

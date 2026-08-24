@@ -952,7 +952,7 @@ class Classification(Base):
     away.** The record carries no identifier for a subject heading (no
     `valueURI` on any of 2,280 live `<subject>` elements, 2026-08-24), so the
     string is the access point and there is no second, stabler half to keep. An
-    LCSH row therefore has `number` and no `label`: putting the same words in
+    LCSH row as this parser writes it has `number` and no `label`: putting the same words in
     both would be one fact stored twice, and the unique index has to be on the
     half that identifies. `ClassificationScheme` says what that costs.
 

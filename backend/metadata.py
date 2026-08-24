@@ -2267,8 +2267,12 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
     **A part either carries its text or nests it, and the second shape is not
     an edge case.** `<topic>`, `<genre>`, `<geographic>` and `<temporal>` hold
     their own text; `<titleInfo>` wraps a `<title>` and `<name>` wraps one to
-    four `<namePart>` elements, a personal name and its dates being two of them
-    (`Süssheim, Karl, 1878-1947`). Measured over 900 live records: 21 nested
+    four `<namePart>` elements. That is not only the personal case: a personal name
+    splits into a name and its dates (`Süssheim, Karl, 1878-1947`), and a
+    corporate one splits into a body and its subordinate unit (`Canada.` plus
+    `Board of railway commissioners.`), which was 2 of 10 multi part names in a
+    live sample. Both shapes lose their tail if only the first part is read.
+    Measured over 900 live records: 21 nested
     titles and 116 nested names, and those are the only two shapes with
     children, so reading a part's own children is the whole rule rather than
     two special cases.
