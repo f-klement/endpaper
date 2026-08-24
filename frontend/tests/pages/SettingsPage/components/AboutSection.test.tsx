@@ -69,16 +69,29 @@ describe("AboutSection", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("asks in one sentence, without explaining itself", () => {
-    // The README argues the case at length, to somebody deciding whether to
-    // install this. The card talks to somebody who already did.
+  it("asks, and says what the money is for", () => {
+    // Two sentences since 2026-08-24, where it was one. The owner reversed the
+    // older rule that the card should add nothing to the ask: "what does this
+    // pay for" is the question the ask provokes, and leaving it unanswered made
+    // the card quieter rather than clearer. See docs/decisions.md.
     render();
 
     expect(
       screen.getByText(
-        "If you like Endpaper and want to support my work, buy me a coffee.",
+        "If you like Endpaper and want to support my work, buy me a coffee. " +
+          "It helps pay for the public server that can mediate between households.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("still leaves out the fact that nothing sits behind the money", () => {
+    // The README and the Docker Hub page carry two facts; the card took the
+    // first and not the second. A reader inside the app is not deciding whether
+    // to install it, so "there is no paid tier" answers a question nobody here
+    // is asking. This is what stops the reversal above from becoming a pitch.
+    render();
+
+    expect(screen.queryByText(/paid tier|no feature/i)).not.toBeInTheDocument();
   });
 
   it("does not explain what this app is to somebody already inside it", () => {

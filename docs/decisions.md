@@ -3177,12 +3177,21 @@ replaced the old rule is narrower rather than looser: one sentence and one butto
 About card at the foot of Settings, and nothing anywhere else. No banner, no menu entry,
 no dismissible card, no mention on any screen somebody passes through while cataloguing.
 
-**Nowhere is it a pitch, and that is the whole of the wording rule.** The README and the
-Docker Hub page ask in one sentence and add two facts: it pays for the shared relay, and
-it is not a paid tier with anything behind it. The card asks in the same sentence and adds
-nothing, because its reader is already inside the app. Earlier drafts of both argued the
-case at length and read as one; the argument was cut from all three places on the same
-day.
+**Nowhere is it a pitch, and that is the whole of the wording rule.** Earlier drafts
+argued the case at length and read as one; the argument was cut from all three places on
+the same day.
+
+**The card carried one sentence and now carries two.** It used to add nothing to the ask,
+on the grounds that its reader is already inside the app and needs no explaining to. The
+owner reversed that on 2026-08-24: it now says what the money is for, matching the README
+and the Docker Hub page, which have always carried that fact.
+
+The reversal is worth recording rather than quietly editing, because the older reasoning
+reads as sound and somebody will otherwise re-derive it and cut the sentence again. What
+changed is not the argument about pitching: it is that "what does this pay for" is the one
+question the ask provokes, and leaving it unanswered inside the app made the card quieter
+without making it clearer. The **second** fact from those pages, that nothing sits behind
+the money, is still left out here, so the card is two sentences rather than three.
 
 **The card's size is what does the work, and the defaults only help an admin.** About is
 open unless explicitly closed. An admin has five other open cards beside it and About is
