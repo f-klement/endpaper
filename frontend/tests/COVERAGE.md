@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,405 tests**, in 95 files.
+**1,439 tests**, in 98 files.
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun

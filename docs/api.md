@@ -299,7 +299,12 @@ book the household owns.
 `POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled
 out rather than inferred so a mistyped request fails instead of silently keeping whichever
 row sorted first. The survivor absorbs only what it is missing, and tags, notes, quotes,
-loans and statuses are repointed rather than dropped. Where the same member holds a status
+classifications, loans and statuses are repointed rather than dropped. A classification
+both rows carry is dropped rather than moved (the pair is unique per book, scheme and
+number), though the survivor takes its caption first if it had none. The survivor is
+capped at 8 like every other book, and a merge that would carry it past that drops the
+overflow, which is where those rows were going anyway before classifications were
+repointed at all. Where the same member holds a status
 on two of the merged rows, the survivor's own row wins: deleting somebody's reading history to
 satisfy a unique index is not an acceptable resolution.
 
@@ -460,6 +465,12 @@ unique among uncopied rows so writing one could collide with a book already here
 The candidates endpoint deliberately carries no `suggested_tag_ids`: that book already has
 tags, and they are somebody's deliberate choice.
 
+**Classifications are the exception, and are added rather than merged.** `overwrite` does
+not reach them: a heading is a catalogue's citation, not a value somebody typed, so there is
+nothing here to overrule. Enrichment adds the ones the book does not already carry, fills in
+a caption where it had none, and never replaces a caption already stored. Both endpoints
+report `classifications` in `updated_fields` when a row was added.
+
 **Neither needs an API key.** Enrichment runs the merged ISBN chain when the book has an
 ISBN and the ranked search when it does not, so a 978-3 book Google does not carry is
 filled in from the DNB instead of reporting that no key is configured. Google joins in as
@@ -554,11 +565,33 @@ An ordinary lookup therefore spends no quota at all.
 A 404 means every one of them was asked and none holds the ISBN. The ranking and the
 measurements behind it are in `backend/metadata.py`.
 
-The response also carries `suggested_tag_ids`, matched by comparing the sources' subject
-strings against the seeded tag names.
+The response carries `classifications`, each a scheme, a number and the caption the
+catalogue gave it (`ddc`, `004`, `Informatik`), and `suggested_tag_ids`.
+
+**The suggestion has two routes and they fail on opposite records.** One compares the
+sources' subject strings against the seeded tag names, which works on an English record and
+scores zero on a German one. The other reads the **DDC number**, which is the same in both
+languages: `004` is Informatik in a German record and Computing in an English one, and both
+resolve to Computing. Measured against the DNB over ten German ISBNs, eight carried a DDC
+heading and none of the eight captions matched a seeded tag name.
+
+**The server applies nothing**: the ids are returned and no endpoint writes a tag from
+them. The web client pre-selects them on the confirm form, so on an ordinary scan they do
+land unless the member unchecks them. Which of those two is "a suggestion" is a settled
+question, in `docs/decisions.md`.
 
 The response is not a book and nothing is persisted. The client posts it back to
-`/api/books/scan` after the member has had a chance to edit it.
+`/api/books/scan` after the member has had a chance to edit it, `classifications` included,
+and a row is written for each.
+
+**A book carries at most 8 classifications, and that is a bound on the book rather than on
+a payload.** `max_length` caps one request; both writers of the table (the add and enrich
+paths, and the merge) count the rows already there and stop, because they are additive
+across requests and neither `POST /{id}/enrich/apply` nor `POST /merge` carries a rate
+limiter. At the ceiling an incoming heading is dropped rather than a stored one evicted,
+and a caption still fills in on a heading already held. The reason the number matters:
+`BookOut.classifications` is on every listing row, so an inflated book is paid for on every
+page that contains it.
 
 `PUT /{id}/refresh` re-runs the same lookup and overwrites the stored fields, with one
 exception: a cover the member uploaded (a `/covers/` URL) is never replaced by a remote one.
@@ -566,8 +599,8 @@ exception: a cover the member uploaded (a `/covers/` URL) is never replaced by a
 ### Deleting, and taking it back
 
 `DELETE /api/books/{id}` no longer destroys anything. It stamps `deleted_at`
-and the row stays, with its notes, quotes, loans, tags and every member's
-reading status still attached, which is what makes `POST /{id}/restore` an undo rather
+and the row stays, with its notes, quotes, classifications, loans, tags and every
+member's reading status still attached, which is what makes `POST /{id}/restore` an undo rather
 than a re-add. The status code is unchanged at 204.
 
 **`visible_to()` is what hides it.** The trashed check lives in the same
@@ -673,8 +706,8 @@ somebody read, which is silent on whether a copy was ever in the house.
 | POST | `/api/backup/restore?confirm=true` | **admin** | multipart. Replaces everything. **400** without `confirm` |
 
 The CSV export is not a backup and never was: it carries one row per book and
-drops the notes, the quotes, the loans, every member's reading status, the
-accounts and every cover file. The archive holds `endpaper.json` (every row of every table,
+drops the notes, the quotes, the classifications, the loans, every member's reading status,
+the accounts and every cover file. The archive holds `endpaper.json` (every row of every table,
 including the `book_tags` association, which has no model of its own and is
 therefore the one that gets forgotten) plus a `covers/` directory.
 

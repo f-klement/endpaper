@@ -371,7 +371,8 @@ class TestValidation:
 
 
 def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
-         extent: str = "992 Seiten", isbn: str = "9783596294336") -> str:
+         extent: str = "992 Seiten", isbn: str = "9783596294336",
+         extra: str = "") -> str:
     """One MARCXML record, as K10plus returns it."""
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -386,6 +387,7 @@ def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
         '<subfield code="c">2024</subfield></datafield>'
         f'<datafield tag="300"><subfield code="a">{extent}</subfield></datafield>'
         '<datafield tag="041"><subfield code="a">ger</subfield></datafield>'
+        f"{extra}"
         "</record></zs:recordData></zs:record></zs:records>"
         "</zs:searchRetrieveResponse>"
     )
@@ -576,3 +578,89 @@ class TestLanguagePreference:
             headers=admin["headers"],
         )
         assert res.status_code == 422
+
+
+class TestOneBadRecordCostsOneResult:
+    """`BookMatch` is a bounded model built straight from third party data, and
+    there is no `ValidationError` handler in the app. Before this guard a single
+    record tripping any bound answered 500 and lost every other row on the page.
+
+    The lookup path answers the same problem the same way, in `_headings`.
+    """
+
+    def _search(self, client, headers, **routes):
+        with respx.mock(assert_all_called=False) as mock:
+            for base, body in routes.items():
+                mock.get(url__startswith=base).mock(return_value=sru_response(body))
+            silence_catalogues(mock)
+            return client.get(
+                "/api/books/search",
+                params={"q": "zauberberg mann"},
+                headers=headers,
+            )
+
+    def _ddc(self, number: str, caption: str = "") -> str:
+        subfields = f'<subfield code="a">{number}{caption}</subfield>'
+        return f'<datafield tag="082">{subfields}</datafield>'
+
+    def _two_records(self, first_extra: str, second_title: str) -> str:
+        """One K10plus response holding two books, the first one poisoned.
+
+        Two records from one source rather than two sources, because the
+        fixtures in this file describe the same book on purpose and
+        `_merge_matches` would fold them into a single row carrying the bad
+        field, which is not the case under test.
+        """
+        head, _, tail = marc(extra=first_extra).partition("<zs:records>")
+        second = marc(title=second_title, isbn="9783596294343")
+        _, _, body = second.partition("<zs:records>")
+        return head + "<zs:records>" + tail.replace(
+            "</zs:records></zs:searchRetrieveResponse>", ""
+        ) + body
+
+    def test_a_caption_the_column_could_not_hold_drops_the_row(self, client, admin):
+        """400 characters against a 200 character column. The lookup path has
+        the same test; this endpoint is fed by the same records and had none."""
+        res = self._search(
+            client,
+            admin["headers"],
+            **{K10PLUS: marc(extra=self._ddc("004", " " + "x" * 400))},
+        )
+
+        assert res.status_code == 200
+        assert res.json() == []
+
+    def test_the_rest_of_the_page_survives_it(self, client, admin):
+        """The point of dropping rather than raising: one bad record must not
+        take the other results on the page with it. Before the guard this
+        answered 500 and lost both."""
+        res = self._search(
+            client,
+            admin["headers"],
+            **{
+                K10PLUS: self._two_records(
+                    self._ddc("004", " " + "x" * 400),
+                    "Der Zauberberg Kommentar",
+                )
+            },
+        )
+
+        assert res.status_code == 200
+        assert [match["title"] for match in res.json()] == [
+            "Der Zauberberg Kommentar"
+        ]
+
+    def test_a_record_repeating_one_number_yields_one_heading(self, client, admin):
+        """Live K10plus returns 082 `$a` values of `['100', '610', '610']` on a
+        single record. The lookup path deduplicates in `_merge`; the search path
+        has no merge, so without `_union_classifications` in `_as_match` the
+        repetition spends the payload's budget of eight twice on nothing."""
+        [match] = self._search(
+            client,
+            admin["headers"],
+            **{K10PLUS: marc(extra=self._ddc("610") + self._ddc("610"))},
+        ).json()
+
+        assert match["classifications"] == [
+            {"scheme": "ddc", "number": "610", "label": None}
+        ]

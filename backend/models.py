@@ -31,6 +31,7 @@ from enums import (
     AuthMode,
     BookCondition,
     BookFormat,
+    ClassificationScheme,
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
@@ -508,6 +509,15 @@ class Book(Base):
     quotes: Mapped[list[Quote]] = relationship(
         "Quote", back_populates="book", cascade="all, delete-orphan"
     )
+    # Ordered by id, which is insertion order, so a book classified by two
+    # catalogues reads the same way twice. Cascaded like the notes and the
+    # quotes: a purged book's headings describe nothing.
+    classifications: Mapped[list[Classification]] = relationship(
+        "Classification",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="Classification.id",
+    )
 
     @validates("cover_url")
     def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:
@@ -885,6 +895,81 @@ class Quote(Base):
 
     book: Mapped[Book] = relationship("Book", back_populates="quotes")
     author: Mapped[User] = relationship("User")
+
+
+#: A classification number, as text. `005.133` and `QA76.73.P98 V53 2021` are
+#: both one, so this is a string and not a number, and 40 is comfortably above
+#: the longest LCC call number the Library of Congress emits.
+CLASSIFICATION_NUMBER_MAX = 40
+
+#: The caption a catalogue supplied for that number, in whatever language it
+#: catalogues in. Longer than a tag name (100) because a DDC caption is a
+#: sentence fragment: "Soziale Probleme, Sozialdienste, Versicherungen" is 47
+#: characters and is not the longest.
+CLASSIFICATION_LABEL_MAX = 200
+
+
+class Classification(Base):
+    """One published scheme's assertion about what a book is about.
+
+    `DDC`, `004`, `Informatik`: a scheme, a number and the caption that scheme
+    gave the number. Three columns rather than the one string `"004
+    Informatik"` a catalogue hands over, because that string cannot be sorted,
+    cannot be matched across languages and does not say which scheme it came
+    from.
+
+    **Not a tag, and not a category.** The three are one store with three jobs,
+    and the difference is provenance: a tag is the household's own word, a
+    category is whatever the publisher claimed, and a row here is somebody at a
+    national library placing the book in a published schedule. Only the last
+    means anything to another institution, which is why it is kept whole rather
+    than flattened into either of the others.
+
+    **The number is what gets matched, never the label.** `004` is Informatik
+    in a German record and Computing in an English one. `ddc.tag_names`
+    projects the number onto the household's vocabulary, and that projection is
+    a **suggestion** offered at add time: no endpoint writes a tag from it. See
+    `serialisation.suggested_tag_ids` for what the client does with it.
+
+    Unique per book, scheme and number, so re-running enrichment against the
+    same catalogues fills nothing in twice. Not unique on the number alone: a
+    book carries a DDC and an LCC at once, and often two DDC numbers from two
+    catalogues that disagree about how precise to be (K10plus returned both
+    `005.133` and `004` for one ISBN, measured 2026-08-23).
+    """
+
+    __tablename__ = "classifications"
+
+    __table_args__ = (
+        Index(
+            "uq_classifications_book_scheme_number",
+            "book_id",
+            "scheme",
+            "number",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No `index=True`: `uq_classifications_book_scheme_number` leads with this
+    # column, so a second index on it would be a write cost with no read
+    # behind it. The same reasoning as `quotes.book_id`.
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    scheme: Mapped[ClassificationScheme] = mapped_column(String(20), nullable=False)
+    number: Mapped[str] = mapped_column(
+        String(CLASSIFICATION_NUMBER_MAX), nullable=False
+    )
+    # Null where the source carries the number alone. MARC 082 is exactly that
+    # shape: the field holds the number and the printed schedule holds the
+    # words, so there is nothing to store and inventing a caption from our own
+    # mapping would put our word in a column that records theirs.
+    label: Mapped[str | None] = mapped_column(
+        String(CLASSIFICATION_LABEL_MAX), nullable=True
+    )
+
+    book: Mapped[Book] = relationship("Book", back_populates="classifications")
 
 
 class Setting(Base):

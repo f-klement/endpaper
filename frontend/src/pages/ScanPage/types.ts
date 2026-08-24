@@ -45,6 +45,10 @@ export function draftFromMatch(match: BookMatch): BookDraft {
     page_count: match.page_count,
     series_name: match.series_name,
     series_index: match.series_index,
+    // Carried for the same reason, and it is the half of a catalogue heading
+    // that survives a language: the confirm step posts these back and the
+    // server writes a row each.
+    classifications: match.classifications ?? [],
     suggested_tag_ids: match.suggested_tag_ids ?? [],
   };
 }

@@ -6,9 +6,12 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { BookFormat } from "./bookFormat.ts";
+import type { ClassificationIn } from "./classificationIn.ts";
 
 export interface BookCreate {
   author?: string | null;
+  /** @maxItems 8 */
+  classifications?: ClassificationIn[];
   collection_id?: number | null;
   cover_url?: string | null;
   description?: string | null;

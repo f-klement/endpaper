@@ -149,6 +149,28 @@ class TagCategory(StrEnum):
     CUSTOM = "custom"
 
 
+class ClassificationScheme(StrEnum):
+    """Published schemes a `classifications` row may quote.
+
+    A closed set rather than free text, because the scheme is what makes the
+    number mean anything: `004` is computing in Dewey and nothing at all in
+    Library of Congress notation. A row whose scheme nobody recognises is a
+    number with no reading.
+
+    Both are produced today. DDC comes from the DNB (`dc:subject`, headings
+    like `004 Informatik`), from K10plus (MARC 082) and from the Library of
+    Congress (`classification authority="ddc"`); LCC comes from the Library of
+    Congress alone (`authority="lcc"`).
+
+    Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. LCC is stored
+    because a catalogue heading is worth keeping whole, not because anything
+    reads it yet.
+    """
+
+    DDC = "ddc"
+    LCC = "lcc"
+
+
 class ExportFormat(StrEnum):
     CSV = "csv"
     TXT = "txt"

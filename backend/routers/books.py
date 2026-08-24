@@ -3,13 +3,14 @@ import csv
 import io
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.sql.elements import UnaryExpression
@@ -42,6 +43,7 @@ from enums import (
     BookFormat,
     BookSort,
     BulkAction,
+    ClassificationScheme,
     ExportFormat,
     LendingWillingness,
     Locale,
@@ -54,6 +56,7 @@ from models import (
     AUTHOR_KEY_MAX,
     AuthorAlias,
     Book,
+    Classification,
     Collection,
     Loan,
     Note,
@@ -69,6 +72,7 @@ from models import (
 )
 from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
+    MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_ROW_ID,
     AuthorMergeOut,
     AuthorMergeRequest,
@@ -85,6 +89,7 @@ from schemas import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
+    ClassificationIn,
     CollectionAssign,
     CopyCreate,
     CoverBackfillOut,
@@ -106,7 +111,7 @@ from schemas import (
     TagCreate,
     TagOut,
 )
-from serialisation import book_to_out, books_to_out, match_subjects_to_tags
+from serialisation import book_to_out, books_to_out, suggested_tag_ids
 from uploads import read_image_upload, replace_image
 
 logger = logging.getLogger("endpaper.books")
@@ -244,8 +249,57 @@ async def lookup_isbn(
     assert result.data is not None
     data = dict(result.data)
     subjects = data.pop("subjects", [])
+    # Built here rather than left to `BookLookup(**data)` so the same objects
+    # feed the tag suggestion and the response, and the two cannot disagree
+    # about what the catalogues said.
+    classifications = _headings(data.pop("classifications", None))
     all_tags = db.query(Tag).all()
-    return BookLookup(**data, suggested_tag_ids=match_subjects_to_tags(subjects, all_tags))
+    return BookLookup(
+        **data,
+        classifications=classifications,
+        suggested_tag_ids=suggested_tag_ids(subjects, classifications, all_tags),
+    )
+
+
+#: How much of a rejected third party value reaches the log.
+#:
+#: A catalogue response has no size cap anywhere in `metadata.py`, so an
+#: untruncated `%r` of a record writes as many bytes to the log as the record
+#: holds. `backup.py` already solves the identical problem the same way with
+#: `cover[:120]` in its own "dropped rather than refused" line.
+_LOGGED_VALUE_MAX = 200
+
+
+def _clipped(value: object) -> str:
+    """A third party value, short enough to log. See `_LOGGED_VALUE_MAX`."""
+    text = repr(value)
+    return text if len(text) <= _LOGGED_VALUE_MAX else text[:_LOGGED_VALUE_MAX] + "..."
+
+
+def _headings(entries: object) -> list[ClassificationIn]:
+    """The classifications in a catalogue record, through the schema a client posts.
+
+    **An upstream catalogue is no more trusted than a browser.** The lookup
+    response is a draft the client posts straight back, so a caption longer than
+    the column or a number longer than 40 characters has to be refused here
+    rather than accepted into a payload that then 422s on the way in. Nothing
+    in a record is worth failing the whole lookup for, so a bad entry is
+    dropped and logged and the rest of the record is answered.
+
+    **Validated first, then truncated.** Slicing the input to
+    `MAX_CLASSIFICATIONS_PER_BOOK` before the loop would let eight malformed
+    entries hide a ninth good one, which is the opposite of what dropping a bad
+    entry is for.
+    """
+    if not isinstance(entries, list):
+        return []
+    headings: list[ClassificationIn] = []
+    for entry in entries:
+        try:
+            headings.append(ClassificationIn.model_validate(entry))
+        except ValidationError:
+            logger.info("Discarded an unusable classification: %s", _clipped(entry))
+    return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
 
 
 def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
@@ -324,12 +378,31 @@ async def search_books(
     results: list[BookMatch] = []
     for match in matches:
         subjects = google_books.split_categories(match.get("categories"))
-        results.append(
-            BookMatch(
-                **match,
-                suggested_tag_ids=match_subjects_to_tags(subjects, all_tags),
+        # Constructed first, then the suggestion is derived from the validated
+        # rows on it. Deriving it from the raw dict instead would run the
+        # bounds and the tidying twice and let the two copies drift.
+        #
+        # **One bad record costs one result, not the response.** `BookMatch` is
+        # a bounded model built straight from third party data, there is no
+        # `ValidationError` handler in `main.py`, and a single record tripping
+        # any bound would answer 500 and throw away every other row on the
+        # page. It is reachable without this round's fields: `year` comes from
+        # a four digit match against `MAX_YEAR` 2200, and 9999 is MARC's own
+        # open ended date for a continuing resource. The lookup path answers
+        # the same problem the same way in `_headings`.
+        try:
+            row = BookMatch(**match)
+        except ValidationError:
+            logger.info(
+                "Discarded an unusable search result from %r: %s",
+                match.get("source"),
+                _clipped(match),
             )
+            continue
+        row.suggested_tag_ids = suggested_tag_ids(
+            subjects, row.classifications, all_tags
         )
+        results.append(row)
     return results
 
 
@@ -824,8 +897,17 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
                 # which is the whole thing this avoids.
                 db.flush()
 
-    book = Book(**payload.model_dump(), added_by_user_id=current_user.id)
+    fields = payload.model_dump()
+    # Popped before the constructor: `Book.classifications` is a relationship,
+    # so handing it a list of plain dicts raises rather than building rows.
+    # The validated models on `payload` are what the rows are written from.
+    fields.pop("classifications", None)
+    book = Book(**fields, added_by_user_id=current_user.id)
     db.add(book)
+    # Before the commit, so a book and the headings it was added with land in
+    # one transaction: a failure here must not leave a book claiming a
+    # provenance no row records.
+    _write_classifications(book, payload.classifications, db)
     db.commit()
     db.refresh(book)
 
@@ -843,6 +925,83 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
+
+
+def _write_classifications(
+    book: Book, headings: Sequence[ClassificationIn], db: Session
+) -> list[str]:
+    """Add or complete this book's headings. Returns the numbers it **changed**.
+
+    **Returning a filled in caption as a change is load bearing**, not
+    bookkeeping. `enrich_book` and `apply_enrichment` both commit only
+    `if updated:`, and `get_db` closes the session in its `finally` without
+    committing, so a call that returned `[]` after setting `stored.label` would
+    have the caption rolled back and lost. That is reachable: K10plus answers
+    082 `$a 004` with no caption, so a book already complete in every column
+    gains nothing but the caption when the DNB later answers `004 Informatik`.
+
+    **Additive, and never a replacement.** Enrichment is re-runnable and the
+    catalogues answer the same way every time, so a writer that replaced the
+    set would churn the table on every run, and one that appended blindly would
+    deposit a second copy of every heading.
+    `uq_classifications_book_scheme_number` refuses the second copy at the
+    database, and this refuses it before the flush, where there is still a
+    request to answer.
+
+    Deduplicated **within** the payload too. A client may post the same number
+    twice (two catalogues agreed), and two identical rows in one flush trip the
+    index rather than the check above.
+
+    A label is never overwritten: a heading already stored came from a
+    catalogue too, and the last writer is not the better one. Filling in a
+    missing one is the exception, because a caption where there was none is
+    strictly more than before.
+
+    **The ceiling is counted against the book, not against the payload.** Every
+    caller is bounded per request and this writer is additive across requests,
+    so without the count here the per book total is unbounded: `enrich/apply`
+    takes a client supplied `BookMatch`, makes no outbound call and therefore
+    carries no rate limiter, and eight rows per call times any number of calls
+    is a stored denial of service that every listing pays for, since
+    `books_to_out` selectin-loads this relationship onto every row of every
+    page.
+    """
+    # Keyed on the pair the unique index is on, with the scheme coerced through
+    # the enum on both sides. A stored row's `scheme` comes back from a plain
+    # VARCHAR as a `str` and the payload's is a `ClassificationScheme`, so
+    # comparing them raw works only for as long as that is a `StrEnum`;
+    # coercing removes the dependency instead of commenting on it.
+    existing = {
+        (ClassificationScheme(entry.scheme), entry.number): entry
+        for entry in book.classifications
+    }
+    changed: list[str] = []
+    for heading in headings:
+        key = (ClassificationScheme(heading.scheme), heading.number)
+        stored = existing.get(key)
+        if stored is not None:
+            if stored.label is None and heading.label is not None:
+                stored.label = heading.label
+                changed.append(heading.number)
+            continue
+        if len(existing) >= MAX_CLASSIFICATIONS_PER_BOOK:
+            logger.info(
+                "Book %s already carries %d classifications; dropping %r",
+                book.id,
+                len(existing),
+                heading.number,
+            )
+            continue
+        row = Classification(
+            book=book,
+            scheme=heading.scheme,
+            number=heading.number,
+            label=heading.label,
+        )
+        db.add(row)
+        existing[key] = row
+        changed.append(heading.number)
+    return changed
 
 
 def _conflict_detail(message: str, holder: Book, current_user: User) -> str | dict[str, object]:
@@ -1760,6 +1919,62 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
                 keeper.tags.append(tag)
                 existing_tags.add(tag.id)
         loser.tags.clear()
+
+    # Classifications move too, and are deduplicated on the way: two rows for
+    # one book often carry the same DDC number, and
+    # `uq_classifications_book_scheme_number` would refuse the second on the
+    # flush. Without this the cascade on the loser's deletion takes them, so a
+    # merge would silently drop the provenance of the row that lost.
+    #
+    # A duplicate is absorbed rather than simply dropped. The keeper may hold
+    # `(ddc, 004, NULL)` from K10plus while the loser holds
+    # `(ddc, 004, "Informatik")` from the DNB, and deleting that row without
+    # taking its caption loses the caption for good: nothing re-enriches a
+    # survivor. Same rule as `_write_classifications`, a caption where there
+    # was none is strictly more than before.
+    #
+    # **`MAX_CLASSIFICATIONS_PER_BOOK` binds here too, and this is the only
+    # other writer that it binds.** `backup.restore` also writes this table and
+    # is deliberately uncapped, for the reason given at the constant.
+    # A merge takes up to 20 books, so without the count
+    # one request moves 8 x 19 = 152 rows onto the survivor, which is then the
+    # baseline for the next merge; merge carries no rate limiter, and every
+    # listing pays for the result because `books_to_out` selectin-loads this
+    # relationship onto every row of every page. An invariant stated "full stop"
+    # with one writer exempt from it is worse than a cap that admits it is soft,
+    # so this obeys it rather than documenting an exception.
+    #
+    # The overflow is **deleted**, which is exactly where it was going before
+    # this round: the cascade on the loser's deletion took every one of its
+    # headings. Keeper first and then losers in id order, so what survives is
+    # what was already stored, the same tie-break `_write_classifications` uses.
+    kept = {
+        (ClassificationScheme(entry.scheme), entry.number): entry
+        for entry in keeper.classifications
+    }
+    for heading in (
+        db.query(Classification)
+        .filter(Classification.book_id.in_(loser_ids))
+        .order_by(Classification.id)
+        .all()
+    ):
+        key = (ClassificationScheme(heading.scheme), heading.number)
+        survivor = kept.get(key)
+        if survivor is not None:
+            if survivor.label is None and heading.label is not None:
+                survivor.label = heading.label
+            db.delete(heading)
+            continue
+        if len(kept) >= MAX_CLASSIFICATIONS_PER_BOOK:
+            logger.info(
+                "Book %s is at the classification ceiling; merge drops %r",
+                keeper.id,
+                heading.number,
+            )
+            db.delete(heading)
+            continue
+        heading.book_id = keeper.id
+        kept[key] = heading
 
     # Notes and loans carry their own history and simply move across. Assigned
     # object by object rather than with a bulk UPDATE: a bulk update with
@@ -2718,6 +2933,11 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
         # `resolve_and_store` runs its own event loop.
         await asyncio.to_thread(_store_cover, book)
 
+    # Added, never cleared, unlike the columns above. A refresh whose source
+    # this time has no DDC number has not withdrawn the one another catalogue
+    # asserted, and a heading is a citation rather than a current value.
+    _write_classifications(book, _headings(data.get("classifications")), db)
+
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
@@ -2945,6 +3165,11 @@ async def enrich_book(
         )
 
     updated = google_books.merge_into(book, fields, overwrite=overwrite)
+    # Outside `merge_into`, which writes columns and knows nothing about rows.
+    # Additive whatever `overwrite` says: a heading is a catalogue's assertion
+    # rather than a value somebody typed, so there is nothing here to overrule.
+    if _write_classifications(book, _headings(fields.get("classifications")), db):
+        updated.append("classifications")
     if updated:
         # `to_thread` because this handler is a coroutine. See refresh_metadata.
         await asyncio.to_thread(_store_cover, book)
@@ -2992,9 +3217,13 @@ def apply_enrichment(
     """
     updated = google_books.merge_into(
         book,
-        payload.model_dump(exclude={"source", "suggested_tag_ids"}),
+        payload.model_dump(exclude={"source", "suggested_tag_ids", "classifications"}),
         overwrite=overwrite,
     )
+    # Already validated and already bounded by `BookMatch`, so the payload's
+    # own models go in rather than a second pass through `_headings`.
+    if _write_classifications(book, payload.classifications, db):
+        updated.append("classifications")
     if updated:
         _store_cover(book)
         db.commit()

@@ -5,6 +5,7 @@
  * Catalogue, lend and track a household's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { ClassificationIn } from "./classificationIn.ts";
 
 /**
  * One candidate from a free-text search, for picking the right edition.
@@ -16,6 +17,8 @@
 export interface BookMatch {
   author?: string | null;
   categories?: string | null;
+  /** @maxItems 8 */
+  classifications?: ClassificationIn[];
   cover_url?: string | null;
   description?: string | null;
   google_books_id?: string | null;

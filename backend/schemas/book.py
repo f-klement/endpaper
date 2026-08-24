@@ -16,6 +16,11 @@ from enums import (
 )
 from google_books import split_categories
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from schemas.classification import (
+    MAX_CLASSIFICATIONS_PER_BOOK,
+    ClassificationIn,
+    ClassificationOut,
+)
 from schemas.common import RowIdField
 from schemas.tag import TagOut
 from schemas.user import UserOut
@@ -59,6 +64,21 @@ class BookLookup(BaseModel):
     # lookup and then throws half the record away.
     language: str | None = None
     page_count: int | None = None
+    #: What the catalogues placed this book at, kept whole: scheme, number and
+    #: the caption they gave it. Here and not only in `suggested_tag_ids`
+    #: because the suggestion is the household's reading of the number and this
+    #: is the library's own assertion.
+    #:
+    #: `ClassificationIn`, not `ClassificationOut`, and that is the point: this
+    #: whole model is a draft the client posts straight back to
+    #: `POST /api/books`, so what it carries has to be what that accepts. The
+    #: bounds are applied where the record is parsed (`_headings`), so a
+    #: caption longer than the column is dropped there rather than 422ing the
+    #: member's own request.
+    classifications: list[ClassificationIn] = []
+    #: Tags the household might want on this book, from the subject headings
+    #: **and** from any DDC number above. Never applied on its own: see
+    #: `serialisation.suggested_tag_ids`.
     suggested_tag_ids: list[int] = []
 
 
@@ -87,6 +107,13 @@ class BookCreate(BaseModel):
     # The one collector field offered at add time. Somebody scanning a book is
     # holding it, so this is the one moment they can answer without checking.
     format: BookFormat | None = None
+    #: The headings the lookup returned, posted back so the scan flow stores
+    #: them. Bounded: every entry becomes a row. Duplicates within one payload
+    #: are dropped by `_write_classifications` rather than refused, because the
+    #: catalogues themselves repeat a number across sources.
+    classifications: list[ClassificationIn] = Field(
+        default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
+    )
 
     @field_validator("cover_url")
     @classmethod
@@ -208,6 +235,13 @@ class BookOut(BaseModel):
     language: str | None = None
     categories: list[str] = []
     google_books_id: str | None = None
+
+    #: Published scheme headings, in insertion order. Distinct from `tags`
+    #: (the household's own words) and from `categories` (whatever the
+    #: publisher claimed): only this one carries a scheme that means something
+    #: outside this house. Batched with the tags in `books_to_out`, so it costs
+    #: no statement per book.
+    classifications: list[ClassificationOut] = []
 
     series_name: str | None = None
     series_index: float | None = None
@@ -356,6 +390,11 @@ class BookMatch(BaseModel):
     isbn13: str | None = None
     series_name: str | None = None
     series_index: float | None = None
+    #: Bounded for the same reason `year` is: this model is a request body, and
+    #: `POST /api/books/{id}/enrich/apply` turns every entry into a row.
+    classifications: list[ClassificationIn] = Field(
+        default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
+    )
     # Populated by the pre-creation search, where the result is about to
     # become a new book and the tag guess saves the person picking them by
     # hand. Left empty by the enrichment candidates endpoint, where the book

@@ -324,6 +324,15 @@
             ],
             "title": "Author"
           },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClassificationIn"
+            },
+            "maxItems": 8,
+            "title": "Classifications",
+            "type": "array"
+          },
           "collection_id": {
             "anyOf": [
               {
@@ -762,6 +771,14 @@
             ],
             "title": "Author"
           },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClassificationIn"
+            },
+            "title": "Classifications",
+            "type": "array"
+          },
           "cover_url": {
             "anyOf": [
               {
@@ -909,6 +926,15 @@
               }
             ],
             "title": "Categories"
+          },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClassificationIn"
+            },
+            "maxItems": 8,
+            "title": "Classifications",
+            "type": "array"
           },
           "cover_url": {
             "anyOf": [
@@ -1117,6 +1143,14 @@
               "type": "string"
             },
             "title": "Categories",
+            "type": "array"
+          },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClassificationOut"
+            },
+            "title": "Classifications",
             "type": "array"
           },
           "collection_id": {
@@ -1617,6 +1651,75 @@
         ],
         "title": "BulkResult",
         "type": "object"
+      },
+      "ClassificationIn": {
+        "description": "One heading, as a client posts it back after a lookup.\n\nAccepted from the client rather than re-fetched, because the lookup that\nproduced it is the expensive part and the member may sit on the confirm\nscreen for a while. Nothing here is trusted beyond its own bounds: the\nscheme is a closed enum, and both strings are bounded and stripped.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "number": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Number",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/ClassificationScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "number"
+        ],
+        "title": "ClassificationIn",
+        "type": "object"
+      },
+      "ClassificationOut": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/ClassificationScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "number"
+        ],
+        "title": "ClassificationOut",
+        "type": "object"
+      },
+      "ClassificationScheme": {
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nBoth are produced today. DDC comes from the DNB (`dc:subject`, headings\nlike `004 Informatik`), from K10plus (MARC 082) and from the Library of\nCongress (`classification authority=\"ddc\"`); LCC comes from the Library of\nCongress alone (`authority=\"lcc\"`).\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. LCC is stored\nbecause a catalogue heading is worth keeping whole, not because anything\nreads it yet.",
+        "enum": [
+          "ddc",
+          "lcc"
+        ],
+        "title": "ClassificationScheme",
+        "type": "string"
       },
       "CollectionAssign": {
         "description": "Which collection a book belongs to, or `null` for none.\n\nIts own endpoint rather than a field on `BookDetailsUpdate`, so the picker\ncan save the moment somebody chooses. An explicit null is how a book is\ntaken out of a collection without being put in another one.",

@@ -49,6 +49,7 @@ const LOOKUP = {
   year: 1965,
   description: null,
   cover_url: "https://covers.openlibrary.org/b/isbn/9780441013593-L.jpg",
+  classifications: [{ scheme: "ddc", number: "004", label: "Informatik" }],
   suggested_tag_ids: [] as number[],
 };
 
@@ -286,6 +287,26 @@ describe("ScanPage", () => {
       >;
       expect(body).not.toHaveProperty("suggested_tag_ids");
       expect(body).not.toHaveProperty("notFound");
+    });
+
+    it("posts the catalogue headings back so the server stores them", async () => {
+      // These are not UI state: the lookup is the only place they exist, and a
+      // payload that dropped them would leave the scan flow storing none.
+      api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
+      renderWithProviders(<ScanPage />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add to Library" }),
+      );
+
+      await waitFor(() =>
+        expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+          classifications: [
+            { scheme: "ddc", number: "004", label: "Informatik" },
+          ],
+        }),
+      );
     });
 
     it("navigates to the new book", async () => {

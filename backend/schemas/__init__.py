@@ -40,6 +40,11 @@ from schemas.book import (
     PurgeResult,
     SeriesOut,
 )
+from schemas.classification import (
+    MAX_CLASSIFICATIONS_PER_BOOK,
+    ClassificationIn,
+    ClassificationOut,
+)
 from schemas.collection import (
     CollectionAssign,
     CollectionCreate,
@@ -79,6 +84,7 @@ LoanOut.model_rebuild()
 __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
+    "MAX_CLASSIFICATIONS_PER_BOOK",
     "MAX_ROW_ID",
     "AppearanceOut",
     "AppearanceUpdate",
@@ -102,6 +108,8 @@ __all__ = [
     "CollectionOut",
     "CollectionStat",
     "CollectionUpdate",
+    "ClassificationIn",
+    "ClassificationOut",
     "CopyCreate",
     "CoverBackfillOut",
     "DuplicateGroup",

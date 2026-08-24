@@ -29,6 +29,12 @@ becomes a row.
 always a choice: nothing is fetched in the background, and a field is only
 overwritten when you say so.
 
+**Classifications are kept whole**: the scheme, the number and the caption a
+catalogue gave it (`DDC`, `004`, `Informatik`). The number is what a tag
+suggestion is matched on, so a German record and an English one suggest the same
+tag. It is offered on the add form with the suggestions ticked, so it is a proposal you
+confirm rather than a tag applied behind you.
+
 **Covers are stored here**, not hotlinked. Every candidate image is fetched and
 checked before it is offered, so a broken link never becomes a book's cover, and
 a stored cover survives the source going away. Fetching is restricted to an

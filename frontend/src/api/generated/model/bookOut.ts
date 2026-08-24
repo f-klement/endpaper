@@ -7,6 +7,7 @@
  */
 import type { BookCondition } from "./bookCondition.ts";
 import type { BookFormat } from "./bookFormat.ts";
+import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { LoanOut } from "./loanOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
@@ -21,6 +22,7 @@ export interface BookOut {
   author: string | null;
   authors?: string[];
   categories?: string[];
+  classifications?: ClassificationOut[];
   collection_id?: number | null;
   collection_name?: string | null;
   condition?: BookCondition | null;

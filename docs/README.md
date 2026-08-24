@@ -7,7 +7,7 @@ pages are for changing it.
 |---|---|
 | [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
 | [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |
-| [data-model.md](data-model.md) | The twelve tables, the relationships, and the privacy rule that every query must honour |
+| [data-model.md](data-model.md) | The thirteen tables, the relationships, and the privacy rule that every query must honour |
 | [api.md](api.md) | Every endpoint, its auth requirement, and the status codes it returns |
 | [theming.md](theming.md) | The seven palettes and the rule that generated them, the ten wallpapers and the rule that admits them, the picker, and where an appearance is stored |
 | [frontend.md](frontend.md) | Component and page layout, state handling, the typed API client |
@@ -30,6 +30,7 @@ endpaper/
 │   ├── auth_backends.py  local / LDAP / proxy identity sources
 │   ├── settings_store.py runtime settings (feature flags, the API key)
 │   ├── isbn.py           parsing, validation, ISBN-10 to ISBN-13
+│   ├── ddc.py            Dewey headings, and the divisions that suggest a tag
 │   ├── google_books.py   metadata lookup, search and the gap-filling merge
 │   ├── goodreads.py      reading a CSV export
 │   ├── schema.py         Alembic runner: create, adopt or upgrade

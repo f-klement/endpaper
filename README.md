@@ -29,7 +29,9 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 ## Features
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
 - **Auto metadata**: title, author, publisher, page count, language and cover art, merged
-  from four catalogues (the German National Library, K10plus, Open Library, Google Books)
+  from four catalogues (the German National Library, K10plus, Open Library, Google Books).
+  A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
+  English one suggest the same one
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
   a shelf does not go blank when an image service moves a URL. Settings has a button that
   fetches the ones already missing, and your browser never tells a third party which books

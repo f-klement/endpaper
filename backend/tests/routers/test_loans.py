@@ -428,7 +428,12 @@ class TestTheNestedBook:
         # breakdown wrongly twice, both times by editing prose rather than
         # measuring. The number this test exists to catch is a linear one, and
         # it was 53 for 25 loans.
-        assert len(selects) <= 11, f"{len(selects)} selects for 10 loans"
+        #
+        # 12 rather than 11 since classifications became a second `selectinload`
+        # on the same re-read. Moving this ceiling is allowed when a **constant**
+        # statement is added and measured; moving it because the number crept up
+        # with the page size is the defect it exists to catch.
+        assert len(selects) <= 12, f"{len(selects)} selects for 10 loans"
 
 
 class TestOneOpenLoanPerBook:

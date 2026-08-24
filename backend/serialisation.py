@@ -15,13 +15,15 @@ users.
 """
 
 import re
+from collections.abc import Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
-from enums import ReadStatus
+import ddc
+from enums import ClassificationScheme, ReadStatus
 from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook, visible_to
-from schemas import BookOut, LoanOut, UserOut
+from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserOut
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
 # part that is ours rather than theirs: mapping whatever subject headings a
@@ -39,6 +41,55 @@ def match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
         tag_core = re.sub(r"\s*\([^)]+\)", "", tag.name).strip().lower()
         if tag_core and tag_core in subjects_blob:
             matched.append(tag.id)
+    return matched
+
+
+def suggested_tag_ids(
+    subjects: list[str],
+    classifications: Sequence[ClassificationIn | ClassificationOut],
+    tags: list[Tag],
+) -> list[int]:
+    """Tags a household might want on this book, from both kinds of evidence.
+
+    Two routes to the same list, and they fail on opposite records. The
+    substring match reads the **caption** a catalogue supplied, which works for
+    an English record and scores zero on a German one. The DDC projection reads
+    the **number**, which is the same in both: `004` is Informatik in a German
+    record and Computing in an English one, and both resolve to Computing here.
+
+    Measured on 2026-08-23 against ten German ISBNs at the DNB: eight carried a
+    DDC heading, and the caption route matched a seeded tag on none of them.
+
+    **The server never writes a tag from this list**, and that is the whole
+    claim: it is returned, and `Book.tags` is not touched anywhere near here.
+    Do not add a caller that does.
+
+    **The web client pre-selects every id in it**, so on the ordinary scan the
+    suggested tags do land unless the member unchecks them
+    (`frontend/src/pages/ScanPage/hooks.ts`, `setSelectedTagIds` then the
+    `addTag` calls on confirm). That is a deliberate reading of "suggestion",
+    argued in `docs/decisions.md`, and it is written here because four
+    documents used to say "nothing applies it" and mean only this half.
+
+    Tags are a small curated vocabulary the household chooses from, which is
+    why the projection stops at proposing one.
+
+    Only DDC is projected. An LCC number is stored whole and read by nobody:
+    the mapping this needs is the published division list, and LCC has no
+    equivalent short enough to ship.
+    """
+    matched = list(match_subjects_to_tags(subjects, tags))
+    numbers = [
+        entry.number
+        for entry in classifications
+        if entry.scheme is ClassificationScheme.DDC
+    ]
+    wanted = {name.lower() for name in ddc.tag_names(numbers)}
+    if wanted:
+        seen = set(matched)
+        matched.extend(
+            tag.id for tag in tags if tag.name.lower() in wanted and tag.id not in seen
+        )
     return matched
 
 
@@ -223,24 +274,25 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     `docs/data-model.md` point here rather than repeating a number, because
     both have been wrong before and were wrong in the same way twice.
 
-    Six statements, constant in the size of the page: the books re-read to
-    populate their tags, the tag load itself, the loans, the statuses, the
-    progress, and the members offering to talk about each book. Measured at 1,
-    5 and 25 books, unchanged.
+    **7** statements, constant in the size of the page: the books re-read to
+    populate their tags, the tag load itself, the classification load, the
+    loans, the statuses, the progress, and the members offering to talk about
+    each book. Measured at 1, 5 and 25 books, unchanged.
 
-    **Seven when the page holds a copy.** `_copy_counts` issues its statement
-    only when some book on the page carries a `copy_group`, which almost none
-    do, and it is one statement for the whole page whatever it finds.
+    It was 6 until classifications were stored: `selectinload` issues one
+    statement per relationship, so loading a second one on the same re-read
+    costs exactly one more for the whole page, not one per book.
 
-    **One more again when the page holds a book filed in a collection.**
+    **8 when the page holds a copy.** `_copy_counts` issues its statement only
+    when some book on the page carries a `copy_group`, which almost none do,
+    and it is one statement for the whole page whatever it finds.
+
+    **8 as well when the page holds a book filed in a collection.**
     `_collection_names` is the same shape: nothing at all until a household
     makes a collection and puts something in it, then one statement for the
     page however many collections it spans. Measured directly on this function
-    over a page of 25 with five books filed across two collections, against the
-    identical page with none filed: **8 statements against 7**, a delta of
-    exactly one. (Both runs paid one statement to reload the author, whose row
-    a preceding commit had expired, which is the 7 rather than 6 in the table
-    below.)
+    over a page of five filed books against a page of plain ones: **8 against
+    7**, a delta of exactly one.
 
     **Plus one per distinct `added_by` author the session has not already
     loaded**, and that one is not this function's: `BookOut.model_validate`
@@ -252,20 +304,28 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     caller added cost nothing here**. That is the one condition that moves the
     number, which is why it is stated rather than left in the measurement.
 
+    **Which of these figures a test would catch.** The 7 is read back out of
+    this docstring by
+    `test_the_number_in_the_docstring_is_the_number_it_costs`, and the two 8s
+    follow from it, since `TestCopyCount` and `TestCollectionName` each assert a
+    delta of exactly one against the same base. The 12 below and the per-author
+    table are measurements and nothing pins them, so treat them as true of the
+    day they were taken.
+
     Measured on rows fetched without `joinedload`, identical at 5 and at 25
     books, for one, two and three distinct authors:
 
         authors                  1   2   3
-        caller wrote none        7   8   9
-        caller is one of them    6   7   8
+        caller wrote none        8   9  10
+        caller is one of them    7   8   9
 
     Every listing endpoint in `routers/books.py` passes
     `joinedload(Book.added_by)`, so none of them pays any of it: `GET
-    /api/books` measures a flat **11 SELECTs** end to end at 5 and 25 books and
-    at one, two and three authors, and `books_to_out` on rows fetched with the
-    option is a flat 6 at 1, 5 and 25 books. Both figures are for a page
-    holding neither a copy nor a filed book, and the two conditional statements
-    above are what a page holding either costs on top.
+    /api/books` measures a flat **12 SELECTs** end to end at 25 books, and
+    `books_to_out` on rows fetched with the option is a flat 7 at 1, 5 and 25
+    books. Both figures are for a page holding neither a copy nor a filed book,
+    and the two conditional statements above are what a page holding either
+    costs on top. Both were one lower before the classification load.
 
     A new caller that fetches books without that option gets the per-author
     cost back. That is the trap this paragraph exists to name.
@@ -286,7 +346,14 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # avoid, arrived by a different door. Re-querying rows already in the
     # identity map looks redundant and is not: it is what populates the
     # collection, and the objects handed back are the same ones.
-    db.query(Book).options(selectinload(Book.tags)).filter(Book.id.in_(book_ids)).all()
+    #
+    # `classifications` rides along for the same reason and costs one more
+    # SELECT for the whole page, not one per book: `selectinload` issues a
+    # statement per relationship, so this option is why the count above is 7
+    # and not 6.
+    db.query(Book).options(
+        selectinload(Book.tags), selectinload(Book.classifications)
+    ).filter(Book.id.in_(book_ids)).all()
 
     active_loans = {
         loan.book_id: loan

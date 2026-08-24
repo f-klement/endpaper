@@ -5,6 +5,7 @@
  * Catalogue, lend and track a household's physical book collection.
  * OpenAPI spec version: 1.0.0
  */
+import type { ClassificationIn } from "./classificationIn.ts";
 
 /**
  * Metadata fetched for an ISBN. Nothing is persisted at this point: the
@@ -12,6 +13,7 @@
  */
 export interface BookLookup {
   author?: string | null;
+  classifications?: ClassificationIn[];
   cover_url?: string | null;
   description?: string | null;
   isbn: string;

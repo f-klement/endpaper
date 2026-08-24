@@ -1,8 +1,9 @@
 """Taking the whole catalogue out, and putting it back.
 
 The CSV export has existed since the beginning and is not a backup. It carries
-one row per book and drops the notes, the quotes, the loans, every member's
-reading status, the accounts themselves and every cover file, which is to say
+one row per book and drops the notes, the quotes, the classifications, the
+loans, every member's reading status, the accounts themselves and every cover
+file, which is to say
 it drops most of what somebody spent an evening typing in.
 
 This produces a **zip** holding two things:
@@ -40,6 +41,7 @@ from config import COVERS_DIR
 from database import Base
 from models import (
     Book,
+    Classification,
     Collection,
     Loan,
     Note,
@@ -86,6 +88,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # written in.
         ("collections", Collection),
         ("books", Book),
+        # Straight after the books they hang off, and deliberately absent from
+        # `_REQUIRED_TABLES`: an archive taken before classifications existed
+        # restores with none, which is the state it was written in.
+        ("classifications", Classification),
         ("user_books", UserBook),
         # After user_books, which is the other per-member table, and before
         # loans purely to keep the reading rows together. Both parents

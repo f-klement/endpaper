@@ -230,6 +230,27 @@ describe("useScanFlow.chooseMatch", () => {
     expect(result.current.isLookingUp).toBe(false);
   });
 
+  it("carries the catalogue headings into the draft", () => {
+    // The number is the half of a heading that survives a language, and the
+    // confirm step is what posts it back. Dropping it here would store a
+    // heading for a scanned book and none for one found by title.
+    const { result } = renderFlow();
+
+    act(() =>
+      result.current.chooseMatch(
+        match({
+          classifications: [
+            { scheme: "ddc", number: "004", label: "Informatik" },
+          ],
+        }),
+      ),
+    );
+
+    expect(result.current.draft?.classifications).toEqual([
+      { scheme: "ddc", number: "004", label: "Informatik" },
+    ]);
+  });
+
   it("is undone by reset", () => {
     const { result } = renderFlow();
     act(() => result.current.chooseMatch(match()));

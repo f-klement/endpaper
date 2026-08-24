@@ -38,7 +38,9 @@ import httpx
 from rapidfuzz.distance import Levenshtein
 
 import covers
+import ddc
 import google_books
+from enums import ClassificationScheme
 from isbn import parse as parse_isbn
 
 logger = logging.getLogger("endpaper.metadata")
@@ -406,14 +408,43 @@ def _dnb_record(record: ElementTree.Element, isbn: str | None) -> dict[str, Any]
         # guess. Built by covers.py, which is the only module allowed to know
         # an image host: see COVER_HOSTS, which the CSP is derived from.
         "cover_url": covers.open_library_url(isbn) if isbn else None,
-        # DDC headings such as "004 Informatik". The leading number is dropped
-        # so it can match a tag by name.
-        "subjects": [
-            re.sub(r"^\d[\d.]*\s+", "", element.text.strip())
-            for element in record.findall(f"{_DC}subject")
-            if element.text
-        ],
+        **_split_dnb_subjects(record),
     }
+
+
+def _split_dnb_subjects(record: ElementTree.Element) -> dict[str, Any]:
+    """`dc:subject` sorted into classifications and plain subject headings.
+
+    The DNB puts both in the same element. `004 Informatik` is a DDC heading
+    and its number is the language independent half; `B Belletristik` is the
+    DNB's own Sachgruppe letter and `20. Jahrhundert` is a plain heading.
+
+    Both halves are kept. The caption still goes into `subjects`, because the
+    substring match against tag names is what catches an English record, and
+    the number goes into `classifications`, which is what catches a German one.
+    Dropping either narrows the suggestion rather than sharpening it.
+
+    Measured on 2026-08-23 over ten German ISBNs: eight carried a DDC heading,
+    and not one of the eight captions matched a seeded tag name, because every
+    caption was German.
+    """
+    subjects: list[str] = []
+    classifications: list[dict[str, Any]] = []
+    for element in record.findall(f"{_DC}subject"):
+        if not element.text:
+            continue
+        raw = element.text.strip()
+        heading = ddc.parse_heading(raw)
+        if heading is None:
+            subjects.append(raw)
+            continue
+        number, label = heading
+        classifications.append(
+            {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
+        )
+        if label:
+            subjects.append(label)
+    return {"subjects": subjects, "classifications": classifications}
 
 
 async def _dnb(isbn: str, api_key: str) -> Lookup:
@@ -725,6 +756,26 @@ def _k10plus_record(
         if entry.get("a")
     ]
 
+    # 082 is the Dewey number and normally nothing else: MARC carries the
+    # notation and the printed schedule carries the caption, so the label is
+    # usually null rather than filled in from our own mapping. A record often
+    # holds two numbers at different precisions (`005.133` and `004`, measured
+    # 2026-08-23), and both are kept: they are two catalogues' answers, not a
+    # duplicate.
+    #
+    # Through `ddc.parse_heading` like every other source path, which is what
+    # strips MARC's segmentation prime: 53 of 463 live `$a` values (11.4%,
+    # measured 2026-08-23) arrive as `005.13/3` where the DNB stores `005.133`,
+    # and storing both spellings makes two rows out of one heading that
+    # `uq_classifications_book_scheme_number` cannot collapse.
+    classifications = [
+        {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
+        for entry in fields.get("082", [])
+        for heading in [ddc.parse_heading(entry.get("a", ""))]
+        if heading is not None
+        for number, label in [heading]
+    ]
+
     description = next(
         (entry["a"] for entry in fields.get("520", []) if entry.get("a")), None
     )
@@ -748,6 +799,7 @@ def _k10plus_record(
         # which is most pre-1970 printings, gets none.
         "cover_url": covers.open_library_url(isbn) if isbn else None,
         "subjects": subjects,
+        "classifications": classifications,
     }
 
 
@@ -842,6 +894,8 @@ def _merge(results: list[Lookup], isbn: str) -> dict[str, Any]:
 
     Subjects are unioned rather than replaced. They feed the tag suggestion,
     where a heading from either catalogue is equally good evidence.
+    Classifications are unioned the same way; see `_union_classifications` for
+    the one rule that differs.
     """
     preferred = _preferred_source(isbn)
     ordered = sorted(
@@ -852,11 +906,14 @@ def _merge(results: list[Lookup], isbn: str) -> dict[str, Any]:
 
     merged: dict[str, Any] = dict(ordered[0].data or {})
     subjects: list[str] = list(merged.get("subjects") or [])
+    classifications: list[dict[str, Any]] = list(merged.get("classifications") or [])
 
     for result in ordered[1:]:
         for name, value in (result.data or {}).items():
             if name == "subjects":
                 subjects.extend(value or [])
+            elif name == "classifications":
+                classifications.extend(value or [])
             elif merged.get(name) is None and value is not None:
                 merged[name] = value
 
@@ -864,7 +921,28 @@ def _merge(results: list[Lookup], isbn: str) -> dict[str, Any]:
     for subject in subjects:
         seen.setdefault(subject, None)
     merged["subjects"] = list(seen)
+    merged["classifications"] = _union_classifications(classifications)
     return merged
+
+
+def _union_classifications(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per scheme and number, keeping the caption if any source had one.
+
+    The captions are what differ: the DNB returns `830 Deutsche Literatur` and
+    K10plus returns `830` bare, and taking the leading source's answer whole
+    would throw away the caption whenever K10plus led. The number decides
+    identity, the caption is filled in from wherever it exists, and a later
+    source never overwrites a caption already found.
+    """
+    kept: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in entries:
+        key = (str(entry.get("scheme")), str(entry.get("number")))
+        existing = kept.get(key)
+        if existing is None:
+            kept[key] = dict(entry)
+        elif existing.get("label") is None and entry.get("label") is not None:
+            existing["label"] = entry["label"]
+    return list(kept.values())
 
 
 # ── Title search ──────────────────────────────────────────────────────────────
@@ -1393,9 +1471,54 @@ def _loc_record(record: ElementTree.Element) -> dict[str, Any] | None:
             for element in record.findall(f"{_MODS}subject/{_MODS}topic")
             if element.text
         ],
+        "classifications": _loc_classifications(record),
         "series_name": None,
         "series_index": None,
     }
+
+
+#: MODS names the scheme in an attribute, so the two are told apart by the
+#: record rather than by guessing at the shape of the notation.
+_LOC_AUTHORITIES: Final[dict[str, ClassificationScheme]] = {
+    "ddc": ClassificationScheme.DDC,
+    "lcc": ClassificationScheme.LCC,
+}
+
+
+def _loc_classifications(record: ElementTree.Element) -> list[dict[str, Any]]:
+    """The `<classification>` elements, which no other source here carries.
+
+    The Library of Congress is the only one that returns both a DDC and an LCC
+    number for one book (`QA76.73.P98 V53 2021` beside `005.133`, measured
+    2026-08-23), which is why the store has a scheme column rather than a Dewey
+    column. Neither carries a caption in MODS, so both are stored with none.
+
+    An authority this app has no reading for is dropped rather than stored: a
+    number whose scheme nothing recognises cannot be sorted, matched or shown
+    as anything but a string.
+    """
+    found: list[dict[str, Any]] = []
+    for element in record.findall(f"{_MODS}classification"):
+        scheme = _LOC_AUTHORITIES.get((element.get("authority") or "").lower())
+        raw = " ".join((element.text or "").split())
+        if scheme is None or not raw:
+            continue
+        if scheme is ClassificationScheme.DDC:
+            # Through the same normaliser as the other two source paths. MODS
+            # carries the prime here too, and a `<classification>` that is not
+            # a Dewey number at all is dropped rather than stored under a
+            # scheme that cannot read it.
+            heading = ddc.parse_heading(raw)
+            if heading is None:
+                continue
+            number, label = heading
+        else:
+            # No normaliser for LCC: a call number is alphanumeric and this app
+            # has no schedule for it. The whitespace collapse above and
+            # `ClassificationIn`'s 40 character bound are the whole guard.
+            number, label = raw, None
+        found.append({"scheme": scheme, "number": number, "label": label})
+    return found
 
 
 def _as_match(record: dict[str, Any], source: str) -> dict[str, Any]:
@@ -1421,6 +1544,20 @@ def _as_match(record: dict[str, Any], source: str) -> dict[str, Any]:
         "isbn13": record.get("isbn"),
         "series_name": record.get("series_name"),
         "series_index": record.get("series_index"),
+        # Carried whole rather than folded into `categories`, which is the
+        # publisher's uncontrolled list. A picked search result is applied to a
+        # book, so losing them here would mean a heading survives a scan and
+        # not a search.
+        #
+        # Deduplicated, because a single record repeats itself: one live
+        # K10plus record's 082 `$a` values read `['100', '610', '610']`
+        # (measured 2026-08-23). The lookup path gets this from `_merge`; the
+        # search path has no merge, so it is applied here or nowhere, and
+        # without it the repetition spends the payload's budget of eight twice
+        # over on entries that mean nothing.
+        "classifications": _union_classifications(
+            record.get("classifications") or []
+        ),
     }
 
 

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+**Classifications are stored whole.** A catalogue heading is a scheme, a number
+and a caption: `DDC`, `004`, `Informatik`. The number used to be stripped off at
+parse time so the caption could substring match a tag by name, which threw away
+the only half that means the same in two languages.
+
+**Which is why German records now suggest tags at all.** Measured against the
+DNB over ten German ISBNs: eight carried a DDC heading, and not one of the eight
+captions matched any of the 105 built in tag names, because every caption was
+German. `830 Deutsche Literatur` now suggests Fiction and `004 Informatik`
+suggests Computing, through a mapping of the 100 published Dewey divisions that
+reads the number and never the words.
+
+**It stays a suggestion.** The suggested tags arrive ticked on the add form and
+nothing is written until you press the button, so an unwanted one is one click
+away rather than something to find and undo later. Tags are a small curated list
+the household chooses from, and one nobody chose cannot later be told apart from
+one they did.
+
 **Headless.** `SERVE_FRONTEND=false` runs the API without mounting the compiled
 frontend, for a host that has no reader to serve a page to. One image and one
 flag: the built files stay on disk, unused. With it set, a path outside the API

@@ -1,6 +1,6 @@
 # Data model
 
-Twelve tables in `backend/models.py`, counted off `Base.metadata`: ten entities, one
+Thirteen tables in `backend/models.py`, counted off `Base.metadata`: eleven entities, one
 association table (`book_tags`), and one key/value store for runtime settings
 (`settings`).
 
@@ -20,6 +20,9 @@ association table (`book_tags`), and one key/value store for runtime settings
                                               └── active loan = the Loan with returned_at IS NULL
 
       Collection ◄──── collection_id ───── Book       (one collection, or none)
+                                            │
+                                            └──────► Classification
+                                                     (DDC 004 Informatik)
 ```
 
 ## Tables
@@ -108,6 +111,56 @@ The cost, in one line so it is not rediscovered: **a row delete does not delete 
 Purging a book, emptying the trash and merging two books each deal with the cover
 explicitly, and nothing decides whether a cover exists by reading `cover_url`. The column and
 the directory can drift, so the filesystem is the authority.
+
+**`classifications`.** What a published scheme says a book is about: a scheme, a number
+and the caption that scheme gave the number, as three columns rather than the one string
+`"004 Informatik"` a catalogue hands over. That string cannot be sorted, cannot be matched
+across languages and does not say which scheme it came from.
+
+**Tags, `books.categories` and this are one store with three jobs, not three vocabularies.**
+The difference is provenance. A tag is the household's own word. A category is whatever the
+publisher claimed, uncontrolled. A row here is somebody at a national library placing the
+book in a published schedule, and only that one means anything to another institution.
+
+| Layer | What it is |
+|---|---|
+| `tags` | the household's own language, curated or invented |
+| `books.categories` | whatever the publisher claimed |
+| `classifications` | an assertion from a published scheme |
+
+**The number is what gets matched, never the caption.** `004` is Informatik in a German
+record and Computing in an English one, so a rule reading the caption matches on the least
+portable part of the heading. `backend/ddc.py` projects the number onto the household's tag
+vocabulary through the 100 published Dewey divisions. Measured against the DNB over ten
+German ISBNs on 2026-08-23: eight carried a DDC heading, and none of the eight captions
+matched any of the 105 seeded tag names.
+
+**The projection is a suggestion, and no server path writes a tag from it.** Auto-applying a
+machine derived tag turns a curated list into a generated one nobody can later tell apart,
+so the ids are returned and the client offers them. The web client offers them **ticked**,
+so on an ordinary scan they land unless the member unticks them; which of those two is "a
+suggestion" is argued in [decisions.md](decisions.md). See
+`serialisation.suggested_tag_ids`.
+
+**At most 8 per book**, counted by both writers of the table rather than only by the
+request schema: they are additive across requests and neither the enrichment apply endpoint
+nor the merge carries a rate limiter, and `BookOut.classifications` is on every listing row,
+so an inflated book is paid for on every page that contains it. At the ceiling an incoming
+heading is dropped rather than a stored one evicted.
+
+`number` is a **normalised** notation, not whatever the source sent: every source path goes
+through `ddc.notation`, which strips MARC's segmentation prime (`005.13/3` becomes
+`005.133`, which is what the DNB stores for the same heading) and refuses anything that is
+not a Dewey number. 53 of 463 live K10plus values carry that prime, measured 2026-08-23, so
+without the strip an eighth of one catalogue's headings are a second spelling the unique
+index cannot collapse.
+
+`label` is null where the source carried the number alone, which is every MARC 082: the
+field holds the notation and the printed schedule holds the words. Unique per book, scheme
+and number (`uq_classifications_book_scheme_number`), so re-running enrichment against the
+same catalogues fills nothing in twice; **not** unique on the number alone, because a book
+carries a DDC and an LCC at once and often two DDC numbers at two precisions. `ON DELETE
+CASCADE`, like `book_tags` and unlike `notes`: a heading means nothing without its book.
 
 **`reading_progress`.** An append-only log of where a member has got to in a book. One
 row is one moment somebody recorded a position, and nothing ever updates one. See

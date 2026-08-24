@@ -689,6 +689,25 @@ class TestEveryBookQueryIsFiltered:
         not the count of every query that derives from books, and a new
         join-only query gets no help from here.
 
+        **The other blind spot: a child table carrying book-derived data.** A
+        query over `classifications`, `quotes`, `notes` or `reading_progress`
+        names no `Book` and is invisible here whatever it selects.
+        `db.query(Classification)` in `routers/books.py:_repoint_relations` is
+        the live example, and it is safe because its ids come from a set
+        already filtered by `visible_to` in the same handler. The one to watch
+        for is an **index** over such a table: "every DDC number in the library,
+        with a count" is exactly the shape this rule was widened for (an author
+        index, a series list, a location list, which publish a name and a
+        count), and it can now be written without touching `Book` at all.
+        `docs/data-model.md` and `implementation_plan.md` §30i both say library
+        mode will show classifications, so that query is coming.
+
+        Not widened to those tables today: it would cost an exemption on the
+        merge statement above and move three stated numbers, to guard a query
+        nobody has written yet. Named here instead, for the same reason the
+        join-only paragraph exists: a guard whose limits are undocumented is
+        read as a guarantee it never made.
+
         Widening `_queries_books` to catch `.join(Book, ...)` was measured
         rather than argued about: the inspected set goes from **30** statements
         to **40**, and the run reports **4** offenders that are all correct

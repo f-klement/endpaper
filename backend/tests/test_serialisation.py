@@ -5,12 +5,21 @@ test is the assembly: two of BookOut's fields are not columns, and both depend
 on who is asking.
 """
 
+import re
+
 import pytest
 from sqlalchemy import event
 
-from enums import ReadStatus
+from enums import ClassificationScheme, ReadStatus
 from models import Book, Collection, Loan, Tag, User, UserBook
-from serialisation import book_to_out, books_to_out, loan_summary, match_subjects_to_tags
+from schemas import ClassificationOut
+from serialisation import (
+    book_to_out,
+    books_to_out,
+    loan_summary,
+    match_subjects_to_tags,
+    suggested_tag_ids,
+)
 
 
 @pytest.fixture
@@ -38,6 +47,39 @@ class TestMatchSubjectsToTags:
 
     def test_an_unrelated_subject_matches_nothing(self):
         assert match_subjects_to_tags(["cookery"], [Tag(id=1, name="Fantasy")]) == []
+
+
+class TestSuggestedTagIds:
+    """Two routes to one list, and they fail on opposite records."""
+
+    TAGS = [Tag(id=1, name="Computing"), Tag(id=2, name="Fiction")]
+
+    def _ddc(self, number: str) -> ClassificationOut:
+        return ClassificationOut(scheme=ClassificationScheme.DDC, number=number)
+
+    def test_an_english_caption_still_matches_by_name(self):
+        assert suggested_tag_ids(["Computing"], [], self.TAGS) == [1]
+
+    def test_a_german_record_resolves_through_its_number(self):
+        """"004 Informatik" matches no English tag name, and this is the whole
+        reason the number is stored."""
+        assert suggested_tag_ids(["Informatik"], [self._ddc("004")], self.TAGS) == [1]
+
+    def test_a_tag_found_by_both_routes_is_suggested_once(self):
+        assert suggested_tag_ids(["Computing"], [self._ddc("004")], self.TAGS) == [1]
+
+    def test_an_lcc_number_is_not_projected(self):
+        """Only DDC has a division mapping short enough to ship."""
+        entry = ClassificationOut(
+            scheme=ClassificationScheme.LCC, number="QA76.73.P98"
+        )
+        assert suggested_tag_ids([], [entry], self.TAGS) == []
+
+    def test_a_number_with_no_mapped_tag_suggests_nothing(self):
+        assert suggested_tag_ids([], [self._ddc("040")], self.TAGS) == []
+
+    def test_nothing_at_all_suggests_nothing(self):
+        assert suggested_tag_ids([], [], self.TAGS) == []
 
 
 class TestLoanSummary:
@@ -137,6 +179,40 @@ class TestBooksToOut:
 
         assert for_two == for_one
 
+    def test_the_number_in_the_docstring_is_the_number_it_costs(self, db, admin, two_books):
+        """The count is stated in prose, and a number in prose goes stale.
+
+        Three times in this repository a stated figure disagreed with the code,
+        so the sentence a reader believes is read back here rather than
+        trusted. The relative measurements below catch a new *per book* query;
+        only this one catches a new constant one.
+
+        The page holds no copy and no filed book, which are the two conditional
+        statements the docstring accounts for separately, and the books were
+        added by nobody, so no `added_by` row is lazily loaded.
+        """
+        user = db.get(User, admin["user"]["id"])
+        for book in two_books:
+            _ = book.title
+        # A first call outside the measured window. The last commit left the
+        # session needing a fresh savepoint, and the listener counts it.
+        books_to_out(two_books, user, db)
+
+        statements: list[str] = []
+
+        @event.listens_for(db.get_bind(), "before_cursor_execute")
+        def record(conn, cursor, statement, *args):
+            statements.append(statement)
+
+        try:
+            books_to_out(two_books, user, db)
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", record)
+
+        stated = re.search(r"\*\*(\d+)\*\* statements", books_to_out.__doc__ or "")
+        assert stated is not None, "books_to_out no longer states a count"
+        assert len(statements) == int(stated.group(1))
+
 
 class TestCopyCount:
     """`copy_count` is 1 for almost every book, and the number is what stops the
@@ -169,8 +245,8 @@ class TestCopyCount:
     def test_it_costs_exactly_one_extra_statement(self, db, admin, two_books):
         """The measurement behind the count in `books_to_out`'s docstring.
 
-        Six statements for a page of ordinary books, seven when something on it
-        is a copy, and nothing at all for the overwhelming majority of pages
+        Seven statements for a page of ordinary books, eight when something on
+        it is a copy, and nothing at all for the overwhelming majority of pages
         where no book carries a group. A per-book query here would be the exact
         N+1 that module exists to avoid.
 

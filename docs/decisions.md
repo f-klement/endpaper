@@ -748,6 +748,134 @@ cannot be split back apart. `google_books.join_categories` / `split_categories` 
 two places that know the delimiter, and the API serves the field as a **list** so no client
 has to know it at all.
 
+### A classification is stored whole, and its number is what gets matched
+
+`metadata.py` used to strip the number off a DDC heading (`"004 Informatik"` became
+`"Informatik"`) so the caption could substring match a tag by name. That threw away the only
+half of the heading that means the same in two languages.
+
+Measured against the DNB on 2026-08-23 over ten German ISBNs: eight came back with a DDC
+heading, and every one of the eight captions was German (`830 Deutsche Literatur`,
+`150 Psychologie`). None of the eight matched any of the 105 seeded tag names, so the
+caption based suggestion scored **zero** on exactly the catalogue that supplies the heading.
+
+So a heading is stored as scheme, number and caption in its own table, and
+`ddc.DIVISION_TAGS` projects the **number** onto the household's tags. `004` and `005.133`
+both resolve to Computing whatever language the record was catalogued in.
+
+**Its own table, not three columns on `books`.** A book carries several at once: K10plus
+returned `005.133` and `004` for one ISBN, and the Library of Congress returns a DDC and an
+LCC side by side. Columns would hold the first and drop the rest.
+
+**One normaliser, `ddc.notation`, and all three source paths call it.** They started with
+three notions of what a number is: the DNB split on a regex, the K10plus path admitted
+anything whose first three characters were digits and then stored the whole subfield, and
+the Library of Congress path stored the element text untouched. A column that exists to
+hold a language independent notation cannot have three answers to "what is one".
+
+**The MARC segmentation prime is stripped, not rejected.** 082 `$a` marks where a library
+may cut a number short for its own shelves (`005.13/3`); it is a printing instruction, and
+the DNB stores the same heading as `005.133`. Measured against K10plus on 2026-08-23 over
+463 live `$a` values, 53 carry one (11.4%). Rejecting them would throw away an eighth of
+what that catalogue supplies; keeping them raw leaves two spellings of one heading that
+`uq_classifications_book_scheme_number` cannot collapse.
+
+### The DDC projection is a suggestion, and "suggestion" means pre-selected
+
+The mapping produces tag ids in `suggested_tag_ids`, and **no server path writes a tag from
+them**: no endpoint, no enrichment, no merge. Tags are a small curated vocabulary the
+household chooses from; a machine derived one applied on its own turns a chosen list into a
+generated one nobody can later tell apart. That is the same argument `books.categories`
+exists for, and it is why the DDC caption is not written into `categories` either.
+
+**The web client pre-selects them, so on an ordinary scan they land unless the member
+unchecks them.** `ScanPage/hooks.ts` calls `setSelectedTagIds(next.suggested_tag_ids)` on
+both the lookup and the chosen-match path, and `confirm()` posts each selected id to
+`POST /{id}/tags/{tag_id}`. The member sees the ticked boxes on the confirm form and can
+untick any of them before pressing the button, and nothing is written until they do press
+it.
+
+**That is the intended reading of "suggestion" here**: the act is a person confirming a
+form, not a person seeking out a checkbox. It is also pre-existing, not something this
+round introduced. What the round changed is how often it fires: the caption route matched
+nothing on a German record and the number route resolves eight of ten, so a default that
+was mostly dormant is now the normal one.
+
+**Worth revisiting.** If the intent is that a machine derived tag should require a positive
+act, the fix is one line in `hooks.ts` (start with the boxes unticked) and it changes what
+every scan does. This is recorded rather than decided, because four documents used to claim
+the tag was never applied at all, and a reader who believes that is not in a position to
+have the argument.
+
+### Division level, not the full Dewey schedule
+
+The mapping is the 100 published divisions (`000`, `010`, ... `990`). The full schedule is
+not free to redistribute, and the ten classes are too coarse: every novel and every work of
+literary criticism would land under one tag. A division is also the granularity the DNB
+emits, since its Sachgruppen are division aligned, so `830 Deutsche Literatur` arrives
+already at the level this maps.
+
+An unmapped division is a real answer rather than a gap. Five are absent and `ddc.py` names
+each one: 040 is unassigned in the schedule, 060 is associations and museums, 080 is
+quotations, 090 is manuscripts and rare books, and 310 is general statistics. Inventing a
+household tag for any of them would be the failure this whole design avoids.
+
+### The Library of Congress is fetched over plaintext HTTP, knowingly
+
+`_LOC_URL` is `http://lx2.loc.gov:210/lcdb`, with `follow_redirects=True`. It is the one
+catalogue of the six not fetched over TLS, because that is the endpoint the Library of
+Congress publishes for its Z39.50-over-HTTP SRU gateway; the other five are https.
+
+**What that costs, stated rather than implied.** An on-path attacker can substitute the
+response. Before classifications existed, the damage was bounded to a draft a member reads
+and edits on the confirm screen. It is not any more: `POST /{id}/enrich` and
+`PUT /{id}/refresh` both run the merged chain, so a substituted record now writes rows, and
+nothing in the client renders a classification yet, so those rows are written where no
+member would notice them.
+
+**Accepted for now, and here is the fence.** Every value from that response goes through
+`ClassificationIn` (a closed scheme enum, a 40 character number, a 200 character caption),
+`_headings` and the search loop each drop a record that fails rather than failing the
+request, and `_write_classifications` caps the per book total. So a substituted record can
+write a wrong heading; it cannot write an unbounded one, take an endpoint down, or reach
+any column outside this table.
+
+**What would change it**: an https endpoint for the same service, which would be a
+one-constant change. Nobody has found one. Until then this paragraph is the point: an
+undocumented plaintext source is read as a guarantee it never made.
+
+### Catalogue XML is parsed with entity expansion on, and no response size cap
+
+All six catalogue parses are `ElementTree.fromstring(response.text)`. `xml.etree` expands
+nested internal entities (measured on this project's own Python 3.14.7: three levels of
+nesting expanded to 1,000 characters), and nothing caps the body read from any source.
+
+A hostile or substituted response is therefore a memory exhaustion, in a pod limited to
+512Mi, where a 1.8 GB peak has already caused an OOMKill once (see the backup upload cap,
+which exists for the same reason from the other direction).
+
+**Pre-existing, and deliberately not fixed in the round that noticed it.** The fix is a
+capped read plus either `defusedxml` or a refusal of any body carrying a `<!DOCTYPE`, and
+it touches all six sources plus their fixtures. Doing that inside a feature round is how a
+transport change ships untested. It is written down here so the next round that touches
+outbound fetching starts with it rather than rediscovering it.
+
+### Classifications are in the backup and not in the CSV
+
+The full backup carries the table, because a backup is the whole library and losing a
+heading would make a restore lossy. The CSV does not, and the CSV import cannot set one.
+
+That is the same line `docs/api.md` already draws for notes, quotes and loans: the CSV is a
+row per book for reading in a spreadsheet and for importing from another service, and none
+of those services emits a classification. A heading is re-fetched by running enrichment,
+which costs one request and produces the same rows.
+
+### Only DDC is projected, though LCC is stored
+
+LCC has no published list short enough to ship as a mapping, and the household vocabulary it
+would project onto is the same one Dewey already covers. So an LCC number is stored whole,
+because a catalogue heading is worth keeping whole, and read by nothing yet.
+
 ### The Goodreads integration is a CSV import and a link
 
 Goodreads shut its public API to new developers in December 2020 and has issued no keys

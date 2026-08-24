@@ -27,17 +27,20 @@ catalogue.
 """
 
 import asyncio
+from xml.etree import ElementTree
 
 import httpx
 import pytest
 import respx
 
 import metadata
+from enums import ClassificationScheme
 from metadata import (
     Outcome,
     _dnb_person,
     _dnb_title,
     _is_placeholder_title,
+    _loc_record,
     _pages_from_extent,
     lookup,
 )
@@ -856,6 +859,149 @@ class TestMerge:
         assert set(result.data["subjects"]) == {"Informatik", "Science Fiction"}
 
     @pytest.mark.asyncio
+    async def test_a_classification_is_kept_whole_and_its_caption_too(self):
+        """Both halves, because they catch opposite records.
+
+        The caption is what a substring match against an English tag name
+        needs; the number is what a German record has instead. Dropping either
+        narrows the suggestion rather than sharpening it.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"] == [
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "004",
+                "label": "Informatik",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_marc_dewey_number_arrives_with_no_caption(self):
+        """082 carries the notation and the printed schedule carries the words,
+        so a caption here would be ours rather than the catalogue's."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        _marc_record(
+                            isbn=GERMAN_ISBN,
+                            extra=(
+                                '<datafield tag="082"><subfield code="a">005.133</subfield>'
+                                "</datafield>"
+                            ),
+                        )
+                    )
+                )
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"] == [
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "005.133",
+                "label": None,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_marc_segmentation_prime_is_stripped(self):
+        """`005.13/3` is how K10plus spells what the DNB stores as `005.133`.
+        Measured live 2026-08-23: 53 of 463 082 `$a` values carry the prime, so
+        storing it raw makes two rows for one heading."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        _marc_record(
+                            isbn=GERMAN_ISBN,
+                            extra=(
+                                '<datafield tag="082"><subfield code="a">005.13/3</subfield>'
+                                "</datafield>"
+                            ),
+                        )
+                    )
+                )
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"] == [
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "005.133",
+                "label": None,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_marc_field_that_is_not_a_dewey_number_is_dropped(self):
+        """084 holds RVK and BK notations in the same shape. A number whose
+        scheme nothing here reads cannot be sorted, matched or shown."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        _marc_record(
+                            isbn=GERMAN_ISBN,
+                            extra=(
+                                '<datafield tag="082"><subfield code="a">ST 250</subfield>'
+                                "</datafield>"
+                            ),
+                        )
+                    )
+                )
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"] == []
+
+    @pytest.mark.asyncio
+    async def test_one_number_from_two_catalogues_keeps_the_caption(self):
+        """K10plus returns the number bare and the DNB returns it captioned.
+        Taking the leading source whole would throw the caption away whenever
+        K10plus led."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        _marc_record(
+                            isbn=GERMAN_ISBN,
+                            extra=(
+                                '<datafield tag="082"><subfield code="a">004</subfield>'
+                                "</datafield>"
+                            ),
+                        )
+                    )
+                )
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.data is not None
+        assert result.data["classifications"] == [
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "004",
+                "label": "Informatik",
+            }
+        ]
+
+    @pytest.mark.asyncio
     async def test_k10plus_leads_for_a_non_german_isbn(self):
         """The DNB holds foreign books mostly as cross references, not records."""
         with respx.mock(assert_all_called=False) as mock:
@@ -1124,3 +1270,70 @@ class TestSearchDeadline:
         results = await metadata._within_deadline([first(), second()])
 
         assert results == [[{"title": "One"}], [{"title": "Two"}]]
+
+
+class TestLibraryOfCongressClassifications:
+    """The one source that returns two schemes for one book.
+
+    `<classification authority="lcc">QA76.73.P98 V53 2021</classification>`
+    beside `authority="ddc"`, measured against the live endpoint on 2026-08-23.
+    That pair is why the store carries a scheme column rather than a Dewey
+    column.
+    """
+
+    MODS = (
+        '<mods xmlns="http://www.loc.gov/mods/v3">'
+        "<typeOfResource>text</typeOfResource>"
+        "<titleInfo><title>Clean Code</title></titleInfo>"
+        "<physicalDescription><extent>464 p.</extent></physicalDescription>"
+        '<classification authority="lcc">QA76.73.P98 V53 2021</classification>'
+        '<classification authority="ddc" edition="23">005.133</classification>'
+        '<classification authority="rvk">ST 250</classification>'
+        "</mods>"
+    )
+
+    def _classifications(self) -> list[dict[str, object]]:
+        parsed = _loc_record(ElementTree.fromstring(self.MODS))
+        assert parsed is not None
+        found = parsed["classifications"]
+        assert isinstance(found, list)
+        return found
+
+    def test_both_schemes_are_kept(self):
+        assert self._classifications() == [
+            {
+                "scheme": ClassificationScheme.LCC,
+                "number": "QA76.73.P98 V53 2021",
+                "label": None,
+            },
+            {
+                "scheme": ClassificationScheme.DDC,
+                "number": "005.133",
+                "label": None,
+            },
+        ]
+
+    def test_a_dewey_number_goes_through_the_same_normaliser(self):
+        """MODS carries the prime too, so the LoC path must not be the one
+        source that stores a spelling the others normalise away."""
+        mods = self.MODS.replace(
+            '<classification authority="ddc" edition="23">005.133</classification>',
+            '<classification authority="ddc" edition="23">005.13/3</classification>',
+        )
+        parsed = _loc_record(ElementTree.fromstring(mods))
+        assert parsed is not None
+        numbers = [
+            entry["number"]
+            for entry in parsed["classifications"]
+            if entry["scheme"] is ClassificationScheme.DDC
+        ]
+
+        assert numbers == ["005.133"]
+
+    def test_an_authority_with_no_reading_here_is_dropped(self):
+        """RVK is a German shelving scheme this app has no mapping for, and a
+        number nothing can read is a string pretending to be a citation."""
+        schemes = {entry["scheme"] for entry in self._classifications()}
+
+        assert ClassificationScheme.DDC in schemes
+        assert "rvk" not in schemes
