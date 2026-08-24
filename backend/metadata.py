@@ -2748,6 +2748,12 @@ def _merge_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # 10 merged rows whose LoC half carried LCSH, 6 lost every heading,
             # and in 6 of 6 the leading row's list was empty. All six were
             # `bnf+loc`, the BnF emitting no classification at all.
+            # `== []` and not `not current`, deliberately. Falsiness would
+            # reclassify a `page_count` of 0, a `year` of 0, a `series_index` of
+            # 0.0 and any `""` from present to absent, and a later source would
+            # overwrite them. Measured over 1,629 live rows, 1,216 carry an int
+            # and 2 a float. `0 == []` is False, so this is the minimal
+            # condition that treats an empty list as missing and nothing else.
             if current is None or current == []:
                 existing[name] = value
 

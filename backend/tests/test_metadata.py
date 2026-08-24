@@ -2005,6 +2005,21 @@ class TestMergingTwoSearchRows:
             {"scheme": "lcsh", "number": "France -- History"}
         ]
 
+    def test_a_zero_is_a_value_and_not_an_absence(self):
+        """`== []` rather than `not current`, pinned.
+
+        Falsiness would reclassify a `page_count` of 0, a `year` of 0, a
+        `series_index` of 0.0 and any empty string from present to absent, and
+        the next source would overwrite them. Nothing else in this file
+        distinguishes the two conditions, because `[]` is falsy under both.
+        """
+        leading = {"source": "bnf", "title": "A pamphlet", "page_count": 0}
+        following = {"source": "loc", "title": "A pamphlet", "page_count": 480}
+
+        merged = metadata._merge_matches([leading, following])
+
+        assert merged[0]["page_count"] == 0
+
     def test_a_populated_list_is_not_replaced_by_a_later_one(self):
         """Only absence is filled. Unioning two populated lists would be a
         change to how every field merges, and is deliberately not what this does.

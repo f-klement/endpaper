@@ -1006,7 +1006,14 @@ fix it.** That was wrong, and the measurement is what showed it. Over 30 live ti
 on 2026-08-24: 13 merged rows carried `loc` beside another source, 10 of those came from an
 LoC row with LCSH, and **6 lost the headings. In 6 of 6 the leading row's list was empty**,
 all of them `bnf+loc`, the BnF emitting no classification at all. There was never a union to
-perform. Unioning two populated lists would indeed be a change to how every field merges;
+perform.
+
+**Open Library never lost a heading, and the reason is worth knowing**, because the obvious
+example was the wrong one. Its *search* row builder omits `classifications` entirely where
+`_as_match` writes `[]`: 290 of 1,629 measured rows carry no such key. So `existing.get()`
+returned None there and the fill always happened. Only a source that writes an empty list
+could trigger this, which is why every measured loss paired the BnF with the Library of
+Congress. Unioning two populated lists would indeed be a change to how every field merges;
 preferring a populated list to an empty one is not, and is one condition.
 
 The rate depends on what it is measured against and both are worth stating: 8 of 118 over

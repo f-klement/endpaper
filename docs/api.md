@@ -533,10 +533,8 @@ visibly wrong answer:
 * **Merging.** One book found by several catalogues is one row, matched by ISBN or by
   title, author and year, with the gaps filled from every source that answered. Two rows
   naming different languages are never merged: a translation is not the same book. A merged
-  row keeps the leading source's `classifications` rather than unioning them, so a Library
-  of Congress row folded into an Open Library one loses its headings. Measured over eight
-  live searches on 2026-08-24: 8 of 118 rows carrying an LCSH heading, 6.8%. Pre-existing
-  and the same for every scheme.
+  row takes `classifications` from the first source that has any, and an **empty list counts
+  as no answer**. Two populated lists are not unioned: the leading source's win.
 * **Ranking.** The SRU catalogues return catalogue order, which is roughly newest first.
   Results are scored against the query: how much of it a row accounts for, then how
   complete the row is, then how recent. Completeness can never outrank matching.
