@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.7.0
+
+_2026-08-24_
 
 **Library of Congress subject headings.** A title search now brings back what a
 cataloguer said the book is about, in the Library of Congress's own controlled
