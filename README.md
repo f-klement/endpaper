@@ -5,13 +5,12 @@
 [![docker hub](https://img.shields.io/docker/v/fklement/endpaper?label=docker%20hub&logo=docker)](https://hub.docker.com/r/fklement/endpaper)
 [![docker pulls](https://img.shields.io/docker/pulls/fklement/endpaper)](https://hub.docker.com/r/fklement/endpaper)
 ![languages](https://img.shields.io/badge/languages-DE%20%7C%20EN-blue)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/fklement)
 
 A self-hosted PWA for cataloging your household's physical book collection.
 
 Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
-server that can mediate between households.
-
-[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi2.png?v=3)](https://ko-fi.com/fklement)
+server that can mediate between households. All features are free either way.
 
 ## Quick Start
 
