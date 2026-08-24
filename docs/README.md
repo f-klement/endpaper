@@ -13,6 +13,7 @@ pages are for changing it.
 | [frontend.md](frontend.md) | Component and page layout, state handling, the typed API client |
 | [security.md](security.md) | The authorization model, rate limiting, uploads, headers, and the known limits |
 | [testing.md](testing.md) | How the mirrored test tree works and the conventions to follow when adding tests |
+| [legend.md](legend.md) | The library science vocabulary this codebase borrows: the catalogues, MARC, the classification and authority schemes, and the codes inside a record. |
 | [decisions.md](decisions.md) | Choices that look odd until you know why. Read before "fixing" one. |
 
 ## Orientation
