@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,450 tests**, in 99 files.
+**1,453 tests**, in 99 files.
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
@@ -72,7 +72,7 @@ readers as a side effect.
 | `pages/components/BookCard.test.tsx`  |    39 | One book in a grid: status, tags, ownership, the talk-about-it marker, selection, and the fold out |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
-| `pages/Home/*`                        |   172 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, the table view, and the dense list: what its row holds, its lazy covers, and that a selection still forces the grid |
+| `pages/Home/*`                        |   175 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, the table view, and the dense list: what its row holds, its lazy covers, and that a selection still forces the grid |
 | `pages/BookDetail/*`                  |   199 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, quotes and their page numbers, enrichment, the reading log and its two units, the credit line whose names are links, and the six collapsible groups: their defaults, what stays outside them, and what a reader's own choice overrides |
 | `pages/ScanPage/*`                    |   124 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
 | `pages/SettingsPage/*`                |   100 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |

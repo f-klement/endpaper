@@ -896,7 +896,7 @@ because a catalogue heading is worth keeping whole, and read by nothing yet.
 GND is a different reason for the same answer. `4203576-4` is an authority record number
 rather than a place in a schedule, so no arithmetic takes it to a division the way `005.133`
 goes to `000`. What a GND heading does bring is its caption, and the caption reaches
-`subjects`, where the existing substring match against tag names already reads it.
+`subjects`, where the existing name match against tag names already reads it.
 
 ### The DNB is read as MARC21, and Dublin Core cost a caption to leave
 
@@ -988,6 +988,14 @@ ways (`QB45.Z43 1998`, `QB45 .Z43 1998`, `QB45`), and `uq_classifications_book_s
 cannot collapse them because they differ by a character. Storing all three would spend three
 of a book's eight rows saying one thing.
 
+**One live counterexample, recorded rather than acted on.** `9780262033848` carries the
+subject `54.10 theoretical informatics`, which genuinely *is* a Basisklassifikation
+notation sitting in the folksonomy. It confirms the rule rather than breaking it: nothing
+in the payload says which scheme it belongs to, and a notation whose scheme has to be
+guessed is not an assertion another institution can act on. It is the shape that would
+justify revisiting this if BK is ever wanted, and round 1 already refused BK for a separate
+reason (nothing here can read the notation).
+
 ### Open Library subjects are bounded at twelve, and the bound is what makes them usable
 
 `subjects` is not stored, but it feeds two things that are: `suggested_tag_ids`, which the
@@ -999,18 +1007,61 @@ left uncapped they pre-select up to **16** of the 105 seeded tags on one book: 1
 to Fiction, Play, Essays, Classic, Contemporary Fiction, Crime, Dystopian, Fantasy, Satire,
 Science Fiction, Short Stories, War, Art, History, Language and Science. At twelve the worst
 case over the same nine is **4**, and they are the ones a person would have picked: Pride
-and Prejudice resolves to Fiction, Classic and Romance.
+and Prejudice resolves to Fiction and Romance (and to Classic as well, until the entry
+below stopped the matcher reading a tag name inside a longer word).
 
 The edition's own subjects are taken first, so the printing's cataloguer beats the work's
 crowd where both spoke.
 
-**A pre-existing defect this measurement surfaced, and did not fix.**
-`match_subjects_to_tags` is a substring match against a joined blob, so the subject
-`Software engineering` matches the tag **War** and `computer science` matches **Science**.
-Reproduced on live data. It is not new and it is not Open Library's: it is why the 653
-decision above refuses a source outright rather than capping it. Fixing it means word
-boundary matching, which loses `classics` matching **Classic** and is a behaviour change
-across every source, so it is a round of its own rather than a line in this one.
+**Both figures above are what a substring matcher produced**, and the entry below changed
+that in the same round: four of the sixteen (Art out of "Outer Party", Crime out of
+"thoughtcrime", and two more) no longer match at all. The two fixes are independent. The
+matcher stops reading a tag name inside a word; this cap stops one book carrying 137
+chances to do it.
+
+**A pre-existing defect this measurement surfaced, now fixed.** See the next entry: it was
+deferred first, then measured properly, and the measurement said to do it.
+
+### Tag names are matched on word boundaries, not as bare substrings
+
+`match_subjects_to_tags` read a tag name anywhere inside a subject string, so
+`Software engineering` proposed **War**, `Outer Party` proposed **Art**, `thoughtcrime`
+proposed **Crime** and `Trous noirs` proposed **Noir**. This entry first recorded the
+defect and deferred the fix as "a behaviour change across every source". That was the
+wrong call and the reason is that the deferral cited two examples and no rate.
+
+**Measured live on 2026-08-24, this function against the 105 seeded tag names:**
+
+| Population | Substring | On word boundaries |
+|---|---|---|
+| 12 English books, Open Library subjects | 27 suggestions, 7 wrong | 20, **2 wrong** |
+| 10 German ISBNs, DNB subject headings | 5 suggestions, **5 wrong** | 0, none |
+| both | 32, **12 wrong (37.5%)** | 20, **2 wrong (10%)** |
+
+It removes ten wrong suggestions and loses two correct ones, and **the two sides are not
+symmetrical**: the web client pre-selects every suggestion, so a wrong one is written
+unless somebody unticks it, while a missing one costs a click. Five wrong removed per
+correct lost, on that asymmetry, is not a close call.
+
+The German row is the sharper one. On those records the substring route produced nothing
+but false positives, out of `Gegenwartsliteratur` and `Softwareentwicklung`, which is the
+failure the DDC number projection exists to work around: it was not merely scoring zero
+there, it was scoring negative.
+
+**What it costs, and the variant that was measured and refused.** `fiction classics` no
+longer proposes **Classic**, on 2 of the 12 English books. Allowing an optional trailing
+`s` recovers both, and also recovers **Noir** and **Travel**: two correct for two wrong,
+which fails the same asymmetry. Both losses are pinned by tests so the trade is visible
+rather than rediscovered.
+
+**Two false positives survive and are not fixable here.** `Medicine in Literature`
+proposes **Medicine** and `computer science` proposes **Science**. Both match on a word
+boundary, and both are wrong because the subject is *about* the tag rather than an
+instance of it. That is a semantics problem and no matching rule solves it.
+
+The boundary is a lookaround (`(?<!\w)` / `(?!\w)`) rather than `\b`, because a household
+tag may end in punctuation: after the `+` of `C++`, `\b` asserts that a word character
+follows, which is the opposite of what is wanted.
 
 ### An Open Library key is validated before it goes into a URL
 
@@ -1027,7 +1078,7 @@ this round adds a second concatenation.
 `tests/test_metadata.py::TestTheOpenLibraryLookup::test_a_key_that_is_not_open_librarys_is_never_fetched`
 pins it.
 
-### The edition cluster drops a translation rather than ranking it down
+### The edition cluster drops a declared translation, and ranks a declared match first
 
 Open Library's work cluster is every printing of a work, and a work spans translations.
 The cluster behind `9783442002009` (Der Zinker) holds 11 entries, of which 9 declare
@@ -1036,12 +1087,35 @@ English and are printings of *The Squeaker*, measured live on 2026-08-24.
 Every one of those is the same work. None of them can fill in a German printing's
 publisher, page count or cover, which is what `POST /{id}/enrich/apply` does with the row
 somebody clicks. Left in, they took four of the five rows the picker shows and pushed the
-German editions out of it entirely.
+German editions out of it entirely. So where the caller knows the language, an entry
+declaring a different one is not a candidate.
 
-So where the caller knows the language, an entry in a different one is not a candidate.
-**An entry declaring no language is kept**, and that is what makes this safe rather than
-destructive: the other 2 of those 11 are the German printings and both carry an empty
-`languages`. 110 of 129 live entries across seven works declare one.
+**An entry declaring no language is kept, and that is a compromise rather than a
+guarantee.** This entry used to say that keeping them "is what makes this safe rather than
+destructive", from a sample where 19 of 129 entries (14.7%) were unlabelled. That sentence
+was false and the sample was unrepresentative. Measured again on 2026-08-24: **56 of 250
+entries across 14 live clusters, 22.4%**, and a second sample of 14 clusters at 52 of 160,
+**32.5%**.
+
+At that rate a filter alone leaves the picker showing four foreign printings that merely
+declined to say so. `9783453435773` (King's *Es*) is the live case: Turkish, Spanish,
+English and French rows, all unlabelled, while the one printing declaring `ger` ranked
+fifth and was never shown. **So the language match is the first term of the sort**, ahead
+of completeness, and that book now leads with its German printing. Verified live after the
+fix.
+
+**What that still cannot fix, recorded as a limit rather than claimed away.** Where *no*
+entry declares the wanted language, nothing in the payload distinguishes the wanted
+printing. `9783596905683` is the live case: four Catalan and Spanish rows lead and the
+German Fischer printing ranks eighth, because it is itself unlabelled. The search half of
+`candidates` is the only thing that answers that book, which is the reason the cluster is
+capped one row short of the page rather than filling it.
+
+**And `prefer_language` is `book.language`**, so on a book with an empty language column no
+filter and no ranking run at all. That is not rare: Open Library supplied a language on
+**0 of 35** records before this round, so every book enriched from it before 2026-08-24 is
+in exactly that state. Nothing here fixes those rows; a refresh now fills the column, and
+the cluster works from then on.
 
 ### The candidates page deduplicates on the ISBN and on nothing else
 
@@ -2389,9 +2463,19 @@ against them rather than in isolation:
 
 | Held | Why |
 |---|---|
-| cover, title, author, reading status | exactly what a grid card's **face** carries |
+| cover, title, author, reading status | what a grid card's **face** carries |
+| a loan marker, an unconfirmed ownership marker | also on the card's face, and the two answers to "why is it not on the shelf", which is the question this view exists for |
 | series | the fact the card hides in its fold out that somebody scanning a list is looking for: it is what says the next one is missing |
 | year | tells two printings apart, which is the other thing a person recognises a book by |
+
+**Dropped from the card's face, deliberately**: the copies badge and the
+discussion offer. Both describe a card rather than a book, and neither answers
+"where is it".
+
+This table used to say the row holds "exactly what a grid card's face carries",
+which was false in both directions: the face carries four conditional things the
+row did not, and two of the four were the point of the view. The two that
+answer the question are now on the row.
 
 Everything else stays in the table, which exists for reading metadata. The three
 optional values are joined into one line rather than laid out in columns: a
@@ -2399,9 +2483,18 @@ column grid with three optional values leaves holes on most rows, and a row with
 holes reads as missing data rather than as data a book does not have.
 
 **The status is plain muted text, not the card's coloured pill.** One pill among
-covers is a marker; thirty stacked is a colour field with no signal, and that
-ramp's own contrast is recorded above as below the 4.5 floor on three palettes.
-The word carries the same information either way.
+covers is a marker; thirty stacked is a colour field with no signal. Measured as
+drawn, with the formula `tests/theme/palettes.test.ts` uses: `paper-600` on the
+card's `paper-0` is **5.03:1** at worst across the seven palettes (rosepine and
+everforest; 5.30 at best, on nord), and `paper-400` on `paper-900` in dark is
+**6.00:1** at worst, against the pill's **3.97:1** as drawn. The replacement is
+better on contrast as well as quieter, and the word carries the same
+information.
+
+The loan and unconfirmed markers keep their colour, and that is the exception
+rather than an inconsistency: both are the minority of a shelf, so one of them
+among thirty rows is a signal rather than a field. They are the same two colours
+the grid uses for the same two facts.
 
 **The whole row is one link**, where the table links only the title. The table's
 reason is that a reader copying a publisher out of a cell should not navigate; a
@@ -2410,9 +2503,18 @@ on a phone.
 
 ### Every cover in the list loads lazily, and carries no accessible name
 
-A list fits roughly three times as many rows on a screen as the grid fits cards,
-so a 200 row page would fetch 200 images at once without `loading="lazy"`. It is
-on every one, and a test asserts it rather than a comment claiming it.
+A 200 row page would fetch 200 images at once without `loading="lazy"`. It is on
+every one, and a test asserts it rather than a comment claiming it.
+
+**The reason is the page size, not the viewport**, and the first version of this
+entry had that wrong. It claimed "roughly three times as many rows as the grid
+fits cards", which holds on a phone and not on a desktop: computed from the
+classes actually shipped, a row is `h-12` plus `py-2` plus a divider, about
+**65px**, and a grid card at `minmax(170px,1fr)` is about **400px**. At a 1200px
+content width and an 800px viewport that is 12 rows against 12 cards, i.e. **1x**;
+at 390px it is about 3x. The grid's covers are lazy too (`BookCard.tsx`), so the
+list is not doing something the grid does not: it is the same rule for the same
+reason, which is that a page holds up to 200 books.
 
 The `alt` is empty because the title sits beside the cover inside the same link,
 and a duplicate label is noise in a screen reader's control list: the quotes

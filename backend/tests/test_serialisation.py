@@ -48,6 +48,38 @@ class TestMatchSubjectsToTags:
     def test_an_unrelated_subject_matches_nothing(self):
         assert match_subjects_to_tags(["cookery"], [Tag(id=1, name="Fantasy")]) == []
 
+    @pytest.mark.parametrize(
+        ("subject", "tag"),
+        [
+            ("Software engineering", "War"),
+            ("Outer Party", "Art"),
+            ("thoughtcrime", "Crime"),
+            ("Trous noirs (astronomie)", "Noir"),
+            ("Gegenwartsliteratur ab 1945", "Art"),
+        ],
+    )
+    def test_a_tag_name_inside_a_longer_word_is_not_a_match(self, subject, tag):
+        """Five live false positives, four English and one German.
+
+        A bare substring match read every one of these as a suggestion, and the
+        web client pre-selects them, so they were written unless somebody
+        unticked them. Measured 2026-08-24 over 12 English books and 10 German
+        ISBNs: 12 of 32 suggestions were wrong, and all 5 of the German ones.
+        """
+        assert match_subjects_to_tags([subject], [Tag(id=1, name=tag)]) == []
+
+    def test_a_tag_name_ending_in_punctuation_still_matches(self):
+        """The boundary is a lookaround rather than `\b`, because `\b` after a
+        `+` asserts that a word character follows."""
+        assert match_subjects_to_tags(["C++ programming"], [Tag(id=1, name="C++")]) == [1]
+
+    def test_a_plural_subject_no_longer_proposes_the_singular_tag(self):
+        """What word boundaries cost, pinned rather than left to be
+        rediscovered: `fiction classics` stopped proposing **Classic**, on 2 of
+        12 live books. Allowing an optional trailing `s` recovers it and also
+        recovers two wrong suggestions, which is why it was not taken."""
+        assert match_subjects_to_tags(["fiction classics"], [Tag(id=1, name="Classic")]) == []
+
 
 class TestSuggestedTagIds:
     """Two routes to one list, and they fail on opposite records."""

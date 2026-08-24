@@ -468,9 +468,13 @@ Three rules hold that together:
 
 * **The cluster leads, and never fills the page.** It is capped one row short, so a work
   merged wrongly is never the whole answer.
-* **A printing in another language is dropped, not ranked down.** A work spans
-  translations, and an English printing cannot fill in a German copy's publisher or page
-  count. An entry declaring no language is kept.
+* **A printing declaring another language is dropped, and one declaring the wanted
+  language is ranked first.** A work spans translations, and an English printing cannot
+  fill in a German copy's publisher or page count. An entry declaring **no** language is
+  kept, because 22% to 33% of live entries declare none and the wanted printing is often
+  among them. Where no entry declares the wanted language, nothing in the payload can pick
+  it out and the search half is what answers: that residual is why the cluster is capped
+  one row short.
 * **Rows are deduplicated on the ISBN alone.** Every row here shares a title and an
   author by construction, so anything looser collapses the page to one row.
 
@@ -592,7 +596,10 @@ the **work** behind it for the subjects and the author the edition mostly omits,
 call for the author's name. Measured over 35 live ISBNs on 2026-08-24 against what shipped
 before, with no losses: subjects on 28 records rather than 16 (178 entries rather than 36),
 a page count on 20 rather than 0, a language on 27 rather than 0, an author on 35 rather
-than 34, and classifications on 12 rather than 0. The cost is 1.34s where it was 1.24s.
+than 34, and classifications on 12 rather than 0. The cost is roughly 0.2s: the same 35
+ISBNs measured 1.24s then 1.15s before the change and 1.34s then 1.46s after it, which is
+network variance around two extra requests on a source that is only asked when the DNB and
+K10plus have both missed.
 
 A 404 means every one of them was asked and none holds the ISBN. The ranking and the
 measurements behind it are in `backend/metadata.py`.

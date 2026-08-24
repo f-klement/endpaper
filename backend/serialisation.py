@@ -31,7 +31,45 @@ from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserO
 
 
 def match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
-    """Case-insensitive substring match of source subjects against our tags."""
+    """Case-insensitive match of source subjects against our tag names, on word boundaries.
+
+    **Boundaries rather than a bare substring, and the reason is a measurement
+    rather than taste.** A substring match reads a tag name anywhere inside a
+    subject, so `Software engineering` proposed **War**, `Outer Party` proposed
+    **Art**, `thoughtcrime` proposed **Crime** and `Trous noirs` proposed
+    **Noir**. Every one of those is pre-selected by the web client, so a wrong
+    suggestion is written unless somebody unticks it, while a missing one costs
+    a click to add. That asymmetry is what decides this.
+
+    Measured live on 2026-08-24, running this function against the 105 seeded
+    tag names:
+
+    | population | substring | on word boundaries |
+    |---|---|---|
+    | 12 English books, Open Library subjects | 27 suggestions, 7 wrong | 20, **2 wrong** |
+    | 10 German ISBNs, DNB subject headings | 5 suggestions, **5 wrong** | 0, none |
+
+    The German row is the sharper one: on those records the substring route
+    produced nothing but false positives (`Gegenw**art**sliteratur` and
+    `Soft**war**eentwicklung`), which is the failure the DDC number projection
+    in `suggested_tag_ids` exists to work around.
+
+    **What boundaries cost, stated rather than hidden**, and it is two tags
+    rather than one: `fiction classics` no longer proposes **Classic**, on 2 of
+    the 12 English books, and **Travel** is lost on one. A second run over nine
+    books during review found the same direction, 18 suggestions to 11, losing
+    Crime, Art, Noir and War, all wrong, against Classic twice and Travel.
+
+    Allowing an optional trailing `s` recovers those and was measured too, but
+    it re-admits **Noir**, so it buys 2 correct suggestions for 2 wrong ones.
+    Not taken, for the asymmetry above: a wrong suggestion is written unless
+    somebody unticks it.
+
+    Still not fixed by this, and not fixable here: `Medicine in Literature`
+    proposes **Medicine** and `computer science` proposes **Science**. Both
+    match on a boundary and are wrong for a different reason, which is that the
+    subject is about the tag rather than an instance of it.
+    """
     if not subjects:
         return []
     subjects_blob = " | ".join(subject.lower() for subject in subjects)
@@ -39,7 +77,11 @@ def match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
     for tag in tags:
         # Strip parenthetical suffixes: "Young Adult (13-18)" becomes "young adult".
         tag_core = re.sub(r"\s*\([^)]+\)", "", tag.name).strip().lower()
-        if tag_core and tag_core in subjects_blob:
+        # Lookaround rather than `\b`, because a tag name can end in a
+        # non-word character ("C++"), where `\b` asserts the opposite thing.
+        if tag_core and re.search(
+            rf"(?<!\w){re.escape(tag_core)}(?!\w)", subjects_blob
+        ):
             matched.append(tag.id)
     return matched
 
@@ -52,7 +94,7 @@ def suggested_tag_ids(
     """Tags a household might want on this book, from both kinds of evidence.
 
     Two routes to the same list, and they fail on opposite records. The
-    substring match reads the **caption** a catalogue supplied, which works for
+    name match reads the **caption** a catalogue supplied, which works for
     an English record and scores zero on a German one. The DDC projection reads
     the **number**, which is the same in both: `004` is Informatik in a German
     record and Computing in an English one, and both resolve to Computing here.

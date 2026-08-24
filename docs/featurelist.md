@@ -53,8 +53,8 @@ series, shelf location, format, reading status and ownership. A filter set can
 be saved as a view.
 
 **Card, list or table.** The list is one dense row per book: a tiny cover, the
-title, and the author, series, year and reading status beside it, which is what
-a grid card's face carries plus the two facts it hides in its fold out. The
+title, and the author, series, year and reading status beside it, plus a marker
+where the book is out on loan or nobody has confirmed the household owns it. The
 table carries twenty one columns and sorts on what the server can genuinely
 order by. The choice is remembered in the browser.
 

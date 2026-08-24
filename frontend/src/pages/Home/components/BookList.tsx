@@ -1,6 +1,10 @@
 import { Link } from "react-router-dom";
 
-import { ReadStatus, type BookOut } from "../../../api/generated/model";
+import {
+  OwnershipStatus,
+  ReadStatus,
+  type BookOut,
+} from "../../../api/generated/model";
 import { Skeleton } from "../../../components";
 import { useTranslation, type Translate } from "../../../i18n";
 import CoverImage from "../../components/CoverImage";
@@ -41,15 +45,27 @@ interface BookListProps {
  *
  * **What the row holds is the design, and the answer is not everything the
  * table has.** A dense row repeating twenty one columns is a worse table. What
- * is here is exactly what a **grid card's face** carries (cover, title, author,
- * reading status) plus the two facts the card hides in its fold out that
- * somebody scanning a list is actually looking for: the series, which is what
- * says the next one is missing, and the year, which is what tells two printings
- * apart. Everything else stays in the table, which exists for reading metadata.
+ * is here is what a **grid card's face** carries, minus the two badges that are
+ * about a card rather than a book (the copies count and the discussion offer),
+ * plus the two facts the card hides in its fold out that somebody scanning a
+ * list is actually looking for: the series, which is what says the next one is
+ * missing, and the year, which tells two printings apart. Everything else stays
+ * in the table, which exists for reading metadata.
  *
- * **Lazy covers are not optional here.** A list fits roughly three times as
- * many rows on a screen as the grid fits cards, and a 200 row page would
- * otherwise fetch 200 images at once. `loading="lazy"` is on every one.
+ * **The loan and the unconfirmed marker are on the row, and that is not
+ * decoration.** This view is for somebody looking for a book they know they
+ * have, and the two answers to "why is it not on the shelf" are that it is out
+ * on loan and that nobody ever confirmed we own it. The grid shows both
+ * deliberately; the table shows neither (its `lending` column is the policy,
+ * not a live loan), so a list without them is the only view that answers the
+ * question it exists for by saying nothing.
+ *
+ * **Lazy covers are not optional here.** A page holds up to 200 books, so
+ * without `loading="lazy"` a full one fetches 200 images at once. It is on
+ * every cover. The reason is the page size rather than the viewport: a row is
+ * about 65px against a grid card's 400px, which is 3x more rows on a 390px
+ * phone and about the same number on a 1200px desktop, and the grid's covers
+ * are lazy for the same reason.
  *
  * **The cover carries no accessible name.** The title sits beside it in the
  * same link, and a duplicate label is noise in a screen reader's control list:
@@ -118,11 +134,29 @@ export default function BookList({
                     </p>
                   )}
                 </div>
+                {/* The two exceptions to the muted rule below, and they earn
+                    it by being rare: a loan and an unconfirmed book are the
+                    minority of a shelf, so a coloured marker on one is a signal
+                    rather than a field. The grid uses the same two colours for
+                    the same two facts. */}
+                {book.active_loan && (
+                  <span className="shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs font-medium text-white">
+                    {t("library.loaned")}
+                  </span>
+                )}
+                {book.ownership === OwnershipStatus.unknown && (
+                  <span className="shrink-0 rounded-full bg-amber-500/90 px-1.5 py-0.5 text-xs font-medium text-white">
+                    {t("ownership.unknown")}
+                  </span>
+                )}
                 {/* Plain muted text, not the coloured pill the card uses. One
                     pill among covers is a marker; thirty of them stacked is a
                     colour field with no signal, and that ramp's own contrast is
-                    recorded as below the 4.5 floor on three palettes. The word
-                    is the information either way. */}
+                    recorded as below the 4.5 floor on three palettes. Measured
+                    as drawn here: paper-600 on paper-0 is 5.03:1 at worst
+                    across the seven palettes, and paper-400 on paper-900 is
+                    6.00:1, against the pill's 3.97:1. The word is the
+                    information either way. */}
                 <span className="shrink-0 text-xs text-paper-600 dark:text-paper-400">
                   {t(STATUS_LABELS[status])}
                 </span>

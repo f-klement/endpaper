@@ -1980,15 +1980,22 @@ class TestTheOpenLibraryLookup:
     async def test_a_key_that_is_not_open_librarys_is_never_fetched(self):
         """A key out of a third party response goes into a URL, and
         `@example.com/` moves the host rather than the path. The request that
-        would make is ours, from our network position."""
+        would make is ours, from our network position.
+
+        **The author key here is `/authors/OL1A@example.com/`, deliberately.** A
+        bare `@example.com/` is refused by `match`, `search` and `fullmatch`
+        alike, so a regression from `fullmatch` to one of the other two would
+        reopen the hole with this test still green. Only `fullmatch` refuses a
+        key that *starts* with a valid one.
+        """
         with respx.mock(assert_all_called=False) as mock:
             _open_library_routes(
                 mock,
                 edition=httpx.Response(
                     200,
                     json=_ol_edition(
-                        authors=[{"key": "@example.com/"}],
-                        works=[{"key": "/works/../../evil"}],
+                        authors=[{"key": "/authors/OL1A@example.com/"}],
+                        works=[{"key": "/works/OL1W/../../evil"}],
                     ),
                 ),
             )
@@ -2002,7 +2009,7 @@ class TestTheOpenLibraryLookup:
         assert not elsewhere.called
 
     @pytest.mark.asyncio
-    async def test_a_work_that_will_not_answer_costs_the_subjects_only(self):
+    async def test_a_work_refusing_with_a_status_costs_the_subjects_only(self):
         """A failure in either extra call costs that field, not the record."""
         with respx.mock(assert_all_called=False) as mock:
             _open_library_routes(
@@ -2017,6 +2024,105 @@ class TestTheOpenLibraryLookup:
         assert result.data is not None
         assert result.data["title"] == "Introduction to Algorithms"
         assert result.data["subjects"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_work_timing_out_costs_the_subjects_only(self):
+        """The half a 500 does not reach, and the one that mattered.
+
+        All three requests used to share one `try`, so a timeout on the work
+        fetch discarded an edition record that had already answered 200, and
+        `_remember` cached that miss for `_MISS_TTL_SECONDS`: one blip made the
+        ISBN uncatalogueable for five minutes. A stubbed 500 is the one failure
+        the code always handled, so it passed while this did not.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OL_ISBN).mock(
+                return_value=httpx.Response(200, json=_ol_edition())
+            )
+            mock.get(url__startswith=OL_AUTHORS).mock(
+                return_value=httpx.Response(200, json=OL_AUTHOR)
+            )
+            mock.get(url__startswith=OL_WORKS).mock(
+                side_effect=httpx.ReadTimeout("too slow")
+            )
+            result = await self._lookup(mock)
+
+        assert result.found
+        assert result.data is not None
+        assert result.data["title"] == "Introduction to Algorithms"
+        assert result.data["subjects"] == []
+
+    @pytest.mark.asyncio
+    async def test_an_author_timing_out_costs_the_author_only(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OL_ISBN).mock(
+                return_value=httpx.Response(200, json=_ol_edition())
+            )
+            mock.get(url__startswith=OL_WORKS).mock(
+                return_value=httpx.Response(200, json=OL_WORK)
+            )
+            mock.get(url__startswith=OL_AUTHORS).mock(
+                side_effect=httpx.ReadTimeout("too slow")
+            )
+            result = await self._lookup(mock)
+
+        assert result.found
+        assert result.data is not None
+        assert result.data["author"] is None
+        assert result.data["subjects"]
+
+    @pytest.mark.asyncio
+    async def test_a_body_that_is_valid_json_but_not_an_object_is_not_a_500(self):
+        """`[]` and `null` parse cleanly and then raise `AttributeError` on
+        `.get`, which is a `ValueError` in no `except` clause on this path. A
+        CDN error page served as `application/json` is enough to reach it."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=["not", "a", "record"]),
+            )
+            result = await self._lookup(mock)
+
+        assert not result.found
+        # `UNAVAILABLE`, not `NOT_FOUND`: a fault at the other end is not an
+        # absence, and the two send the reader to different actions.
+        assert result.outcome is Outcome.UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_a_work_body_that_is_not_an_object_costs_the_subjects_only(self):
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(200, json=_ol_edition()),
+                work=httpx.Response(200, json=["nope"]),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.found
+        assert result.data is not None
+        assert result.data["subjects"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_page_count_no_book_could_have_is_dropped(self):
+        """`BookLookup.page_count` is unbounded and `PUT /{id}/refresh` writes
+        it straight onto a column with no CHECK: `10**19` raises
+        `OverflowError` on the commit, and 100,001 upward stores silently past
+        the app's own ceiling. Open Library is a wiki and this field is
+        editable by any account."""
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(
+                mock,
+                edition=httpx.Response(
+                    200, json=_ol_edition(number_of_pages=10**19)
+                ),
+                work=httpx.Response(200, json=OL_WORK),
+                author=httpx.Response(200, json=OL_AUTHOR),
+            )
+            result = await self._lookup(mock)
+
+        assert result.data is not None
+        assert result.data["page_count"] is None
 
 
 #: An editions listing, in the shape `/works/{key}/editions.json` returns.
@@ -2099,6 +2205,41 @@ class TestTheEditionCluster:
         assert [row["isbn13"] for row in rows] == ["9783486590029", None]
 
     @pytest.mark.asyncio
+    async def test_a_printing_declaring_the_wanted_language_leads(self):
+        """The blocking defect of this round, and a filter alone did not fix it.
+
+        22% to 33% of live entries declare no language, so a cluster whose
+        foreign printings are unlabelled passed the filter whole and filled
+        every row: King's *Es* (`9783453435773`) showed Turkish, Spanish,
+        English and French, while the one printing declaring `ger` ranked fifth
+        and was never shown. The language match is the first term of the sort,
+        ahead of completeness, which is what puts it back on the page.
+        """
+        listing = {
+            "size": 2,
+            "entries": [
+                # More complete, and unlabelled: it wins on completeness alone.
+                {
+                    "title": "Es, Turkish printing",
+                    "publishers": ["Altin Kitaplar"],
+                    "publish_date": "2019",
+                    "number_of_pages": 900,
+                    "isbn_13": ["9789751027788"],
+                },
+                {
+                    "title": "Es",
+                    "publish_date": "1988",
+                    "languages": [{"key": "/languages/ger"}],
+                },
+            ],
+        }
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock, listing)
+            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
+
+        assert [row["title"] for row in rows] == ["Es", "Es, Turkish printing"]
+
+    @pytest.mark.asyncio
     async def test_a_printing_declaring_no_language_survives_the_filter(self):
         """110 of 129 live entries declare one, and both German printings in
         the Der Zinker cluster are among the 19 that do not."""
@@ -2145,6 +2286,28 @@ class TestTheEditionCluster:
 
         assert rows == []
         assert not edition.called
+
+    @pytest.mark.asyncio
+    async def test_a_listing_that_is_not_an_object_costs_no_rows(self):
+        """From `editions` an `AttributeError` escapes `_work_cluster`, which
+        catches `TimeoutError` only, and then `candidates`' bare `gather`, so it
+        answers 500 for the whole page rather than losing the cluster."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock, ["not", "a", "listing"])
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_an_edition_body_that_is_not_an_object_costs_no_rows(self):
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            mock.get(url__startswith=OL_ISBN).mock(
+                return_value=httpx.Response(200, json="just a string")
+            )
+            rows = await metadata.editions(ENGLISH_ISBN, 5)
+
+        assert rows == []
 
     @pytest.mark.asyncio
     async def test_a_book_open_library_does_not_hold_costs_no_rows(self):

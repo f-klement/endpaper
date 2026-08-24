@@ -42,6 +42,7 @@ import ddc
 import google_books
 from enums import ClassificationScheme
 from isbn import parse as parse_isbn
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
@@ -109,15 +110,47 @@ _OPEN_LIBRARY: Final = "https://openlibrary.org"
 #: the *host* rather than the path: `https://openlibrary.org@example.com/.json`
 #: is a request to somebody else's server, made by ours, with our timeout and
 #: our network position. Matching the documented shape is what stops that.
-_OL_AUTHOR_KEY: Final = re.compile(r"/authors/OL\d+A")
-_OL_WORK_KEY: Final = re.compile(r"/works/OL\d+W")
+#: Bounded rather than `\d+`: an upstream key of `/authors/OL` plus ten thousand
+#: digits plus `A` is a well formed key and a 10,040 byte URL. Live ids are six
+#: to eight digits.
+#:
+#: **`follow_redirects=True` is on every client here and this guard runs before
+#: it**, so what is constrained is the host at request time rather than the host
+#: finally reached: `/isbn/{isbn}.json` measured `num_redirects=1` live, so
+#: turning it off is not an option. That is the right trade for the threat this
+#: is actually against, which is a wiki field any account can edit rather than
+#: control of the site.
+_OL_AUTHOR_KEY: Final = re.compile(r"/authors/OL\d{1,12}A")
+_OL_WORK_KEY: Final = re.compile(r"/works/OL\d{1,12}W")
 
 
 def _open_library_key(value: object, pattern: re.Pattern[str]) -> str | None:
-    """One key, or None where it is not the shape Open Library documents."""
+    """One key, or None where it is not the shape Open Library documents.
+
+    **`fullmatch`, and that is the guard rather than a detail.** `match` and
+    `search` both accept a key that merely *starts* with a valid one, so
+    `/authors/OL1A@example.com/` would pass and move the host. The pinning test
+    uses exactly that value, because a value the three functions all refuse
+    would let a regression from `fullmatch` to `search` pass green.
+    """
     if isinstance(value, str) and pattern.fullmatch(value):
         return value
     return None
+
+
+def _open_library_object(response: httpx.Response) -> dict[str, Any]:
+    """A response body as a JSON object, or an empty one.
+
+    **A valid body that is not an object is the failure this exists for.**
+    `response.json()` raises `JSONDecodeError`, a `ValueError`, which every
+    caller here catches; `[]`, `"x"` and `null` parse cleanly and then raise
+    `AttributeError` on `.get`, which is in no `except` clause on any of these
+    paths. From the lookup that escapes to a 500 on `GET /api/books/lookup`;
+    from `editions` it 500s the whole candidates page. A CDN or proxy error page
+    served as `application/json` is enough to reach it.
+    """
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
 
 
 #: Where a subject hides on an Open Library record. All four are the same kind
@@ -143,11 +176,19 @@ _OPEN_LIBRARY_SUBJECT_KEYS: Final = (
 #: Classic, Contemporary Fiction, Crime, Dystopian, Fantasy, Satire, Science
 #: Fiction, Short Stories, War, Art, History, Language, Science). At twelve the
 #: worst case over the same nine books is **4**, and the matches are the ones a
-#: person would have picked: Pride and Prejudice resolves to Fiction, Classic
-#: and Romance.
+#: person would have picked: Pride and Prejudice resolves to Fiction and
+#: Romance (and to Classic as well, until the matcher stopped reading a tag
+#: name inside a longer word: see `match_subjects_to_tags`).
 #:
 #: Edition subjects are taken first, so the printing's own cataloguer beats the
 #: work's crowd where both have something to say.
+#:
+#: **Both figures above are what a substring matcher produced.**
+#: `match_subjects_to_tags` matches on word boundaries since 2026-08-24, which
+#: removes four of that sixteen outright (Art out of "Outer Party", Crime out of
+#: "thoughtcrime"). The cap is what keeps the rest in proportion, and the two
+#: fixes are independent: the matcher stops reading a tag inside a word, and
+#: this stops one book carrying 137 chances to do it.
 _OPEN_LIBRARY_MAX_SUBJECTS: Final = 12
 
 
@@ -209,7 +250,11 @@ def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]
     if isinstance(call_numbers, list) and call_numbers:
         # No normaliser for LCC, the same as the Library of Congress path: a
         # call number is alphanumeric and this app has no schedule for it.
-        number = " ".join(str(call_numbers[0]).split())
+        # Checked rather than cast, symmetrically with the Dewey loop above:
+        # `str()` on a non-string entry stores its Python repr as a call number
+        # wherever the result is under 40 characters.
+        first = call_numbers[0]
+        number = " ".join(first.split()) if isinstance(first, str) else ""
         if number:
             found.append(
                 {"scheme": ClassificationScheme.LCC, "number": number, "label": None}
@@ -241,8 +286,25 @@ def _open_library_language(raw: object) -> str | None:
 
 
 def _open_library_pages(raw: object) -> int | None:
-    """`number_of_pages`, if it is a number of pages."""
-    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else None
+    """`number_of_pages`, if it is a number of pages a book could have.
+
+    **Bounded here because nothing downstream bounds it.**
+    `BookLookup.page_count` is deliberately unbounded and `PUT /{id}/refresh`
+    assigns it straight onto the row, where `books.page_count` carries no CHECK.
+    Measured: `10**19` raises `OverflowError` on the commit, so a 500 on the
+    refresh, and anything from 100,001 to `2**63-1` stores silently past the
+    app's own stated ceiling. On the scan path the same value reaches
+    `BookCreate`, whose `le` then 422s the member's own post.
+
+    The unbounded writer is pre-existing (`_pages_from_extent` and
+    `google_books` pass their values through raw). What is new is the supplier:
+    Open Library is a wiki and this field is editable by any account, with no
+    MARC extent string in between, which is a weaker boundary than either of the
+    other two.
+    """
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return None
+    return raw if 0 < raw <= MAX_PAGE_NUMBER_IN_A_BOOK else None
 
 
 def _open_library_author_key(entries: object) -> str | None:
@@ -288,13 +350,26 @@ def _open_library_work_author_key(work: dict[str, Any]) -> str | None:
 async def _open_library_author(
     client: httpx.AsyncClient, key: str | None
 ) -> str | None:
-    """One author key resolved to a name, which no other record carries."""
+    """One author key resolved to a name, which no other record carries.
+
+    **Its own `except`, and that is load bearing rather than defensive.** This
+    runs after the edition record has already been fetched successfully, so an
+    exception escaping to `_open_library`'s handler would discard a 200 that
+    arrived, answer `UNAVAILABLE`, and have `_remember` cache that miss for
+    `_MISS_TTL_SECONDS`. One transient timeout would then make the ISBN
+    uncatalogueable for five minutes. Before this round there was one request
+    and nothing to lose.
+    """
     if key is None:
         return None
-    response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
-    if response.status_code != 200:
+    try:
+        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        if response.status_code != 200:
+            return None
+        name = _open_library_object(response).get("name")
+    except (httpx.HTTPError, ValueError):
+        logger.info("Open Library author %s did not answer", key, exc_info=True)
         return None
-    name = response.json().get("name")
     return name if isinstance(name, str) else None
 
 
@@ -317,14 +392,21 @@ async def _open_library_work(
     subjects on two of them, the work on seven. Reading only the edition is why
     Open Library used to contribute nothing to the tag suggestion for books it
     describes perfectly well.
+
+    **Its own `except`, for the reason `_open_library_author`'s docstring
+    gives**: a transport failure here must not throw away an edition record that
+    already arrived, because the resulting miss is cached for five minutes.
     """
     if key is None:
         return {}
-    response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
-    if response.status_code != 200:
+    try:
+        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        if response.status_code != 200:
+            return {}
+        return _open_library_object(response)
+    except (httpx.HTTPError, ValueError):
+        logger.info("Open Library work %s did not answer", key, exc_info=True)
         return {}
-    payload = response.json()
-    return payload if isinstance(payload, dict) else {}
 
 
 async def _open_library(isbn: str, api_key: str) -> Lookup:
@@ -352,7 +434,14 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
                 return Lookup(Outcome.NOT_FOUND, source="open_library")
             if response.status_code != 200:
                 return Lookup(Outcome.UNAVAILABLE, source="open_library")
-            data = response.json()
+            data = _open_library_object(response)
+            if not data:
+                # A 200 carrying no object at all is a fault at the other end
+                # rather than an absence, so it is `UNAVAILABLE` and not
+                # `NOT_FOUND`: the difference is whether the reader is told to
+                # type the book in by hand or to try again.
+                logger.info("Open Library answered %s with no record object", isbn)
+                return Lookup(Outcome.UNAVAILABLE, source="open_library")
 
             # The work first, because it is the fallback for the author: an
             # edition record names one on a minority of records and the work
@@ -2592,7 +2681,7 @@ async def _open_library_author_names(
         response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
         if response.status_code != 200:
             return key, None
-        found = response.json().get("name")
+        found = _open_library_object(response).get("name")
         return key, found if isinstance(found, str) else None
 
     names: dict[str, str] = {}
@@ -2666,23 +2755,44 @@ async def editions(
 ) -> list[dict[str, Any]]:
     """Every other printing of this work Open Library has merged.
 
-    Three requests: the ISBN gives the work, the work gives the cluster, and
-    one more resolves the authors the cluster names by key.
+    **Two requests, plus at most three author lookups.** The ISBN gives the
+    work and the work gives the cluster, sequentially; then
+    `_open_library_author_names` resolves up to `_OPEN_LIBRARY_AUTHOR_LOOKUPS`
+    distinct keys concurrently, so the worst case is five requests and three
+    round trips. Said precisely because this is the sentence any argument about
+    outbound amplification rests on.
 
-    **A translation is dropped, not ranked down**, and this is not a nicety. A
-    work spans translations. The cluster behind `9783442002009` (Der Zinker)
-    holds 11 entries, of which 9 declare English and are printings of *The
-    Squeaker*, measured live on 2026-08-24. Every one is the same work; none
-    can fill in a German printing's publisher, page count or cover, and left in
-    they took four of the five rows the picker shows and pushed the German
-    editions out of it. So where the caller knows the language, an entry in a
-    different one is not a candidate.
+    **A translation is dropped, and a printing that says it is the wanted
+    language leads.** A work spans translations. The cluster behind
+    `9783442002009` (Der Zinker) holds 11 entries, of which 9 declare English
+    and are printings of *The Squeaker*, measured live on 2026-08-24. Every one
+    is the same work; none can fill in a German printing's publisher, page count
+    or cover, and left in they took four of the five rows the picker shows and
+    pushed the German editions out of it.
 
-    **An entry declaring no language is kept**, and that is what makes this
-    safe rather than destructive: the other 2 of those 11 are the German
-    printings, and both carry an empty `languages`. 110 of 129 live entries
-    across seven works declare one, so refusing the rest would throw away
-    records for a field Open Library simply left blank.
+    **An entry declaring no language is kept, and that is a compromise rather
+    than a guarantee.** Open Library leaves the field blank far more often than
+    this round's first measurement suggested: **56 of 250 entries across 14 live
+    clusters, 22.4%**, and a second sample of 14 **different** works measured 52
+    of 160, **32.5%**. Both measured on 2026-08-24, against the 19 of 129
+    (14.7%) this docstring used to argue from. They are two samples of one
+    population on one day over different works, so the **range** is the honest
+    reading rather than either figure alone. Refusing them
+    would throw away the wanted printing on any cluster that never labels it,
+    which is the Der Zinker case: both German printings there carry an empty
+    `languages`. Keeping them costs the opposite, and it is the reason the
+    language match is the **first** term of the sort rather than a filter alone:
+    without it, King's *Es* (`9783453435773`) showed Turkish, Spanish, English
+    and French rows, all unlabelled, while the one printing that says
+    `languages: [ger]` ranked fifth and was never seen.
+
+    **What that still cannot fix**, and it is recorded rather than claimed away:
+    where **no** entry declares the wanted language, nothing in the payload
+    distinguishes the wanted printing. `9783596905683` is the live case: four
+    Catalan and Spanish rows lead and the German Fischer printing ranks eighth,
+    because it is itself unlabelled. The search half of `candidates` is the only
+    thing that answers that book, which is why the cluster is capped one row
+    short of the page.
 
     **Then `_completeness`, not catalogue order**, which is the same function
     and the same reason `_merge` uses it to choose between printings: an entry
@@ -2709,7 +2819,7 @@ async def editions(
             response = await client.get(f"{_OPEN_LIBRARY}/isbn/{canonical}.json")
             if response.status_code != 200:
                 return []
-            key = _open_library_work_key(response.json().get("works"))
+            key = _open_library_work_key(_open_library_object(response).get("works"))
             if key is None:
                 return []
             listing = await client.get(
@@ -2718,7 +2828,7 @@ async def editions(
             )
             if listing.status_code != 200:
                 return []
-            entries = listing.json().get("entries")
+            entries = _open_library_object(listing).get("entries")
             if not isinstance(entries, list):
                 return []
             names = await _open_library_author_names(client, entries)
@@ -2738,7 +2848,15 @@ async def editions(
             if record["language"] in (prefer_language, None)
         ]
     records.sort(
-        key=lambda record: (_completeness(record), record.get("year") or 0),
+        key=lambda record: (
+            # First, not a tiebreak. A printing that says it is the wanted
+            # language beats one that says nothing, and 22% to 33% of live
+            # entries say nothing. Without this, King's Es showed four
+            # unlabelled foreign printings and never the German one.
+            bool(prefer_language) and record["language"] == prefer_language,
+            _completeness(record),
+            record.get("year") or 0,
+        ),
         reverse=True,
     )
     return [_as_match(record, "open_library") for record in records[:limit]]

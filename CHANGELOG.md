@@ -61,10 +61,19 @@ holding is still offered, because it is the same book.
 
 **A third way to look at the library.** Beside the covers and the table there
 is now a list: one dense row per book, a tiny cover, and the title, author,
-series, year and reading status beside it. It is for the case the other two are
+series, year and reading status beside it, with a marker when the book is out on
+loan or nobody has confirmed you own it. It is for the case the other two are
 bad at, which is finding a book you know you own without reading twenty one
 columns or scrolling past forty covers. Your choice is remembered in your
 browser, as it already was.
+
+**Suggested tags stop reading a word inside another word.** "Software
+engineering" used to suggest **War** and "thoughtcrime" used to suggest
+**Crime**, and since suggestions arrive ticked, those got written unless you
+noticed. Measured over 22 books, 12 of 32 suggestions were wrong that way, and
+on German records every single one was. It costs one real suggestion: a book
+filed under "fiction classics" no longer offers **Classic**, because the tag is
+singular and the subject is not.
 
 **Headless.** `SERVE_FRONTEND=false` runs the API without mounting the compiled
 frontend, for a host that has no reader to serve a page to. One image and one

@@ -112,8 +112,13 @@ export const STATUS_FILTERS: { label: MessageKey; value: ReadStatus | null }[] =
  *
  * Whole words rather than icons: a grid glyph, a table glyph and a list glyph
  * are near enough identical at 16 pixels that the label is what actually says
- * which is which. Three of them still fit the strip on a phone, because each
- * word is one short noun.
+ * which is which.
+ *
+ * The strip they sit in scrolls (`overflow-x-auto` in `BookFilters`) and
+ * already overflows a phone before this group: six status pills plus the sort
+ * select is roughly 850px against a 390px viewport. So the third button costs
+ * about 48px of a strip that was already scrolling, rather than being the thing
+ * that breaks it.
  */
 export const VIEW_OPTIONS: { label: MessageKey; value: LibraryView }[] = [
   { label: "library.viewGrid", value: "grid" },

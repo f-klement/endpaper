@@ -101,7 +101,7 @@ export interface UseLibraryResult {
   toggleTag: (tagId: number) => void;
   clearTags: () => void;
 
-  /** Covers or metadata. Remembered in this browser, not on the account. */
+  /** Covers, dense rows or metadata. Remembered in this browser, not on the account. */
   view: LibraryView;
   setView: (view: LibraryView) => void;
 

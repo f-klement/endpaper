@@ -4,9 +4,12 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ReadStatus } from "../../../../src/api/generated/model";
+import {
+  OwnershipStatus,
+  ReadStatus,
+} from "../../../../src/api/generated/model";
 import BookList from "../../../../src/pages/Home/components/BookList";
-import { makeBook, resetIds } from "../../../factories";
+import { makeBook, makeLoan, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
@@ -46,6 +49,35 @@ describe("BookList", () => {
     ).toBeInTheDocument();
     expect(within(row).getByText(/1965/)).toBeInTheDocument();
     expect(within(row).getByText("Reading")).toBeInTheDocument();
+  });
+
+  it("says when a book is out on loan", () => {
+    /** The list is for somebody looking for a book they know they have, and
+     * "it is lent out" is one of the two answers to why it is not there. */
+    renderList({
+      books: [makeBook({ title: "Dune", active_loan: makeLoan() })],
+    });
+
+    expect(screen.getByText("Loaned")).toBeInTheDocument();
+  });
+
+  it("says when nobody has confirmed the household owns it", () => {
+    renderList({
+      books: [makeBook({ title: "Dune", ownership: OwnershipStatus.unknown })],
+    });
+
+    expect(screen.getByText("Not confirmed")).toBeInTheDocument();
+  });
+
+  it("marks neither on an ordinary book", () => {
+    /** Both are the minority of a shelf, which is what makes them a signal
+     * rather than a colour field. */
+    renderList({
+      books: [makeBook({ ownership: OwnershipStatus.owned, active_loan: null })],
+    });
+
+    expect(screen.queryByText("Loaned")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not confirmed")).not.toBeInTheDocument();
   });
 
   it("names the series and the number in it", () => {
