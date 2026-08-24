@@ -757,7 +757,7 @@ export const de: Messages = {
   "about.licenceLabel": "Lizenz",
   "about.sourceLabel": "Quelltext",
   "about.support":
-    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee. Er hilft, den öffentlichen Server zu finanzieren, der zwischen Haushalten vermitteln kann.",
+    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee. Er hilft, den öffentlichen Server zu finanzieren, der zwischen Haushalten vermitteln kann. Alle Funktionen sind so oder so kostenlos.",
   "about.kofiAlt": "Endpaper auf Ko-fi unterstützen",
 
   // ── Gespeicherte Ansichten ──────────────────────────────────────────────

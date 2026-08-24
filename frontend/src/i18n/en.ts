@@ -781,7 +781,7 @@ export const en = {
   "about.licenceLabel": "Licence",
   "about.sourceLabel": "Source",
   "about.support":
-    "If you like Endpaper and want to support my work, buy me a coffee. It helps pay for the public server that can mediate between households.",
+    "If you like Endpaper and want to support my work, buy me a coffee. It helps pay for the public server that can mediate between households. All features are free either way.",
   "about.kofiAlt": "Support Endpaper on Ko-fi",
 
   // ── Saved views ─────────────────────────────────────────────────────────

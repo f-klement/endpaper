@@ -833,8 +833,15 @@ and edits on the confirm screen. It is not any more: `POST /{id}/enrich` and
 nothing in the client renders a classification yet, so those rows are written where no
 member would notice them.
 
+**Its share of this table grew on 2026-08-24 and the accepting has to be re-stated for it.**
+LCSH comes from this response and nothing else does: measured over 900 live records, 84.7%
+carry at least one and they supply 1,526 headings, where the same records supply at most two
+classifications each. So the plaintext source went from a minority supplier of a number to
+the sole supplier of a whole subject vocabulary. Nothing about the exposure changed in kind;
+what changed is how many rows are on the wrong side of it.
+
 **Accepted for now, and here is the fence.** Every value from that response goes through
-`ClassificationIn` (a closed scheme enum, a 40 character number, a 200 character caption),
+`ClassificationIn` (a closed scheme enum, a 120 character number, a 200 character caption),
 `_headings` and the search loop each drop a record that fails rather than failing the
 request, and `_write_classifications` caps the per book total. So a substituted record can
 write a wrong heading; it cannot write an unbounded one, take an endpoint down, or reach
@@ -887,7 +894,7 @@ row per book for reading in a spreadsheet and for importing from another service
 of those services emits a classification. A heading is re-fetched by running enrichment,
 which costs one request and produces the same rows.
 
-### Only DDC is projected, though LCC and GND are stored
+### Only DDC is projected, though LCC, GND and LCSH are stored
 
 LCC has no published list short enough to ship as a mapping, and the household vocabulary it
 would project onto is the same one Dewey already covers. So an LCC number is stored whole,
@@ -897,6 +904,95 @@ GND is a different reason for the same answer. `4203576-4` is an authority recor
 rather than a place in a schedule, so no arithmetic takes it to a division the way `005.133`
 goes to `000`. What a GND heading does bring is its caption, and the caption reaches
 `subjects`, where the existing name match against tag names already reads it.
+
+LCSH is the third reason and the plainest: there is no number at all. `Computer software --
+Development` is a phrase, so there is nothing to project. Its text reaches `subjects`
+through the existing `<subject><topic>` reader, which is where the tag name match sees it.
+
+### LCSH is a parser extension, and the Library of Congress stays off the lookup path
+
+The record `_loc_subject_headings` reads is the one `_loc_record` already has in hand:
+`<subject authority="lcsh">` sits beside the `<classification>` elements the same function
+has parsed since round 1. So LCSH costs no outbound request, no key and no new host, and
+`id.loc.gov` is not touched.
+
+**What was measured first, because the sizing rested on it.** 45 live `dc.title=` searches
+against `lx2.loc.gov`, 20 records each, 2026-08-24, 900 MODS records:
+
+| | |
+|---|---|
+| Records carrying at least one LCSH heading | 762 of 900, 84.7% |
+| Headings in total | 1,526 |
+| Mean per record that carries any | 2.00 |
+| Most on one record | 14 |
+| Headings carrying a ` -- ` subdivision | 990, 64.9% |
+| `valueURI` on any `<subject>` element | 0 of 1,559 |
+
+**The Library of Congress does not join `_SOURCES`, and that is the decision rather than the
+next step.** It is the one catalogue here reached over plaintext HTTP, which this file
+already records as accepted precisely because it is not on the scan path, and putting it
+there would add an outbound call to every scan. It would also buy nothing for this
+household's main case: of eight ISBNs measured, the Library of Congress held a record for
+five and all five were English, the misses being both German ISBNs and one English title it
+does not hold. So LCSH appears on a search row and reaches a book the way any other picked
+row does, through `POST /{id}/enrich/apply`.
+
+### `classifications.number` is 120 characters, and LCSH is why
+
+The column was 40, which is comfortably above the longest Dewey number, LCC call number or
+GND authority number this app has seen. An LCSH heading is not a notation: its subdivisions
+are part of it, and `Computer software` alone is a different heading with a different set of
+books under it. Measured over the 1,526 live headings above, a bound of 40 refuses **335 of
+them, 22.0%**, and refuses exactly the subdivided ones. 80 still refuses 4; 100 and 120
+refuse none. Longest measured: 89 characters.
+
+Widening the shared column rather than giving LCSH its own is the smaller change and costs
+the row nothing that matters: `CLASSIFICATION_LABEL_MAX` is 200 on the same table, so a
+heading row was already allowed 240 bytes of text and is now allowed 320, against a per book
+ceiling of eight rows that did not move. Migration `b7d41f0a2c95`.
+
+### A subject heading never reaches the Dewey parser, on this source either
+
+`ddc.parse_heading` accepts any three digit token, so an LCSH heading opening with one
+(`004 Jahre Bauhaus`) would be stored as a Dewey number and would suggest a household tag
+from it. Round 2 closed this for the DNB by making 082 the only field handed to `ddc`; the
+same shape holds here. `<classification>` is the only element `_loc_classifications` reads
+and the only one `ddc` ever sees, and `_loc_subject_headings` builds LCSH rows without
+importing it. Structural rather than defensive, and pinned by a test using that heading.
+
+### LCSH sorts last at the ceiling, and the tie against GND is decided on the column
+
+`_SCHEME_ORDER` is DDC, LCC, GND, LCSH. The two shelf classifications lead both subject
+vocabularies for the reason already recorded: a record supplies several subject headings and
+one classification, and DDC is the only scheme a tag suggestion is projected from.
+
+GND and LCSH are the same kind of assertion at nearly the same rate (2.20 per DNB record,
+2.00 per Library of Congress record carrying any), so the rate cannot break the tie. The
+column does. A GND row's `number` is an authority identifier that outlives its own caption;
+an LCSH row's `number` **is** the caption, and it is what moves when the Library of Congress
+revises a heading, as it did turning `Afro-Americans` into `African Americans`. The store
+exists to hold the half that does not move, so the scheme that has one is kept first.
+
+**Half of that ordering fires today and half does not**, which is worth stating rather than
+leaving to be discovered. DDC and LCC ahead of LCSH is live: a Library of Congress record can
+carry 14 subject headings against two classifications, so the sort decides what a search row
+shows. GND against LCSH is not reachable through any flow the app itself drives, because the
+DNB supplies one and the Library of Congress the other and no path concatenates the two: the
+lookup merge never asks the Library of Congress, and `_merge_matches` fills only absent
+fields. It is decided now so that it is not decided later by list position.
+
+### A merged search row keeps one source's classifications rather than unioning them
+
+`_merge_matches` fills a field only where the leading row has none, and `_as_match` always
+writes a list, so a Library of Congress row folded into an Open Library one loses its
+headings entirely. Measured over eight live searches on 2026-08-24: 7 of 117 rows carrying an
+LCSH heading, **6.0%**.
+
+Pre-existing since round 1 and identical for DDC, LCC and GND. Not fixed here: unioning two
+sources' headings on the search path is a change to how every field merges, with its own
+comparison to run, and at 6.0% it is not what limits what LCSH delivers. The ranking slice
+is: eight live searches returned 60 rows to the member of which 12 carried an LCSH heading,
+20%.
 
 ### The DNB is read as MARC21, and Dublin Core cost a caption to leave
 
@@ -3178,20 +3274,33 @@ About card at the foot of Settings, and nothing anywhere else. No banner, no men
 no dismissible card, no mention on any screen somebody passes through while cataloguing.
 
 **Nowhere is it a pitch, and that is the whole of the wording rule.** Earlier drafts
-argued the case at length and read as one; the argument was cut from all three places on
+argued the case at length and read as one; that argument was cut from all three places on
 the same day.
 
-**The card carried one sentence and now carries two.** It used to add nothing to the ask,
-on the grounds that its reader is already inside the app and needs no explaining to. The
-owner reversed that on 2026-08-24: it now says what the money is for, matching the README
-and the Docker Hub page, which have always carried that fact.
+**All three places carry the same two facts: what the money pays for, and that nothing is
+gated.** The card did not, until 2026-08-24. It asked in one sentence and explained
+nothing, on the reasoning that its reader is already inside the app and needs no selling
+to.
 
-The reversal is worth recording rather than quietly editing, because the older reasoning
-reads as sound and somebody will otherwise re-derive it and cut the sentence again. What
-changed is not the argument about pitching: it is that "what does this pay for" is the one
-question the ask provokes, and leaving it unanswered inside the app made the card quieter
-without making it clearer. The **second** fact from those pages, that nothing sits behind
-the money, is still left out here, so the card is two sentences rather than three.
+**That reasoning was wrong, and it is worth saying why, because it reads as sound.** It
+treated the sentences as *justification*, which a reader inside the app does not need. They
+are not. A donate button provokes two questions wherever it appears, and the second one
+matters more to somebody who already installed this than to a stranger:
+
+* **What does this pay for?** The relay, and only the relay.
+* **What am I missing by not paying?** Nothing. Every feature is free either way.
+
+Leaving those unanswered did not make the card quieter, it made it vaguer, and a vague ask
+is the one that reads as a pitch. The second question is the sharper of the two here: a
+donate button inside software somebody already runs invites the suspicion that this is the
+free tier, and one short sentence retires it.
+
+**The English is the source and the German is not a gloss of it.** "All features are free
+either way" became "Alle Funktionen sind so oder so kostenlos", chosen over the tighter
+`ohnehin` because the two sentences before it are informal (`dir`, `du`, `spendier mir`)
+and `so oder so` matches that register. `Er hilft, den Server zu finanzieren` keeps the
+English's small joke, where `er` is the coffee rather than the donation, and `finanzieren`
+rather than `bezahlen` because paying for a server is ongoing rather than one invoice.
 
 **The card's size is what does the work, and the defaults only help an admin.** About is
 open unless explicitly closed. An admin has five other open cards beside it and About is
