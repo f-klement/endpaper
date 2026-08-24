@@ -492,7 +492,9 @@ tags, and they are somebody's deliberate choice.
 catalogue, and both go through one builder for that reason: a record carrying more headings
 than a book may hold loses the ninth rather than the whole result, and a caption longer than
 the column loses that heading. The headings are ordered by scheme before the cut, so a Dewey
-number outranks a subject heading whichever catalogue supplied it.
+number outranks a subject heading whichever catalogue supplied it. One record can now exceed
+the ceiling by itself: a Library of Congress record carries up to 14 LCSH headings beside
+its two classifications, and the parser emits the classifications first for that reason.
 
 **Classifications are the exception, and are added rather than merged.** `overwrite` does
 not reach them: a heading is a catalogue's citation, not a value somebody typed, so there is
@@ -530,7 +532,11 @@ visibly wrong answer:
   wrong answer to "which book am I holding".
 * **Merging.** One book found by several catalogues is one row, matched by ISBN or by
   title, author and year, with the gaps filled from every source that answered. Two rows
-  naming different languages are never merged: a translation is not the same book.
+  naming different languages are never merged: a translation is not the same book. A merged
+  row keeps the leading source's `classifications` rather than unioning them, so a Library
+  of Congress row folded into an Open Library one loses its headings. Measured over eight
+  live searches on 2026-08-24: 8 of 118 rows carrying an LCSH heading, 6.8%. Pre-existing
+  and the same for every scheme.
 * **Ranking.** The SRU catalogues return catalogue order, which is roughly newest first.
   Results are scored against the query: how much of it a row accounts for, then how
   complete the row is, then how recent. Completeness can never outrank matching.
@@ -605,10 +611,17 @@ A 404 means every one of them was asked and none holds the ISBN. The ranking and
 measurements behind it are in `backend/metadata.py`.
 
 The response carries `classifications`, each a scheme, a number and the caption the
-catalogue gave it, and `suggested_tag_ids`. Three schemes are produced: `ddc` and `lcc`
+catalogue gave it, and `suggested_tag_ids`. Four schemes are produced. `ddc` and `lcc`
 arrive with no caption (MARC carries the notation and the printed schedule carries the
-words), and `gnd`, the German subject authority file, arrives as an authority record number
-with the heading text as its caption (`gnd`, `4203576-4`, `Schatz`).
+words). `gnd`, the German subject authority file, arrives as an authority record number with
+the heading text as its caption (`gnd`, `4203576-4`, `Schatz`). `lcsh` arrives as the
+authorised heading string itself, subdivisions included
+(`Computer software -- Development`), with no caption: the Library of Congress publishes no
+identifier for it in this record, so the string is the access point.
+
+**`lcsh` reaches only the search response**, not this one. The Library of Congress is not
+one of the four sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the
 sources' subject strings against the seeded tag names, which works on an English record and
@@ -632,8 +645,10 @@ enrich paths, and the merge; a backup restore is the third and is deliberately u
 across requests and neither `POST /{id}/enrich/apply` nor `POST /merge` carries a rate
 limiter. At the ceiling an incoming heading is dropped rather than a stored one evicted,
 and a caption still fills in on a heading already held. **Which one is dropped is decided by
-order**: the list is sorted by scheme before it is cut, so a Dewey number outranks a subject
-heading whichever catalogue supplied it. The reason the number matters:
+order**: the list is sorted by scheme before it is cut, in the order DDC, LCC, GND, LCSH, so
+a Dewey number outranks a subject heading whichever catalogue supplied it. GND leads LCSH
+because its number is an identifier that outlives its own caption, where an LCSH number is
+the heading text and moves when the Library of Congress revises it. The reason the number matters:
 `BookOut.classifications` is on every listing row, so an inflated book is paid for on every
 page that contains it. Measured on 2026-08-24 against one catalogue, which is not the whole
 of what a book can carry: 3.07 headings per record over 85 DNB lookups, and 8 of 189 records

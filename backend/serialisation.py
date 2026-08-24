@@ -116,7 +116,7 @@ def suggested_tag_ids(
     Tags are a small curated vocabulary the household chooses from, which is
     why the projection stops at proposing one.
 
-    Only DDC is projected, of the three schemes stored. An LCC number needs the
+    Only DDC is projected, of the four schemes stored. An LCC number needs the
     published division list this mapping is, and LCC has no equivalent short
     enough to ship. A GND number is an authority record identifier rather than a
     place in a schedule: there is no arithmetic that takes `4203576-4` to a

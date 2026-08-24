@@ -44,6 +44,7 @@ from metadata import (
     _marc_fields,
     _pages_from_extent,
     _parsed,
+    _union_classifications,
     lookup,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
@@ -1754,6 +1755,166 @@ class TestLibraryOfCongressClassifications:
         assert "rvk" not in schemes
 
 
+class TestLibraryOfCongressSubjectHeadings:
+    """LCSH out of the record the search path already fetches.
+
+    A parser extension rather than a source: `<subject authority="lcsh">` sits
+    beside the `<classification>` elements the class above reads, in the same
+    MODS document, so it costs no request. Measured over 900 live records on
+    2026-08-24: 769 of them carry at least one, 1,559 headings in all.
+    """
+
+    MODS = (
+        '<mods xmlns="http://www.loc.gov/mods/v3">'
+        "<typeOfResource>text</typeOfResource>"
+        "<titleInfo><title>Clean Code</title></titleInfo>"
+        "<physicalDescription><extent>464 p.</extent></physicalDescription>"
+        '<classification authority="lcc">QA76.73.P98 V53 2021</classification>'
+        '<classification authority="ddc" edition="23">005.133</classification>'
+        '<subject authority="lcsh"><topic>Computer programming</topic></subject>'
+        '<subject authority="lcsh"><topic>Computer software</topic>'
+        "<topic>Development</topic></subject>"
+        '<subject authority="rvm"><topic>Genie logiciel</topic></subject>'
+        "</mods>"
+    )
+
+    def _classifications(self, mods: str | None = None) -> list[dict[str, object]]:
+        parsed = _loc_record(ElementTree.fromstring(mods or self.MODS))
+        assert parsed is not None
+        found = parsed["classifications"]
+        assert isinstance(found, list)
+        return found
+
+    def _lcsh(self, mods: str | None = None) -> list[str]:
+        return [
+            str(entry["number"])
+            for entry in self._classifications(mods)
+            if entry["scheme"] is ClassificationScheme.LCSH
+        ]
+
+    def test_a_heading_becomes_a_row_under_its_own_scheme(self):
+        assert {
+            "scheme": ClassificationScheme.LCSH,
+            "number": "Computer programming",
+            "label": None,
+        } in self._classifications()
+
+    def test_a_subdivided_heading_is_one_row_and_not_two(self):
+        """`Computer software` alone is a different heading with a different
+        set of books under it, so the subdivisions belong in the string."""
+        assert "Computer software -- Development" in self._lcsh()
+        assert "Computer software" not in self._lcsh()
+
+    def test_the_heading_is_the_number_and_no_caption_is_stored(self):
+        """The record supplies no identifier, so the string is the access
+        point. Writing it into `label` as well would store one fact twice."""
+        rows = [
+            entry
+            for entry in self._classifications()
+            if entry["scheme"] is ClassificationScheme.LCSH
+        ]
+
+        assert rows
+        assert all(entry["label"] is None for entry in rows)
+
+    def test_a_vocabulary_this_app_has_no_reading_for_is_dropped(self):
+        """The Library of Congress mixes 23 authority values into one record.
+        `rvm` is the French one; `fast` and `lcshac` are separate authority
+        files whose headings are not LCSH's, so folding them in would make the
+        scheme name a lie."""
+        crowded = self.MODS.replace(
+            "</mods>",
+            '<subject authority="fast"><topic>Software engineering</topic></subject>'
+            '<subject authority="lcshac"><topic>Computers</topic></subject>'
+            "</mods>",
+        )
+
+        assert self._lcsh(crowded) == self._lcsh()
+
+    def test_a_subject_with_no_authority_at_all_is_dropped(self):
+        """289 of 2,280 live `<subject>` elements name no authority. A heading
+        whose vocabulary is unstated cannot be matched against another
+        catalogue, which is the only thing this store is for."""
+        anonymous = self.MODS.replace(
+            "</mods>", "<subject><topic>Uncontrolled</topic></subject></mods>"
+        )
+
+        assert self._lcsh(anonymous) == self._lcsh()
+
+    def test_a_work_named_as_a_subject_reads_its_nested_title(self):
+        """`<titleInfo>` nests a `<title>` rather than carrying text, which is
+        one of the two nested shapes. 21 of 1,559 live headings are it."""
+        about_a_work = self.MODS.replace(
+            "</mods>",
+            '<subject authority="lcsh"><titleInfo>'
+            "<title>Microsoft Windows (Computer file)</title>"
+            "</titleInfo></subject></mods>",
+        )
+
+        assert "Microsoft Windows (Computer file)" in self._lcsh(about_a_work)
+
+    def test_a_person_named_as_a_subject_keeps_their_name(self):
+        """`<name>` nests one to four `<namePart>` elements, and reading it as
+        empty does not drop the heading, it shortens it: `Catholic Church --
+        History` would arrive as `History`, which asserts a different thing
+        about the book. 116 of 1,559 live LCSH elements are that shape."""
+        about_a_person = self.MODS.replace(
+            "</mods>",
+            '<subject authority="lcsh"><name type="personal">'
+            "<namePart>S\u00fcssheim, Karl,</namePart>"
+            '<namePart type="date">1878-1947</namePart></name>'
+            "<topic>Sources</topic></subject></mods>",
+        )
+
+        assert "S\u00fcssheim, Karl, 1878-1947 -- Sources" in self._lcsh(about_a_person)
+
+    def test_a_subject_element_with_no_text_yields_no_row(self):
+        empty = self.MODS.replace(
+            "</mods>", '<subject authority="lcsh"><topic>  </topic></subject></mods>'
+        )
+
+        assert self._lcsh(empty) == self._lcsh()
+
+    def test_a_subject_heading_is_never_read_as_a_dewey_number(self):
+        """`ddc.parse_heading` accepts any three digit token, so a heading that
+        opens with one would be stored as a Dewey number and would suggest a
+        household tag from it. The guard is structural: `<classification>` is
+        the only element handed to `ddc`, and this path does not import it."""
+        numeric = self.MODS.replace(
+            "<topic>Computer programming</topic>",
+            "<topic>004 Jahre Bauhaus</topic>",
+        )
+        dewey = [
+            entry["number"]
+            for entry in self._classifications(numeric)
+            if entry["scheme"] is ClassificationScheme.DDC
+        ]
+
+        assert dewey == ["005.133"]
+        assert "004 Jahre Bauhaus" in self._lcsh(numeric)
+
+    def test_the_shelf_classifications_come_before_the_subject_headings(self):
+        """Which is load bearing rather than tidy. `_as_match` slices this list
+        to eight and `routers/books._headings` applies `_SCHEME_ORDER` only
+        afterwards, so on the search path a record's own order is the only
+        thing keeping its Dewey number. One live record carries 14 LCSH
+        headings against at most two classifications."""
+        crowded = self.MODS.replace(
+            "</mods>",
+            "".join(
+                f'<subject authority="lcsh"><topic>Thema {index}</topic></subject>'
+                for index in range(14)
+            )
+            + "</mods>",
+        )
+        found = self._classifications(crowded)
+        kept = _union_classifications(found)[:MAX_CLASSIFICATIONS_PER_BOOK]
+        schemes = [entry["scheme"] for entry in kept]
+
+        assert schemes[:2] == [ClassificationScheme.LCC, ClassificationScheme.DDC]
+        assert ClassificationScheme.LCSH in schemes
+
+
 # ── Open Library, deepened ────────────────────────────────────────────────────
 #
 # Open Library is the only source here that clusters printings under a work,
@@ -1810,6 +1971,58 @@ def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
     mock.get(url__startswith=OL_WORKS).mock(
         return_value=parts.get("work", httpx.Response(404))
     )
+
+
+class TestMergingTwoSearchRows:
+    """`_merge_matches` when one row has classifications and the other does not."""
+
+    def test_a_populated_list_beats_an_empty_one(self):
+        """The regression this was written for, measured live before fixing.
+
+        Every scalar a catalogue omits arrives as None, so "fill where the value
+        `is None`" was the whole rule until `classifications` became the one list
+        valued key `_as_match` writes. It always writes a list, so a source that
+        found nothing wrote `[]`, which is not None, so it beat a populated list
+        from the next source. Over 30 live title searches, 6 of the 10 merged
+        rows whose Library of Congress half carried LCSH lost every heading, and
+        in 6 of 6 the leading row's list was empty.
+        """
+        leading = {
+            "source": "bnf",
+            "title": "Les Miserables",
+            "classifications": [],
+        }
+        following = {
+            "source": "loc",
+            "title": "Les Miserables",
+            "classifications": [{"scheme": "lcsh", "number": "France -- History"}],
+        }
+
+        merged = metadata._merge_matches([leading, following])
+
+        assert len(merged) == 1
+        assert merged[0]["classifications"] == [
+            {"scheme": "lcsh", "number": "France -- History"}
+        ]
+
+    def test_a_populated_list_is_not_replaced_by_a_later_one(self):
+        """Only absence is filled. Unioning two populated lists would be a
+        change to how every field merges, and is deliberately not what this does.
+        """
+        leading = {
+            "source": "open_library",
+            "title": "Les Miserables",
+            "classifications": [{"scheme": "ddc", "number": "843.7"}],
+        }
+        following = {
+            "source": "loc",
+            "title": "Les Miserables",
+            "classifications": [{"scheme": "lcsh", "number": "France -- History"}],
+        }
+
+        merged = metadata._merge_matches([leading, following])
+
+        assert merged[0]["classifications"] == [{"scheme": "ddc", "number": "843.7"}]
 
 
 class TestTheOpenLibraryLookup:

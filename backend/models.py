@@ -898,9 +898,26 @@ class Quote(Base):
 
 
 #: A classification number, as text. `005.133` and `QA76.73.P98 V53 2021` are
-#: both one, so this is a string and not a number, and 40 is comfortably above
-#: the longest LCC call number the Library of Congress emits.
-CLASSIFICATION_NUMBER_MAX = 40
+#: both one, so this is a string and not a number.
+#:
+#: **120 rather than 40, and the widening is LCSH's.** The other three schemes
+#: put a notation or an authority number here and none of them approaches 40.
+#: LCSH has no identifier in the record at all (measured: no `valueURI` on any
+#: of 2,280 `<subject>` elements in 900 live MODS records, 2026-08-24), so its
+#: access point is the authorised heading string, subdivisions and all:
+#: `University of Nebraska (Lincoln campus). University Galleries --
+#: Exhibitions -- Periodicals` is 91 characters. Measured over the 1,559 LCSH
+#: headings in those records, a bound of 40 refuses **399 of them, 25.6%**, and
+#: it refuses exactly the subdivided ones, which are the informative ones. 80
+#: still refuses 5; 100 and 120 refuse none.
+#:
+#: Widening it costs the row nothing that matters: `CLASSIFICATION_LABEL_MAX`
+#: is 200 on the same table, so a heading row was already allowed 240 **characters**
+#: of text and is now allowed 320. Characters rather than bytes matters here: an
+#: LCSH heading is routinely non-ASCII, so the per book ceiling of 2,560
+#: characters can be up to about 10 KB. Against a per book ceiling of eight rows
+#: (`MAX_CLASSIFICATIONS_PER_BOOK`) that did not move.
+CLASSIFICATION_NUMBER_MAX = 120
 
 #: The caption a catalogue supplied for that number, in whatever language it
 #: catalogues in. Longer than a tag name (100) because a DDC caption is a
@@ -923,12 +940,21 @@ class Classification(Base):
     the words, and every live supplier of a Dewey number here is MARC.
 
     **`number` is the scheme's own identifier for the heading**, which is a
-    shelf notation in DDC and LCC and an authority record number in GND. What
-    the three have in common is the thing the column exists for: the identifier
-    is stable, and the caption is whatever the supplying record wrote. For Dewey
-    that was measured across languages in round 1; for GND it is one supplier
-    and German captions, so the stability is the identifier's own property
-    rather than something this catalogue has seen tested.
+    shelf notation in DDC and LCC, an authority record number in GND, and the
+    authorised heading string itself in LCSH. What the first three have in
+    common is the thing the column exists for: the identifier is stable, and
+    the caption is whatever the supplying record wrote. For Dewey that was
+    measured across languages in round 1; for GND it is one supplier and German
+    captions, so the stability is the identifier's own property rather than
+    something this catalogue has seen tested.
+
+    **LCSH is the exception and it is stored as one rather than pretended
+    away.** The record carries no identifier for a subject heading (no
+    `valueURI` on any of 2,280 live `<subject>` elements, 2026-08-24), so the
+    string is the access point and there is no second, stabler half to keep. An
+    LCSH row therefore has `number` and no `label`: putting the same words in
+    both would be one fact stored twice, and the unique index has to be on the
+    half that identifies. `ClassificationScheme` says what that costs.
 
     **Not a tag, and not a category.** The three are one store with three jobs,
     and the difference is provenance: a tag is the household's own word, a

@@ -828,14 +828,23 @@ Congress publishes for its Z39.50-over-HTTP SRU gateway; the other five are http
 
 **What that costs, stated rather than implied.** An on-path attacker can substitute the
 response. Before classifications existed, the damage was bounded to a draft a member reads
-and edits on the confirm screen. It is not any more: `POST /{id}/enrich` and
-`PUT /{id}/refresh` both run the merged chain, so a substituted record now writes rows, and
-nothing in the client renders a classification yet, so those rows are written where no
-member would notice them.
+and edits on the confirm screen. It is not any more, and the three routes that reach this
+source are worth naming exactly, because two of them show the row to a member first and one
+does not:
+
+* `POST /api/books` and `POST /{id}/enrich/apply` write what a member saw and confirmed.
+* **`POST /{id}/enrich` is the unattended one.** Its fallback calls
+  `metadata.search(query, api_key, limit=1)` and writes `matches[0]` directly, so a
+  substituted record's headings land with nobody having looked at them.
+
+`PUT /{id}/refresh` does **not** reach this source: it calls `metadata.lookup` only, and
+`_SOURCES` holds four sources with the Library of Congress not among them. An earlier draft
+of this paragraph claimed it did. Nothing in the client renders a classification yet, so
+all three write where no member would notice.
 
 **Its share of this table grew on 2026-08-24 and the accepting has to be re-stated for it.**
-LCSH comes from this response and nothing else does: measured over 900 live records, 84.7%
-carry at least one and they supply 1,526 headings, where the same records supply at most two
+LCSH comes from this response and nothing else does: measured over 900 live records, 85.4%
+carry at least one and they supply 1,559 headings, where the same records supply at most two
 classifications each. So the plaintext source went from a minority supplier of a number to
 the sole supplier of a whole subject vocabulary. Nothing about the exposure changed in kind;
 what changed is how many rows are on the wrong side of it.
@@ -921,12 +930,12 @@ against `lx2.loc.gov`, 20 records each, 2026-08-24, 900 MODS records:
 
 | | |
 |---|---|
-| Records carrying at least one LCSH heading | 762 of 900, 84.7% |
-| Headings in total | 1,526 |
-| Mean per record that carries any | 2.00 |
+| Records carrying at least one LCSH heading | 769 of 900, 85.4% |
+| Headings in total | 1,559 |
+| Mean per record that carries any | 2.03 |
 | Most on one record | 14 |
-| Headings carrying a ` -- ` subdivision | 990, 64.9% |
-| `valueURI` on any `<subject>` element | 0 of 1,559 |
+| Headings carrying a ` -- ` subdivision | 1,056, 67.7% |
+| `valueURI` on any `<subject>` element | 0 of 2,280 |
 
 **The Library of Congress does not join `_SOURCES`, and that is the decision rather than the
 next step.** It is the one catalogue here reached over plaintext HTTP, which this file
@@ -942,9 +951,10 @@ row does, through `POST /{id}/enrich/apply`.
 The column was 40, which is comfortably above the longest Dewey number, LCC call number or
 GND authority number this app has seen. An LCSH heading is not a notation: its subdivisions
 are part of it, and `Computer software` alone is a different heading with a different set of
-books under it. Measured over the 1,526 live headings above, a bound of 40 refuses **335 of
-them, 22.0%**, and refuses exactly the subdivided ones. 80 still refuses 4; 100 and 120
-refuse none. Longest measured: 89 characters.
+books under it. Measured over the 1,559 live headings above, a bound of 40 refuses **399 of
+them, 25.6%**, and refuses exactly the subdivided ones. 80 still refuses 5; 100 and 120
+refuse none. Longest measured: 91 characters, `University of Nebraska (Lincoln campus).
+University Galleries -- Exhibitions -- Periodicals`.
 
 Widening the shared column rather than giving LCSH its own is the smaller change and costs
 the row nothing that matters: `CLASSIFICATION_LABEL_MAX` is 200 on the same table, so a
@@ -967,7 +977,7 @@ vocabularies for the reason already recorded: a record supplies several subject 
 one classification, and DDC is the only scheme a tag suggestion is projected from.
 
 GND and LCSH are the same kind of assertion at nearly the same rate (2.20 per DNB record,
-2.00 per Library of Congress record carrying any), so the rate cannot break the tie. The
+2.03 per Library of Congress record carrying any), so the rate cannot break the tie. The
 column does. A GND row's `number` is an authority identifier that outlives its own caption;
 an LCSH row's `number` **is** the caption, and it is what moves when the Library of Congress
 revises a heading, as it did turning `Afro-Americans` into `African Americans`. The store
@@ -975,24 +985,38 @@ exists to hold the half that does not move, so the scheme that has one is kept f
 
 **Half of that ordering fires today and half does not**, which is worth stating rather than
 leaving to be discovered. DDC and LCC ahead of LCSH is live: a Library of Congress record can
-carry 14 subject headings against two classifications, so the sort decides what a search row
-shows. GND against LCSH is not reachable through any flow the app itself drives, because the
-DNB supplies one and the Library of Congress the other and no path concatenates the two: the
-lookup merge never asks the Library of Congress, and `_merge_matches` fills only absent
-fields. It is decided now so that it is not decided later by list position.
+carry 14 subject headings against two classifications. That ordering decides what survives
+on a **merged book**, not what a search row shows: `_as_match` slices before `_headings`
+sorts, which is what the comment on that slice and its test exist to say. GND against LCSH is not reachable through any flow the app itself drives, because the
+DNB supplies one and the Library of Congress the other. `POST /merge` **does** bring both
+onto one book, and the conclusion survives for a different reason than "no path concatenates
+them": `_repoint_relations` orders keeper first then losers by id and never consults
+`_SCHEME_ORDER` at all. It is decided now so that it is not decided later by list position.
 
-### A merged search row keeps one source's classifications rather than unioning them
+### An empty list is absent, and `[]` used to beat a populated list
 
-`_merge_matches` fills a field only where the leading row has none, and `_as_match` always
-writes a list, so a Library of Congress row folded into an Open Library one loses its
-headings entirely. Measured over eight live searches on 2026-08-24: 7 of 117 rows carrying an
-LCSH heading, **6.0%**.
+`_merge_matches` filled a field only where the leading row's value `is None`. Every scalar a
+catalogue omits arrives as None, so that was the whole rule until `classifications` became
+the one **list valued** key `_as_match` writes. It always writes a list, so a source that
+found no heading wrote `[]`, and `[]` is not None, so an empty list beat a populated one and
+a Library of Congress row folded into another lost every heading.
 
-Pre-existing since round 1 and identical for DDC, LCC and GND. Not fixed here: unioning two
-sources' headings on the search path is a change to how every field merges, with its own
-comparison to run, and at 6.0% it is not what limits what LCSH delivers. The ranking slice
-is: eight live searches returned 60 rows to the member of which 12 carried an LCSH heading,
-20%.
+**The first draft of this entry recorded that as a merge design question and declined to
+fix it.** That was wrong, and the measurement is what showed it. Over 30 live title searches
+on 2026-08-24: 13 merged rows carried `loc` beside another source, 10 of those came from an
+LoC row with LCSH, and **6 lost the headings. In 6 of 6 the leading row's list was empty**,
+all of them `bnf+loc`, the BnF emitting no classification at all. There was never a union to
+perform. Unioning two populated lists would indeed be a change to how every field merges;
+preferring a populated list to an empty one is not, and is one condition.
+
+The rate depends on what it is measured against and both are worth stating: 8 of 118 over
+all rows carrying a heading is **6.8%**, but conditional on a merge actually happening it
+was 6 of 10.
+
+What still limits what LCSH delivers is the ranking slice, not the merge: six live searches
+returned 60 rows to the member of which 12 carried an LCSH heading, **20%**, because the
+Library of Congress answered 87 rows carrying one and a page holds ten. That figure is query
+set bound; a different eight searches gave 39 of 80, **48.8%**.
 
 ### The DNB is read as MARC21, and Dublin Core cost a caption to leave
 

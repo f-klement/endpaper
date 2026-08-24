@@ -35,9 +35,11 @@ what a tag suggestion is matched on, so a German record and an English one
 suggest the same tag. It is offered on the add form with the suggestions ticked,
 so it is a proposal you confirm rather than a tag applied behind you.
 
-Three schemes are stored: Dewey and Library of Congress shelf numbers, and the
+Four schemes are stored: Dewey and Library of Congress shelf numbers, the
 subject headings the German National Library assigns, each with the identifier
-that names it in the national authority file. Nothing displays them yet.
+that names it in the national authority file, and Library of Congress Subject
+Headings, which the record supplies as a phrase rather than a number. Nothing
+displays them yet.
 
 **Covers are stored here**, not hotlinked. Every candidate image is fetched and
 checked before it is offered, so a broken link never becomes a book's cover, and

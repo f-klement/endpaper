@@ -2151,7 +2151,16 @@ def _loc_record(record: ElementTree.Element) -> dict[str, Any] | None:
             for element in record.findall(f"{_MODS}subject/{_MODS}topic")
             if element.text
         ],
-        "classifications": _loc_classifications(record),
+        # The shelf classifications first and the subject headings after,
+        # which is load bearing rather than tidy. `_as_match` slices this list
+        # to `MAX_CLASSIFICATIONS_PER_BOOK` and `routers/books._headings`
+        # applies `_SCHEME_ORDER` only afterwards, so on the search path a
+        # record's own order decides what survives. One live record carries 14
+        # LCSH headings (measured over 900 records, 2026-08-24); putting them
+        # in front would cost this record its Dewey number and its call number,
+        # which are the two schemes nothing else in the chain supplies together.
+        "classifications": _loc_classifications(record)
+        + _loc_subject_headings(record),
         "series_name": None,
         "series_index": None,
     }
@@ -2198,6 +2207,112 @@ def _loc_classifications(record: ElementTree.Element) -> list[dict[str, Any]]:
             # `ClassificationIn`'s 40 character bound are the whole guard.
             number, label = raw, None
         found.append({"scheme": scheme, "number": number, "label": label})
+    return found
+
+
+#: The subject vocabulary this app reads, of the 23 the Library of Congress
+#: mixes into one record.
+#:
+#: Measured over 900 live MODS records on 2026-08-24: 2,280 `<subject>`
+#: elements, of which 289 name no authority at all and the other 1,991 name 23
+#: distinct values (one of them a stray `bisacsh.` beside `bisacsh`). `lcsh` is
+#: 1,559 of them; the largest of the other 22 are `fast` 213, `lcshac` 59,
+#: `rvm` 49, `sears` 19, `mesh` 19 and `gtt` 18, and the remaining 16 supply 55
+#: between them.
+#:
+#: Only `lcsh` is read, which is the rule `_LOC_AUTHORITIES` already applies to
+#: `<classification>`: a heading whose vocabulary this app has no reading for
+#: is a string nothing can match against another catalogue. `lcshac` is the
+#: children's subject list and is deliberately **not** folded in: it is a
+#: separate authority file with its own headings, so `lcsh` would stop meaning
+#: one vocabulary. `fast` is the closest miss, being LCSH mechanically
+#: flattened, and it is left out for the same reason.
+_LOC_SUBJECT_AUTHORITY: Final = "lcsh"
+
+#: How LCSH writes a heading and its subdivisions: `Computer software --
+#: Development`. MODS gives the parts as sibling elements instead, so the
+#: separator has to be put back.
+#:
+#: Two ASCII hyphens, which is the vocabulary's own notation and not this
+#: repository's prose. 1,056 of 1,559 live headings carry at least one, 67.7%.
+_LCSH_SUBDIVISION: Final = " -- "
+
+
+def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
+    """The `<subject authority="lcsh">` elements, as classification rows.
+
+    **A parser extension rather than a new source.** The record this reads is
+    the one `_loc_record` already has in hand, so LCSH costs no outbound
+    request and the Library of Congress does not join `_SOURCES`. It stays off
+    the lookup path for the reason `docs/decisions.md` records: it is the one
+    catalogue here reached over plaintext HTTP, and it held nothing for either
+    German ISBN measured, which is this household's main case.
+
+    **No `<subject>` element ever reaches `ddc`.** `ddc.parse_heading` accepts
+    any three digit token, so a heading opening with one would be stored as a
+    Dewey number and would suggest a household tag from it. Checked rather than
+    assumed: `parse_heading("004 Jahre Bauhaus")` answers `("004", "Jahre
+    Bauhaus")`, where `parse_heading("1968 -- Fiction")` answers None, four
+    digits not being a notation. The guard is structural and is the same
+    one round 2 built for the DNB: `<classification>` is the only element
+    handed to `ddc`, in `_loc_classifications`, and this function builds LCSH
+    rows without importing it.
+
+    **The heading is the whole chain, not its first part.** MODS gives
+    `Computer software -- Development` as two sibling `<topic>` elements, and
+    `Computer software` alone is a different heading that a different set of
+    books carries. The parts are joined in document order, which is the order
+    LCSH itself prescribes.
+
+    **A part either carries its text or nests it, and the second shape is not
+    an edge case.** `<topic>`, `<genre>`, `<geographic>` and `<temporal>` hold
+    their own text; `<titleInfo>` wraps a `<title>` and `<name>` wraps one to
+    four `<namePart>` elements, a personal name and its dates being two of them
+    (`Süssheim, Karl, 1878-1947`). Measured over 900 live records: 21 nested
+    titles and 116 nested names, and those are the only two shapes with
+    children, so reading a part's own children is the whole rule rather than
+    two special cases.
+
+    Getting that wrong is worse than losing a row. A `<name>` read as empty
+    does not drop the heading, it **shortens** it: `Catholic Church -- History`
+    becomes `History`, which is a different heading asserted about the wrong
+    thing. 116 of 1,559 live LCSH elements, 7.4%, are that shape.
+
+    **`number` holds the heading and this parser leaves `label` empty**, because the
+    record supplies no identifier to separate them: see `models.Classification`
+    for the measurement and what it costs.
+
+    Not deduplicated here. `_as_match` unions on (scheme, number) **before** it
+    slices, so a record repeating a heading spends one place and not two, and a
+    second dedupe would be the same rule enforced twice.
+    """
+    found: list[dict[str, Any]] = []
+    for element in record.findall(f"{_MODS}subject"):
+        if (element.get("authority") or "").lower() != _LOC_SUBJECT_AUTHORITY:
+            continue
+        parts: list[str] = []
+        for part in element:
+            words = (part.text or "").split()
+            if not words:
+                # Nested rather than absent: see the docstring. A name's parts
+                # are joined with a space because the record already writes the
+                # comma, `Süssheim, Karl,` then `1878-1947`.
+                words = [
+                    word
+                    for child in part
+                    for word in (child.text or "").split()
+                ]
+            if words:
+                parts.append(" ".join(words))
+        if not parts:
+            continue
+        found.append(
+            {
+                "scheme": ClassificationScheme.LCSH,
+                "number": _LCSH_SUBDIVISION.join(parts),
+                "label": None,
+            }
+        )
     return found
 
 
@@ -2617,7 +2732,19 @@ def _merge_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             filler = match
         for name, value in filler.items():
-            if name != "source" and existing.get(name) is None and value is not None:
+            if name == "source" or value is None:
+                continue
+            current = existing.get(name)
+            # An **empty list counts as absent**, and that is not pedantry. Every
+            # scalar a catalogue omits arrives as None, so `is None` was the whole
+            # rule until `classifications` became the one list valued key
+            # `_as_match` writes: it always writes a list, so a source that found
+            # no heading wrote `[]`, and `[]` is not None, so it beat a populated
+            # list from the next source. Measured live over 30 title searches: of
+            # 10 merged rows whose LoC half carried LCSH, 6 lost every heading,
+            # and in 6 of 6 the leading row's list was empty. All six were
+            # `bnf+loc`, the BnF emitting no classification at all.
+            if current is None or current == []:
                 existing[name] = value
 
         # Every catalogue that found it, so the picker can say where a row came

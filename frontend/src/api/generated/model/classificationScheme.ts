@@ -14,10 +14,12 @@
  * Library of Congress notation. A row whose scheme nobody recognises is a
  * number with no reading.
  *
- * All three are produced today. DDC comes from the DNB and K10plus (MARC
+ * All four are produced today. DDC comes from the DNB and K10plus (MARC
  * 082) and from the Library of Congress (`classification authority="ddc"`);
  * LCC comes from the Library of Congress alone (`authority="lcc"`); GND comes
- * from the DNB's subject fields, 650, 651, 655, 689 and 600.
+ * from the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from
+ * the same Library of Congress record as the other two, `<subject
+ * authority="lcsh">` beside the `<classification>` elements.
  *
  * **GND is an authority file rather than a shelf order, and it still belongs
  * here.** What the column called `number` holds is the scheme's own identifier
@@ -29,12 +31,23 @@
  * record calls it. What differs is that a Dewey number also sorts, and a GND
  * number does not, which costs nothing because nothing here sorts on it.
  *
+ * **LCSH is the one member with no identifier at all, and that is measured
+ * rather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a
+ * single `<subject>` element across 900 live records (2026-08-24), so the
+ * only access point the record supplies is the authorised heading string.
+ * `number` holds that string and `label` is absent, because storing the same
+ * words in both columns would state one fact twice. The consequence is
+ * honest and worth knowing: a heading the Library of Congress later revises
+ * (`Afro-Americans` became `African Americans`) changes this scheme's
+ * identifier, where a GND number or a Dewey notation survives its own
+ * recaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.
+ *
  * **A person's identifier is not one of these**, though the DNB writes it in
  * the same `$0`: `100 $0` says who wrote the book, and every scheme here says
  * what the book is about. See `docs/decisions.md`, "The author's GND is read
  * by nothing".
  *
- * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other two
+ * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three
  * are stored because a catalogue heading is worth keeping whole, not because
  * anything reads them yet.
  */
@@ -45,4 +58,5 @@ export const ClassificationScheme = {
   ddc: "ddc",
   lcc: "lcc",
   gnd: "gnd",
+  lcsh: "lcsh",
 } as const;

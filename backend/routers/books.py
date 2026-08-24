@@ -281,9 +281,20 @@ def _clipped(value: object) -> str:
 #: DDC leads because it is the only scheme a tag suggestion is projected from,
 #: so losing it costs the member something visible. LCC next: a shelf
 #: classification is one assertion per catalogue and the thing a MARC export
-#: needs. GND last because a single record supplies several (2.20 per record,
-#: measured over 85 live DNB records on 2026-08-24), and an eighth subject
-#: heading is worth less than another catalogue's Dewey number.
+#: needs. The two subject vocabularies come after both, because a single record
+#: supplies several of each (GND 2.20 per record over 85 live DNB records, LCSH
+#: 2.03 per record that carries any over 900 live Library of Congress records,
+#: both measured 2026-08-24) and an eighth subject heading is worth less than
+#: another catalogue's Dewey number.
+#:
+#: **GND before LCSH, and the tie is broken on which `number` is stable.** They
+#: are the same kind of assertion at nearly the same rate, so the reason has to
+#: be the column: a GND row's number is an authority identifier that outlives
+#: its own caption, and an LCSH row's number is the heading string itself,
+#: which is precisely what moves when the Library of Congress revises a heading
+#: (`Afro-Americans` became `African Americans`). The store exists to hold the
+#: half that does not move, so the scheme that has one is kept first. Nothing
+#: renders a classification yet, so this is not a display preference: see §30i.
 #:
 #: A scheme missing from here sorts last rather than raising, so adding one to
 #: `ClassificationScheme` cannot break the ceiling by forgetting this.
@@ -291,6 +302,7 @@ _SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
     ClassificationScheme.DDC: 0,
     ClassificationScheme.LCC: 1,
     ClassificationScheme.GND: 2,
+    ClassificationScheme.LCSH: 3,
 }
 
 
@@ -299,7 +311,8 @@ def _headings(entries: object) -> list[ClassificationIn]:
 
     **An upstream catalogue is no more trusted than a browser.** The lookup
     response is a draft the client posts straight back, so a caption longer than
-    the column or a number longer than 40 characters has to be refused here
+    the column or a number longer than `CLASSIFICATION_NUMBER_MAX` has to be
+    refused here
     rather than accepted into a payload that then 422s on the way in. Nothing
     in a record is worth failing the whole lookup for, so a bad entry is
     dropped and logged and the rest of the record is answered.
@@ -359,10 +372,14 @@ def _match_rows(
     caption costs its own heading rather than the row. What it no longer does
     on this path is the count: `_as_match` has already sliced, so on the search
     path the parser's own order decides what survives and not `_SCHEME_ORDER`.
-    That is safe only while `_dnb_record` emits the Dewey number first and is
-    the only producer of a second scheme, and it is the sentence that goes
-    wrong first if a parser ever emits one ahead of DDC. The sort still decides
-    for a merged book, which is where several catalogues meet.
+    Two parsers now have to keep that true, not one. `_dnb_record` emits its
+    Dewey number ahead of its GND headings, and `_loc_record` emits its
+    `<classification>` elements ahead of its LCSH ones, which is where the
+    slice actually bites: a live Library of Congress record carries up to 14
+    subject headings against at most two classifications. This is the sentence
+    that goes wrong first if a third parser emits a subject vocabulary ahead of
+    a shelf one. The sort still decides for a merged book, which is where
+    several catalogues meet.
 
     `all_tags` is None where the caller already has a book. The enrichment
     candidates are other editions of a book that exists, so a tag suggestion

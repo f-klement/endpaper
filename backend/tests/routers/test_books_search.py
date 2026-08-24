@@ -17,6 +17,7 @@ import httpx
 import pytest
 import respx
 
+from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import (
     BNF,
     DNB,
@@ -744,3 +745,102 @@ class TestOneBadRecordCostsOneResult:
         assert match["classifications"] == [
             {"scheme": "ddc", "number": "610", "label": None}
         ]
+
+
+class TestSubjectHeadingsOnASearchRow:
+    """LCSH, out of the Library of Congress record this path already fetches.
+
+    The search path is the only one that reaches it: the Library of Congress is
+    not in `_SOURCES`, so a scan never asks it. A picked row carries the
+    headings into `POST /{id}/enrich/apply` like any other, which is how they
+    reach a book.
+    """
+
+    #: A live shaped MODS record: the two `<classification>` elements the
+    #: parser already read, plus the `<subject authority="lcsh">` siblings that
+    #: sit beside them, plus one French `rvm` heading the record also carries.
+    def _mods(self, subjects: str) -> str:
+        return mods_record().replace(
+            "</mods>",
+            '<classification authority="lcc">QA76.73.P98 V53 2021</classification>'
+            '<classification authority="ddc" edition="23">005.133</classification>'
+            f"{subjects}"
+            '<subject authority="rvm"><topic>Genie logiciel</topic></subject>'
+            "</mods>",
+        )
+
+    def _search(self, client, headers, subjects: str) -> dict:
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOC).mock(
+                return_value=sru_response(self._mods(subjects))
+            )
+            silence_catalogues(mock)
+            [match] = client.get(
+                "/api/books/search",
+                params={"q": "sombra viento zafon"},
+                headers=headers,
+            ).json()
+        return match
+
+    def test_a_subject_heading_reaches_a_search_row(self, client, admin):
+        match = self._search(
+            client,
+            admin["headers"],
+            '<subject authority="lcsh"><topic>Computer software</topic>'
+            "<topic>Development</topic></subject>",
+        )
+
+        assert {
+            "scheme": "lcsh",
+            "number": "Computer software -- Development",
+            "label": None,
+        } in match["classifications"]
+
+    def test_a_heading_longer_than_any_call_number_survives_whole(
+        self, client, admin
+    ):
+        """89 characters, against a column that held 40 before this scheme
+        existed. 399 of 1,559 headings measured live on 2026-08-24 are over
+        that bound, 25.6%, and truncating one merges two headings that name
+        different sets of books."""
+        heading = (
+            "United States -- History -- Civil War, 1861-1865 -- "
+            "Social aspects -- Juvenile literature"
+        )
+        match = self._search(
+            client,
+            admin["headers"],
+            '<subject authority="lcsh"><topic>United States</topic>'
+            "<topic>History</topic><topic>Civil War, 1861-1865</topic>"
+            "<topic>Social aspects</topic>"
+            "<topic>Juvenile literature</topic></subject>",
+        )
+        numbers = [entry["number"] for entry in match["classifications"]]
+
+        assert heading in numbers
+        assert len(heading) == 89
+
+    def test_the_shelf_classifications_lead_a_row_crowded_with_headings(
+        self, client, admin
+    ):
+        """A record carrying more subject headings than the whole book budget.
+
+        Measured live: one record carries 14 against at most two
+        classifications. `_as_match` slices before `_SCHEME_ORDER` is applied,
+        so the parser emitting the `<classification>` elements first is what
+        keeps the Dewey number and the call number on the row, and
+        `_headings` then puts the Dewey number in front.
+        """
+        match = self._search(
+            client,
+            admin["headers"],
+            "".join(
+                f'<subject authority="lcsh"><topic>Thema {index}</topic></subject>'
+                for index in range(14)
+            ),
+        )
+        schemes = [entry["scheme"] for entry in match["classifications"]]
+
+        assert len(schemes) == MAX_CLASSIFICATIONS_PER_BOOK
+        assert schemes[:2] == ["ddc", "lcc"]
+        assert schemes[2:] == ["lcsh"] * 6

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+**Library of Congress subject headings.** A title search now brings back what a
+cataloguer said the book is about, in the Library of Congress's own controlled
+vocabulary: `Computer programming`, `Software architecture`,
+`Computer software -- Development`. They ride along on the record the search
+already fetched, so nothing got slower and no new service is involved. Measured
+over 900 live records: 85% carry at least one.
+
+They are kept whole, subdivisions included, because `Computer software` and
+`Computer software -- Development` are two different headings with two different
+sets of books under them. Nothing displays them yet.
+
 **The About card carries the README's badges.** Version, licence and source, at
 the top of the card at the foot of Settings, where the version and a source link
 used to sit as a sentence. They are drawn rather than fetched: no shields.io and

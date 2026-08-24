@@ -128,24 +128,42 @@ book in a published schedule, and only that one means anything to another instit
 | `books.categories` | whatever the publisher claimed |
 | `classifications` | an assertion from a published scheme |
 
-**Three schemes, and `number` means the same thing in all three.** DDC and LCC are shelf
+**Four schemes, and `number` means the same thing in three of them.** DDC and LCC are shelf
 orders; GND is the German national subject authority file, and what the column holds for it
-is the authority record number (`gnd`, `4203576-4`, `Schatz`). What the three share is the
+is the authority record number (`gnd`, `4203576-4`, `Schatz`). What those three share is the
 job the column does: the identifier is stable and the caption is whatever the supplying
 record wrote. That was measured across languages for Dewey; for GND the DNB is the only
 supplier here, so every caption is German today. What differs is that a Dewey number also
 sorts and a GND number does not, which costs nothing here because nothing sorts on it.
+
+**LCSH is the exception and is stored as one.** The Library of Congress supplies no
+identifier for a subject heading: no `valueURI` on any of 2,280 `<subject>` elements across
+900 live records, measured 2026-08-24. The authorised heading string is the access point, so
+it goes in `number` and `label` stays empty, because putting the same words in both would
+state one fact twice. What that costs is worth knowing: a heading the Library of Congress
+later revises (`Afro-Americans` became `African Americans`) changes this scheme's
+identifier, where a GND number survives its own recaptioning. That is also why LCSH sorts
+last at the ceiling.
 
 | Scheme | Comes from | Caption |
 |---|---|---|
 | `ddc` | DNB and K10plus MARC 082, Library of Congress MODS, Open Library `dewey_decimal_class` | none, since 2026-08-24 |
 | `lcc` | Library of Congress, Open Library `lc_classifications` | none |
 | `gnd` | DNB MARC 650, 651, 655, 689 and 600 | the heading text |
+| `lcsh` | Library of Congress MODS `<subject authority="lcsh">` | none: the heading **is** the number |
+
+`number` is 120 characters, which is LCSH's doing. A notation never approaches it; an LCSH
+heading carries its subdivisions (`Computer software -- Development`), and the longest of
+1,559 measured live is 91. A bound of 40, which is what the column held until 2026-08-24,
+refuses 399 of them, 25.6%, and refuses exactly the subdivided ones.
 
 **Open Library's `subjects` are not on this list, and that is the decision rather than an
 omission.** They are uncontrolled strings somebody typed (`open_syllabus_project`,
-`fiction classics`), so they go to `subjects` with the publisher's own list. Only the two
-fields above name a published scheme. Argued in [`decisions.md`](decisions.md).
+`fiction classics`), so they go to `subjects` with the publisher's own list. Only fields that
+name a published scheme reach this table. The same rule keeps out the other 22 authority
+values the Library of Congress mixes into one record (`fast`, `lcshac`, `rvm`, `sears` and
+the rest): each is a separate authority file, so folding them into `lcsh` would make the
+scheme name a lie. Argued in [`decisions.md`](decisions.md).
 
 **An author identifier is not one of these.** The DNB writes it in the same `$0`, and
 `100 $0` says who wrote the book where every scheme here says what the book is about. It is
@@ -175,7 +193,10 @@ so an inflated book is paid for on every page that contains it. At the ceiling a
 heading is dropped rather than a stored one evicted, and **which one survives is decided by
 order**: `_headings` sorts by scheme before it slices, so a Dewey number outranks a subject
 heading, and that is done there rather than in a parser because by then `_merge` has
-concatenated up to four catalogues. Re-measured on 2026-08-24, when the subject headings
+concatenated up to four catalogues. The order is DDC, LCC, GND, LCSH; the two subject
+vocabularies come last because a record supplies several of each and one classification, and
+GND comes before LCSH because its number is an identifier that outlives its caption where an
+LCSH number is the caption. Re-measured on 2026-08-24, when the subject headings
 started arriving: 3.07 headings per record over 85 DNB lookups and 2.9 over 189 records from
 four DNB searches, with 1 and 8 records respectively above eight. Both are one catalogue's
 figures and this bounds a book several can feed, so neither is headroom for the total.

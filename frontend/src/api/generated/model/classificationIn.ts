@@ -19,7 +19,7 @@ export interface ClassificationIn {
   label?: string | null;
   /**
    * @minLength 1
-   * @maxLength 40
+   * @maxLength 120
    */
   number: string;
   scheme: ClassificationScheme;

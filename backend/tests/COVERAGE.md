@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**2204 tests**, in 51 files. Line coverage was last measured at **96%** (4303 statements,
+**2223 tests**, in 51 files. Line coverage was last measured at **96%** (4303 statements,
 186 missed) when the suite held 1571, which is 568 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
@@ -37,7 +37,7 @@ is why the helper uses regexes.
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number, and that every mapped tag name is a tag that exists |
 | `test_backup.py` | 63 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
-| `test_metadata.py` | 140 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a classification keeps its number, its caption and its scheme, what a MARC record carries that a Dublin Core crosswalk had cleaned up (repeated subfields, non-sorting delimiters, decomposed text), and Open Library's three records: that its subjects never become classifications, that a key out of a response cannot move the host, and that the edition cluster drops a translation |
+| `test_metadata.py` | 149 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a classification keeps its number, its caption and its scheme, what a MARC record carries that a Dublin Core crosswalk had cleaned up (repeated subfields, non-sorting delimiters, decomposed text), and Open Library's three records: that its subjects never become classifications, that a key out of a response cannot move the host, that the edition cluster drops a translation, and that a Library of Congress subject heading keeps its subdivisions, refuses the other twenty two authorities in the same record and never reaches the Dewey parser |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
@@ -55,13 +55,13 @@ is why the helper uses regexes.
 | `test_main.py` | 57 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route, and `SERVE_FRONTEND=false` taking both away |
 | `test_house_rules.py` | 29 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed |
 | `test_serialisation.py` | 42 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match, that the copy count and the collection name each cost one statement for a page rather than one per book, and that the statement count stated in the docstring is the one measured |
-| `test_schema.py` | 40 | Alembic: create, adopt a pre-Alembic database, upgrade, and that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 44 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and that widening the classification number kept the unique index and the rows |
 | `test_database.py` | 27 | Engine setup and the session dependency |
 | `routers/test_books_bulk.py` | 27 | One verb applied to a selection, and the three-way count |
 | `routers/test_collections.py` | 19 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, counts filtered to the caller, and a delete that unfiles rather than destroys |
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 31 | Duplicate detection and the merge, incl. the ORM cascade trap |
-| `routers/test_books_classifications.py` | 28 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a household tag, that the server writes no tag by itself, and that re-running enrichment, merging and purging each leave the right rows, including the per book ceiling that both capped writers of the table obey and the scheme ordering that decides what survives it |
+| `routers/test_books_classifications.py` | 31 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a household tag, that the server writes no tag by itself, and that re-running enrichment, merging and purging each leave the right rows, including the per book ceiling that both capped writers of the table obey and the scheme ordering that decides what survives it |
 | `routers/test_books_quotes.py` | 50 | **Passages copied out of a book.** The bounds on the excerpt, the remark and the page, reading order with the unpaged last, who may correct one, that a private book's quotes are 404, and that the cross-book listing filters its rows *and* its count |
 | `routers/test_books_progress.py` | 29 | **The reading log.** One unit per entry, the promotion to reading, that a member never sees another's, and the merge that would otherwise cascade it away |
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
@@ -69,7 +69,7 @@ is why the helper uses regexes.
 | `routers/test_books_authors.py` | 47 | The author index and its privacy, the `?author=` filter, merging and reversing one, the household wide mapping against the filtered shelf, the flat map, and undoing a merge |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
 | `routers/test_books_google.py` | 26 | Enrichment, the chosen-edition apply and that its body cannot overflow the database, candidates and that a record the schema refuses costs one heading rather than the whole response, that the work cluster is asked with the book's own ISBN, the feature gate |
-| `routers/test_books_search.py` | 37 | **Free-text search.** That it works with no API key, that all six catalogues answer, how they merge, that one record failing a bound costs one result rather than the response, and that a record carrying more headings than the ceiling loses the ninth rather than its whole row |
+| `routers/test_books_search.py` | 40 | **Free-text search.** That it works with no API key, that all six catalogues answer, how they merge, that one record failing a bound costs one result rather than the response, that a record carrying more headings than the ceiling loses the ninth rather than its whole row, and that a Library of Congress record's shelf classifications lead a row crowded with subject headings |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
 | `routers/test_settings.py` | 58 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
 | `routers/test_imports.py` | 43 | The import, the private-ISBN branch, the tag caps, the rate limit |

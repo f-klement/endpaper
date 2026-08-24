@@ -691,3 +691,107 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
                 ).scalar()
                 == 0
             )
+
+
+class TestWideningTheClassificationNumber:
+    """Revision b7d41f0a2c95, which resizes a column rather than adding one.
+
+    SQLite does not enforce a `VARCHAR` length, so nothing here would fail
+    without the migration on this engine. What the batch rewrite can still get
+    wrong is the table around the column: the unique index that stops
+    enrichment depositing a second copy of every heading is rebuilt with it, and
+    a rewrite that dropped it would be silent until two identical rows appeared.
+    """
+
+    HEADING = (
+        "United States -- History -- Civil War, 1861-1865 -- "
+        "Social aspects -- Juvenile literature"
+    )
+
+    def build_database_with_a_heading(self) -> None:
+        """A database one revision back, holding a book and a short heading."""
+        drop_everything()
+        schema.upgrade_to("e2c74a91b5d8")
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, is_private, added_at, ownership) "
+                    "VALUES ('Clean Code', 0, datetime('now'), 'owned')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, label) "
+                    "VALUES (1, 'ddc', '005.133', NULL)"
+                )
+            )
+            connection.commit()
+
+    def numbers(self) -> list[str]:
+        with engine.connect() as connection:
+            return list(
+                connection.execute(
+                    text("SELECT number FROM classifications ORDER BY id")
+                ).scalars()
+            )
+
+    def test_the_column_takes_a_heading_no_call_number_would_reach(self):
+        self.build_database_with_a_heading()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, label) "
+                    "VALUES (1, 'lcsh', :number, NULL)"
+                ),
+                {"number": self.HEADING},
+            )
+            connection.commit()
+        assert self.HEADING in self.numbers()
+
+    def test_the_heading_already_stored_survives_the_rewrite(self):
+        self.build_database_with_a_heading()
+
+        schema.upgrade_to_head()
+
+        assert self.numbers() == ["005.133"]
+
+    def test_the_unique_index_survives_the_rewrite(self):
+        """Batch mode rebuilds the table by reflecting it, and losing this index
+        would let every re-run of enrichment deposit a second copy of a
+        heading."""
+        self.build_database_with_a_heading()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, label) "
+                    "VALUES (1, 'ddc', '005.133', NULL)"
+                )
+            )
+
+    def test_the_downgrade_deletes_a_row_the_narrow_column_could_not_hold(self):
+        """A row the schema says cannot exist is worse than a row that is gone:
+        narrowing a column with over-long values in it fails outright on a real
+        database and keeps them silently on SQLite."""
+        from alembic import command
+
+        self.build_database_with_a_heading()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, label) "
+                    "VALUES (1, 'lcsh', :number, NULL)"
+                ),
+                {"number": self.HEADING},
+            )
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), "e2c74a91b5d8")
+
+        assert self.numbers() == ["005.133"]

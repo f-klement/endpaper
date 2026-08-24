@@ -9,6 +9,7 @@ rows, and that nothing in this app turns a heading into a tag by itself.
 import httpx
 import respx
 
+from enums import ClassificationScheme
 from models import Book, Classification, Tag
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import (
@@ -202,6 +203,42 @@ class TestTheLookup:
         ]
 
         assert numbers == ["004", "4026894-9"]
+
+    def test_a_number_longer_than_the_column_is_refused(self, client, admin):
+        """`ClassificationIn.number` is the **only** thing enforcing that bound.
+
+        SQLite does not enforce a `VARCHAR` length: a 5,000 character string
+        inserted into `VARCHAR(120)` stores at 5,000, measured. So the schema is
+        the fence, and the security acceptance for the plaintext Library of
+        Congress path rests on it holding. Deleting `max_length` from that field
+        used to break no test at all.
+
+        The number carries the heading itself for LCSH, where for DDC it is a
+        notation, which is why the two bounds are tested separately.
+        """
+        long_number = "9" * 121
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(
+                    DNB_RECORD.replace(
+                        '<subfield code="a">004</subfield>',
+                        f'<subfield code="a">{long_number}</subfield>',
+                    )
+                )
+            )
+            silence_catalogues(mock)
+            res = client.get(
+                f"/api/books/lookup?isbn={GERMAN_ISBN}", headers=admin["headers"]
+            )
+
+        assert res.status_code == 200
+        assert all(
+            len(entry["number"]) <= 120
+            for entry in res.json()["classifications"]
+        )
+        assert long_number not in [
+            entry["number"] for entry in res.json()["classifications"]
+        ]
 
     def test_a_heading_the_column_could_not_hold_is_dropped(self, client, admin):
         """The lookup response is a draft the client posts straight back, so a
@@ -653,6 +690,73 @@ class TestMerging:
 
         assert res.status_code == 200
         assert len(headings(pair[0]["id"], db)) == 1
+
+
+class TestSubjectHeadingsFromTheLibraryOfCongress:
+    """LCSH reaches a book the way a picked search row does, and only that way.
+
+    The Library of Congress is not in `_SOURCES`, so a scan never asks it and
+    nothing here can arrive from a lookup. A member picks a search result and
+    the client posts it back to `enrich/apply`, which is the path under test.
+    """
+
+    HEADING = (
+        "United States -- History -- Civil War, 1861-1865 -- "
+        "Social aspects -- Juvenile literature"
+    )
+
+    def test_a_picked_row_stores_its_subject_heading(self, client, admin, db):
+        created = client.post(
+            "/api/books", json={"title": "Battle Cry of Freedom"}, headers=admin["headers"]
+        ).json()
+
+        res = client.post(
+            f"/api/books/{created['id']}/enrich/apply",
+            json={"classifications": [{"scheme": "lcsh", "number": self.HEADING}]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        stored = headings(created["id"], db)
+        assert [(row.scheme, row.number, row.label) for row in stored] == [
+            (ClassificationScheme.LCSH, self.HEADING, None)
+        ]
+
+    def test_the_subdivisions_are_stored_rather_than_truncated(
+        self, client, admin, db
+    ):
+        """89 characters, against the 40 the column carried before this scheme
+        existed. `United States -- History` and the whole chain name different
+        sets of books, so a truncation would merge two headings into one."""
+        created = client.post(
+            "/api/books",
+            json={
+                "title": "Battle Cry of Freedom",
+                "classifications": [{"scheme": "lcsh", "number": self.HEADING}],
+            },
+            headers=admin["headers"],
+        ).json()
+
+        assert len(self.HEADING) == 89
+        assert headings(created["id"], db)[0].number == self.HEADING
+
+    def test_two_headings_sharing_a_stem_are_two_rows(self, client, admin, db):
+        """The unique index is on the whole string, which is the whole access
+        point in this scheme. Collapsing them would lose the more precise one.
+        """
+        created = client.post(
+            "/api/books",
+            json={
+                "title": "Battle Cry of Freedom",
+                "classifications": [
+                    {"scheme": "lcsh", "number": "United States -- History"},
+                    {"scheme": "lcsh", "number": "United States -- History -- Sources"},
+                ],
+            },
+            headers=admin["headers"],
+        ).json()
+
+        assert len(headings(created["id"], db)) == 2
 
 
 class TestTheCeiling:
