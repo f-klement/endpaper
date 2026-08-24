@@ -193,6 +193,22 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
+/**
+ * CIE L*, because a contrast ratio says nothing useful about two adjacent
+ * surfaces. `paper-100` on `paper-200` is 1.035:1 on Rose Pine light and
+ * 1.272:1 on solarized: both round to "the same", while their lightness
+ * separation differs by a factor of six and only one of them reads as two
+ * surfaces. Yn is 1, so the argument is the relative luminance above.
+ */
+function lightness(hex: string): number {
+  const y = luminance(hex);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+}
+
+function separation(a: string, b: string): number {
+  return Math.abs(lightness(a) - lightness(b));
+}
+
 // ── The contract ─────────────────────────────────────────────────────────────
 
 const PAPER_STEPS = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
@@ -273,6 +289,15 @@ function lightPairs(): Pair[] {
     // error nor an achievement, so it must not borrow danger or bloom, and it
     // still has to be readable at pill size.
     pair("the did-not-finish pill", "paper-800", "paper-200", 4.5),
+    // The About card's badge row, which is drawn rather than fetched: no
+    // shields.io, because `img-src` comes from the cover hosts and a badge is
+    // decoration. The label cell reuses the pill's pairing above; the value
+    // cell sits one rung lighter so the split reads without a border, and a
+    // link's value cell carries the accent and an underline.
+    pair("a badge label", "paper-800", "paper-200", 4.5),
+    pair("a badge value", "paper-800", "paper-100", 4.5),
+    pair("a badge link", "accent-800", "paper-100", 4.5),
+    pair("a badge link, pointed at", "accent-900", "paper-100", 4.5),
     // The accent, at the rungs that carry text.
     pair("link on the card", "accent-700", "paper-0", 4.5),
     pair("link on the page", "accent-700", "paper-50", 4.5),
@@ -304,6 +329,13 @@ function darkPairs(): Pair[] {
     pair("paper-300", "paper-300", "paper-900", 7.0),
     pair("body text on the card", "paper-200", "paper-900", 7.0),
     pair("the did-not-finish pill", "paper-200", "paper-800", 4.5),
+    // The badge row again. `paper-700` is the lightest surface in a dark ramp
+    // and so the hardest of the two cells, which is why the value cell and the
+    // link ink are both measured against it rather than against the label's.
+    pair("a badge label", "paper-200", "paper-800", 4.5),
+    pair("a badge value", "paper-200", "paper-700", 4.5),
+    pair("a badge link", "accent-200", "paper-700", 4.5),
+    pair("a badge link, pointed at", "accent-100", "paper-700", 4.5),
     pair("muted text on the page", "paper-400", "paper-950", 6.0),
     pair("accent text on the card", "accent-400", "paper-900", 4.5),
     pair("accent text on the page", "accent-400", "paper-950", 4.5),
@@ -461,6 +493,47 @@ describe("the body ink stays inside the anti-glare band", () => {
       const ratio = contrast(tokens["--color-paper-200"]!, tokens["--color-paper-950"]!);
       expect(ratio).toBeGreaterThanOrEqual(8.5);
       expect(ratio).toBeLessThanOrEqual(16);
+    });
+  }
+});
+
+describe("the About card's badge cells read apart", () => {
+  // The defect this was written for: the row's two cells are `paper-200` and
+  // `paper-100` in light, which are 1.32 CIE L* apart on Rose Pine and 3.14 to
+  // 8.89 on the other six, so on that one palette a badge drew as a single flat
+  // chip. The same round had rejected an accent cell at 1.13:1 in the dark for
+  // exactly that, which is what makes this mechanical rather than a matter of
+  // taste. The fix is a hairline, and what has to hold is that the hairline is
+  // visible against both cells it sits between.
+  //
+  // 4.0 is the floor, and it is anchored to a hairline this app already ships
+  // rather than chosen. `CollapsibleSection`'s own 1px divider,
+  // `border-paper-100 dark:border-paper-800`, measures 4.11 L* at worst light
+  // (endpaper) and 4.25 at worst dark (nord); the card border is 5.64 and 4.25.
+  // A floor below that would admit a separator fainter than the faintest line
+  // the app treats as visible, which is exactly what an eighth palette would
+  // present. Measured worst with the tokens as they ship: 5.43 in light
+  // (rosepine, the separator against the label cell) and 12.30 in dark
+  // (endpaper, against the value cell), so this moves no shipped value.
+  const FLOOR = 4.0;
+
+  for (const palette of THEMES) {
+    it(`${palette} light`, () => {
+      const tokens = tokensFor(palette, "light");
+      const rule = tokens["--color-paper-300"]!;
+      const cells = ["--color-paper-200", "--color-paper-100"];
+      for (const cell of cells) {
+        expect(separation(rule, tokens[cell]!)).toBeGreaterThanOrEqual(FLOOR);
+      }
+    });
+
+    it(`${palette} dark`, () => {
+      const tokens = tokensFor(palette, "dark");
+      const rule = tokens["--color-paper-600"]!;
+      const cells = ["--color-paper-800", "--color-paper-700"];
+      for (const cell of cells) {
+        expect(separation(rule, tokens[cell]!)).toBeGreaterThanOrEqual(FLOOR);
+      }
     });
   }
 });

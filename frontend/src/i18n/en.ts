@@ -772,8 +772,14 @@ export const en = {
 
   // ── About ───────────────────────────────────────────────────────────────────
   "about.title": "About Endpaper",
-  "about.version": "Version {version}",
-  "about.source": "Source code",
+  // The badge row's labels. Each is a whole phrase on its own rather than a
+  // fragment of one, so a translator is never asked to guess word order. The
+  // values are not here: a version string, "Apache 2.0" and "GitHub" are names
+  // rather than language, and a catalogue entry that is byte identical in every
+  // language is a translation nobody can make.
+  "about.versionLabel": "Version",
+  "about.licenceLabel": "Licence",
+  "about.sourceLabel": "Source",
   "about.support":
     "If you like Endpaper and want to support my work, buy me a coffee.",
   "about.kofiAlt": "Support Endpaper on Ko-fi",

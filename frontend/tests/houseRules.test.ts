@@ -237,10 +237,16 @@ describe("a dark hover state is stated, never inherited", () => {
     // slightly wrong; text that is a shade off is text nobody can read, and
     // WCAG 1.4.3 has a number for the second and not the first.
     //
-    // Concatenated class strings are joined before matching. Two of these are
+    // Concatenated class strings are joined before matching. Four of these are
     // written as `"…light…" + "…dark…"` across a line break, and a rule that
-    // read the halves separately would report both as offenders and teach the
-    // next person to work around it.
+    // read the halves separately would report all four as offenders and teach
+    // the next person to work around it. Counted 2026-08-24, by joining each
+    // concatenation chain and asking which put the plain hover and the dark one
+    // in different segments: `components/Button.tsx`,
+    // `app/components/NavBar.tsx`, `pages/Home/components/BookFilters.tsx`,
+    // `pages/SettingsPage/components/AboutBadges.tsx`. This comment said "two"
+    // while there were three, which is why the count is now dated and the files
+    // named: a claim that there are exactly N is worth nothing without them.
     //
     // Said out loud so nobody trusts it as total: the unit is the string
     // literal, not the utility. A literal carrying two unqualified hover

@@ -1,6 +1,7 @@
 
 import { CollapsibleSection } from "../../../components";
 import { useTranslation } from "../../../i18n";
+import AboutBadges from "./AboutBadges";
 
 interface AboutSectionProps {
   isOpen: boolean;
@@ -10,12 +11,14 @@ interface AboutSectionProps {
 /**
  * Which build is running, where the source is, and one line asking.
  *
- * **Two lines and a button, and the shortness is the design.** A sentence
- * describing the app was written and cut: somebody reading this is already
- * inside it and does not need to be told what it is. What is left is what an
- * About card is for. A version number is what gets quoted in a bug report, and
- * the source link is what an Apache-2.0 reader goes looking for, so those two
- * share a line: they are one thought.
+ * **A badge row, one line and a button, and the shortness is the design.** A
+ * sentence describing the app was written and cut: somebody reading this is
+ * already inside it and does not need to be told what it is. What is left is
+ * what an About card is for. A version number is what gets quoted in a bug
+ * report, and the source link is what an Apache-2.0 reader goes looking for.
+ * Both are now badges, in `AboutBadges`, which is why the paragraph that used
+ * to carry them is gone rather than sitting above them: two statements of the
+ * same two facts is what the badge row was added to remove.
  *
  * **The ask is one sentence and does not explain itself.** `README.md` and the
  * Docker Hub page ask in the same sentence and add two facts, that it pays for
@@ -49,6 +52,17 @@ interface AboutSectionProps {
  * 712px of painted card, against 170px for the language card. Tightening the
  * panel's own `space-y-4` would buy 24px and was refused: it would give this
  * one card a rhythm no other card has.
+ *
+ * **The badge row cost that figure nothing**, which is why it could be a row
+ * rather than a line of text. A `text-sm` paragraph is 20px on Tailwind's
+ * scale, and a `text-xs` badge at `py-0.5` is 16px of line box plus 4px of
+ * padding, also 20px. Three badges are one line at this width in both languages
+ * (roughly 361px of badge in English, 372px in German, against 632px of content
+ * inside `p-5`), and a development build's longer version string takes it to
+ * roughly 433px, still one line. It wraps below about 375px of card width, so a
+ * phone sees two rows: 20px twice plus `gap-1.5`, which is 26px more, so 236px.
+ * Wrapping is the deliberate behaviour, because a badge sliced in half at the
+ * card's edge is worse than a second line.
  */
 export default function AboutSection({ isOpen, onToggle }: AboutSectionProps) {
   const { t } = useTranslation();
@@ -62,24 +76,7 @@ export default function AboutSection({ isOpen, onToggle }: AboutSectionProps) {
       isOpen={isOpen}
       onToggle={onToggle}
     >
-      {/* One line, because it is one thought: what am I running, and where does
-          it live. The middot is a separator rather than a word, so it is hidden
-          from the accessibility tree, where the paragraph and the link are
-          already two things. */}
-      <p className="text-sm text-paper-600 dark:text-paper-400">
-        {t("about.version", { version: __APP_VERSION__ })}
-        <span aria-hidden="true" className="mx-1.5">
-          ·
-        </span>
-        <a
-          href="https://github.com/f-klement/endpaper"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-accent-700 hover:text-accent-800 underline dark:text-accent-400 dark:hover:text-accent-300"
-        >
-          {t("about.source")}
-        </a>
-      </p>
+      <AboutBadges />
 
       <p className="text-sm text-paper-600 dark:text-paper-400">
         {t("about.support")}

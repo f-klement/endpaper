@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**The About card carries the README's badges.** Version, licence and source, at
+the top of the card at the foot of Settings, where the version and a source link
+used to sit as a sentence. They are drawn rather than fetched: no shields.io and
+no image at all, so they take the colours of whichever palette you chose, they
+render with the app installed and offline, and opening Settings tells no outside
+service that your server exists.
+
 **Classifications are stored whole.** A catalogue heading is a scheme, a number
 and a caption: `GND`, `4203576-4`, `Schatz`. The number used to be stripped off
 at parse time so the caption could substring match a tag by name, which threw

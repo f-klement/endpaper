@@ -3202,7 +3202,8 @@ which is what makes the rest of these comparable.
 |---|---|---|---|
 | First draft, with a sentence describing the app | 286px | 788px | 36% |
 | That sentence cut | 246px | 748px | 33% |
-| **Shipped: version and source on one line** | **210px** | **712px** | **29.5%** |
+| Version and source on one line | 210px | 712px | 29.5% |
+| **Shipped: that line replaced by a badge row, 2026-08-24** | **210px** | **712px** | **29.5%** |
 
 About is still the tallest card there by 40px, against 170px for language and 160px for
 appearance, and that is where it stops. It is last on the page and one card among five,
@@ -3234,7 +3235,9 @@ pattern names: a trademark question rather than a copyright one.
 
 The card also names the version and links the source, which is the half of it that is not
 about money at all: a version number is what somebody quotes in a bug report, and the
-source link is what an Apache-2.0 reader goes looking for.
+source link is what an Apache-2.0 reader goes looking for. Since 2026-08-24 both are
+badges rather than a sentence, and the section below is why the row cost the figures above
+nothing.
 
 ### The version is derived, not declared
 
@@ -3270,6 +3273,151 @@ Every feature stays available to somebody who runs their own relay, and if that 
 being true it is a different project. Publishing what the relay costs and what came in was
 promised in an earlier draft of these texts and is promised in none of them now; it is
 unshipped work in `implementation_plan.md` A0, waiting on a relay to have a cost.
+
+### The About card's badges are drawn, never fetched
+
+`README.md` opens with a row of shields.io badges. The same row exists in the app, at the
+top of the About card, and **none of it is an image**.
+
+**The constraint is the CSP and it is not negotiable here.** `img-src` is derived from
+`covers.COVER_HOSTS` (`backend/covers.py`), and this card already refused to widen it once,
+for the Ko-fi button, which is served from `/kofi-button.png` for exactly that reason. A
+badge is decoration, so it is the weakest possible case for a policy entry, and a remote
+one would report a private household server to a third party every time somebody opened
+Settings.
+
+Drawn as markup and CSS instead, which is better here for three reasons that have nothing
+to do with the policy: the row themes with whichever of the seven palettes is in force, it
+renders in the installed PWA with no network at all, and it adds no request to a page load.
+Written down because an `<img src="https://img.shields.io/...">` is what the next person
+reaches for, and it would look like a simplification.
+
+**Four badges, and the rule is that a badge states something knowable without a call:**
+
+| Badge | Value | Where it comes from |
+|---|---|---|
+| Version | `__APP_VERSION__` | substituted by `vite.config.ts`, see below |
+| Licence | Apache 2.0 | static, links the LICENSE file on GitHub |
+| Source | GitHub | static, links the repository |
+
+**Three, where the README has five, and languages is the one that was cut.** Two reasons
+converge on it. The Language card is the first card on this same page and arrives open,
+offering those two languages as buttons, so the badge answers "what does this project
+support" for a stranger evaluating the README rather than for a member one card below the
+switch: exactly the argument that cut the sentence describing the app. And "DE, EN" was a
+fourth hardcoded copy of the locale list, after `CATALOGUES` in `i18n/index.tsx` (the
+exhaustive one, where adding a `Locale` is a compile error), `LANGUAGES` in
+`SettingsPage.tsx`, and the catalogues themselves. A third locale would have left the badge
+reading "DE, EN" with nothing failing.
+
+**The two values that are names are not catalogue entries.** "Apache 2.0" and "GitHub" are
+constants in the component. A message key whose value is byte identical in every language
+is a translation nobody can make, and three of the seven keys the first draft added were
+that. The labels stay translated: "Licence" is "Lizenz" and "Source" is "Quelltext".
+
+**Docker pulls and a latest release badge are deliberately absent.** Both need a request to
+a host the CSP does not carry, and the alternative, a number typed into the source, is
+wrong within a week and says nothing about being wrong. The README keeps them because
+shields.io fetches them at render time; the app cannot.
+
+**The line the row replaced is gone.** The card used to read "Version 0.6.0 · Source code"
+above the ask. Both facts are badges now, and keeping the sentence would state each of them
+twice on a card whose whole design is that it is short.
+`AboutSection.test.tsx::states the version and the source once, not twice` holds that.
+
+**The chrome is neutral in both modes and only the ink carries the accent.** Two solid
+accent rungs were measured as a value cell first and both fail in the dark: `accent-900`
+against the dark card `paper-900` is **1.01:1** on gruvbox and `accent-950` against it is
+1.13:1 on rosepine, so half of each link badge would disappear into the card.
+
+**That rejection is about solid rungs and nothing wider.** The idiom this app already ships
+for a tinted chip on a dark surface is an alpha tint, `dark:bg-accent-500/20` in
+`app/components/NavBar.tsx`. Composited over the dark card it measures 8.21 to 13.85 CIE L*
+of separation across the seven palettes, with `paper-200` ink on it at 4.92:1 to 10.58:1:
+better than the neutral split below, on every palette. It is not used here because neutral
+chrome is quieter on a card whose whole design is that it is quiet, which is a choice about
+loudness. Recorded so the next person does not read the two ratios above as "an accent cell
+cannot be built in the dark", because they do not say that.
+
+**The two cells are separated by a hairline, not by their own difference, and the first
+draft got this wrong.** `paper-100` against `paper-200` is **1.32 CIE L*** apart on Rose
+Pine light where the other six run 3.14 to 8.89, so on that one palette the badge drew as a
+single flat chip. That draft had rejected a 1.13:1 accent cell in the dark, then shipped a
+1.035:1 split in the light: the same defect, on the same palette, in the other mode. The fix
+is `border-l border-paper-300 dark:border-paper-600`, which is 6.75 CIE L* off the value
+cell and 5.43 off the label cell at worst (both Rose Pine light), and 12.30 and 24.11 at
+worst in the dark (Endpaper and gruvbox).
+
+`paper-300` as the label *background* was measured instead and rejected: `paper-800` on it
+is 3.88:1 on catppuccin and nord, under the 4.5 floor.
+
+**A contrast ratio cannot express this, so the test does not use one.**
+`frontend/tests/theme/palettes.test.ts` grew a `lightness()` helper and a block asserting
+that the separator is at least 3.0 CIE L* from both cells it sits between, on every palette
+and in both modes. `paper-100` on `paper-200` is 1.035:1 on Rose Pine and 1.272:1 on
+solarized: both round to "the same colour" as a ratio, while their lightness separation
+differs by a factor of six and only one of them reads as two surfaces.
+
+**Contrast, measured across all seven palettes and both modes** with the formula
+`frontend/tests/theme/palettes.test.ts` uses, and added to that file's pair list so the
+numbers cannot drift from the tokens:
+
+| Cell | Pairing | Worst | Where | Best |
+|---|---|---|---|---|
+| label ink | `paper-800` on `paper-200` | **4.57:1** | catppuccin | 11.35 endpaper |
+| label ink | `paper-200` on `paper-800`, dark | 5.57:1 | everforest | 11.35 endpaper |
+| value ink | `paper-800` on `paper-100` | 5.34:1 | catppuccin | 12.85 endpaper |
+| value ink | `paper-200` on `paper-700`, dark | 4.62:1 | catppuccin | 7.41 rosepine |
+| link ink | `accent-800` on `paper-100` | 7.21:1 | catppuccin | 9.05 rosepine |
+| link ink | `accent-200` on `paper-700`, dark | **4.58:1** | solarized | 6.76 endpaper |
+| link hover | `accent-900` on `paper-100` | 9.34:1 | endpaper | 11.52 rosepine |
+| link hover | `accent-100` on `paper-700`, dark | 5.36:1 | gruvbox | 7.89 endpaper |
+
+4.57:1 is the worst of them, against the 4.5 WCAG 1.4.3 asks of text below 18.66px: the
+badge is `text-xs`, 12px.
+
+**The four `paper` on `paper` rows are shaped the way that table's tripwire reads.**
+`palettes.test.ts::the contrast table in docs/decisions.md` parses rows whose pairing cell
+begins with the two tokens, and asserts each figure is the worst across the seven palettes
+and each palette is the one it belongs to. The first draft of this table wrote the cell as
+"label ink `paper-800` on `paper-200`, light", which the regex does not match, so eight
+freshly written figures sat in a document with a guard against exactly that and were not
+covered by it. The four `accent` rows are still uncovered: the tripwire reads one ramp.
+
+**The status pill's ramp is deliberately not reused.** The `unread` pill draws `paper-600`
+on `paper-200`, which measures 3.55:1 on solarized, 3.56 on nord and 3.87 on catppuccin,
+under the floor on three of seven palettes and recorded above as known debt. A badge
+copying it would have inherited that. It takes the `paper-800` ink the did-not-finish pill
+takes instead, which is the one rung of that pairing that clears 4.5 everywhere.
+`AboutBadges.test.tsx::keeps its ink off the rung the status pill fails on` ties the
+component to those tokens, because the palette file measures tokens and cannot see which
+component uses them.
+
+**A link is told apart by more than its colour.** WCAG 1.4.1, so the value cell of the two
+link badges is underlined at rest rather than relying on the accent alone.
+
+**A link badge is named by its own two cells, with a `{" "}` between them.** Measured with
+`dom-accessibility-api`, the package testing-library computes names with: two adjacent
+spans with no whitespace between them name the link "SourceGitHub", and with the space they
+name it "Source GitHub". JSX strips whitespace between elements, which is why it has to be
+written explicitly.
+
+The first draft used an `aria-label` instead and justified it by claiming a text node
+between the cells would become an anonymous flex item and open a visible gap. **That is
+false**: CSS Flexbox Level 1 section 4 says an anonymous flex item containing only white
+space is not rendered, as if `display: none`. The label was harmless, the reason was not,
+and it was stated in four places while contradicting the rule about never assembling a
+phrase out of translated fragments in the one place this component would have done it.
+
+**It lives in the page folder, not `src/components/`.** The bar for that directory is domain
+free *and* used by more than one page (`docs/frontend.md`), and this is used by one. The
+pill itself carries no domain knowledge and is the half that moves up if a second page ever
+wants one.
+
+**The row is one line at `max-w-2xl` and wraps below about 401px of card width**, which is a
+phone. Wrapping rather than scrolling is the choice: a badge sliced in half at the card's
+edge is worse than a second line, and the second line costs 26px (20px of row plus
+`gap-1.5`), so 236px, on a screen where the card is the only thing on it.
 
 ## Tooling
 

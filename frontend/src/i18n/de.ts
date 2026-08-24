@@ -753,8 +753,9 @@ export const de: Messages = {
 
   // ── Über ──────────────────────────────────────────────────────────────────
   "about.title": "Über Endpaper",
-  "about.version": "Version {version}",
-  "about.source": "Quelltext",
+  "about.versionLabel": "Version",
+  "about.licenceLabel": "Lizenz",
+  "about.sourceLabel": "Quelltext",
   "about.support":
     "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee.",
   "about.kofiAlt": "Endpaper auf Ko-fi unterstützen",
