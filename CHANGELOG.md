@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.8.0
+
+_2026-08-25_
+
+A larger refactor of UI elements, naming conventions, documentation and
+presentation style.
+
+The `:latest` image also reports its version again. It read `unknown` between
+releases, and `:latest` is what most self-hosters run, so the version was
+missing on every day that was not a release day. It now names the release it
+descends from. Tagged releases were never affected.
+
 ## v0.7.0
 
 _2026-08-24_
