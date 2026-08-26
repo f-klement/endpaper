@@ -1012,10 +1012,10 @@ def _write_classifications(
     """Add or complete this book's headings. Returns the numbers it **changed**.
 
     **Returning a filled in caption as a change is load bearing**, not
-    bookkeeping. `enrich_book` and `apply_enrichment` both commit only
-    `if updated:`, and `get_db` closes the session in its `finally` without
-    committing, so a call that returned `[]` after setting `stored.label` would
-    have the caption rolled back and lost. That is reachable: the DNB answers
+    bookkeeping. `apply_enrichment` commits only `if updated:`, and `get_db`
+    closes the session in its `finally` without committing, so a call that
+    returned `[]` after setting `stored.label` would have the caption rolled
+    back and lost. That is reachable: the DNB answers
     `650 $0 (DE-588)4026894-9 $a Informatik` where a stored row from an earlier
     run carries the number and no caption, so a book already complete in every
     column gains nothing but the caption.
@@ -1024,10 +1024,10 @@ def _write_classifications(
     2026-08-24: no source captions a Dewey number now that the DNB reads MARC
     082, which carries the notation alone. GND is where a caption arrives.
 
-    **Additive, and never a replacement.** Enrichment is re-runnable and the
-    catalogues answer the same way every time, so a writer that replaced the
-    set would churn the table on every run, and one that appended blindly would
-    deposit a second copy of every heading.
+    **Additive, and never a replacement.** Selecting the same Catalogue record
+    may happen more than once. A writer that replaced the set would churn the
+    table on every selection, and one that appended blindly would deposit a
+    second copy of every heading.
     `uq_classifications_book_scheme_number` refuses the second copy at the
     database, and this refuses it before the flush, where there is still a
     request to answer.
@@ -3017,10 +3017,8 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
         # `resolve_and_store` runs its own event loop.
         await asyncio.to_thread(_store_cover, book)
 
-    # Added, never cleared, unlike the columns above. A refresh whose source
-    # this time has no DDC number has not withdrawn the one another catalogue
-    # asserted, and a heading is a citation rather than a current value.
-    _write_classifications(book, _headings(data.get("classifications")), db)
+    # A refresh selects no Catalogue record. Its Classifications remain
+    # external evidence until a Member selects a candidate through enrich/apply.
 
     db.commit()
     db.refresh(book)
@@ -3217,8 +3215,9 @@ async def enrich_book(
     French catalogues were added for: a 978-3 ISBN that Google does not carry
     would report "no key" rather than the full record the DNB was holding.
 
-    Only empty fields are filled unless `overwrite` is set: enrichment adds
-    what is missing, it does not overrule what somebody typed.
+    Only empty scalar fields are filled unless `overwrite` is set: enrichment
+    adds what is missing, it does not overrule what somebody typed.
+    Classifications need a selected candidate through `enrich/apply`.
     """
     metadata_limiter.check(current_user.username)
     # Present is better than absent, but never required. When a key is
@@ -3249,11 +3248,8 @@ async def enrich_book(
         )
 
     updated = google_books.merge_into(book, fields, overwrite=overwrite)
-    # Outside `merge_into`, which writes columns and knows nothing about rows.
-    # Additive whatever `overwrite` says: a heading is a catalogue's assertion
-    # rather than a value somebody typed, so there is nothing here to overrule.
-    if _write_classifications(book, _headings(fields.get("classifications")), db):
-        updated.append("classifications")
+    # This route chooses no Catalogue record. Its classification evidence must
+    # not reach the Book or be reported as an updated field.
     if updated:
         # `to_thread` because this handler is a coroutine. See refresh_metadata.
         await asyncio.to_thread(_store_cover, book)
@@ -3298,6 +3294,9 @@ def apply_enrichment(
     The merge rule is the same either way, and it is the server's rather than
     the client's: only empty fields are filled unless `overwrite` is set, so a
     publisher somebody typed in by hand is never quietly replaced.
+
+    Selecting the row also confirms its Classifications. Automatic enrichment
+    and refresh do not have that confirmation.
     """
     updated = google_books.merge_into(
         book,

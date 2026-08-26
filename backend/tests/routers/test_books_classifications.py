@@ -1,9 +1,9 @@
-"""Classifications on a book: stored whole, added never replaced.
+"""Classifications on a book: stored whole, selected records add them.
 
 The store's whole reason is that a catalogue heading has two halves and only
 the number is language independent. What is pinned here is the half that used
-to be thrown away, the rules that keep re-running enrichment from duplicating
-rows, and that nothing in this app turns a heading into a tag by itself.
+to be thrown away, the selected record rule and that nothing in this app turns
+a heading into a tag by itself.
 """
 
 import httpx
@@ -332,7 +332,7 @@ class TestTheLookup:
 
 
 class TestEnrichment:
-    def test_enrichment_stores_the_headings_it_finds(
+    def test_automatic_enrichment_fills_scalars_without_storing_headings(
         self, client, admin, make_book, db
     ):
         book = make_book(admin["headers"], isbn=GERMAN_ISBN)
@@ -346,43 +346,42 @@ class TestEnrichment:
             )
 
         assert res.status_code == 200
-        assert "classifications" in res.json()["updated_fields"]
-        assert [entry.number for entry in headings(book["id"], db)] == [
-            "004",
-            "4026894-9",
-        ]
+        assert res.json()["book"]["page_count"] == 390
+        assert "classifications" not in res.json()["updated_fields"]
+        assert headings(book["id"], db) == []
 
-    def test_running_it_twice_does_not_duplicate_a_heading(
+    def test_repeated_automatic_enrichment_leaves_no_headings(
         self, client, admin, make_book, db
     ):
-        """Enrichment is re-runnable and the catalogues answer the same way, so
-        an appending writer would deposit a second copy on every run."""
+        """Automatic enrichment may run again without accepting a record."""
         book = make_book(admin["headers"], isbn=GERMAN_ISBN)
+        responses = []
         for _ in range(2):
             with respx.mock(assert_all_called=False) as mock:
                 mock.get(url__startswith=DNB).mock(
                     return_value=sru_response(DNB_RECORD)
                 )
                 silence_catalogues(mock)
-                client.post(
-                    f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+                responses.append(
+                    client.post(
+                        f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+                    )
                 )
 
-        # The Dewey number and the GND subject heading, once each.
-        assert len(headings(book["id"], db)) == 2
+        assert all("classifications" not in res.json()["updated_fields"] for res in responses)
+        assert headings(book["id"], db) == []
 
-    def test_a_caption_already_stored_is_not_overwritten(
+    def test_automatic_enrichment_does_not_complete_a_stored_heading(
         self, client, admin, db
     ):
-        """A heading already here came from a catalogue too, and the last
-        writer is not the better one."""
+        """A selected record is needed even to fill a missing caption."""
         created = client.post(
             "/api/books",
             json={
                 "title": "Docker",
                 "isbn": GERMAN_ISBN,
                 "classifications": [
-                    {"scheme": "ddc", "number": "004", "label": "Computer science"}
+                    {"scheme": "gnd", "number": "4026894-9"}
                 ],
             },
             headers=admin["headers"],
@@ -397,49 +396,44 @@ class TestEnrichment:
                 f"/api/books/{created['id']}/enrich", headers=admin["headers"]
             )
 
-        assert headings(created["id"], db)[0].label == "Computer science"
+        assert headings(created["id"], db)[0].label is None
 
-    def test_a_missing_caption_is_filled_in(self, client, admin, db):
-        """The exception to the rule above: a caption where there was none is
-        strictly more than before.
-
-        On the GND heading rather than the Dewey one, because since the MARC
-        switch no source supplies a Dewey caption for this to fill in with.
-        """
+    def test_a_selected_record_adds_its_headings(self, client, admin, db):
+        """The chosen route is the only existing Book classification writer."""
         created = client.post(
             "/api/books",
-            json={
-                "title": "Docker",
-                "isbn": GERMAN_ISBN,
-                "classifications": [{"scheme": "gnd", "number": "4026894-9"}],
-            },
+            json={"title": "Docker"},
             headers=admin["headers"],
         ).json()
 
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=DNB).mock(
-                return_value=sru_response(DNB_RECORD)
-            )
-            silence_catalogues(mock)
-            client.post(
-                f"/api/books/{created['id']}/enrich", headers=admin["headers"]
-            )
+        res = client.post(
+            f"/api/books/{created['id']}/enrich/apply",
+            json={
+                "classifications": [
+                    {"scheme": "ddc", "number": "004"},
+                    {"scheme": "gnd", "number": "4026894-9", "label": "Informatik"},
+                ]
+            },
+            headers=admin["headers"],
+        )
 
-        assert headings(created["id"], db)[0].label == "Informatik"
+        assert res.status_code == 200
+        assert res.json()["updated_fields"] == ["classifications"]
+        assert [entry.number for entry in headings(created["id"], db)] == [
+            "004",
+            "4026894-9",
+        ]
 
     def test_a_caption_is_the_only_change_and_still_commits(
         self, client, admin, db
     ):
         """The isolated case, which the test above cannot reach.
 
-        `enrich` and `enrich/apply` both commit only `if updated:`, and
-        `get_db` closes the session in its `finally` without committing, so a
-        writer that did not report a filled in caption as a change would have
-        it rolled back. `test_a_missing_caption_is_filled_in` passes either way,
-        because that book is empty enough for `merge_into` to report a column
-        and commit for its own reasons. Here the payload carries **nothing but
-        the caption**, so the classification write is the only thing that can
-        cause a commit.
+        `enrich/apply` commits only `if updated:`, and `get_db` closes the
+        session in its `finally` without committing, so a writer that did not
+        report a filled in caption as a change would have it rolled back. Here
+        the selected payload carries **nothing but the caption**, so the
+        classification write is the only thing that can cause a commit.
         """
         created = client.post(
             "/api/books",
@@ -464,11 +458,10 @@ class TestEnrichment:
         assert res.json()["updated_fields"] == ["classifications"]
         assert headings(created["id"], db)[0].label == "Informatik"
 
-    def test_a_refresh_adds_a_heading_and_never_clears_one(
+    def test_a_refresh_keeps_existing_headings_without_adding_new_ones(
         self, client, admin, db
     ):
-        """Unlike the columns a refresh rewrites: a catalogue that has no DDC
-        number this time has not withdrawn the one another asserted."""
+        """Refresh preserves classification evidence without accepting more."""
         created = client.post(
             "/api/books",
             json={
@@ -491,11 +484,8 @@ class TestEnrichment:
             )
 
         assert res.status_code == 200
-        assert sorted(entry.number for entry in headings(created["id"], db)) == [
-            "004",
-            "4026894-9",
-            "QA76.73.P98",
-        ]
+        assert res.json()["page_count"] == 390
+        assert [entry.number for entry in headings(created["id"], db)] == ["QA76.73.P98"]
 
 
 class TestMerging:

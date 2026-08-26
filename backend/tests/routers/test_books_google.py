@@ -18,6 +18,7 @@ import pytest
 import respx
 
 from enums import SettingKey
+from models import Classification
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
 
@@ -255,6 +256,34 @@ class TestEnrichmentCandidates:
 
         assert res.status_code == 200
         assert len(res.json()[0]["classifications"]) == MAX_CLASSIFICATIONS_PER_BOOK
+
+    def test_candidate_headings_are_evidence_not_a_book_write(
+        self, client, admin, make_book, google_enabled, db
+    ):
+        book = make_book(
+            admin["headers"], title="Der Zauberberg", author="Thomas Mann"
+        )
+        heading = '<datafield tag="082"><subfield code="a">004</subfield></datafield>'
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=sru_response(self._catalogue_record(heading))
+            )
+            silence_catalogues(mock)
+            res = client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200
+        assert res.json()[0]["classifications"] == [
+            {"scheme": "ddc", "number": "004", "label": None}
+        ]
+        assert (
+            db.query(Classification)
+            .filter(Classification.book_id == book["id"])
+            .count()
+            == 0
+        )
 
     def test_a_heading_the_column_could_not_hold_costs_the_heading(
         self, client, admin, make_book, google_enabled

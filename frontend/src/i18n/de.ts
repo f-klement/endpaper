@@ -157,6 +157,8 @@ export const de: Messages = {
   "enrich.pickTitle": "Welche Ausgabe ist das?",
   "enrich.pickHint":
     "Wähle die Ausgabe, die du in der Hand hast. Es werden nur leere Felder ergänzt, deine eigenen Angaben bleiben stehen.",
+  "enrich.proposedClassifications": "Vorgeschlagene Klassifikationen",
+  "enrich.noClassifications": "Keine Klassifikationen vorgeschlagen.",
   "enrich.notFound": "Google Books hat keinen Eintrag zu diesem Buch.",
   "enrich.disabled":
     "Die Google Books Suche ist ausgeschaltet. Ein Administrator kann sie in den Einstellungen aktivieren.",

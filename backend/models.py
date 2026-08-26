@@ -969,9 +969,9 @@ class Classification(Base):
     a **suggestion** offered at add time: no endpoint writes a tag from it. See
     `serialisation.suggested_tag_ids` for what the client does with it.
 
-    Unique per book, scheme and number, so re-running enrichment against the
-    same catalogues fills nothing in twice. Not unique on the number alone: a
-    book carries a DDC and an LCC at once, and often two DDC numbers from two
+    Unique per book, scheme and number, so selecting the same record twice
+    fills nothing in twice. Not unique on the number alone: a book carries a
+    DDC and an LCC at once, and often two DDC numbers from two
     catalogues that disagree about how precise to be (K10plus returned both
     `005.133` and `004` for one ISBN, measured 2026-08-23).
     """

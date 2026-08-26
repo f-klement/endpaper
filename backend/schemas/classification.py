@@ -18,8 +18,8 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: page.
 #:
 #: **Both capped writers, and there are exactly two of those.**
-#: `_write_classifications` is the one every add and enrich path goes through,
-#: and `_repoint_relations` is the merge. `backup.restore` is a third writer of
+#: `_write_classifications` serves the create and selected enrichment paths.
+#: `_repoint_relations` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and
 #: every other table is uncapped there for the same reason.

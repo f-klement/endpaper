@@ -213,9 +213,9 @@ field holds the notation and the printed schedule holds the words. Since the DNB
 MARC21 on 2026-08-24 **no source supplies a Dewey caption at all**, where `dc:subject` used
 to answer `830 Deutsche Literatur`. A GND heading still arrives captioned, and
 `_union_classifications` still fills a missing caption from any source that has one. Unique per book, scheme
-and number (`uq_classifications_book_scheme_number`), so re-running enrichment against the
-same catalogues fills nothing in twice; **not** unique on the number alone, because a book
-carries a DDC and an LCC at once and often two DDC numbers at two precisions. `ON DELETE
+and number (`uq_classifications_book_scheme_number`), so selecting the same record twice
+fills nothing in twice; **not** unique on the number alone, because a book carries a DDC and
+an LCC at once and often two DDC numbers at two precisions. `ON DELETE
 CASCADE`, like `book_tags` and unlike `notes`: a heading means nothing without its book.
 
 **`reading_progress`.** An append-only log of where a member has got to in a book. One

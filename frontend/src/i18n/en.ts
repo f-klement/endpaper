@@ -173,6 +173,8 @@ export const en = {
   "enrich.pickTitle": "Which edition is this?",
   "enrich.pickHint":
     "Pick the printing you are holding. Only empty fields are filled in, so nothing you typed is replaced.",
+  "enrich.proposedClassifications": "Proposed classifications",
+  "enrich.noClassifications": "No classifications proposed.",
   "enrich.notFound": "Google Books does not have a record for this book.",
   "enrich.disabled":
     "Google Books lookup is switched off. An admin can enable it in Settings.",

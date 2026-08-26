@@ -484,6 +484,11 @@ unless `overwrite=true`, so a publisher somebody typed by hand is never quietly 
 Neither ever takes the ISBN: a chosen printing's ISBN is not this copy's, and the column is
 unique among uncopied rows so writing one could collide with a book already here.
 
+Candidates are read only evidence. A Member selects one through `POST /enrich/apply` before
+its Classifications can add a row or complete a caption. Automatic enrichment and Refresh
+Metadata change scalar fields only. They neither write Classifications nor report them in
+`updated_fields`.
+
 The candidates endpoint deliberately carries no `suggested_tag_ids`: that book already has
 tags, and they are somebody's deliberate choice.
 
@@ -498,9 +503,9 @@ its two classifications, and the parser emits the classifications first for that
 
 **Classifications are the exception, and are added rather than merged.** `overwrite` does
 not reach them: a heading is a catalogue's citation, not a value somebody typed, so there is
-nothing here to overrule. Enrichment adds the ones the book does not already carry, fills in
-a caption where it had none, and never replaces a caption already stored. Both endpoints
-report `classifications` in `updated_fields` when a row was added.
+nothing here to overrule. A Member selected candidate adds the headings the book does not
+already carry, fills in a caption where it had none, and never replaces a caption already
+stored. `POST /enrich/apply` reports `classifications` in `updated_fields` when one changes.
 
 **Neither needs an API key.** Enrichment runs the merged ISBN chain when the book has an
 ISBN and the ranked search when it does not, so a 978-3 book Google does not carry is
@@ -638,15 +643,16 @@ The response is not a book and nothing is persisted. The client posts it back to
 and a row is written for each.
 
 **A book carries at most 8 classifications, and that is a bound on the book rather than on
-a payload.** `max_length` caps one request; both capped writers of the table (the add and
-enrich paths, and the merge; a backup restore is the third and is deliberately uncapped) count the rows already there and stop, because they are additive
-across requests and neither `POST /{id}/enrich/apply` nor `POST /merge` carries a rate
-limiter. At the ceiling an incoming heading is dropped rather than a stored one evicted,
-and a caption still fills in on a heading already held. **Which one is dropped is decided by
-order**: the list is sorted by scheme before it is cut, in the order DDC, LCC, GND, LCSH, so
-a Dewey number outranks a subject heading whichever catalogue supplied it. GND leads LCSH
-because its number is an identifier that outlives its own caption, where an LCSH number is
-the heading text and moves when the Library of Congress revises it. The reason the number matters:
+a payload.** `max_length` caps one request. The capped writers, creation or selected
+enrichment through `POST /{id}/enrich/apply`, and merge, count the rows already there and
+stop. A backup restore is deliberately uncapped because it restores a whole database. The
+writes are additive across requests and neither `POST /{id}/enrich/apply` nor `POST /merge`
+carries a rate limiter. At the ceiling an incoming heading is dropped rather than a stored
+one evicted, and a caption still fills in on a heading already held. **Which one is dropped
+is decided by order**: the list is sorted by scheme before it is cut, in the order DDC, LCC,
+GND, LCSH, so a Dewey number outranks a subject heading whichever catalogue supplied it. GND
+leads LCSH because its number is an identifier that outlives its own caption, where an LCSH
+number is the heading text and moves when the Library of Congress revises it. The reason the number matters:
 `BookOut.classifications` is on every listing row, so an inflated book is paid for on every
 page that contains it. Measured on 2026-08-24 against one catalogue, which is not the whole
 of what a book can carry: 3.07 headings per record over 85 DNB lookups, and 8 of 189 records

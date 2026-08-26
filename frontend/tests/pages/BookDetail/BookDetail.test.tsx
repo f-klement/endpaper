@@ -847,6 +847,9 @@ const CANDIDATE = {
   isbn13: "9780441013593",
   series_name: null,
   series_index: null,
+  classifications: [
+    { scheme: "ddc", number: "813.54", label: "American fiction" },
+  ],
   suggested_tag_ids: [],
 };
 
@@ -889,7 +892,10 @@ describe("BookDetail enrichment", () => {
   it("offers the editions it found", async () => {
     stubLoad({ googleBooks: true });
     api.on("/api/books/1/enrich/candidates", {
-      body: [CANDIDATE, { ...CANDIDATE, year: 1999, page_count: 500 }],
+      body: [
+        CANDIDATE,
+        { ...CANDIDATE, year: 1999, page_count: 500, classifications: [] },
+      ],
     });
     renderDetail();
 
@@ -900,6 +906,12 @@ describe("BookDetail enrichment", () => {
     const dialog = await screen.findByRole("dialog");
     // Scoped to the dialog: the page heading is also the book's title.
     expect(within(dialog).getAllByText("Dune")).toHaveLength(2);
+    expect(
+      within(dialog).getByText("DDC 813.54: American fiction"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("No classifications proposed."),
+    ).toBeInTheDocument();
   });
 
   it("fills gaps rather than overwriting typed values", async () => {
@@ -925,6 +937,9 @@ describe("BookDetail enrichment", () => {
       "http://localhost",
     ).searchParams;
     expect(query.get("overwrite")).toBe("false");
+    expect(api.lastCall("/enrich/apply", "POST")!.body).toMatchObject({
+      classifications: CANDIDATE.classifications,
+    });
   });
 
   it("says what it added", async () => {

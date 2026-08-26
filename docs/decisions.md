@@ -827,20 +827,20 @@ catalogue of the six not fetched over TLS, because that is the endpoint the Libr
 Congress publishes for its Z39.50-over-HTTP SRU gateway; the other five are https.
 
 **What that costs, stated rather than implied.** An on-path attacker can substitute the
-response. Before classifications existed, the damage was bounded to a draft a member reads
-and edits on the confirm screen. It is not any more, and the three routes that reach this
-source are worth naming exactly, because two of them show the row to a member first and one
-does not:
+response. A Classification reaches an existing Book only after a Member has seen and selected
+the candidate record. The routes that handle them are worth naming exactly:
 
-* `POST /api/books` and `POST /{id}/enrich/apply` write what a member saw and confirmed.
-* **`POST /{id}/enrich` is the unattended one.** Its fallback calls
-  `metadata.search(query, api_key, limit=1)` and writes `matches[0]` directly, so a
-  substituted record's headings land with nobody having looked at them.
+* `POST /api/books` receives the scan draft a Member submits.
+* `POST /{id}/enrich/apply` writes the selected candidate record, including its
+  Classifications.
+* `POST /{id}/enrich` may choose a first match to fill scalar fields, but discards its
+  Classifications.
+* `PUT /{id}/refresh` changes scalar lookup fields only. It does **not** reach this source:
+  `metadata.lookup` uses `_SOURCES`, which holds four sources and excludes the Library of
+  Congress.
 
-`PUT /{id}/refresh` does **not** reach this source: it calls `metadata.lookup` only, and
-`_SOURCES` holds four sources with the Library of Congress not among them. An earlier draft
-of this paragraph claimed it did. Nothing in the client renders a classification yet, so
-all three write where no member would notice.
+The detail picker displays every candidate Classification, or an explicit empty state, before
+selection. A row confirms its whole record. There is no individual Classification action.
 
 **Its share of this table grew on 2026-08-24 and the accepting has to be re-stated for it.**
 LCSH comes from this response and nothing else does: measured over 900 live records, 85.4%
@@ -849,12 +849,12 @@ classifications each. So the plaintext source went from a minority supplier of a
 the sole supplier of a whole subject vocabulary. Nothing about the exposure changed in kind;
 what changed is how many rows are on the wrong side of it.
 
-**Accepted for now, and here is the fence.** Every value from that response goes through
-`ClassificationIn` (a closed scheme enum, a 120 character number, a 200 character caption),
-`_headings` and the search loop each drop a record that fails rather than failing the
-request, and `_write_classifications` caps the per book total. So a substituted record can
-write a wrong heading; it cannot write an unbounded one, take an endpoint down, or reach
-any column outside this table.
+**The fence now includes confirmation.** Every candidate value goes through
+`ClassificationIn` (a closed scheme enum, a 120 character number, a 200 character caption).
+`_headings` and the search loop drop a record that fails rather than failing the request, and
+the selected writer, `_write_classifications`, caps the per book total. A substituted record
+can show a wrong heading, but cannot write one until a Member selects it. It cannot write an
+unbounded value, take an endpoint down, or reach a column outside this table.
 
 **What would change it**: an https endpoint for the same service, which would be a
 one-constant change. Nobody has found one. Until then this paragraph is the point: an
@@ -900,8 +900,8 @@ heading would make a restore lossy. The CSV does not, and the CSV import cannot 
 
 That is the same line `docs/api.md` already draws for notes, quotes and loans: the CSV is a
 row per book for reading in a spreadsheet and for importing from another service, and none
-of those services emits a classification. A heading is re-fetched by running enrichment,
-which costs one request and produces the same rows.
+of those services emits a classification. A Member restores a heading by fetching candidates,
+then selecting a Catalogue record.
 
 ### Only DDC is projected, though LCC, GND and LCSH are stored
 

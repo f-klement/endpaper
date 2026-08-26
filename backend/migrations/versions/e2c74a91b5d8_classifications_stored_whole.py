@@ -21,9 +21,8 @@ once: K10plus returned both `005.133` and `004` for one ISBN, and the Library
 of Congress returns a DDC and an LCC side by side. Three columns on `books`
 would hold the first and silently drop the rest.
 
-**Unique per book, scheme and number.** Enrichment is re-runnable, and the same
-catalogues answer the same way, so without this every re-run would deposit a
-second copy of every heading. Not unique on the number alone, for the two
+**Unique per book, scheme and number.** Selecting the same record twice must
+not deposit a second copy of every heading. Not unique on the number alone, for the two
 reasons above: two schemes, and two precisions of one scheme, are both real.
 
 `ondelete="CASCADE"` matches `book_tags` rather than `notes`: a heading is an
@@ -34,7 +33,7 @@ relationship carries `delete-orphan` besides.
 No backfill. Nothing in an existing database holds a number to recover: the
 parse dropped it before any row was written, and `books.categories` holds the
 stripped captions with no way to tell which came from a classification.
-Re-running enrichment on a book fills it in.
+Selecting a Catalogue record for a book fills it in.
 
 Downgrade drops the table. Every heading goes with it, and there is nowhere
 else they live.

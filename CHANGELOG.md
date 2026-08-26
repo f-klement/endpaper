@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+**Classification review.** Metadata refresh and automatic enrichment now update scalar
+facts only. Choosing a catalogue record shows its Classifications first, then adds the
+selected evidence to the book.
+
 ## v0.8.0
 
 _2026-08-25_

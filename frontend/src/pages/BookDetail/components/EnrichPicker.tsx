@@ -1,4 +1,4 @@
-import type { BookMatch } from "../../../api/generated/model";
+import type { BookMatch, ClassificationIn } from "../../../api/generated/model";
 import { Modal, Spinner } from "../../../components";
 import { CoverImage } from "../../components";
 import { errorText } from "../../../components/ErrorState";
@@ -19,6 +19,12 @@ function summarise(match: BookMatch): string {
   return [match.publisher, match.year, match.language?.toUpperCase()]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** The exact scheme evidence a selected candidate will post back. */
+function classificationText(classification: ClassificationIn): string {
+  const label = classification.label ? `: ${classification.label}` : "";
+  return `${classification.scheme.toUpperCase()} ${classification.number}${label}`;
 }
 
 /**
@@ -99,6 +105,23 @@ export default function EnrichPicker({
                       ? t("book.pages", { count: match.page_count })
                       : ""}
                     {match.source ? ` · ${match.source.replace(/\+/g, ", ")}` : ""}
+                  </span>
+                  <span className="block mt-1 text-xs text-paper-600 dark:text-paper-400">
+                    <span className="font-medium text-paper-700 dark:text-paper-300">
+                      {t("enrich.proposedClassifications")}
+                    </span>
+                    {match.classifications?.length ? (
+                      match.classifications.map((classification) => (
+                        <span
+                          key={`${classification.scheme}-${classification.number}`}
+                          className="block"
+                        >
+                          {classificationText(classification)}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="block">{t("enrich.noClassifications")}</span>
+                    )}
                   </span>
                 </span>
               </button>
