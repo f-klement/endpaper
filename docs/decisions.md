@@ -1685,7 +1685,7 @@ it is already served: the import lands, the result links into the library, and t
 `set_collection` files the selection in one press. A second path to the same state would be
 a second thing to keep in step with the first.
 
-**Peer sync does not carry it.** A collection is shelf taxonomy, which `implementation_plan.md`
+**Peer sync does not carry it.** A collection is shelf taxonomy, which `archive/implementation_plan.md`
 §9 already refuses to send for `location`, and a collection named after a member would leak
 a member's name besides. It is also not a *scope* for a grant: scopes come from
 the stored grant and there are exactly two, and a third keyed on a library wide label that
@@ -2060,7 +2060,7 @@ about the shelf, and any other answer confirms a book is on it.
 
 ### Author aliases never cross to a peer
 
-`implementation_plan.md` A6. The peer payload carries `author` as the string on the book, and
+`archive/implementation_plan.md` A6. The peer payload carries `author` as the string on the book, and
 that does not change: a peer receives the credit line as printed and applies its own
 library's decisions to it, if it has any. An alias is shelf taxonomy in the same class as
 `location` and a collection name, and it is one library's reading of its own shelf.
@@ -3421,7 +3421,7 @@ trim are the two a reader needs: what it pays for, and that no capability sits b
 Every feature stays available to somebody who runs their own relay, and if that ever stops
 being true it is a different project. Publishing what the relay costs and what came in was
 promised in an earlier draft of these texts and is promised in none of them now; it is
-unshipped work in `implementation_plan.md` A0, waiting on a relay to have a cost.
+unshipped work in `archive/implementation_plan.md` A0, waiting on a relay to have a cost.
 
 ### The About card's badges are drawn, never fetched
 
@@ -3652,7 +3652,7 @@ departure is argued in the author entries above rather than assumed.
 
 **Two features had no useful reference.** Collections and multiple copies are
 shaped by this codebase rather than by the field: what decides them is
-`visible_to()`, the sync payload in `implementation_plan.md`, and `books.isbn`
+`visible_to()`, the sync payload in `archive/implementation_plan.md`, and `books.isbn`
 being unique. Reading a competitor will not tell you what breaking that
 constraint costs here.
 

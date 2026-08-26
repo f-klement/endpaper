@@ -750,7 +750,7 @@ class TestDnbRecord:
 
         Recorded rather than implied: see `docs/decisions.md`, "The author\'s
         GND is read by nothing". A row here would answer the author identity
-        question `implementation_plan.md` §30g defers, and that answer is
+        question `docs/archive/implementation_plan.md` §30g defers, and that answer is
         expensive to change once data exists.
         """
         with respx.mock(assert_all_called=False) as mock:

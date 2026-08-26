@@ -699,7 +699,7 @@ class TestEveryBookQueryIsFiltered:
         with a count" is exactly the shape this rule was widened for (an author
         index, a series list, a location list, which publish a name and a
         count), and it can now be written without touching `Book` at all.
-        `docs/data-model.md` and `implementation_plan.md` §30i both say library
+        `docs/data-model.md` and `docs/archive/implementation_plan.md` §30i both say library
         mode will show classifications, so that query is coming.
 
         Not widened to those tables today: it would cost an exemption on the
