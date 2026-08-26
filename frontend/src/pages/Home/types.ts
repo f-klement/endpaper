@@ -1,3 +1,5 @@
+import { DEFAULT_FILTERS } from "../../lib/bookFilters";
+import type { BookFilters } from "../../lib/bookFilters";
 import {
   BookFormat,
   BookSort,
@@ -8,63 +10,13 @@ import {
 import type { MessageKey } from "../../i18n";
 import type { LibraryView } from "../../lib/libraryView";
 
-/** The filter state the grid is driven by. Local to this page. */
-export interface BookFilters {
-  query: string;
-  status: ReadStatus | null;
-  /** Whether a copy is physically here. Independent of `status`. */
-  ownership: OwnershipStatus | null;
-  series: string | null;
-  /**
-   * One person, as a name or as the key `GET /api/books/authors` issues.
-   *
-   * Whichever the link carried, kept verbatim so the chip can show it. Neither
-   * is durable: a merge moves the key as surely as it moves the display name,
-   * and an older link keeps working because the API resolves a folded spelling
-   * back to whoever it was folded into, not because a key is an identity.
-   */
-  author: string | null;
-  location: string | null;
-  /** Hardback, paperback, ebook, audiobook. "Do we have this on audio". */
-  format: BookFormat | null;
-  /** Would the library lend it. Nothing to do with whether it is out now. */
-  lending: LendingWillingness | null;
-  /**
-   * Which collection to show, `"unfiled"` for the books in none, or null for
-   * all of them.
-   *
-   * Three states in one field rather than an id plus a boolean, because the
-   * three are alternatives: the API refuses a request naming both a collection
-   * and the unfiled books, so a shape that can express both is a shape the UI
-   * can put into an error.
-   */
-  collection: number | "unfiled" | null;
-  /**
-   * Only books somebody has offered to talk about.
-   *
-   * **Anybody's offer, not the reader's own.** It is a boolean rather than a
-   * three-way, because the useful question is "what can we talk about"; the
-   * opposite view, books nobody has offered, is the rest of the library.
-   */
-  discuss: boolean;
-  sort: BookSort;
-  tagIds: number[];
-}
-
-export const DEFAULT_FILTERS: BookFilters = {
-  query: "",
-  status: null,
-  ownership: null,
-  series: null,
-  author: null,
-  location: null,
-  format: null,
-  lending: null,
-  collection: null,
-  discuss: false,
-  sort: BookSort.title_asc,
-  tagIds: [],
-};
+// `BookFilters` and `DEFAULT_FILTERS` live in `lib/bookFilters.ts` and are
+// re-exported here. The shape moved because nothing in it is view state: the
+// wire test asserts every field becomes a query parameter and its client-only
+// allowlist is empty. Re-exported rather than updated at every import, so the
+// consumers on this page did not have to move with it.
+export type { BookFilters } from "../../lib/bookFilters";
+export { DEFAULT_FILTERS } from "../../lib/bookFilters";
 
 /**
  * The wishlist is not a fourth status, it is a saved view.

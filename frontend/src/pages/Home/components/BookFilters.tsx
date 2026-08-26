@@ -22,18 +22,18 @@ interface BookFiltersProps {
   tags: TagOut[];
   showTagPanel: boolean;
   onToggleTagPanel: () => void;
-  onStatusChange: (status: Filters["status"]) => void;
-  onOwnershipChange: (ownership: Filters["ownership"]) => void;
-  onLocationChange: (location: Filters["location"]) => void;
-  onCollectionChange: (collection: Filters["collection"]) => void;
-  onFormatChange: (format: Filters["format"]) => void;
-  onLendingChange: (lending: Filters["lending"]) => void;
-  onDiscussChange: (discuss: boolean) => void;
-  onSeriesClear: () => void;
-  onAuthorClear: () => void;
+  /**
+   * Change one or more filters. One callback, not one per field.
+   *
+   * Ten of these were separate props, each spelled in the interface, in the
+   * destructure and at its handler: thirty spellings for one object. Adding a
+   * filter cost a line in each, which is the abstraction making the next change
+   * harder rather than easier. The panel now says what changed and the caller
+   * decides what that means.
+   */
+  onFilterChange: (patch: Partial<Filters>) => void;
   locations: LocationOut[];
   collections: CollectionOut[];
-  onSortChange: (sort: Filters["sort"]) => void;
   onToggleTag: (tagId: number) => void;
   onClearTags: () => void;
   view: LibraryView;
@@ -46,18 +46,9 @@ export default function BookFilters({
   tags,
   showTagPanel,
   onToggleTagPanel,
-  onStatusChange,
-  onOwnershipChange,
-  onFormatChange,
-  onLendingChange,
-  onDiscussChange,
-  onLocationChange,
-  onCollectionChange,
-  onSeriesClear,
-  onAuthorClear,
+  onFilterChange,
   locations,
   collections,
-  onSortChange,
   onToggleTag,
   onClearTags,
   view,
@@ -73,7 +64,7 @@ export default function BookFilters({
           {STATUS_FILTERS.map((option) => (
             <button
               key={option.label}
-              onClick={() => onStatusChange(option.value)}
+              onClick={() => onFilterChange({ status: option.value })}
               aria-pressed={filters.status === option.value}
               className={`shrink-0 text-sm px-3 py-1 rounded-full border transition-colors ${
                 filters.status === option.value
@@ -89,7 +80,7 @@ export default function BookFilters({
         <select
           value={filters.sort}
           onChange={(event) =>
-            onSortChange(event.target.value as Filters["sort"])
+            onFilterChange({ sort: event.target.value as Filters["sort"] })
           }
           aria-label={t("library.sortLabel")}
           className="shrink-0 text-sm px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
@@ -141,7 +132,7 @@ export default function BookFilters({
         {OWNERSHIP_FILTERS.map((option) => (
           <button
             key={option.label}
-            onClick={() => onOwnershipChange(option.value)}
+            onClick={() => onFilterChange({ ownership: option.value })}
             aria-pressed={filters.ownership === option.value}
             className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
               filters.ownership === option.value
@@ -159,9 +150,9 @@ export default function BookFilters({
         <select
           value={filters.format ?? ""}
           onChange={(event) =>
-            onFormatChange(
-              (event.target.value || null) as Filters["format"],
-            )
+            onFilterChange({
+              format: (event.target.value || null) as Filters["format"],
+            })
           }
           aria-label={t("copy.format")}
           className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
@@ -178,7 +169,9 @@ export default function BookFilters({
         <select
           value={filters.lending ?? ""}
           onChange={(event) =>
-            onLendingChange((event.target.value || null) as Filters["lending"])
+            onFilterChange({
+              lending: (event.target.value || null) as Filters["lending"],
+            })
           }
           aria-label={t("lending.label")}
           className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
@@ -195,7 +188,7 @@ export default function BookFilters({
             which is what the button already off shows. */}
         <button
           type="button"
-          onClick={() => onDiscussChange(!filters.discuss)}
+          onClick={() => onFilterChange({ discuss: !filters.discuss })}
           aria-pressed={filters.discuss}
           className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
             filters.discuss
@@ -231,13 +224,14 @@ export default function BookFilters({
             }
             onChange={(event) => {
               const chosen = event.target.value;
-              onCollectionChange(
-                chosen === ""
-                  ? null
-                  : chosen === "unfiled"
-                    ? "unfiled"
-                    : Number(chosen),
-              );
+              onFilterChange({
+                collection:
+                  chosen === ""
+                    ? null
+                    : chosen === "unfiled"
+                      ? "unfiled"
+                      : Number(chosen),
+              });
             }}
             aria-label={t("collections.label")}
             className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
@@ -260,7 +254,7 @@ export default function BookFilters({
         <div className="mt-2">
           <select
             value={filters.location ?? ""}
-            onChange={(event) => onLocationChange(event.target.value || null)}
+            onChange={(event) => onFilterChange({ location: event.target.value || null })}
             aria-label={t("location.label")}
             className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
           >
@@ -285,7 +279,7 @@ export default function BookFilters({
             {t("authors.label")}: {filters.author}
             <button
               type="button"
-              onClick={onAuthorClear}
+              onClick={() => onFilterChange({ author: null })}
               aria-label={t("common.clearSelection")}
               className="opacity-60 hover:opacity-100 leading-none"
             >
@@ -303,7 +297,7 @@ export default function BookFilters({
             {t("series.label")}: {filters.series}
             <button
               type="button"
-              onClick={onSeriesClear}
+              onClick={() => onFilterChange({ series: null })}
               aria-label={t("common.clearSelection")}
               className="opacity-60 hover:opacity-100 leading-none"
             >

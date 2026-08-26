@@ -74,7 +74,7 @@ readers as a side effect.
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
 | `pages/Home/*`                        |   175 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, the table view, and the dense list: what its row holds, its lazy covers, and that a selection still forces the grid |
 | `pages/BookDetail/*`                  |   199 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, quotes and their page numbers, enrichment, the reading log and its two units, the credit line whose names are links, and the six collapsible groups: their defaults, what stays outside them, and what a reader's own choice overrides |
-| `pages/ScanPage/*`                    |   124 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over |
+| `pages/ScanPage/*`                    |   143 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over, and the scan and copy requests checked against the API's own schema |
 | `pages/SettingsPage/*`                |   100 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
 | `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |
 | `pages/LoginPage/LoginPage.test.tsx`  |    24 | Sign-in, registration, the background uploader              |

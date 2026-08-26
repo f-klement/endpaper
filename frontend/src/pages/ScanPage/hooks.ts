@@ -5,7 +5,7 @@
  * plain values and callbacks.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -27,7 +27,6 @@ import {
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
 import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
-import { BookFormat } from "../../api/generated/model";
 import type { BookMatch, LocationOut, TagOut } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
 import {
@@ -37,9 +36,13 @@ import {
 } from "../../lib/lastLocation";
 import {
   blankDraft,
+  blankPending,
   draftFromMatch,
   draftFromLookup,
+  toCopyRequest,
+  toScanRequest,
   type BookDraft,
+  type PendingBook,
 } from "./types";
 
 /** Below this, a search is noise rather than a query. Matches the API bound. */
@@ -59,8 +62,16 @@ function useKnownLocations(): LocationOut[] {
 
 export interface UseScanFlowResult {
   isbn: string | null;
-  draft: BookDraft | null;
-  setDraft: (draft: BookDraft) => void;
+  /** The book being added. Null `draft` means no lookup has landed yet. */
+  pending: PendingBook;
+  /**
+   * Change one field of it or several, leaving the rest alone.
+   *
+   * One door rather than a setter per field, for the reason `PendingBook`
+   * gives and the reason `useLibrary.update` gives: the two are the same
+   * pattern and are spelled the same way on purpose.
+   */
+  update: (patch: Partial<PendingBook>) => void;
   tags: TagOut[];
 
   lookup: (isbn: string) => void;
@@ -69,35 +80,21 @@ export interface UseScanFlowResult {
   /** Prefill the confirm step from a chosen search result. */
   chooseMatch: (match: BookMatch) => void;
 
-  selectedTagIds: number[];
+  /**
+   * Add or remove one tag. Not a patch: a caller passing one would have to
+   * compute the next list itself at every call site.
+   */
   toggleTag: (tagId: number) => void;
   /**
    * Invent a tag and select it for this book. Nothing is attached yet: the
-   * book does not exist until confirm, so the new tag joins `selectedTagIds`
+   * book does not exist until confirm, so the new tag joins `pending.tagIds`
    * and is applied with the rest.
    */
   createTag: (name: string) => void;
   isCreatingTag: boolean;
 
-  coverFile: File | null;
-  setCoverFile: (file: File | null) => void;
-  isPrivate: boolean;
-  setIsPrivate: (isPrivate: boolean) => void;
-  /**
-   * Where this copy goes. Carried over from the last book added rather than
-   * cleared, because a shelf is catalogued in one sitting.
-   */
-  location: string;
-  setLocation: (location: string) => void;
   /** Shelves already in use, for the suggestions. */
   locations: LocationOut[];
-  /**
-   * Hardback or paperback. Offered here because the person scanning is
-   * holding the book, which is the one moment they can answer without going
-   * to look.
-   */
-  format: BookFormat | "";
-  setFormat: (format: BookFormat | "") => void;
 
   confirm: () => void;
   isAdding: boolean;
@@ -120,13 +117,19 @@ export function useScanFlow(
   onAdded: (bookId: number) => void,
 ): UseScanFlowResult {
   const [isbn, setIsbn] = useState<string | null>(null);
-  const [draft, setDraft] = useState<BookDraft | null>(null);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
-  const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [location, setLocation] = useState(readLastLocation);
-  const [format, setFormat] = useState<BookFormat | "">("");
+  // One state for the whole book being built. The shelf is read from storage
+  // once, as the initial value, so the first scan of a session starts on the
+  // shelf the last one ended on.
+  const [pending, setPending] = useState<PendingBook>(() =>
+    blankPending(readLastLocation()),
+  );
   const [addError, setAddError] = useState<unknown>(null);
+
+  const update = useCallback(
+    (patch: Partial<PendingBook>) =>
+      setPending((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   const queryClient = useQueryClient();
   const tags = useListTags();
@@ -146,15 +149,13 @@ export function useScanFlow(
   );
 
   // Fold the query result into the editable draft exactly once per lookup.
-  if (isbn !== null && draft === null && !lookupQuery.isPending) {
+  if (isbn !== null && pending.draft === null && !lookupQuery.isPending) {
     if (lookupQuery.data) {
       const next = draftFromLookup(lookupQuery.data);
-      setDraft(next);
-      setSelectedTagIds(next.suggested_tag_ids ?? []);
+      update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
     } else if (lookupQuery.error) {
       // Neither source knew it: offer manual entry rather than a dead end.
-      setDraft(blankDraft(isbn));
-      setSelectedTagIds([]);
+      update({ draft: blankDraft(isbn), tagIds: [] });
     }
   }
 
@@ -166,8 +167,10 @@ export function useScanFlow(
   const createTag = useCreateTag({
     mutation: {
       onSuccess: (tag) => {
-        setSelectedTagIds((current) =>
-          current.includes(tag.id) ? current : [...current, tag.id],
+        setPending((current) =>
+          current.tagIds.includes(tag.id)
+            ? current
+            : { ...current, tagIds: [...current.tagIds, tag.id] },
         );
         void queryClient.invalidateQueries({ queryKey: getListTagsQueryKey() });
       },
@@ -176,38 +179,23 @@ export function useScanFlow(
 
   function reset() {
     setIsbn(null);
-    setDraft(null);
-    setSelectedTagIds([]);
-    setCoverFile(null);
-    setIsPrivate(false);
-    setFormat("");
     setAddError(null);
-    // `location` is deliberately not reset. It is the one field that is the
-    // same for the next book far more often than not, and clearing it here
-    // would undo the carry-over on every cancel.
+    // Everything except the shelf. It is the one field that is the same for
+    // the next book far more often than not, and clearing it here would undo
+    // the carry-over on every cancel.
+    setPending((current) => blankPending(current.location));
   }
 
   async function confirm() {
+    const { draft } = pending;
     if (!draft) return;
     setAddError(null);
 
-    // Strip the client-only fields: neither is a column.
-    const {
-      notFound: _notFound,
-      suggested_tag_ids: _suggested,
-      ...fields
-    } = draft;
-
-    const shelf = normaliseLocation(location);
+    const shelf = normaliseLocation(pending.location);
 
     try {
       const book = await scanAdd.mutateAsync({
-        data: {
-          ...fields,
-          is_private: isPrivate,
-          location: shelf || null,
-          format: format || null,
-        },
+        data: toScanRequest({ ...pending, draft }),
       });
 
       // Only after the write succeeded. Remembering a shelf for a book that
@@ -216,13 +204,13 @@ export function useScanFlow(
 
       // The book exists by now. A failed cover or tag is not worth discarding
       // it and making the member scan again, so these are best-effort.
-      if (coverFile) {
+      if (pending.coverFile) {
         await uploadCover
-          .mutateAsync({ bookId: book.id, data: { file: coverFile } })
+          .mutateAsync({ bookId: book.id, data: { file: pending.coverFile } })
           .catch(() => undefined);
       }
       await Promise.all(
-        selectedTagIds.map((tagId) =>
+        pending.tagIds.map((tagId) =>
           addTag.mutateAsync({ bookId: book.id, tagId }).catch(() => undefined),
         ),
       );
@@ -237,11 +225,20 @@ export function useScanFlow(
   /**
    * Add the scanned book as another copy of the one already in the catalogue.
    *
-   * **The draft's tags and uploaded cover are not carried over**, unlike
-   * `confirm()`, which applies both. Neither belongs to the copy: the tags come
-   * from the book being copied, which already has them, and a cover uploaded
-   * here would be a photo of the same edition. Both are editable on the new
-   * copy's own page, and the UI says so before the press.
+   * **The draft's tags, uploaded cover and privacy tick are not carried over**,
+   * unlike `confirm()`, which applies the first two. Neither of those belongs
+   * to the copy: the tags come from the book being copied, which already has
+   * them, and a cover uploaded here would be a photo of the same edition. Both
+   * are editable on the new copy's own page, and the UI says so before the
+   * press.
+   *
+   * **The privacy tick is the one worth knowing about.** A copy inherits
+   * `is_private` from the book it copies, because `CopyCreate` has no such
+   * field, so ticking private and then pressing this makes a **public** copy if
+   * the book being copied is public. The checkbox sits directly above this
+   * button and is inert for this press. The backend refusing to take a privacy
+   * flag here is deliberate: privacy follows the Book, and a copy is a
+   * different Book only in the sense of being a different row.
    */
   async function addCopy() {
     const holder = addError instanceof ApiError ? addError.bookId : undefined;
@@ -249,15 +246,15 @@ export function useScanFlow(
     // the ISBN is somebody else's private one and its id was withheld.
     if (holder === undefined) return;
 
-    const shelf = normaliseLocation(location);
+    const shelf = normaliseLocation(pending.location);
     setAddError(null);
     try {
-      // Only the per-copy fields. The work is taken from the book being
-      // copied, which is what stops two rows claiming to be copies of each
-      // other while naming different books.
       const copy = await addAnotherCopy.mutateAsync({
         bookId: holder,
-        data: { location: shelf || null, format: format || null },
+        // `toCopyRequest`, not a literal. See its docstring: this was the
+        // second writer of a request body and the one the schema guard could
+        // not see.
+        data: toCopyRequest(pending),
       });
       rememberLastLocation(shelf);
       void queryClient.invalidateQueries();
@@ -274,44 +271,35 @@ export function useScanFlow(
     // with whatever Open Library says. The record is already chosen, so the
     // scan flow stays parked at null and the draft carries the ISBN instead.
     setIsbn(null);
-    setDraft(next);
-    setSelectedTagIds(next.suggested_tag_ids ?? []);
+    update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
   }
 
   return {
     isbn,
-    draft,
-    setDraft,
+    pending,
+    update,
     tags: tags.data ?? [],
 
     chooseMatch,
 
     lookup: (nextIsbn) => {
-      setDraft(null);
+      update({ draft: null });
       setAddError(null);
       setIsbn(nextIsbn);
     },
-    isLookingUp: isbn !== null && draft === null,
+    isLookingUp: isbn !== null && pending.draft === null,
 
-    selectedTagIds,
     createTag: (name) => createTag.mutate({ data: { name } }),
     isCreatingTag: createTag.isPending,
     toggleTag: (tagId) =>
-      setSelectedTagIds((current) =>
-        current.includes(tagId)
-          ? current.filter((id) => id !== tagId)
-          : [...current, tagId],
-      ),
+      setPending((current) => ({
+        ...current,
+        tagIds: current.tagIds.includes(tagId)
+          ? current.tagIds.filter((id) => id !== tagId)
+          : [...current.tagIds, tagId],
+      })),
 
-    coverFile,
-    setCoverFile,
-    isPrivate,
-    setIsPrivate,
-    location,
-    setLocation,
     locations,
-    format,
-    setFormat,
 
     confirm: () => void confirm(),
     isAdding: scanAdd.isPending,
@@ -506,17 +494,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
 
     for (const entry of ready) {
       const draft = entry.draft!;
-      const {
-        notFound: _notFound,
-        suggested_tag_ids: _suggested,
-        ...fields
-      } = draft;
       try {
         // Sequential rather than Promise.all: a 300-book batch would otherwise
         // open 300 concurrent requests against one SQLite writer, and a
         // duplicate ISBN 409 needs to be attributed to a specific book.
+        //
+        // The same request builder as the one-book flow, so a field added
+        // there cannot quietly go missing from a rapid run. Everything a rapid
+        // run does not offer takes its blank value: no cover, no tags, not
+        // private, no format.
         await scanAdd.mutateAsync({
-          data: { ...fields, is_private: false, location: shelf || null },
+          data: toScanRequest({ ...blankPending(shelf), draft }),
         });
         added += 1;
       } catch (error) {

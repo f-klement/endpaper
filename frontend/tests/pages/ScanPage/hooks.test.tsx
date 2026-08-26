@@ -121,7 +121,9 @@ describe("useBookSearch", () => {
     act(() => result.current.setQuery("  dune  "));
     act(() => result.current.submit());
 
-    await waitFor(() => expect(api.lastCall("/api/books/search")).toBeDefined());
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/search")).toBeDefined(),
+    );
 
     const query = new URL(
       api.lastCall("/api/books/search")!.url,
@@ -185,7 +187,7 @@ describe("useScanFlow.chooseMatch", () => {
 
     act(() => result.current.chooseMatch(match()));
 
-    expect(result.current.draft).toMatchObject({
+    expect(result.current.pending.draft).toMatchObject({
       title: "Dune",
       subtitle: "A Novel",
       author: "Frank Herbert",
@@ -199,7 +201,7 @@ describe("useScanFlow.chooseMatch", () => {
   it("preselects the suggested tags", () => {
     const { result } = renderFlow();
     act(() => result.current.chooseMatch(match()));
-    expect(result.current.selectedTagIds).toEqual([7]);
+    expect(result.current.pending.tagIds).toEqual([7]);
   });
 
   it("shows the summary rather than the manual-entry fields", () => {
@@ -207,7 +209,7 @@ describe("useScanFlow.chooseMatch", () => {
     // blank form to fill in.
     const { result } = renderFlow();
     act(() => result.current.chooseMatch(match()));
-    expect(result.current.draft?.notFound).toBeUndefined();
+    expect(result.current.pending.draft?.notFound).toBeUndefined();
   });
 
   it("accepts a record with no ISBN", () => {
@@ -215,7 +217,7 @@ describe("useScanFlow.chooseMatch", () => {
     // a blank ISBN as absent rather than as invalid.
     const { result } = renderFlow();
     act(() => result.current.chooseMatch(match({ isbn13: null })));
-    expect(result.current.draft?.isbn).toBe("");
+    expect(result.current.pending.draft?.isbn).toBe("");
   });
 
   it("does not start an ISBN lookup that would overwrite the draft", async () => {
@@ -225,7 +227,7 @@ describe("useScanFlow.chooseMatch", () => {
 
     act(() => result.current.chooseMatch(match()));
 
-    await waitFor(() => expect(result.current.draft).not.toBeNull());
+    await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
     expect(api.lastCall("/api/books/lookup")).toBeUndefined();
     expect(result.current.isLookingUp).toBe(false);
   });
@@ -246,7 +248,7 @@ describe("useScanFlow.chooseMatch", () => {
       ),
     );
 
-    expect(result.current.draft?.classifications).toEqual([
+    expect(result.current.pending.draft?.classifications).toEqual([
       { scheme: "ddc", number: "004", label: "Informatik" },
     ]);
   });
@@ -257,8 +259,8 @@ describe("useScanFlow.chooseMatch", () => {
 
     act(() => result.current.reset());
 
-    expect(result.current.draft).toBeNull();
-    expect(result.current.selectedTagIds).toEqual([]);
+    expect(result.current.pending.draft).toBeNull();
+    expect(result.current.pending.tagIds).toEqual([]);
   });
 });
 
@@ -396,7 +398,9 @@ describe("useScanFlow and a book already on the shelf", () => {
 
   const CONFLICT = {
     status: 409,
-    body: { detail: { message: "Book with this ISBN already in catalog", book_id: 7 } },
+    body: {
+      detail: { message: "Book with this ISBN already in catalog", book_id: 7 },
+    },
   };
 
   async function scanADuplicate(onAdded: (bookId: number) => void = () => {}) {
@@ -405,11 +409,11 @@ describe("useScanFlow and a book already on the shelf", () => {
     const rendered = renderHookWithProviders(() => useScanFlow(onAdded));
 
     act(() => rendered.result.current.lookup("9780441013593"));
-    await waitFor(() => expect(rendered.result.current.draft).not.toBeNull());
-    act(() => rendered.result.current.confirm());
     await waitFor(() =>
-      expect(rendered.result.current.error).not.toBeNull(),
+      expect(rendered.result.current.pending.draft).not.toBeNull(),
     );
+    act(() => rendered.result.current.confirm());
+    await waitFor(() => expect(rendered.result.current.error).not.toBeNull());
     return rendered;
   }
 
@@ -427,7 +431,7 @@ describe("useScanFlow and a book already on the shelf", () => {
     // The deliberate half of the collision. The mis-scan keeps its own answer,
     // which is the link to the book already here.
     const { result } = await scanADuplicate();
-    act(() => result.current.setLocation("Loft"));
+    act(() => result.current.update({ location: "Loft" }));
     api.on("/api/books/7/copies", { body: makeBook({ id: 99 }) }, "POST");
 
     act(() => result.current.addCopy());
@@ -480,7 +484,9 @@ describe("the shelf location carries over", () => {
   it("starts a scan from the shelf last used", async () => {
     localStorage.setItem("lastLocation", "Loft box 2");
     const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
-    await waitFor(() => expect(result.current.location).toBe("Loft box 2"));
+    await waitFor(() =>
+      expect(result.current.pending.location).toBe("Loft box 2"),
+    );
   });
 
   it("sends the shelf with the book", async () => {
@@ -489,8 +495,8 @@ describe("the shelf location carries over", () => {
     const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
 
     act(() => result.current.lookup("9780441013593"));
-    await waitFor(() => expect(result.current.draft).not.toBeNull());
-    act(() => result.current.setLocation("Kitchen"));
+    await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
+    act(() => result.current.update({ location: "Kitchen" }));
     act(() => result.current.confirm());
 
     await waitFor(() =>
@@ -512,8 +518,8 @@ describe("the shelf location carries over", () => {
     const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
 
     act(() => result.current.lookup("9780441013593"));
-    await waitFor(() => expect(result.current.draft).not.toBeNull());
-    act(() => result.current.setLocation("Kitchen"));
+    await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
+    act(() => result.current.update({ location: "Kitchen" }));
     act(() => result.current.confirm());
 
     await waitFor(() => expect(result.current.error).not.toBeNull());
@@ -524,10 +530,12 @@ describe("the shelf location carries over", () => {
     api.on("/api/books/lookup", { body: LOOKUP });
     const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
 
-    act(() => result.current.setLocation("Kitchen"));
+    act(() => result.current.update({ location: "Kitchen" }));
     act(() => result.current.reset());
 
-    await waitFor(() => expect(result.current.location).toBe("Kitchen"));
+    await waitFor(() =>
+      expect(result.current.pending.location).toBe("Kitchen"),
+    );
   });
 
   it("sends one shelf for every book in a rapid run", async () => {

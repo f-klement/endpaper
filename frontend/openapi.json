@@ -7058,7 +7058,7 @@
     },
     "/api/imports/preview": {
       "post": {
-        "description": "Read a file and report what it turned out to be, writing nothing.\n\nA column guessed wrong is invisible until after the import, and after the\nimport is too late: undoing it means finding and deleting a few hundred\nbooks. So the mapping is shown first, against the file's real header list,\nwith the first few rows as the parser actually read them.",
+        "description": "Read a file and report what it turned out to be, writing nothing.\n\nA column guessed wrong is invisible until after the import, and after the\nimport is too late: undoing it means finding and deleting a few hundred\nbooks. So the mapping is shown first, against the file's real header list,\nwith the first few rows as the parser actually read them.\n\nRate limited together with the import itself, so a preview and the import\nthat follows it spend two of the three a minute allows.",
         "operationId": "preview_import",
         "parameters": [
           {

@@ -31,9 +31,14 @@ export default function ScanPage() {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [rejectedCode, setRejectedCode] = useState<string | null>(null);
 
+  // The one field of the pending book this page reads for itself: it decides
+  // which of the three panels is on screen. The rest of it is the confirm
+  // card's business and is handed over whole.
+  const { draft } = scan.pending;
+
   // The scanner and the search box are both ways of choosing *which* book.
   // Once a draft exists that question is answered, so both step aside.
-  const showEntry = scan.draft === null && !scan.isLookingUp && !rapid.isActive;
+  const showEntry = draft === null && !scan.isLookingUp && !rapid.isActive;
 
   function handleManualLookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,7 +81,7 @@ export default function ScanPage() {
         <h1 className="text-xl font-semibold text-paper-900 dark:text-paper-100">
           {t("scan.title")}
         </h1>
-        {scan.draft === null && (
+        {draft === null && (
           <Button
             variant="secondary"
             size="sm"
@@ -151,7 +156,9 @@ export default function ScanPage() {
             variant={isCameraOn ? "secondary" : "primary"}
             fullWidth
             className="mt-3"
-            icon={isCameraOn ? null : <Icon name="camera" className="w-4 h-4" />}
+            icon={
+              isCameraOn ? null : <Icon name="camera" className="w-4 h-4" />
+            }
             onClick={() => {
               setRejectedCode(null);
               setIsCameraOn((on) => !on);
@@ -228,26 +235,17 @@ export default function ScanPage() {
         />
       )}
 
-      {scan.draft && (
+      {draft && (
         <LookupResult
-          draft={scan.draft}
+          pending={{ ...scan.pending, draft }}
+          onChange={scan.update}
           tags={scan.tags}
-          selectedTagIds={scan.selectedTagIds}
-          coverFile={scan.coverFile}
-          isPrivate={scan.isPrivate}
-          location={scan.location}
           locations={scan.locations}
-          format={scan.format}
           isAdding={scan.isAdding}
           error={scan.error}
-          onDraftChange={scan.setDraft}
           onToggleTag={scan.toggleTag}
-          onCoverChange={scan.setCoverFile}
-          onPrivateChange={scan.setIsPrivate}
-          onLocationChange={scan.setLocation}
           onCreateTag={scan.createTag}
           isCreatingTag={scan.isCreatingTag}
-          onFormatChange={scan.setFormat}
           onConfirm={scan.confirm}
           onCancel={handleCancel}
           onAddCopy={scan.addCopy}

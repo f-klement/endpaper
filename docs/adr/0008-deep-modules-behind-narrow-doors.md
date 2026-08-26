@@ -2,7 +2,7 @@
 
 Decided 2026-08-26, after the refactor that produced `shelf.py` and `authorship.py`.
 
-This records **why four existing modules are the target shape**, so the next review does not
+This records **why three existing modules are the target shape**, so the next review does not
 re-litigate them and the next module has something to be measured against. It changes no
 code. It exists because the same review that produced two new seams also proposed splitting
 `routers/books.py` by resource, and the argument against that is the argument for these.
@@ -13,7 +13,7 @@ code. It exists because the same review that produced two new seams also propose
 line count. A deep module has a small door and a lot of room behind it. A shallow one costs
 a reader an import and a name and gives back a line they could have written.
 
-Measured over the four this ADR names, plus the two the refactor added:
+Measured over the three this ADR names, plus the two the refactor added:
 
 | Module | Lines | Public surface | Private |
 |---|---|---|---|
@@ -71,9 +71,36 @@ description from two routes and had to put it back.
 found this way both paid: the many-Book query and author identity. One candidate remains and
 is on the tracker rather than in this ADR, because it is work rather than a decision.
 
+## A worked example of the test, in both directions
+
+The frontend was measured the same way after the backend work, by ranking hooks on interface
+width. Two came out at the top and **only one of them is a defect**, which is what makes the
+pair worth recording.
+
+`useLibrary` had **32** members, **15** of them writers, and eleven wrote one field each of a
+single `BookFilters` object held in one `useState`. Adding a filter cost the interface, the
+hook, the panel's props and the page. No caller stopped knowing anything. That is the shallow
+case, and narrowing it to `update(patch)` took the interface to 21 and the panel's props from
+ten callbacks to one.
+
+`useBookActions` has **21** members, **15** of them actions, and looks like the same thing.
+It is not, and the difference is one measurement: each setter calls a **different mutation**.
+`setStatus` is `status.mutate`, `setRating` is `rating.mutate`, `updateDetails` is
+`details.mutate`, and `setPrivacy`, `setOwnership` and `setCollection` are three more
+endpoints again. They are fifteen distinct API operations that happen to be spelled like
+field writes, not fifteen writes to one object.
+
+**Collapsing them into `update(patch)` would hide which endpoint a caller is calling**, which
+is the opposite of a caller stopping knowing something: it would make a caller stop knowing
+something it needs. Refused, and recorded here rather than in a ticket because the next
+reviewer ranking hooks by width will find it again and reach for the same fix.
+
+**So width is a symptom, exactly as size is.** The question is what is behind the door: one
+value, or fifteen operations.
+
 ## The rejected alternative
 
-Writing nothing, on the grounds that these four modules are fine and nobody is proposing to
+Writing nothing, on the grounds that these three modules are fine and nobody is proposing to
 change them. Refused because "nobody is proposing to change them" was untrue within the same
 review, and because the argument for keeping them is the argument that decides the next
 module. An unwritten rule gets re-argued at the price of a review round each time.

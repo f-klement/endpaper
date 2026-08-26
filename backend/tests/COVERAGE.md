@@ -1,7 +1,7 @@
 # Backend test coverage
 
-**2308 tests**, in 53 files. Line coverage was last measured at **96%** (4303 statements,
-186 missed) when the suite held 1571, which is 734 tests ago, and has not been re-measured
+**2333 tests**, in 54 files. Line coverage was last measured at **96%** (4303 statements,
+186 missed) when the suite held 1571, which is 762 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
 
@@ -47,6 +47,7 @@ is why the helper uses regexes.
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
 | `test_models.py` | 59 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that a quote's length ceilings are a CHECK rather than a `String(n)` SQLite ignores |
+| `test_importing.py` | 19 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing, and does not stop the rest of the file, while the same ISBN on a book they *can* see is an ordinary match, because a difference in behaviour would be the oracle again. That reading records are personal and an existing rating is never overwritten; that a plain book list leaves no unread marker; that a file listing one book twice creates it once; the two measured tag caps and the truncate-before-the-cache-key ordering that once took a whole import down; that a tag already in the library is reused rather than re-inserted, including one with a non-ASCII capital, which used to raise and take the whole file down; and that the catalogue costs one SELECT per row rather than four |
 | `test_authorship.py` | 21 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale, which is what says there is no cache; that the module raises a domain error rather than an HTTP one; and the three rules the design rests on: a key is derived from the name and never chosen, removing one is allowed while no operation retypes one in place, and a key is per spelling so the kept spelling gets a row too. Plus resolution through a chain of folded names, and the privacy line on the alias table: the rows are library wide, but a spelling surviving only on somebody else's private book is not listed |
 | `test_shelf.py` | 58 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. The house rule in three `ast` passes: no module but `shelf.py` imports a visibility predicate, none but `shelf.py` builds a query naming `Book`, none but `notifications.py` reaches `books` through a join. Nineteen evasion shapes that defeated earlier versions of the rule across five review rounds, each asserted against the pass that must catch it, so deleting a pass fails a test. That `notifications.py` and `backup.py` are outside the seam on purpose, with `backup.py`'s guards counted against its routes rather than against a literal, because it is invisible to every rule here. Who sees what; that no narrowing widens past the predicate, `select()` included, which is the column form that publishes a name and a count; every listing filter and that `matching()` reads all thirteen; stable paging and the series null rule; the statement cost of all three `Loading` members plus a relative check that the cost does not grow with the page; that anchoring the FROM fixes join direction and not join presence, measured on both `select()` and `where()`; and that the two named ways past a viewer are two rules rather than one hatch, with their **call sites** counted rather than their modules |
 | `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules, and the two bounds that keep them from being a plantable denial of service: a cap per bucket and a budget for the pass |
@@ -74,8 +75,8 @@ is why the helper uses regexes.
 | `routers/test_books_search.py` | 40 | **Free-text search.** That it works with no API key, that all six catalogues answer, how they merge, that one record failing a bound costs one result rather than the response, that a record carrying more headings than the ceiling loses the ninth rather than its whole row, and that a Library of Congress record's shelf classifications lead a row crowded with subject headings |
 | `routers/test_books_trash.py` | 43 | **Undoing a delete.** That a trashed book leaves every view, comes back whole, and frees its ISBN again |
 | `routers/test_settings.py` | 58 | Feature flags, the masked API key, the overdue webhook settings, admin-only writes |
-| `routers/test_imports.py` | 43 | The import, the private-ISBN branch, the tag caps, the rate limit |
-| `routers/test_books_tags.py` | 24 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
+| `routers/test_imports.py` | 47 | The import, the private-ISBN branch, the tag caps, the rate limit |
+| `routers/test_books_tags.py` | 26 | **Two vocabularies in one table.** Who may create, who may delete, and the counts |
 | `routers/test_auth.py` | 74 | Registration, login, `/auth/me`, the registration switch, and switching into a test account in all three modes |
 | `routers/test_loans.py` | 57 | Lending, returning, history, and who may run the overdue digest |
 | `routers/test_stats.py` | 37 | Every aggregation, and that each respects privacy |

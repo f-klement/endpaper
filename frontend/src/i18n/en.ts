@@ -691,7 +691,7 @@ export const en = {
   "copies.add": "Add another copy",
   "copies.adding": "Adding...",
   "copies.fromScanHint":
-    "A copy takes its tags and its cover from the book already here.",
+    "A copy takes its tags, its cover and its privacy from the book already here.",
   "copies.addFailed": "That copy could not be added.",
   "copies.loadFailed": "The other copies of this book could not be loaded.",
   "copies.badge": "{count} copies",

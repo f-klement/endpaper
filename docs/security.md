@@ -235,7 +235,7 @@ Five things are limited, for three different reasons:
 | `/auth/login` | 10 / min | username + address | Bounds guesses at a token |
 | `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
-| `/api/imports/*` | 3 / min | username | One call writes thousands of rows in one transaction, holding the single SQLite writer against the library |
+| `/api/imports/*` | 3 / min | username | `/csv` writes thousands of rows in one transaction, holding the single SQLite writer against the library. `/preview` writes nothing and is limited for the other half of the cost: parsing a 5.02 MB, 20,000 row export is 3.081 seconds of CPU, measured, and `MAX_UPLOAD_BYTES` caps the body without capping the rate. One window covers both, so the ordinary flow of a preview then an import spends two of the three |
 | metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this library neither runs nor pays for |
 
 The last is the one that is not about this deployment: spending somebody else's quota is a

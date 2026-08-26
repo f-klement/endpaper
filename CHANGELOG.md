@@ -19,6 +19,25 @@ Every "not found" answer from the cover, book and author routes kept a little
 state alive for the lifetime of the process. Nothing was exposed and nothing was
 lost; a busy library would have seen memory climb slowly.
 
+**Internal: the library's filters have one owner, and the two sides are now checked
+against each other.** Reading them out of a link and turning them into a request were
+written in different places, and nothing said they described the same set of filters.
+They do, and a test proves it against the API's own schema from now on. Nothing about
+what the filters do has changed.
+
+**Fixed: importing a library export could fail completely if one of its shelf
+names was not plain English.** A shelf called "Ästhetik" that already existed as
+a tag made the whole import stop and write nothing, every time, with no useful
+message. Nothing was lost, but nothing arrived either.
+
+**Fixed: the import preview had no rate limit**, although the documentation said
+it did. Reading a large file is the expensive half, so it is now limited
+together with the import itself.
+
+**Internal: applying an import has one owner too.** The code that reads a parsed
+export and writes it into the library moved out of the request handler. Nothing
+about importing behaves differently.
+
 **Internal: author identity has one owner too.** The rules for deciding that two
 spellings are one person were already in their own module and were already pure;
 everything the database knew about it was in a route handler. Both halves now sit

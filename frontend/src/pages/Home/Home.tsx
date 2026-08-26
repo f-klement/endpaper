@@ -35,7 +35,7 @@ export default function Home() {
 
   /** Jump to the unconfirmed books and start ticking them off in one step. */
   function reviewUnconfirmed() {
-    library.setOwnership(OwnershipStatus.unknown);
+    library.update({ ownership: OwnershipStatus.unknown });
     selection.start();
   }
 
@@ -71,25 +71,16 @@ export default function Home() {
         <UnconfirmedBanner count={unconfirmed} onReview={reviewUnconfirmed} />
       )}
 
-      <SearchBar onSearch={library.setQuery} />
+      <SearchBar onSearch={(query) => library.update({ query })} />
 
       <BookFilters
         filters={library.filters}
         tags={library.tags}
         showTagPanel={showTagPanel}
         onToggleTagPanel={() => setShowTagPanel((open) => !open)}
-        onStatusChange={library.setStatus}
-        onOwnershipChange={library.setOwnership}
-        onFormatChange={library.setFormat}
-        onLendingChange={library.setLending}
-        onDiscussChange={library.setDiscuss}
-        onLocationChange={library.setLocation}
-        onCollectionChange={library.setCollection}
-        onSeriesClear={() => library.setSeries(null)}
-        onAuthorClear={() => library.setAuthor(null)}
+        onFilterChange={library.update}
         locations={library.locations}
         collections={library.collections}
-        onSortChange={library.setSort}
         onToggleTag={library.toggleTag}
         onClearTags={library.clearTags}
         view={library.view}
@@ -99,7 +90,9 @@ export default function Home() {
       <SavedSearches
         searches={library.savedSearches}
         canSave={filtered}
-        onApply={library.setFilters}
+        // A saved search is a complete filter set, so applying one writes
+        // every field. There is no separate whole-set door for that reason.
+        onApply={library.update}
         onSave={library.saveCurrentSearch}
         onDelete={library.deleteSavedSearch}
       />
@@ -158,7 +151,7 @@ export default function Home() {
               <BookTable
                 books={library.books}
                 sort={library.filters.sort}
-                onSortChange={library.setSort}
+                onSortChange={(sort) => library.update({ sort })}
                 isLoading={library.isLoading}
                 hasMore={library.hasMore}
                 isLoadingMore={library.isLoadingMore}

@@ -898,7 +898,7 @@ generated one nobody can later tell apart. That is the same argument `books.cate
 exists for, and it is why the DDC caption is not written into `categories` either.
 
 **The web client pre-selects them, so on an ordinary scan they land unless the member
-unchecks them.** `ScanPage/hooks.ts` calls `setSelectedTagIds(next.suggested_tag_ids)` on
+unchecks them.** `ScanPage/hooks.ts` calls `update({ tagIds: next.suggested_tag_ids ?? [] })` on
 both the lookup and the chosen-match path, and `confirm()` posts each selected id to
 `POST /{id}/tags/{tag_id}`. The member sees the ticked boxes on the confirm form and can
 untick any of them before pressing the button, and nothing is written until they do press
@@ -2126,6 +2126,63 @@ reversible, and a shelf only an admin may tidy is a shelf nobody tidies. Deletin
 collection is admin only because it strips a label off every book at once with no undo;
 nothing here has that shape.
 
+### `importing.py` owns applying an export, `csv_import.py` stays pure underneath
+
+The third module in the same series and found the same way, by measuring after the second
+shipped. `csv_import.py` was already right: 12 public names, no session, decode and sniff and
+map and parse. Everything the database knew about **applying** the result was in a route
+handler: the catalogue index, the matching, the gap filling, the tag invention, the reading
+record and the review, with a **143 line** `import_csv` around them.
+
+`routers/imports.py` went from **511 lines to 182**. `Import.for_member(db, member_id)`
+mirrors `Shelf.seen_by` and `Authorship.seen_by`.
+
+**The index does not make the per row cost zero and must not claim to.** `find` still issues
+one `db.get` for a matched row, because that is the lookup that has to return a live object
+rather than an id. What moved from per row to per import is the ISBN query, the title query
+and the status query. The old 25,001 figure counted every statement including writes, so no
+new total is derived from it; what is pinned is the **slope in SELECTs**, and it is one.
+
+**The rule this module exists to protect is not about speed.** A row whose ISBN belongs to a
+Book the Member cannot see is counted as unmatched and its title is never reported. Creating
+it raises on the unique index, which aborts the whole transaction so a 5000 row import
+silently writes nothing, and the 500 against 200 difference is a clean oracle for "does a
+Book with this ISBN exist in this house". `skipped` merges it with the rows that had no
+title, because separating them out would be the oracle by another route.
+
+### SQLite folds case in ASCII and Python does not
+
+`func.lower(Tag.name) == key`, with `key` folded in Python, looks like one comparison and is
+two different functions. Measured: `lower('Ästhetik')` is `'Ästhetik'` in SQLite and
+`'ästhetik'` in Python.
+
+So a Tag carrying a non-ASCII capital never matched, the import decided the name was new, and
+the insert hit the binary `unique=True` on `tags.name` with a name already there. That raised
+`IntegrityError` **and took the whole file with it**: a member with one German shelf name
+imported nothing, every time, with a 500. Any member could plant such a tag through
+`POST /api/tags` or one earlier import.
+
+The fix is to fold on one side only: `importing.Import._tags_by_folded_name` reads the Tag
+table once and keys it with Python's `.lower()`, so a cache miss means genuinely new. It also
+turns one query per unseen name into one per import.
+
+**The general rule: never compare a database fold against a Python fold.** If a lookup folds
+case, do it in one language, and prefer Python where the set is small enough to hold. The
+remaining instance is `routers/collections.py:37`, issue #77, and it is a different severity
+rather than the same bug waiting. There the check folds in SQLite and the index it backs,
+`uq_collections_name_nocase`, is `lower(name)` in SQLite too, so the two **agree** and nothing
+raises. The cost is that `Ästhetik` and `ästhetik` coexist as two Collections while `Fiction`
+and `fiction` do not. Fixing the check alone would split the pair and turn a quiet duplicate
+into an `IntegrityError`, so the index has to change, which needs a migration.
+
+**Where two lookups fold the same set, they must break a tie the same way, and stability is
+not enough.** A dict comprehension and a `next(...)` over one `order_by(Tag.id)` are both
+perfectly stable and land on opposite ends: the first keeps the last key written, the second
+takes the first row. Measured on Tags at ids 106 and 107, the import resolved the pair to 107
+and `create_tag` to 106, while both docstrings cited the ordering as what made them agree.
+Both now take the first, matching `_first_wins` in the same module. Such a pair is reachable
+on any database that met the bug above, because the old `create_tag` created exactly it.
+
 ### A route docstring is API documentation, not an internal comment
 
 FastAPI serves a handler's docstring as the operation description at `/docs`, `/redoc` and
@@ -2552,6 +2609,93 @@ is at `concurrent: 2`, so two real CI jobs can now land together.
 
 One page goes in that page's folder, several pages in `pages/components/`, general and
 domain-free in `src/components/`. See [frontend.md](frontend.md).
+
+### `useLibrary` has one door for filters, not a setter per field
+
+Eleven one-line setters wrote one field each of a single `BookFilters`, so adding a filter
+cost the interface, the hook and every caller a line, and no caller stopped knowing
+anything: the test [ADR 0008](adr/0008-deep-modules-behind-narrow-doors.md) sets.
+`update(patch: Partial<BookFilters>)` replaces them, and `UseLibraryResult` went from 32
+members to 21.
+
+`toggleTag` and `clearTags` stay, because neither is a field write: a caller passing a
+patch would have to compute the next tag list itself, at every call site.
+
+**`setFilters` is gone rather than kept.** Its only caller applies a saved search, and a
+saved search holds a complete `BookFilters`, so a patch naming every key is already a
+replacement. The one case where the two differ is a search stored before a field existed,
+and merging is the better answer there: the missing field keeps its current value instead
+of becoming undefined.
+
+Reading filters out of a URL moved out with them, into `lib/bookFilters.ts`, which is pure
+and has no React in it, and so did turning a filter set into query parameters.
+
+**Reading a URL, not the round trip.** Writing one is seven hand-written literals in six
+files (`NavBar`, `AuthorCard`, `BookHeader` twice, `SeriesCard`, `CollectionCard`,
+`SettingsPage`), none of them going through this module and none covered by the guard
+below. Renaming a parameter in `readFilters` today breaks all seven silently and the suite
+stays green. That half is unowned, deliberately not fixed here, and on the tracker.
+
+**`readFilters` covers ten of the twelve fields.** `query` and `tagIds` are not reachable
+from a link, which is a decision rather than an omission: a link naming a search box's
+contents, or a set of tag ids that mean something different in every library, is not
+something this app produces. Both halves are now asserted, `toParams` by a totality check
+and `readFilters` by two tables that between them have to account for every field.
+
+**A link and a request do not use the same vocabulary, and writing that guard is what
+surfaced it.** `?collection=3` is this app's own route parameter; `collection_id=3` is the
+listing endpoint's. `readFilters` reads the first and `toParams` writes the second. The first
+version of the guard fed one into the other, assumed they agreed, and failed on `collection`
+alone. The tables in `tests/lib/bookFilters.test.ts` now name the link parameter per field,
+so the two vocabularies are written down instead of being discovered by a test that
+happened to be wrong in the right place.
+
+`BookFilters` and `DEFAULT_FILTERS` live here rather than in `pages/Home/types.ts`.
+Keeping the shape on the page was tried and does not survive its own guard: the wire test
+asserts that **every one of the twelve fields becomes a query parameter**, and its
+client-only allowlist is empty. Nothing in the shape is view state, so it is not a view
+model, and `lib/libraryView.ts` already holds `LibraryView` by the same logic. The page
+re-exports both, so no consumer changed.
+
+### The filter set is checked against the API's own schema
+
+`BookFilters` exists on both sides of the wire, `backend/shelf.py` has its own, and
+nothing checked that the two describe the same filters. Both failures are silent: a
+filter the UI sends and the API ignores is a 200 and the whole library, and a filter the
+API accepts and the UI cannot send is a feature nobody can reach.
+
+`tests/lib/bookFilters.test.ts` reads the committed `openapi.json`, takes the query
+parameters of `list_books`, and compares them against what `toParams` can produce, in
+both directions. It is the frontend half of
+`test_shelf.py::test_every_filter_field_narrows_something`, which asserts the same thing
+about `matching()`.
+
+Three parameters are allowed through with a reason each: `page` and `page_size`, which
+belong to whoever is reading rather than to a filter set, and `unrated`, which the API
+accepts and no control in this app offers. Verified by mutation rather than trusted:
+renaming `q` to `search` and deleting `location` from `toParams` fails all three
+assertions, naming `search`, then `q` and `location`, then `location`.
+
+**The scan flow has the same guard, on two endpoints.**
+`tests/pages/ScanPage/types.test.ts` checks `toScanRequest` against `BookCreate` and
+`toCopyRequest` against `CopyCreate`, resolving each `$ref` out of the same committed
+document rather than assuming it.
+
+It found its own `unrated`: **`BookCreate` accepts `collection_id` and the scan flow never
+sends it**, on either endpoint. There is no collection control on the confirm step, which is
+a design decision rather than a plumbing gap, and it is recorded in the exemption table so
+adding one is a decision somebody makes rather than a difference nobody sees.
+
+**Two endpoints because there were two writers.** `addCopy` built its body from a literal,
+so a new per-copy field reached the scan endpoint through `toScanRequest` and reached the
+copy endpoint only if somebody remembered the literal. `CopyCreate` and `BookCreate` do not
+accept the same fields (`condition`, the four purchase columns and `lending` are copy only),
+so one function per endpoint is the only shape under which both can be checked at all.
+
+**The document itself is now re-derived in CI.** It is committed and read as the authority
+by both guards, so nothing stopped somebody editing that one file and making every
+assertion pass while agreeing with nothing. `test:backend` regenerates it and diffs, in that
+job because regenerating needs `uv`.
 
 ### Types are generated, not hand-written
 

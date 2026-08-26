@@ -690,7 +690,7 @@ export const de: Messages = {
   "copies.add": "Weiteres Exemplar hinzufügen",
   "copies.adding": "Wird hinzugefügt...",
   "copies.fromScanHint":
-    "Ein Exemplar übernimmt Schlagwörter und Titelbild von dem Buch, das schon da ist.",
+    "Ein Exemplar übernimmt Schlagwörter, Titelbild und die Sichtbarkeit von dem Buch, das schon da ist.",
   "copies.addFailed": "Dieses Exemplar konnte nicht hinzugefügt werden.",
   "copies.loadFailed": "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
   "copies.badge": "{count} Exemplare",

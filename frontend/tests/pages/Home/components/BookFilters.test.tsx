@@ -17,18 +17,9 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     tags: [],
     showTagPanel: false,
     onToggleTagPanel: vi.fn(),
-    onStatusChange: vi.fn(),
-    onOwnershipChange: vi.fn(),
-    onLocationChange: vi.fn(),
-    onCollectionChange: vi.fn(),
-    onFormatChange: vi.fn(),
-    onLendingChange: vi.fn(),
-    onDiscussChange: vi.fn(),
-    onSeriesClear: vi.fn(),
-    onAuthorClear: vi.fn(),
+    onFilterChange: vi.fn(),
     locations: [],
     collections: [],
-    onSortChange: vi.fn(),
     onToggleTag: vi.fn(),
     onClearTags: vi.fn(),
     view: "grid" as const,
@@ -74,7 +65,7 @@ describe("the collection filter", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Collection"), "3");
 
-    expect(props.onCollectionChange).toHaveBeenCalledWith(3);
+    expect(props.onFilterChange).toHaveBeenCalledWith({ collection: 3 });
   });
 
   it("reports the unfiled option as a word, not an id", async () => {
@@ -84,7 +75,7 @@ describe("the collection filter", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Collection"), "unfiled");
 
-    expect(props.onCollectionChange).toHaveBeenCalledWith("unfiled");
+    expect(props.onFilterChange).toHaveBeenCalledWith({ collection: "unfiled" });
   });
 
   it("stays on screen when the list empties under an active filter", () => {
@@ -109,7 +100,7 @@ describe("the collection filter", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Collection"), "");
 
-    expect(props.onCollectionChange).toHaveBeenCalledWith(null);
+    expect(props.onFilterChange).toHaveBeenCalledWith({ collection: null });
   });
 });
 
@@ -128,6 +119,6 @@ describe("the author chip", () => {
     expect(screen.getByText("Author: ursula k le guin")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByLabelText("Clear selection"));
 
-    expect(props.onAuthorClear).toHaveBeenCalled();
+    expect(props.onFilterChange).toHaveBeenCalledWith({ author: null });
   });
 });

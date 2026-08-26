@@ -174,6 +174,9 @@ export const getPreviewImportUrl = (params?: PreviewImportParams) => {
  * import is too late: undoing it means finding and deleting a few hundred
  * books. So the mapping is shown first, against the file's real header list,
  * with the first few rows as the parser actually read them.
+ *
+ * Rate limited together with the import itself, so a preview and the import
+ * that follows it spend two of the three a minute allows.
  * @summary Preview Import
  */
 export const previewImport = async (

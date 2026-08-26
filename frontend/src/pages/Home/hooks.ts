@@ -24,19 +24,15 @@ import {
   type LibraryView,
 } from "../../lib/libraryView";
 import {
-  BookFormat,
   BulkAction,
-  LendingWillingness,
   OwnershipStatus,
-  ReadStatus,
   type BookOut,
   type BulkResult,
   type CollectionOut,
-  type ListBooksParams,
   type LocationOut,
   type TagOut,
 } from "../../api/generated/model";
-import { BookSort } from "../../api/generated/model";
+import { readFilters, toParams } from "../../lib/bookFilters";
 import {
   deleteSearch,
   readSavedSearches,
@@ -45,50 +41,28 @@ import {
 } from "../../lib/savedSearches";
 import { useToast } from "../../app/toast";
 import { useTranslation } from "../../i18n";
-import { DEFAULT_FILTERS, type BookFilters } from "./types";
+import type { BookFilters } from "./types";
 
 /** Rows per request. Enough to fill a wide grid without over-fetching. */
 export const PAGE_SIZE = 24;
 
-function toParams(filters: BookFilters): ListBooksParams {
-  return {
-    // Empty values are omitted rather than sent blank, so the query key (and
-    // therefore the cache entry) is the same as an unfiltered request.
-    ...(filters.query ? { q: filters.query } : {}),
-    ...(filters.status ? { status: filters.status } : {}),
-    ...(filters.ownership ? { ownership: filters.ownership } : {}),
-    ...(filters.series ? { series: filters.series } : {}),
-    ...(filters.author ? { author: filters.author } : {}),
-    ...(filters.location ? { location: filters.location } : {}),
-    ...(filters.format ? { format: filters.format } : {}),
-    ...(filters.lending ? { lending: filters.lending } : {}),
-    // The two are mutually exclusive on the server, which is why one field
-    // produces one parameter or the other and never both.
-    ...(typeof filters.collection === "number"
-      ? { collection_id: filters.collection }
-      : {}),
-    ...(filters.collection === "unfiled" ? { unfiled: true } : {}),
-    ...(filters.discuss ? { discuss: true } : {}),
-    ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
-    sort: filters.sort,
-    page_size: PAGE_SIZE,
-  };
-}
-
 export interface UseLibraryResult {
   filters: BookFilters;
-  setQuery: (query: string) => void;
-  setStatus: (status: BookFilters["status"]) => void;
-  setOwnership: (ownership: BookFilters["ownership"]) => void;
-  setSeries: (series: BookFilters["series"]) => void;
-  setAuthor: (author: BookFilters["author"]) => void;
-  setLocation: (location: BookFilters["location"]) => void;
-  setFormat: (format: BookFilters["format"]) => void;
-  setLending: (lending: BookFilters["lending"]) => void;
-  setCollection: (collection: BookFilters["collection"]) => void;
-  setDiscuss: (discuss: boolean) => void;
-  /** Replace the whole filter set, for a saved view such as the wishlist. */
-  setFilters: (filters: BookFilters) => void;
+  /**
+   * Change one filter or several, leaving the rest alone.
+   *
+   * One door rather than a setter per field. Eleven of them cost the type, the
+   * hook and every caller a line each to add a filter, and gave a caller
+   * nothing it could not have written itself.
+   *
+   * Applying a saved search goes through the same door: a saved search holds a
+   * complete `BookFilters`, so a patch naming every key is a replacement. That
+   * is why there is no separate whole-set setter. A stored search written
+   * before a field existed is the one case where the two would differ, and
+   * merging is the safer of the two answers there: the missing field keeps a
+   * real value rather than becoming undefined.
+   */
+  update: (patch: Partial<BookFilters>) => void;
 
   /** Filter combinations somebody named and kept. Browser-local. */
   savedSearches: SavedSearch<BookFilters>[];
@@ -97,7 +71,6 @@ export interface UseLibraryResult {
   locations: LocationOut[];
   /** Every collection in the library, for the filter. */
   collections: CollectionOut[];
-  setSort: (sort: BookFilters["sort"]) => void;
   toggleTag: (tagId: number) => void;
   clearTags: () => void;
 
@@ -120,82 +93,20 @@ export interface UseLibraryResult {
   loadMore: () => void;
 }
 
-function isStatus(value: string | null): value is ReadStatus {
-  return (
-    value !== null && (Object.values(ReadStatus) as string[]).includes(value)
-  );
-}
-
-function isSort(value: string | null): value is BookSort {
-  return (
-    value !== null && (Object.values(BookSort) as string[]).includes(value)
-  );
-}
-
-function isFormat(value: string | null): value is BookFormat {
-  return (
-    value !== null && (Object.values(BookFormat) as string[]).includes(value)
-  );
-}
-
-function isLending(value: string | null): value is LendingWillingness {
-  return (
-    value !== null &&
-    (Object.values(LendingWillingness) as string[]).includes(value)
-  );
-}
-
-function readCollection(value: string | null): BookFilters["collection"] {
-  if (value === "unfiled") return "unfiled";
-  if (value === null) return null;
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : null;
-}
-
-function isOwnership(value: string | null): value is OwnershipStatus {
-  return (
-    value === OwnershipStatus.owned ||
-    value === OwnershipStatus.not_owned ||
-    value === OwnershipStatus.unknown
-  );
-}
-
 export function useLibrary(): UseLibraryResult {
-  // `?ownership=unknown` is a real entry point, not decoration: it is the link
-  // the Goodreads import result offers, and the banner below uses the same one.
   // Read once as the initial value rather than kept in sync, so clicking a
-  // filter afterwards is not fought by the URL.
+  // filter afterwards is not fought by the URL. What the parameters mean is
+  // `lib/bookFilters.ts`.
   const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState<BookFilters>(() => {
-    const ownership = searchParams.get("ownership");
-    const sort = searchParams.get("sort");
-    const status = searchParams.get("status");
-    return {
-      ...DEFAULT_FILTERS,
-      ...(isOwnership(ownership) ? { ownership } : {}),
-      ...(isStatus(status) ? { status } : {}),
-      ...(isSort(sort) ? { sort } : {}),
-      ...(isFormat(searchParams.get("format"))
-        ? { format: searchParams.get("format") as BookFormat }
-        : {}),
-      ...(isLending(searchParams.get("lending"))
-        ? { lending: searchParams.get("lending") as LendingWillingness }
-        : {}),
-      // Present and not "false" is on. A bare `?discuss` is what a link
-      // somebody typed looks like, and treating it as off would make the link
-      // silently do nothing.
-      discuss:
-        searchParams.has("discuss") && searchParams.get("discuss") !== "false",
-      series: searchParams.get("series"),
-      author: searchParams.get("author"),
-      location: searchParams.get("location"),
-      // `?collection=4` is the link the collections page offers, and
-      // `?collection=unfiled` is the one the picker's empty option offers.
-      // Anything else is ignored rather than sent on, so a hand-typed value
-      // cannot produce a request the API answers 422 to.
-      collection: readCollection(searchParams.get("collection")),
-    };
-  });
+  const [filters, setFilters] = useState<BookFilters>(() =>
+    readFilters(searchParams),
+  );
+
+  const update = useCallback(
+    (patch: Partial<BookFilters>) =>
+      setFilters((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   // Read once on mount. Nothing else in the tab writes them, so re-reading
   // storage on every render would be work for no news.
@@ -207,7 +118,7 @@ export function useLibrary(): UseLibraryResult {
   // answer gives the grid rather than an error.
   const [view, setViewState] = useState<LibraryView>(() => readLibraryView());
 
-  const params = toParams(filters);
+  const params = { ...toParams(filters), page_size: PAGE_SIZE };
 
   const books = useListBooksInfinite(params, {
     query: {
@@ -250,27 +161,13 @@ export function useLibrary(): UseLibraryResult {
 
   return {
     filters,
-    setQuery: (query) => setFilters((current) => ({ ...current, query })),
-    setStatus: (status) => setFilters((current) => ({ ...current, status })),
-    setOwnership: (ownership) =>
-      setFilters((current) => ({ ...current, ownership })),
-    setSeries: (series) => setFilters((current) => ({ ...current, series })),
-    setAuthor: (author) => setFilters((current) => ({ ...current, author })),
-    setLocation: (location) =>
-      setFilters((current) => ({ ...current, location })),
-    setFormat: (format) => setFilters((current) => ({ ...current, format })),
-    setLending: (lending) => setFilters((current) => ({ ...current, lending })),
-    setCollection: (collection) =>
-      setFilters((current) => ({ ...current, collection })),
-    setDiscuss: (discuss) => setFilters((current) => ({ ...current, discuss })),
-    setFilters: (next) => setFilters(next),
+    update,
 
     savedSearches,
     saveCurrentSearch: (name) => setSavedSearches(saveSearch(name, filters)),
     deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
     collections: collections.data ?? [],
-    setSort: (sort) => setFilters((current) => ({ ...current, sort })),
     toggleTag: (tagId) =>
       setFilters((current) => ({
         ...current,

@@ -25,6 +25,43 @@ class TestCreating:
         assert res.status_code == 201
         assert res.json()["name"] == "Holiday reads"
 
+    def test_a_non_ascii_duplicate_returns_the_existing_tag(self, client, admin):
+        """This answered **500** until 2026-08-26.
+
+        The lookup folded with SQLite's `lower()` and compared against Python's,
+        and those are different functions: `lower('Ästhetik')` is `'Ästhetik'`
+        in SQLite and `'ästhetik'` here. So the tag was never found, and the
+        insert hit the binary unique index on `tags.name` with a name already
+        there. See `docs/decisions.md`, "SQLite folds case in ASCII and Python
+        does not".
+        """
+        first = client.post(
+            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+        assert first.status_code == 201
+
+        again = client.post(
+            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+
+        assert again.status_code == 201
+        assert again.json()["id"] == first.json()["id"]
+
+    def test_a_non_ascii_name_differing_only_in_case_is_the_same_tag(self, client, admin):
+        """The other half of the same fold. Without it "Ästhetik" and
+        "ästhetik" both exist, which is the promise this route makes broken
+        quietly rather than loudly."""
+        first = client.post(
+            "/api/books/tags", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+
+        lower = client.post(
+            "/api/books/tags", json={"name": "ästhetik"}, headers=admin["headers"]
+        )
+
+        assert lower.status_code == 201
+        assert lower.json()["id"] == first.json()["id"]
+
     def test_it_lands_in_the_custom_group(self, client, admin):
         res = client.post(
             "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]

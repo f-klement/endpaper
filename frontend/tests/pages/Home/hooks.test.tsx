@@ -101,7 +101,7 @@ describe("useLibrary", () => {
       const { result } = renderLibrary();
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      act(() => result.current.setQuery("dune"));
+      act(() => result.current.update({ query: "dune" }));
 
       await waitFor(() => expect(lastQuery().get("q")).toBe("dune"));
     });
@@ -110,7 +110,7 @@ describe("useLibrary", () => {
       const { result } = renderLibrary();
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      act(() => result.current.setStatus(ReadStatus.read));
+      act(() => result.current.update({ status: ReadStatus.read }));
 
       await waitFor(() => expect(lastQuery().get("status")).toBe("read"));
     });
@@ -119,7 +119,7 @@ describe("useLibrary", () => {
       const { result } = renderLibrary();
       await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-      act(() => result.current.setSort(BookSort.year_desc));
+      act(() => result.current.update({ sort: BookSort.year_desc }));
 
       await waitFor(() => expect(lastQuery().get("sort")).toBe("year_desc"));
     });
@@ -224,14 +224,14 @@ describe("useLibrary ownership filter", () => {
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setOwnership(OwnershipStatus.unknown));
+    act(() => result.current.update({ ownership: OwnershipStatus.unknown }));
 
     await waitFor(() => expect(lastQuery().get("ownership")).toBe("unknown"));
   });
 
   it("counts as an active filter", async () => {
     const { result } = renderLibrary();
-    act(() => result.current.setOwnership(OwnershipStatus.owned));
+    act(() => result.current.update({ ownership: OwnershipStatus.owned }));
     await waitFor(() =>
       expect(result.current.filters.ownership).toBe(OwnershipStatus.owned),
     );
@@ -262,7 +262,7 @@ describe("useLibrary ownership filter", () => {
         expect(result.current.filters.ownership).toBe(OwnershipStatus.unknown),
       );
 
-      act(() => result.current.setOwnership(null));
+      act(() => result.current.update({ ownership: null }));
 
       await waitFor(() => expect(result.current.filters.ownership).toBeNull());
     });
@@ -282,7 +282,7 @@ describe("useLibrary collection filter", () => {
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setCollection(3));
+    act(() => result.current.update({ collection: 3 }));
 
     await waitFor(() => expect(lastQuery().get("collection_id")).toBe("3"));
   });
@@ -293,7 +293,7 @@ describe("useLibrary collection filter", () => {
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setCollection("unfiled"));
+    act(() => result.current.update({ collection: "unfiled" }));
 
     await waitFor(() => expect(lastQuery().get("unfiled")).toBe("true"));
     expect(lastQuery().has("collection_id")).toBe(false);
@@ -352,7 +352,7 @@ describe("useLibrary author filter", () => {
     const { result } = renderLibrary("/?author=ursula%20k%20le%20guin");
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setAuthor(null));
+    act(() => result.current.update({ author: null }));
 
     await waitFor(() => expect(lastQuery().has("author")).toBe(false));
   });
@@ -370,7 +370,7 @@ describe("useLibrary lending and discussion filters", () => {
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setLending(LendingWillingness.happy));
+    act(() => result.current.update({ lending: LendingWillingness.happy }));
 
     await waitFor(() => expect(lastQuery().get("lending")).toBe("happy"));
   });
@@ -379,10 +379,10 @@ describe("useLibrary lending and discussion filters", () => {
     const { result } = renderLibrary();
     await waitFor(() => expect(result.current.books).toHaveLength(1));
 
-    act(() => result.current.setDiscuss(true));
+    act(() => result.current.update({ discuss: true }));
     await waitFor(() => expect(lastQuery().get("discuss")).toBe("true"));
 
-    act(() => result.current.setDiscuss(false));
+    act(() => result.current.update({ discuss: false }));
     await waitFor(() => expect(lastQuery().has("discuss")).toBe(false));
   });
 

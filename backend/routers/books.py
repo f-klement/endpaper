@@ -168,8 +168,23 @@ def create_tag(payload: TagCreate, db: DbSession, current_user: CurrentUser) -> 
     than a 409: somebody typing a name that is already there wants that tag,
     and an error would send them to find it by hand.
     """
-    existing = (
-        db.query(Tag).filter(func.lower(Tag.name) == payload.name.lower()).first()
+    # **Folded in Python on both sides, never `func.lower` against `.lower()`.**
+    # Those are two different functions: SQLite's `lower()` is ASCII only, so
+    # `lower('Ästhetik')` is `'Ästhetik'` there and `'ästhetik'` here. A stored
+    # tag with a non-ASCII capital therefore never matched, and the insert then
+    # hit the binary `unique=True` on `tags.name` with a name already present:
+    # measured, this route answered **500** to `{"name": "Ästhetik"}` whenever
+    # that tag existed. See `docs/decisions.md`, "SQLite folds case in ASCII
+    # and Python does not".
+    #
+    # One query and a scan rather than a filtered lookup, because the tags are
+    # a library's curated list plus what imports invented, and correctness here
+    # is worth more than the index. `importing.Import._tags_by_folded_name`
+    # does the same thing for the same reason.
+    folded = payload.name.lower()
+    existing = next(
+        (tag for tag in db.query(Tag).order_by(Tag.id).all() if tag.name.lower() == folded),
+        None,
     )
     if existing is not None:
         return existing

@@ -6,28 +6,30 @@ import type { LocationOut, TagOut } from "../../../api/generated/model";
 import { ErrorState } from "../../../components";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { CoverImage, LocationField, TagPicker } from "../../components";
-import type { BookDraft } from "../types";
+import type { BookDraft, PendingBook } from "../types";
 
 interface LookupResultProps {
-  draft: BookDraft;
+  /**
+   * The book being added, whole. `draft` is not null here: this card is on
+   * screen only once a lookup has produced one.
+   */
+  pending: PendingBook & { draft: BookDraft };
+  /**
+   * Change one field of it or several. One callback, not one per field.
+   *
+   * Five of these were separate props, each spelled in the interface, in the
+   * destructure, at its handler and again in the page that supplied it. The
+   * card now says what changed and the caller decides what that means.
+   */
+  onChange: (patch: Partial<PendingBook>) => void;
   tags: TagOut[];
-  selectedTagIds: number[];
-  coverFile: File | null;
-  isPrivate: boolean;
-  location: string;
   locations: LocationOut[];
-  format: BookFormat | "";
   isAdding: boolean;
   error: unknown;
-  onDraftChange: (draft: BookDraft) => void;
   onToggleTag: (tagId: number) => void;
-  onCoverChange: (file: File | null) => void;
-  onPrivateChange: (isPrivate: boolean) => void;
-  onLocationChange: (location: string) => void;
   /** Invent a tag mid-scan. Cataloguing a new shelf is when one is needed. */
   onCreateTag: (name: string) => void;
   isCreatingTag?: boolean;
-  onFormatChange: (format: BookFormat | "") => void;
   onConfirm: () => void;
   onCancel: () => void;
   /** Record it as another copy of the book the 409 named. */
@@ -50,30 +52,22 @@ const FORMATS: { value: BookFormat; label: MessageKey }[] = [
 ];
 
 export default function LookupResult({
-  draft,
+  pending,
+  onChange,
   tags,
-  selectedTagIds,
-  coverFile,
-  isPrivate,
-  location,
   locations,
-  format,
   isAdding,
   error,
-  onDraftChange,
   onToggleTag,
-  onCoverChange,
-  onPrivateChange,
-  onLocationChange,
   onCreateTag,
   isCreatingTag = false,
-  onFormatChange,
   onConfirm,
   onCancel,
   onAddCopy,
   isAddingCopy,
 }: LookupResultProps) {
   const { t } = useTranslation();
+  const { draft, coverFile, isPrivate, location, format, tagIds } = pending;
   return (
     <div className="bg-paper-0 rounded-2xl border border-paper-100 shadow-sm overflow-hidden dark:bg-paper-900 dark:border-paper-800">
       {/* The outer condition stays: a book with no cover at all shows nothing
@@ -104,7 +98,7 @@ export default function LookupResult({
               type="text"
               value={draft.title}
               onChange={(event) =>
-                onDraftChange({ ...draft, title: event.target.value })
+                onChange({ draft: { ...draft, title: event.target.value } })
               }
               className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm mb-2 dark:border-paper-700"
               placeholder={t("scan.titlePlaceholder")}
@@ -120,7 +114,7 @@ export default function LookupResult({
               type="text"
               value={draft.author ?? ""}
               onChange={(event) =>
-                onDraftChange({ ...draft, author: event.target.value })
+                onChange({ draft: { ...draft, author: event.target.value } })
               }
               className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
               placeholder={t("scan.authorPlaceholder")}
@@ -155,15 +149,15 @@ export default function LookupResult({
           <div className="mt-4">
             <p className="text-sm font-medium text-paper-700 mb-2 dark:text-paper-200">
               {t("library.tags")}
-              {selectedTagIds.length > 0 && (
+              {tagIds.length > 0 && (
                 <span className="ml-1.5 text-xs text-paper-600 dark:text-paper-400">
-                  {t("scan.tagsSelected", { count: selectedTagIds.length })}
+                  {t("scan.tagsSelected", { count: tagIds.length })}
                 </span>
               )}
             </p>
             <TagPicker
               tags={tags}
-              selectedIds={selectedTagIds}
+              selectedIds={tagIds}
               onToggle={onToggleTag}
               onCreate={onCreateTag}
               isCreating={isCreatingTag}
@@ -182,7 +176,9 @@ export default function LookupResult({
             id="cover-file"
             type="file"
             accept="image/*"
-            onChange={(event) => onCoverChange(event.target.files?.[0] ?? null)}
+            onChange={(event) =>
+              onChange({ coverFile: event.target.files?.[0] ?? null })
+            }
             className="block w-full text-sm text-paper-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 dark:text-paper-400"
           />
           {coverFile && (
@@ -195,7 +191,7 @@ export default function LookupResult({
         <div className="mt-4">
           <LocationField
             value={location}
-            onChange={onLocationChange}
+            onChange={(next) => onChange({ location: next })}
             locations={locations}
             hint={t("location.carriedOver")}
           />
@@ -208,7 +204,7 @@ export default function LookupResult({
           <select
             value={format}
             onChange={(event) =>
-              onFormatChange(event.target.value as BookFormat | "")
+              onChange({ format: event.target.value as BookFormat | "" })
             }
             className="field"
           >
@@ -225,7 +221,7 @@ export default function LookupResult({
           <input
             type="checkbox"
             checked={isPrivate}
-            onChange={(event) => onPrivateChange(event.target.checked)}
+            onChange={(event) => onChange({ isPrivate: event.target.checked })}
             className="w-4 h-4 rounded border-paper-300 text-accent-600"
           />
           <span className="text-sm text-paper-700 dark:text-paper-200">

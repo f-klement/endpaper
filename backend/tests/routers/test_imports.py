@@ -186,6 +186,72 @@ class TestPrivacy:
         assert res.json()["matched"] == 0
 
 
+class TestThePreview:
+    """`POST /api/imports/preview`, which had **no test at all** until
+    2026-08-26 while `COVERAGE.md` listed this file as covering the rate limit.
+
+    A column guessed wrong is invisible until after the import, and after the
+    import is too late, which is what the endpoint is for.
+    """
+
+    def test_it_reports_the_mapping_without_writing(self, client, admin, db):
+        res = client.post(
+            "/api/imports/preview",
+            files={"file": ("export.csv", csv_bytes(goodreads_row("Dune", "read")), "text/csv")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["total_rows"] == 1
+        assert db.query(Book).count() == 0
+
+    def test_it_honours_an_override(self, client, admin):
+        """The same overrides the import will use. Without them a reader who
+        corrects a mapping cannot see the corrected result."""
+        res = client.post(
+            "/api/imports/preview",
+            files={"file": ("export.csv", csv_bytes(goodreads_row("Dune", "read")), "text/csv")},
+            headers=admin["headers"],
+            params={"overrides": "title=Author"},
+        )
+
+        assert res.status_code == 200
+        assert res.json()["mapping"]["title"] == "Author"
+
+    def test_it_is_rate_limited(self, client, admin):
+        """Added with the limiter itself. Parsing is the expensive half, 3.081
+        seconds of CPU for a 5.02 MB export, and only the import was limited
+        while `docs/security.md` promised `/api/imports/*` at three a minute.
+
+        A limiter nothing exercises is a limiter nobody notices removing.
+        """
+        content = csv_bytes(goodreads_row("Dune", "read"))
+        codes = [
+            client.post(
+                "/api/imports/preview",
+                files={"file": ("export.csv", content, "text/csv")},
+                headers=admin["headers"],
+            ).status_code
+            for _ in range(4)
+        ]
+
+        assert codes == [200, 200, 200, 429]
+
+    def test_the_window_is_shared_with_the_import(self, client, admin):
+        """Three previews spend the window, so the import that follows is
+        refused. The flow the UI produces is one preview and one import, which
+        is two of the three."""
+        content = csv_bytes(goodreads_row("Dune", "read"))
+        for _ in range(3):
+            client.post(
+                "/api/imports/preview",
+                files={"file": ("export.csv", content, "text/csv")},
+                headers=admin["headers"],
+            )
+
+        assert upload(client, admin["headers"], content).status_code == 429
+
+
 class TestBadInput:
     def test_a_plain_title_and_author_list_is_now_accepted(self, client, admin):
         """This used to be refused for not being a Goodreads export.
