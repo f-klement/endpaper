@@ -19,7 +19,7 @@
  * it belongs to, and the next boot on this device paints from the cache before
  * React exists, then reconciles when `/api/users/me/appearance` answers.
  *
- * Keyed by account because a household shares devices, and one member's dark
+ * Keyed by account because a library shares devices, and one member's dark
  * Gruvbox is not the other's. `last` is the account that used this browser most
  * recently, which is what the login screen paints with: a front door that looks
  * like the house you last let in. That does disclose to anyone holding the

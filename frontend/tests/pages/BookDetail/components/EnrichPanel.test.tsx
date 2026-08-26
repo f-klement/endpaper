@@ -104,7 +104,7 @@ describe("EnrichPanel", () => {
 
 describe("EnrichPanel without a Google Books key", () => {
   it("stays usable, because the other catalogues need no key", () => {
-    // It used to grey itself out here, which left a household unable to fill
+    // It used to grey itself out here, which left a library unable to fill
     // in exactly the books the national catalogues cover best.
     renderPanel({ isConfigured: false });
     expect(

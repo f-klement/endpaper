@@ -111,7 +111,7 @@ class TestSelection:
 
     def test_excludes_a_private_book(self, db, lend):
         """A webhook has no member identity and lands in a channel the whole
-        household reads."""
+        library reads."""
         lend(private=True)
         assert notifications.due_for_reminder(db, now(), 7) == []
 
@@ -273,7 +273,7 @@ class TestRunDigest:
         assert loan.notified_at is None
 
     async def test_a_redirect_is_not_followed(self, configured, lend):
-        """A 302 would send the household's book titles somewhere nobody
+        """A 302 would send the library's book titles somewhere nobody
         approved."""
         lend()
         with respx.mock as mock:

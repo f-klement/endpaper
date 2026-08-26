@@ -27,7 +27,7 @@ from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserO
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
 # part that is ours rather than theirs: mapping whatever subject headings a
-# catalogue happens to use onto the household's own tag vocabulary.
+# catalogue happens to use onto this library's own tag vocabulary.
 
 
 def match_subjects_to_tags(subjects: list[str], tags: list[Tag]) -> list[int]:
@@ -91,7 +91,7 @@ def suggested_tag_ids(
     classifications: Sequence[ClassificationIn | ClassificationOut],
     tags: list[Tag],
 ) -> list[int]:
-    """Tags a household might want on this book, from both kinds of evidence.
+    """Tags a library might want on this book, from both kinds of evidence.
 
     Two routes to the same list, and they fail on opposite records. The
     name match reads the **caption** a catalogue supplied, which works for
@@ -113,14 +113,14 @@ def suggested_tag_ids(
     argued in `docs/decisions.md`, and it is written here because four
     documents used to say "nothing applies it" and mean only this half.
 
-    Tags are a small curated vocabulary the household chooses from, which is
+    Tags are a small curated vocabulary the library chooses from, which is
     why the projection stops at proposing one.
 
     Only DDC is projected, of the four schemes stored. An LCC number needs the
     published division list this mapping is, and LCC has no equivalent short
     enough to ship. A GND number is an authority record identifier rather than a
     place in a schedule: there is no arithmetic that takes `4203576-4` to a
-    division, and the household vocabulary it would map to is the caption, which
+    division, and the library vocabulary it would map to is the caption, which
     `match_subjects_to_tags` above already reads (a GND heading reaches
     `subjects` too).
     """
@@ -263,7 +263,7 @@ def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str
     two.
 
     **`visible_to` applies**, and it is not a formality here. A member who made
-    their own copy private would otherwise be announced to the whole household
+    their own copy private would otherwise be announced to everyone here
     by the number on everybody else's card. It also excludes trashed rows, so
     deleting one of two copies leaves the other reading "1" rather than
     claiming a copy that is in the bin.
@@ -287,7 +287,7 @@ def _collection_names(books: list[Book], db: Session) -> dict[int, str]:
     """The name of each collection this page's books are filed in.
 
     One statement for the page, and none at all when nothing on it is filed,
-    which is every page in a household that has not made a collection.
+    which is every page in a library that has not made a collection.
 
     Read here rather than through `Book.collection`, which is a lazy
     relationship: serialising a page of 25 filed books would otherwise issue 25
@@ -298,7 +298,7 @@ def _collection_names(books: list[Book], db: Session) -> dict[int, str]:
 
     **No `visible_to`.** It filters books, and there is not a book in this
     query: it reads the label a row already in the caller's hands points at.
-    The collection list itself is household wide by design, so a name is not a
+    The collection list itself is library wide by design, so a name is not a
     disclosure; the **count** is, and that one is filtered where it is served
     (`routers/collections._counts`).
     """
@@ -334,7 +334,7 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     and it is one statement for the whole page whatever it finds.
 
     **8 as well when the page holds a book filed in a collection.**
-    `_collection_names` is the same shape: nothing at all until a household
+    `_collection_names` is the same shape: nothing at all until a library
     makes a collection and puts something in it, then one statement for the
     page however many collections it spans. Measured directly on this function
     over a page of five filed books against a page of plain ones: **8 against
@@ -421,10 +421,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     latest_progress = _latest_progress(book_ids, current_user, db)
     discussers = _discussers(book_ids, db)
-    # Only when something on the page is a copy, so the ordinary library pays
+    # Only when something on the page is a copy, so the ordinary page pays
     # nothing for a feature almost no book uses.
     copy_counts = _copy_counts(books, current_user, db)
-    # Same conditional shape, same reason: a household with no collections pays
+    # Same conditional shape, same reason: a library with no collections pays
     # nothing for the feature.
     collection_names = _collection_names(books, db)
 

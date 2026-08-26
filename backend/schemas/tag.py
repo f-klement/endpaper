@@ -21,7 +21,7 @@ class TagOut(BaseModel):
 
 
 class TagCreate(BaseModel):
-    """A tag the household is inventing.
+    """A tag the library is inventing.
 
     No category is accepted. Everything created this way is CUSTOM: asking
     somebody to file "Holiday reads" under type, genre or age is asking a

@@ -126,7 +126,7 @@ class TestLendingABookMarkedNeverLent:
     def test_the_acknowledgement_is_not_remembered(
         self, client, admin, member, never_lent
     ):
-        """It is about one request, not about the book. A household that lent
+        """It is about one request, not about the book. A library that lent
         this once has not changed its mind about lending it in general."""
         loan = self.lend(
             client, admin, member, never_lent, acknowledge_not_lendable=True
@@ -252,7 +252,7 @@ class TestListLoans:
 class TestDueDates:
     """A loan with no due date is still a loan.
 
-    Most household lending has no deadline, so the field is optional. It exists so
+    Most library lending has no deadline, so the field is optional. It exists so
     that an open loan can be called overdue by something other than a person
     remembering, which is the only reason to record a loan at all.
     """

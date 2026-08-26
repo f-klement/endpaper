@@ -4,7 +4,7 @@ The curated vocabulary was the whole vocabulary: type, genre and age, seeded at
 boot, and no way past it. Jelu and Openreads both make every tag free-form
 instead, and neither is right on its own. The curated list is what makes the
 picker useful before anybody has typed anything; what was missing was a
-household being able to add "Holiday reads" to it.
+library being able to add "Holiday reads" to it.
 
 So the thing worth pinning is the boundary between the two: a seeded tag cannot
 be deleted, because `seed_tags()` would put it straight back and the delete
@@ -94,7 +94,7 @@ class TestDeleting:
             "/api/books/tags", json={"name": name}, headers=headers
         ).json()
 
-    def test_a_tag_the_household_invented(self, client, admin, db):
+    def test_a_tag_the_library_invented(self, client, admin, db):
         tag = self._custom(client, admin["headers"])
 
         res = client.delete(f"/api/books/tags/{tag['id']}", headers=admin["headers"])

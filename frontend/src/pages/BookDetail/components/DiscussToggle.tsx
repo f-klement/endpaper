@@ -14,7 +14,7 @@ interface DiscussToggleProps {
  * Beside the reading status rather than in the copy panel, because it is a
  * fact about a reader and not about the object: two people holding the same
  * copy can feel entirely differently about it, and the copy panel is about
- * what the household owns.
+ * what the library holds.
  *
  * The second line is what makes the first one worth ticking. A flag only its
  * owner can see is not a way to be asked about anything, so everybody who has

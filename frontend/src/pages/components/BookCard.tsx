@@ -61,7 +61,7 @@ const STATUS_STYLES: Record<ReadStatus, string> = {
  *
  * Three rather than two, and genre first rather than whatever order the API
  * returned: what a book *is* is the thing somebody scanning a shelf is
- * matching on, and an age band or a household filing tag arriving first used
+ * matching on, and an age band or a library filing tag arriving first used
  * to push the genre off the card entirely.
  */
 const MAX_VISIBLE_TAGS = 3;
@@ -91,7 +91,7 @@ function seriesText(book: BookOut, t: Translate): string | null {
  * Currency is free text on the record and is often absent, so the amount is
  * shown on its own rather than being suppressed for want of a label: what was
  * paid is the fact somebody recorded, and which currency is usually obvious to
- * the household that recorded it.
+ * the library that recorded it.
  */
 function priceText(book: BookOut): string | null {
   const amount = formatMinor(book.purchase_price_minor);

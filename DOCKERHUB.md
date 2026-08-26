@@ -8,11 +8,13 @@
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/fklement)
 
 Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
-server that can mediate between households. All features are free either way.
+server that lets two copies of Endpaper reach each other. All features are free
+either way.
 
-Catalogue, lend and track a household's collection of **physical** books. Scan a barcode,
-the book appears with its cover and metadata. Self-hosted, no account anywhere else, no
-telemetry.
+Catalogue, lend and track a collection of **physical** books, shared by the people who use
+it. Scan a barcode, the book appears with its cover and metadata. Built for a household's
+shelves and for the library or archive that has outgrown a spreadsheet. Self-hosted, no
+account anywhere else, no telemetry.
 
 One container. It serves the API and the compiled web client together, so there is no
 second web server and no CORS to configure. Storage is a single SQLite file plus a
@@ -57,7 +59,7 @@ volumes:
 | `SECRET_KEY` | none | **Signs session tokens. Set it.** The container refuses to start in production without one, because the example value makes every session forgeable |
 | `DATA_DIR` | `/app/data` | The SQLite file and the cover images. This is the only path worth persisting |
 | `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | Point elsewhere if you must; SQLite is what it is tested against |
-| `ALLOW_REGISTRATION` | `true` | Set `false` once your household has signed up, or anyone reaching the port can create an account |
+| `ALLOW_REGISTRATION` | `true` | Set `false` once your library has signed up, or anyone reaching the port can create an account |
 | `AUTH_MODE` | `local` | `local`, `ldap`, or `proxy`. See below |
 | `GOOGLE_BOOKS_API_KEY` | none | Optional. Metadata works without it: the German National Library, K10plus and Open Library are queried first and need no key |
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret check and nothing else |

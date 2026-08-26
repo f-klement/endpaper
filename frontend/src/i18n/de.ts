@@ -12,8 +12,26 @@ import type { Messages } from "./en";
  *
  * * **No em dashes.** House style for all UI strings, and German typography
  *   uses them differently from English anyway.
- * * **Informal address (du, dein).** This is a household bookshelf, not a bank.
- *   Mixing du and Sie reads badly, so it is du throughout.
+ * * **Informal address (du, dein).** This started as "a household bookshelf, not
+ *   a bank". Mixing du and Sie reads badly, so it is du throughout.
+ *
+ *   **Decided 2026-08-26: address follows library mode.** du with the mode off,
+ *   Sie with it on, because a German library addresses a Benutzer:in as Sie and
+ *   a public catalogue in du reads as careless to an institution.
+ *
+ *   **This file stays informal and does not gain a second copy.** The formal
+ *   register is an overlay, `deFormal.ts`, holding only the keys that differ,
+ *   merged over this one when library mode is on. Measured 2026-08-26: of 640
+ *   string values here, **58 carry address at all** (44 with a du pronoun or
+ *   possessive, 14 with a likely informal imperative, and that second number is
+ *   an overestimate because it counts nouns like "Suche läuft"). So the overlay
+ *   is roughly 9% of this file, and the other 582 strings cannot drift between
+ *   registers because they exist once.
+ *
+ *   Do not switch this file to Sie, and do not mix registers within it. A string
+ *   added here in du needs a formal counterpart; the test that enforces that
+ *   greps the merged formal catalogue for informal markers and fails on a
+ *   survivor. See docs/decisions.md, "German address follows library mode".
  */
 export const de: Messages = {
   // ── Navigation und Rahmen ───────────────────────────────────────────────
@@ -759,7 +777,7 @@ export const de: Messages = {
   "about.licenceLabel": "Lizenz",
   "about.sourceLabel": "Quelltext",
   "about.support":
-    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee. Er hilft, den öffentlichen Server zu finanzieren, der zwischen Haushalten vermitteln kann. Alle Funktionen sind so oder so kostenlos.",
+    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee. Er hilft, den öffentlichen Server zu finanzieren, der zwei Endpaper-Installationen miteinander verbindet. Alle Funktionen sind so oder so kostenlos.",
   "about.kofiAlt": "Endpaper auf Ko-fi unterstützen",
 
   // ── Gespeicherte Ansichten ──────────────────────────────────────────────
@@ -805,7 +823,7 @@ export const de: Messages = {
 
   "help.googleBooks.title": "Google-Books-Abfrage",
   "help.googleBooks.what":
-    "Google Books ergänzt Angaben, die ein Barcode nicht enthält: Seitenzahl, Sprache, Kategorien, Reihe und eine Beschreibung. Dafür braucht es einen kostenlosen API-Schlüssel, den ein Admin einmal für den ganzen Haushalt einrichtet.",
+    "Google Books ergänzt Angaben, die ein Barcode nicht enthält: Seitenzahl, Sprache, Kategorien, Reihe und eine Beschreibung. Dafür braucht es einen kostenlosen API-Schlüssel, den ein Admin einmal für alle hier einrichtet.",
   "help.googleBooks.notConfigured":
     "Es ist noch kein Schlüssel hinterlegt, deshalb ist die Funktion aus. So bekommst du einen.",
   "help.googleBooks.step1": "Lege in der Google-Cloud-Konsole ein Projekt an.",

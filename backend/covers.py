@@ -515,7 +515,7 @@ async def resolve_many(isbns: list[str]) -> dict[str, str | None]:
 # pod being able to reach it, every reader's browser being able to reach it,
 # and the CSP permitting it. Four of the five are outside this application, so
 # a library full of hotlinked covers can go blank for reasons nothing here can
-# see or fix. It also tells `covers.openlibrary.org` which books this household
+# see or fix. It also tells `covers.openlibrary.org` which books this library
 # owns, once per grid render, from the reader's own browser.
 #
 # So the bytes are fetched once and served from this app, through the

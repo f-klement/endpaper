@@ -20,11 +20,11 @@ MAX_BORROWER_NAME = 120
 
 class LoanCreate(BaseModel):
     book_id: RowIdField
-    #: A member of the household...
+    #: A member of the library...
     loaned_to_user_id: RowIdField | None = None
     #: ...or somebody with no account at all. Exactly one of the two.
     loaned_to_name: str | None = Field(default=None, max_length=MAX_BORROWER_NAME)
-    # Optional. Most household lending has no deadline, and demanding one would
+    # Optional. Most library lending has no deadline, and demanding one would
     # make the common case worse to serve the rare one.
     due_at: datetime | None = None
 
@@ -36,7 +36,7 @@ class LoanCreate(BaseModel):
     #: created: the same row, reached by an extra deliberate step.
     #:
     #: Deliberately **not** stored. It says something about one request, not
-    #: about the loan, and a household that lends a never-lent book to a
+    #: about the loan, and a library that lends a never-lent book to a
     #: sibling has not changed its mind about lending it to anybody else.
     acknowledge_not_lendable: bool = False
 

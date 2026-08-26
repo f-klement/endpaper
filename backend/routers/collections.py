@@ -63,7 +63,7 @@ def _counts(db: Session, user_id: int) -> dict[int, int]:
 
 @router.get("", response_model=list[CollectionOut])
 def list_collections(db: DbSession, current_user: CurrentUser) -> list[CollectionOut]:
-    """Every collection in the household, with the caller's own counts.
+    """Every collection in the library, with the caller's own counts.
 
     Ordered case insensitively by name: "ebooks" sorting after "Zola" because
     of its first letter's byte value is the kind of ordering a reader reads as
@@ -153,7 +153,7 @@ def delete_collection(
     **Admin only, and deliberately asymmetric with creating one**, exactly like
     `DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;
     deleting empties a shelf label off every book in the house at once, with no
-    undo, and one member should not be able to unpick the household's filing on
+    undo, and one member should not be able to unpick the library's filing on
     their own.
 
     Nothing here nulls the column by hand, and two things do it instead. The

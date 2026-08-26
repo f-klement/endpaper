@@ -81,7 +81,7 @@ describe("AboutSection", () => {
     expect(
       screen.getByText(
         "If you like Endpaper and want to support my work, buy me a coffee. " +
-          "It helps pay for the public server that can mediate between households. " +
+          "It helps pay for the public server that lets two copies of Endpaper reach each other. " +
           "All features are free either way.",
       ),
     ).toBeInTheDocument();

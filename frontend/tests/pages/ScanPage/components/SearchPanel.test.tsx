@@ -158,7 +158,7 @@ describe("SearchPanel", () => {
 
 describe("SearchPanel without a Google Books key", () => {
   it("stays usable, because Open Library needs no key", () => {
-    // It used to grey itself out here, which left a household with no key
+    // It used to grey itself out here, which left a library with no key
     // unable to add a book that has no barcode at all.
     renderPanel({ isConfigured: false, query: "dune" });
 

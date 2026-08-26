@@ -4,7 +4,7 @@
  * The constraint the whole component exists under is that a badge here is
  * markup, never an image. shields.io would need `img-src` widened for
  * decoration, which this card already refused once over the Ko-fi button, and
- * it would report a private household server to a third party on every visit to
+ * it would report a private server to a third party on every visit to
  * Settings. That is asserted rather than commented, because an `<img>` is what
  * somebody reaches for first.
  *

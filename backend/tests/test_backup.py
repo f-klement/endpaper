@@ -202,7 +202,7 @@ class TestRoundTrip:
         self, client, admin, library
     ):
         """`quotes` is deliberately absent from `_REQUIRED_TABLES`. Adding a
-        table to that set would refuse every backup the household already
+        table to that set would refuse every backup the library already
         holds, which is the trap the set exists to have escaped once."""
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)
@@ -515,7 +515,7 @@ class TestReadManifest:
 class TestRestoringAnOlderArchive:
     """A backup taken before a migration must still restore.
 
-    Refusing it would make every schema change throw away the household's
+    Refusing it would make every schema change throw away the library's
     backups, so a column the archive does not carry takes its database
     default. One default lies, and that one is repaired explicitly.
     """
@@ -542,7 +542,7 @@ class TestRestoringAnOlderArchive:
         fiction = db.query(Tag).filter(Tag.name == "Fiction").one()
         assert fiction.is_predefined is True
 
-    def test_a_tag_the_household_invented_stays_deletable(
+    def test_a_tag_the_library_invented_stays_deletable(
         self, client, admin, library, db
     ):
         """The repair must not adopt every restored tag as a built-in one."""
@@ -901,7 +901,7 @@ class TestReadingProgressSurvives:
     ):
         """`FORMAT_VERSION` promises an older archive stays restorable. Making
         every entry in `_TABLES` mandatory would have refused every backup the
-        household already holds the moment a table was added.
+        library already holds the moment a table was added.
         """
         data = client.get("/api/backup", headers=admin["headers"]).content
         manifest = read_manifest(data)

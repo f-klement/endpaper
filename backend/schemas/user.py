@@ -58,7 +58,7 @@ class AppearanceOut(BaseModel):
 
     Deliberately not part of `UserOut`, which is served inside every book
     payload and the member list: appearance on that schema would tell everyone
-    in the household what everyone else's library looks like.
+    in the library what everyone else's library looks like.
 
     Every field is nullable and null means "has not chosen", which is what a
     new account and every directory shadow account start as. The client then

@@ -6,7 +6,7 @@ from enums import Locale, OverdueNotifyReason
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
 #: 1 rather than 0: a zero would mean "resend on every tick", which is an hourly
-#: repeat of the same list into the household's channel.
+#: repeat of the same list into the library's channel.
 MIN_REMINDER_DAYS = 1
 MAX_REMINDER_DAYS = 365
 
@@ -132,7 +132,7 @@ class OverdueNotifyResult(BaseModel):
 
     Reported rather than logged, because "send now" exists so a person can see
     the thing work. `skipped_private` is here for the same reason the exclusion
-    exists: a household that expects five entries and gets four should be able
+    exists: a library that expects five entries and gets four should be able
     to see why without reading the source.
     """
 
@@ -162,7 +162,7 @@ class RestoreResult(BaseModel):
     Counted per table rather than reported as "done", so a backup that was
     missing its covers or its loans says so instead of looking successful.
 
-    The list is the tables whose absence a household would notice: their books,
+    The list is the tables whose absence a library would notice: their books,
     their accounts, what they wrote, who has what, and what they have read. It
     is not every table, and the two it leaves out are the two nobody counts:
     `tags` and `book_tags` come back with the books, and `settings` is one row
@@ -177,10 +177,10 @@ class RestoreResult(BaseModel):
     covers: int = Field(ge=0)
     #: Every member's reading status, rating and reading dates. Absent from
     #: this report until reading progress was added, so a restore that dropped
-    #: the household's entire reading history read as a clean one.
+    #: the library's entire reading history read as a clean one.
     user_books: int = Field(default=0, ge=0)
     reading_progress: int = Field(default=0, ge=0)
-    #: The household's shelf labels. Here for the reason above: losing them
+    #: The library's shelf labels. Here for the reason above: losing them
     #: silently restores every book unfiled, which reads as a clean restore
     #: until somebody opens the library and finds their shelves gone.
     collections: int = Field(default=0, ge=0)

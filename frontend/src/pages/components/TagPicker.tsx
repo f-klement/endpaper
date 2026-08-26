@@ -23,7 +23,7 @@ interface TagPickerProps {
   onCreate?: (name: string) => void;
   isCreating?: boolean;
   /**
-   * Delete a tag the household invented, everywhere. Offered only alongside
+   * Delete a tag the library invented, everywhere. Offered only alongside
    * `onCreate`, because the place you invent a vocabulary is the place you
    * correct it.
    */
@@ -126,7 +126,7 @@ export default function TagPicker({
               >
                 {inCategory.map((tag) => {
                   const selected = selectedIds.includes(tag.id);
-                  // Only a tag the household invented can go. A seeded one
+                  // Only a tag the library invented can go. A seeded one
                   // comes straight back at the next restart, so offering it
                   // would be offering an action that undoes itself.
                   const removable = Boolean(onDelete) && !tag.is_predefined;

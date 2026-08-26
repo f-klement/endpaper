@@ -61,7 +61,7 @@ logger = logging.getLogger("endpaper.backup")
 #:
 #: Deliberately not bumped when a table gains a column. An archive taken before
 #: a migration is still restorable, and refusing it would make every schema
-#: change throw away the household's backups. A column the archive does not
+#: change throw away the library's backups. A column the archive does not
 #: carry takes its database default, which is right for every one of them
 #: except `tags.is_predefined`; see `_repair_seeded_tags`.
 #: Still 1. The envelope has not changed: the manifest layout is the same, the
@@ -113,7 +113,7 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
 #: knows how to restore.
 #:
 #: The two are not the same set, and conflating them breaks every backup the
-#: household already holds. `FORMAT_VERSION` promises that an archive taken
+#: library already holds. `FORMAT_VERSION` promises that an archive taken
 #: before a schema change is still restorable, and `read_manifest` used to
 #: enforce presence of every entry in `_TABLES`, so **adding a table would have
 #: refused every older archive** with "the backup is missing: reading_progress".
@@ -138,7 +138,7 @@ _COVER_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp")
 #: entry drove peak memory to 1.8 GB, against a pod limited to 512Mi. That is
 #: an OOMKill from a file that passes every other check.
 #:
-#: Generous enough for a household's whole library with its covers, small
+#: Generous enough for a library's whole library with its covers, small
 #: enough that the pod survives being handed a bomb.
 MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 
@@ -294,7 +294,7 @@ def read_manifest(data: bytes) -> dict[str, Any]:
         raise RestoreError(f"The backup is missing: {', '.join(missing)}.")
 
     # A user table with nobody in it restores to a library nobody can sign in
-    # to, which locks the household out of their own catalogue.
+    # to, which locks the library out of their own catalogue.
     if not tables.get("users"):
         raise RestoreError("The backup contains no accounts, so nothing could sign in.")
 

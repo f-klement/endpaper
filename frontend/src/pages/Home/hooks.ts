@@ -95,7 +95,7 @@ export interface UseLibraryResult {
   saveCurrentSearch: (name: string) => void;
   deleteSavedSearch: (id: string) => void;
   locations: LocationOut[];
-  /** Every collection in the household, for the filter. */
+  /** Every collection in the library, for the filter. */
   collections: CollectionOut[];
   setSort: (sort: BookFilters["sort"]) => void;
   toggleTag: (tagId: number) => void;
@@ -237,7 +237,7 @@ export function useLibrary(): UseLibraryResult {
   // panel, not the grid, so their errors are deliberately not surfaced.
   const tags = useListTags();
   const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
-  // Cached like the locations, and for the same reason: how a household has
+  // Cached like the locations, and for the same reason: how a library has
   // divided its shelf changes far less often than what is on it.
   const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
 

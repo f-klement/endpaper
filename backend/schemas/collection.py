@@ -19,7 +19,7 @@ class CollectionOut(BaseModel):
 
 
 class CollectionCreate(BaseModel):
-    """A collection the household is inventing.
+    """A collection the library is inventing.
 
     Any member may make one. A collection is shelving rather than permission,
     so there is nothing here to restrict to an admin.

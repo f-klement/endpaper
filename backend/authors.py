@@ -84,7 +84,7 @@ MAX_SUGGESTIONS = 100
 #: and it is right because of what suggestions are: advice a person confirms.
 #: A word shared by more than this many authors is not a lead anybody works
 #: through, and every other bucket is still offered. 200 is two orders of
-#: magnitude above a real household surname and bounds one bucket at 19,900
+#: magnitude above a real library surname and bounds one bucket at 19,900
 #: pairs.
 MAX_BUCKET = 200
 
@@ -114,7 +114,7 @@ MAX_BUCKET = 200
 #: mid-rule and returns what it has: this is advice, so less of it is a fair
 #: answer where refusing to load the page is not.
 #:
-#: 200,000 against a real household, where a bucket is a shared surname holding
+#: 200,000 against a real library, where a bucket is a shared surname holding
 #: two or three names: the honest workload is thousands of comparisons, so this
 #: is two orders of magnitude of headroom and still a fifth of a second.
 #:
@@ -125,7 +125,7 @@ MAX_BUCKET = 200
 #: shortest that still parse, and reproduced here at 48 with slightly longer
 #: ones. On a clean shelf of three real names the pass returns one group, from
 #: the fragment rule; with that junk added it returns none, in 0.21s. So one
-#: member can switch the fragment rule off for the whole household, quietly.
+#: member can switch the fragment rule off for everyone here, quietly.
 #:
 #: **Recorded rather than mitigated, and the reason is that the obvious
 #: mitigation does not work.** Giving each rule a reserved floor guarantees it
@@ -172,7 +172,7 @@ class _Budget:
 #: Only the comma. `&` and `and` are deliberately not separators: "Simon and
 #: Schuster" is a name, and there is no way to tell it from a join without
 #: guessing, which is the class of guess that produces two authors nobody can
-#: find. A household that writes "A & B" gets one author and can merge it.
+#: find. A library that writes "A & B" gets one author and can merge it.
 _SEPARATOR = ","
 
 _PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
@@ -305,7 +305,7 @@ def build_index(
     than from whichever book happened to be read last is what makes the
     displayed name independent of the order books were added in.
 
-    **Every alias applies, whoever is asking.** The mapping is household wide,
+    **Every alias applies, whoever is asking.** The mapping is library wide,
     like a collection's name, so one book is filed under the same person for
     every member and `?author=` resolves the same way for all of them.
 
@@ -341,7 +341,7 @@ def build_index(
             key = author_key(canonical) if canonical is not None else raw_key
             if canonical is not None:
                 # Recorded from the rows, so it holds only spellings on a book
-                # this caller can see. The mapping is household wide; this is
+                # this caller can see. The mapping is library wide; this is
                 # the part of it they have evidence for, which is what the page
                 # offers an undo beside.
                 folded[key].add(raw_key)
@@ -497,7 +497,7 @@ def _edges_on_initials(
 
     **This is the rule the cap costs something.** A name has exactly one last
     word, so an oversized surname bucket loses this rule for everybody in it:
-    a household with two hundred and one authors called Smith gets no initials
+    a library with two hundred and one authors called Smith gets no initials
     suggestion for any Smith. That is the trade, and it is the right way round,
     because the alternative is a page that does not load. `_edges_on_fragments`
     degrades far more gently for the reason recorded there.

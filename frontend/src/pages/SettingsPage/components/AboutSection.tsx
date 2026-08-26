@@ -41,7 +41,7 @@ interface AboutSectionProps {
  * `storage.ko-fi.com`. Two reasons, and neither is bandwidth: the CSP's
  * `img-src` is derived from `covers.COVER_HOSTS` on the server, so a remote
  * button would mean widening the policy for a decoration; and a remote button
- * would tell Ko-fi the address of a private household server every time
+ * would tell Ko-fi the address of a private server every time
  * somebody opened Settings. `rel="noopener noreferrer"` keeps that true of the
  * link as well: following it tells them nothing about where it was followed
  * from.

@@ -147,7 +147,7 @@ describe("pages read", () => {
   });
 
   it("draws no section when nothing has been recorded", async () => {
-    // Page tracked books only, so a household that reads only audiobooks has
+    // Page tracked books only, so a library of only audiobooks has
     // an empty series rather than a converted one.
     api.on("/api/stats", { body: makeStats({ total: 1, pages_by_month: [] }) });
     renderWithProviders(<StatsPage />);

@@ -487,7 +487,7 @@ class TestAnotherMembersPrivateBook:
 
 
 class TestTagLimits:
-    """Measured: 200 rows of one title created 4032 household-wide tags."""
+    """Measured: 200 rows of one title created 4032 library wide tags."""
 
     def _rows(self, count: int, per_row: int = 5) -> bytes:
         rows = []

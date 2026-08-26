@@ -7,7 +7,7 @@ measured against the live deployment rather than guessed at.
 1. **The Google fallback never sent the API key.** It built the URL by hand
    while `google_books.py` had a `_request` helper that appends `key`. So every
    fallback lookup went to the unauthenticated endpoint, which is rate limited
-   per source address, and a household behind one address exhausts it almost at
+   per source address, and a library behind one address exhausts it almost at
    once. The observed result was a run of `429 Too Many Requests` and a 404 for
    every scan.
 2. **Neither source covers German publishing.** Open Library returned 404 for
@@ -853,7 +853,7 @@ def _is_placeholder_title(title: str) -> bool:
 #: the author; the author is 100, and `docs/decisions.md` says why nothing reads
 #: its identifier. 655 is the odd one: it is the **form** of the work rather
 #: than its subject ("Fiktionale Darstellung"), and it is kept because a genre
-#: is what a household would look for.
+#: is what a library would look for.
 #:
 #: **`$2` is not read, and these are not all one vocabulary.** Measured over 85
 #: live records on 2026-08-24, the five fields supply 363 values: 188 declare
@@ -1601,7 +1601,7 @@ def _union_classifications(entries: list[dict[str, Any]]) -> list[dict[str, Any]
 #
 # The other half of getting a book in: no barcode to scan, a damaged one, or a
 # book printed before ISBNs existed at all. Until recently this was Google
-# Books only, which meant a household without an API key had **no way** to add
+# Books only, which meant a library without an API key had **no way** to add
 # a book by title, and the search box was hidden from them entirely.
 #
 # All three free catalogues answer here, and getting the German pair to be
@@ -2246,11 +2246,11 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
     request and the Library of Congress does not join `_SOURCES`. It stays off
     the lookup path for the reason `docs/decisions.md` records: it is the one
     catalogue here reached over plaintext HTTP, and it held nothing for either
-    German ISBN measured, which is this household's main case.
+    German ISBN measured, which is this library's main case.
 
     **No `<subject>` element ever reaches `ddc`.** `ddc.parse_heading` accepts
     any three digit token, so a heading opening with one would be stored as a
-    Dewey number and would suggest a household tag from it. Checked rather than
+    Dewey number and would suggest a curated tag from it. Checked rather than
     assumed: `parse_heading("004 Jahre Bauhaus")` answers `("004", "Jahre
     Bauhaus")`, where `parse_heading("1968 -- Fiction")` answers None, four
     digits not being a notation. The guard is structural and is the same
@@ -2447,7 +2447,7 @@ _PRECISION_WEIGHT: Final = 4
 _BOTH_HALVES_BONUS: Final = 4
 
 #: Matching the reader's own language. One term's worth, so it orders printings
-#: without ever outranking a real title match: a German household searching an
+#: without ever outranking a real title match: a German library searching an
 #: English title still gets the English book.
 _LANGUAGE_WEIGHT: Final = 3
 
@@ -2586,7 +2586,7 @@ async def search(
     whichever reprint was catalogued most recently.
 
     `prefer_language` breaks ties towards the reader's own language without
-    ever outranking a title match, so a German household searching an English
+    ever outranking a title match, so a German library searching an English
     title still gets the English book.
 
     A source that fails is skipped rather than failing the search. Losing one

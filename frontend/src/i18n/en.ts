@@ -304,7 +304,7 @@ export const en = {
   "stats.byType": "By Type",
   "stats.byGenre": "By Genre",
   "stats.byAge": "By Age",
-  "stats.byCustomTag": "By Household Tags",
+  "stats.byCustomTag": "By Your Tags",
   "stats.byCollection": "By Collection",
   "stats.finishedByMonth": "Finished, by Month",
   "stats.finishedTotal": "books finished",
@@ -319,7 +319,7 @@ export const en = {
   "tags.type": "Type",
   "tags.genre": "Genre",
   "tags.age": "Age",
-  "tags.custom": "Household tags",
+  "tags.custom": "Your tags",
   "tags.count": "{count}",
   "tags.countWithChosen": "{chosen} of {count}",
   "tags.newLabel": "New tag",
@@ -783,7 +783,7 @@ export const en = {
   "about.licenceLabel": "Licence",
   "about.sourceLabel": "Source",
   "about.support":
-    "If you like Endpaper and want to support my work, buy me a coffee. It helps pay for the public server that can mediate between households. All features are free either way.",
+    "If you like Endpaper and want to support my work, buy me a coffee. It helps pay for the public server that lets two copies of Endpaper reach each other. All features are free either way.",
   "about.kofiAlt": "Support Endpaper on Ko-fi",
 
   // ── Saved views ─────────────────────────────────────────────────────────
@@ -827,7 +827,7 @@ export const en = {
 
   "help.googleBooks.title": "Google Books lookup",
   "help.googleBooks.what":
-    "Google Books fills in details a barcode does not carry: page count, language, categories, series and a description. It needs a free API key, which an admin sets up once for the whole household.",
+    "Google Books fills in details a barcode does not carry: page count, language, categories, series and a description. It needs a free API key, which an admin sets up once for everyone here.",
   "help.googleBooks.notConfigured":
     "No key is set yet, so this is switched off. Here is how to get one.",
   "help.googleBooks.step1": "Create a project in the Google Cloud console.",

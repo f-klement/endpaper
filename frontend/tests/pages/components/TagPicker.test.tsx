@@ -242,7 +242,7 @@ describe("TagPicker, inventing a tag", () => {
     expect(box).toHaveValue("");
   });
 
-  it("groups a household tag under its own heading", () => {
+  it("groups a curated tag under its own heading", () => {
     renderLocalised(
       <TagPicker
         tags={[makeTag({ name: "Holiday reads", category: TagCategory.custom })]}
@@ -250,7 +250,7 @@ describe("TagPicker, inventing a tag", () => {
         onToggle={vi.fn()}
       />,
     );
-    expect(screen.getByText("Household tags")).toBeInTheDocument();
+    expect(screen.getByText("Your tags")).toBeInTheDocument();
   });
 });
 

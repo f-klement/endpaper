@@ -46,7 +46,7 @@ class StatsOut(BaseModel):
     per_user: list[PerUserStat]
     by_tag: list[TagStat]
     # Named collections, largest first. A shelf split into physical and ebook
-    # wants the split counted; a household that never made one gets an empty
+    # wants the split counted; a library that never made one gets an empty
     # list and the section is not drawn.
     by_collection: list[CollectionStat] = []
     by_month: list[MonthStat]

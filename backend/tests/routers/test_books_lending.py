@@ -1,7 +1,7 @@
 """Lending willingness on a book, and "ask me about it" per member.
 
 Two fields that look alike and are not. One is a standing intention about an
-object and is shared by the household; the other is a fact about one reader
+object and is shared by the library; the other is a fact about one reader
 that every other reader is meant to see. This file is mostly about keeping
 those two apart.
 

@@ -142,8 +142,8 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
 
     **A book marked `lending = never` is refused once, not forbidden.** Neither
     extreme is right here. Allowing it silently makes the field decorative, and
-    a household that took the trouble to mark a copy would find the app had
-    quietly ignored it. Forbidding it outright is worse: the same household
+    a library that took the trouble to mark a copy would find the app had
+    quietly ignored it. Forbidding it outright is worse: the same library
     lends that book to a sibling anyway, and an app that will not let them
     record what actually happened gets a loan kept in somebody's head instead,
     which is the one thing this table exists to replace.
@@ -170,7 +170,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # A book the household said it does not lend. Refused once, then allowed:
+    # A book the library said it does not lend. Refused once, then allowed:
     # see `_refuse_unless_acknowledged`.
     if (
         book.lending == LendingWillingness.NEVER

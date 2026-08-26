@@ -158,7 +158,7 @@ Cover files are named by book id, so a book has at most one uploaded cover and r
 replaces it. The handler deletes any existing file with a different extension first, or
 `12.jpg` and `12.png` could both exist and which one won would depend on lookup order.
 
-SQLite is a fit here rather than a stopgap: a handful of household members making occasional
+SQLite is a fit here rather than a stopgap: a handful of member making occasional
 writes. The one thing to know is that `check_same_thread` is disabled, because FastAPI runs
 synchronous endpoints in a worker thread pool, so the session is created on one thread and
 used on another.
@@ -191,7 +191,7 @@ default language. They live in a `settings` table behind `backend/settings_store
 
 The split is deliberate. **Environment** holds what a deployment decides and what must be
 right before the app can serve a request: the secret key, the auth mode, the data directory.
-**The settings table** holds what a household decides and may change on a Tuesday.
+**The settings table** holds what a library decides and may change on a Tuesday.
 
 `GET /api/settings/features` exposes only the flags, publicly, because the login page is
 localised and needs the default language before anyone has a token. The full record,

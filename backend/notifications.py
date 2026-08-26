@@ -1,18 +1,18 @@
 """Chasing overdue loans, by posting a digest to a webhook.
 
 A generic outbound webhook rather than email or an integration with one chat
-service. A self-hosted app that other households run should not carry an
+service. A self-hosted app that other libraries run should not carry an
 integration with something nobody else runs, and a webhook is the one shape
 every receiver already speaks: a chat bridge, a home automation flow, or a
 five-line script.
 
 **Private books are excluded.** A webhook has no member identity behind it and
-lands in a channel the whole household reads, so putting a private book's title
+lands in a channel everyone here reads, so putting a private book's title
 through it defeats the single promise the data model makes. The in-app overdue
 view is per member and already scoped, so the owner still gets chased there.
 See `docs/decisions.md` and `docs/security.md`.
 
-The reminder interval is the household's, not this module's. Handy Library's
+The reminder interval is the library's, not this module's. Handy Library's
 named differentiator in this space is configurable timing, and it is the right
 one to copy: a week is nagging in one house and silence in another.
 
@@ -50,7 +50,7 @@ logger = logging.getLogger("endpaper.notifications")
 TIMEOUT_SECONDS = 10.0
 
 #: How often the background task looks. Hourly rather than daily, so a
-#: household that sets a one day interval gets a reminder within an hour of it
+#: library that sets a one day interval gets a reminder within an hour of it
 #: coming due rather than at whatever time the container last restarted.
 TICK_SECONDS = 60 * 60
 
@@ -154,7 +154,7 @@ def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
 def count_private_overdue(db: Session, now: datetime) -> int:
     """How many overdue loans the privacy exclusion held back.
 
-    A count, never a title. Reported so a household that expects five entries
+    A count, never a title. Reported so a library that expects five entries
     and receives four can see why without reading the source.
 
     **No reminder interval here, and that is the difference from
@@ -222,7 +222,7 @@ async def post_digest(url: str, body: bytes, secret: str) -> None:
     """POST the digest, or raise.
 
     **Redirects are not followed.** A 302 from the configured host to somewhere
-    else would send the household's book titles to a destination nobody
+    else would send the library's book titles to a destination nobody
     approved, and this is the one request in the app whose payload is
     catalogue content going somewhere unauthenticated. The metadata lookups
     follow redirects because they are asking rather than telling.

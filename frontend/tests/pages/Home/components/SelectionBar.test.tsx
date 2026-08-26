@@ -186,7 +186,7 @@ describe("SelectionBar extra actions", () => {
     expect(props.onRun).not.toHaveBeenCalled();
   });
 
-  it("offers no collection picker until the household has one", async () => {
+  it("offers no collection picker until the library has one", async () => {
     renderBar();
     const user = userEvent.setup();
 

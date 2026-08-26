@@ -422,7 +422,7 @@ class TestTheExport:
         assert "Dune" in body
 
     def test_a_name_that_looks_like_a_formula_is_neutralised(self, client, admin, make_book):
-        """Collection names are member supplied and household wide, so one
+        """Collection names are member supplied and library wide, so one
         reaches everybody's export. Same guard as tag names."""
         shelf = make_collection(client, admin["headers"], "=HYPERLINK(1)")
         book = make_book(admin["headers"], title="Dune")

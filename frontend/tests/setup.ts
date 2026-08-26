@@ -13,7 +13,7 @@ import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 // confusing way to learn that a docblock took effect.
 // happy-dom implements no modal dialogue functions at all, where jsdom shipped
 // stubs that throw "not implemented". The app calls `confirm()` before the
-// destructive actions (emptying the trash, deleting a household tag, a bulk
+// destructive actions (emptying the trash, deleting a curated tag, a bulk
 // delete), and tests spy on it to assert that a given action does or does not
 // ask. `vi.spyOn` on a missing property fails outright, so these have to exist
 // before a spy can replace them. Defaults are deliberately the safe answers: a

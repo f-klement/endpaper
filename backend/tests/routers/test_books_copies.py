@@ -432,7 +432,7 @@ class TestLoans:
 class TestDuplicatesLeaveCopiesAlone:
     def test_two_copies_are_not_offered_as_duplicates(self, client, admin, make_book):
         """They are the strongest possible title-and-author match, and merging
-        them would destroy a book the household owns."""
+        them would destroy a book the library holds."""
         book = make_book(admin["headers"], title="Dune", author="Frank Herbert")
         add_copy(client, admin["headers"], book["id"])
 

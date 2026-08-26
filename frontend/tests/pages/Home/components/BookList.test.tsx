@@ -61,7 +61,7 @@ describe("BookList", () => {
     expect(screen.getByText("Loaned")).toBeInTheDocument();
   });
 
-  it("says when nobody has confirmed the household owns it", () => {
+  it("says when nobody has confirmed the library holds it", () => {
     renderList({
       books: [makeBook({ title: "Dune", ownership: OwnershipStatus.unknown })],
     });

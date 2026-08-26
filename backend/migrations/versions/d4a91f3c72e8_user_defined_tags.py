@@ -1,4 +1,4 @@
-"""Tags a household can invent for itself.
+"""Tags a library can invent for itself.
 
 One column. Every tag that exists when this runs was put there by
 `seed_tags()`, because until now there was no other way for one to appear, so
@@ -41,7 +41,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # A tag the household invented has no meaning without the flag, and leaving
+    # A tag the library invented has no meaning without the flag, and leaving
     # it behind would put "Holiday reads" into the curated genre list.
     #
     # **The association rows go first, and that ordering is not cosmetic.**

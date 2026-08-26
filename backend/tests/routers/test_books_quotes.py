@@ -175,7 +175,7 @@ class TestListingOneBook:
         self, client, admin, member, make_book
     ):
         """The shelf is shared, so a passage copied out of a book on it is the
-        household's to read. Same rule as notes, deliberately."""
+        library's to read. Same rule as notes, deliberately."""
         book = make_book(admin["headers"])
         add(client, admin["headers"], book["id"], text="Mine")
 

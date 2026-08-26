@@ -1,7 +1,7 @@
 """Tests for backend/ratelimit.py.
 
 Two layers: the sliding-window counter on its own, and the login/registration
-endpoints that use it. Guessing at a household password was unbounded before.
+endpoints that use it. Guessing at a library password was unbounded before.
 """
 
 import pytest
@@ -127,7 +127,7 @@ class TestLoginRateLimit:
 
     def test_a_different_account_is_unaffected(self, client, admin, member, tight_login_limit):
         """Keyed on the username under attack, so hammering one account does
-        not lock the rest of the household out."""
+        not lock the rest of the library out."""
         for _ in range(TIGHT.max_attempts + 2):
             client.post("/auth/login", json={"username": "admin", "password": "wrong"})
         res = client.post("/auth/login", json={"username": "member", "password": "password123"})

@@ -57,7 +57,7 @@ interface BookDetailProps {
  * otherwise (`useBookSections`).
  *
  * What is deliberately outside every section: the cover, title and author; the
- * loan badge, which is the one thing a household member scans for; the privacy
+ * loan badge, which is the one thing a member scans for; the privacy
  * control, because a control over who can see a book must not be something you
  * have to go looking for; the delete button, because a destructive action
  * hidden in a fold is a worse surprise than a long page; and the enrichment
@@ -216,7 +216,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             />
 
             {/* Under the shelf, because both answer "where does this one
-                live": one physically, one in the household's own filing. */}
+                live": one physically, one in this library's own filing. */}
             <CollectionPicker
               book={book}
               collections={collections}
@@ -342,7 +342,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             Deliberately not inside "About this book": that section is drawn
             only when the catalogue already knows something, which is exactly
             the book that needs no enrichment. It used to hide itself without
-            an API key, and that left a household unable to fill in exactly the
+            an API key, and that left a library unable to fill in exactly the
             books the national catalogues cover best. Folding it away on a bare
             book is the same fault by a different route. */}
         {enrichment.isEnabled && (

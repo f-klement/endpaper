@@ -189,7 +189,7 @@ describe("Home's view toggle", () => {
   });
 
   it("remembers the choice in this browser", async () => {
-    // Local first, like the saved views: a habit rather than household data,
+    // Local first, like the saved views: a habit rather than library data,
     // and it needs no endpoint and no migration to be useful.
     renderWithProviders(<Home />);
     await screen.findByText("Dune");

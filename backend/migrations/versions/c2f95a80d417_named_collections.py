@@ -4,14 +4,14 @@ Revision ID: c2f95a80d417
 Revises: b1e7c94a2d05
 Create Date: 2026-08-23
 
-A household separates physical from ebook, kept from sold, and one person's
+A library separates physical from ebook, kept from sold, and one person's
 shelf from another's. All three are partitions, so a book carries **one**
 collection: a nullable `books.collection_id` rather than a join table.
 
 **No backfill and no invented collection.** Every book that exists predates
 this migration, and every one of them stays unfiled. Creating a default
 collection would mean choosing its name here, which is a name in one language
-that nobody picked, and it would put the feature in front of every household
+that nobody picked, and it would put the feature in front of every library
 that never asked for it. Unfiled is a real state and the API says so.
 
 `ON DELETE SET NULL`: deleting a collection unfiles its books and destroys

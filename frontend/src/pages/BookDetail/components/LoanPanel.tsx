@@ -133,7 +133,7 @@ export default function LoanPanel({
         </button>
       ) : (
         <>
-          {/* Refused once, not forbidden. A household lends a never-lent book
+          {/* Refused once, not forbidden. A library lends a never-lent book
               to a sibling sometimes, and an app that will not let them record
               it gets the loan kept in somebody's head instead. So the button
               stays disabled until this is ticked, and the server asks for the

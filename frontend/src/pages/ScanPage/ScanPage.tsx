@@ -195,7 +195,7 @@ export default function ScanPage() {
 
           {/* The third way in, for a book with no barcode, a damaged one, or
               one printed before ISBNs existed. Always available: it no longer
-              needs an API key, and hiding it from a household without one left
+              needs an API key, and hiding it from a library without one left
               them unable to add such a book at all. */}
           <SearchPanel
             isConfigured={search.isConfigured}

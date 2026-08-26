@@ -27,7 +27,7 @@ export interface BookFilters {
   location: string | null;
   /** Hardback, paperback, ebook, audiobook. "Do we have this on audio". */
   format: BookFormat | null;
-  /** Would the household lend it. Nothing to do with whether it is out now. */
+  /** Would the library lend it. Nothing to do with whether it is out now. */
   lending: LendingWillingness | null;
   /**
    * Which collection to show, `"unfiled"` for the books in none, or null for

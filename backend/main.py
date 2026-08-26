@@ -59,7 +59,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("endpaper")
 
 PREDEFINED_TAGS: list[tuple[str, TagCategory]] = [
-    # The vocabulary a household gets before it has typed anything, which is
+    # The vocabulary a library gets before it has typed anything, which is
     # the whole reason for having a curated list at all (Jelu and Openreads
     # make every tag free-form and start empty).
     #
@@ -197,7 +197,7 @@ def seed_tags() -> None:
     """Insert any predefined tag that is missing. Idempotent, so a restart
     never duplicates and a tag deleted by hand comes back.
 
-    Only these carry `is_predefined`. A tag the household invented is left
+    Only these carry `is_predefined`. A tag the library invented is left
     alone here, which is the whole reason the flag exists: without it a
     restart would either delete their tags or adopt them.
     """
@@ -271,7 +271,7 @@ def custom_operation_id(route: APIRoute) -> str:
 app = FastAPI(
     title="Endpaper",
     version="1.0.0",
-    description="Catalogue, lend and track a household's physical book collection.",
+    description="Catalogue, lend and track a collection of physical books, shared by the people who use it.",
     generate_unique_id_function=custom_operation_id,
     lifespan=lifespan,
 )
@@ -441,7 +441,7 @@ def healthz(db: DbSession) -> dict[str, str]:
     intended.** Once the check works, a hung mount restarts the pod, and the
     restarted pod blocks in `init_db()` on the same mount, so it stays down and
     visible rather than coming back. A container in `CrashLoopBackOff` reaches
-    every alert a household has; a pod that is 1/1 Ready and serving nothing
+    every alert a library has; a pod that is 1/1 Ready and serving nothing
     reaches none of them, which is what the 39 hours above were. It recovers by
     itself when the mount does.
 

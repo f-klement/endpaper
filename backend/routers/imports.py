@@ -162,7 +162,7 @@ def import_csv(
     # Measured before this existed: a 5000 row file cost 25,001 statements and
     # 61 seconds, and profiling put only ~15% of that in SQLite. The rest was
     # SQLAlchemy compiling the same three queries five thousand times each. The
-    # catalogue is a household's, so holding two dicts of it is a few hundred
+    # catalogue is a library's, so holding two dicts of it is a few hundred
     # kilobytes.
     index = _CatalogueIndex.build(db, current_user.id)
 
@@ -271,7 +271,7 @@ class _CatalogueIndex:
     their ISBN, and the reason has changed rather than gone away: an export
     listing a book twice must not silently mint a second copy. A copy is
     something a person adds on purpose, one press at a time, never something a
-    CSV file decides a household owns.
+    CSV file decides a library holds.
     """
 
     by_isbn: dict[str, int]
@@ -397,7 +397,7 @@ def _apply_tags(
     for the same answer.
 
     **Two caps, and both were measured rather than guessed.** A 12 KB file of
-    200 rows created 4032 household-wide tags and put 4000 of them on one book,
+    200 rows created 4032 library wide tags and put 4000 of them on one book,
     because the only limit was per row. Past the caps this stops inventing
     rather than failing: the books in the file are still worth having.
 

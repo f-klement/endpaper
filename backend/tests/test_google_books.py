@@ -224,7 +224,7 @@ class TestMergeInto:
 
         A title is how the book is recognised on the shelf, and Google's
         spelling of it (series numbering, subtitle folded in) is often not the
-        one the household uses.
+        one the library uses.
         """
         book = Book(title="Dune (Dune Chronicles, Book 1)")
         merge_into(book, _volume_to_fields(VOLUME), overwrite=True)

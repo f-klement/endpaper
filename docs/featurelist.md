@@ -1,6 +1,7 @@
 # What Endpaper does
 
-A catalogue of the books a household owns, and a record of who has them.
+A catalogue of the books a library holds, and a record of who has them. Built for a
+household's shelves and for the library or archive that has outgrown a spreadsheet.
 
 This is the current feature set, not a roadmap.
 
@@ -56,7 +57,7 @@ be saved as a view.
 
 **Card, list or table.** The list is one dense row per book: a tiny cover, the
 title, and the author, series, year and reading status beside it, plus a marker
-where the book is out on loan or nobody has confirmed the household owns it. The
+where the book is out on loan or nobody has confirmed the library holds it. The
 table carries twenty one columns and sorts on what the server can genuinely
 order by. The choice is remembered in the browser.
 
@@ -103,7 +104,7 @@ about who may see a book.
 **Multiple copies** of one title, each with its own condition, location and
 lending state. The ISBN uniqueness rule applies to single copies only.
 
-**Ownership** distinguishes what the household owns from what it wants.
+**Ownership** distinguishes what the library holds from what it wants.
 
 **Bulk edits** tag, re-shelve, set a status or delete a whole selection at once,
 so a shelf reorganised in life does not take an evening to reorganise here.
@@ -125,7 +126,7 @@ answers 404, never 403, because a 403 confirms the id exists.
 
 **Statistics**: what is on the shelf, who reads what, what got finished when, and
 how the year compares to the last. Every count obeys the privacy rule, so a
-household total is not a way to learn what somebody keeps private.
+library wide total is not a way to learn what somebody keeps private.
 
 ## Running it
 

@@ -1,10 +1,24 @@
 # Changelog
 
-## Unreleased
+## v0.9.0
+
+_2026-08-26_
 
 **Classification review.** Metadata refresh and automatic enrichment now update scalar
 facts only. Choosing a catalogue record shows its Classifications first, then adds the
 selected evidence to the book.
+
+**Endpaper is for libraries and archives too, and now says so.** It was always
+usable by a small library, and every page described it as a household tool, which
+told the wrong half of its audience it was not for them. The description is now "a
+self-hosted catalogue for the books you share", built for a household's shelves and
+for the library or archive that has outgrown a spreadsheet.
+
+Nothing about how it behaves has changed. The features a library needs are still
+being built, and the pages say only what has actually shipped.
+
+Two interface labels read better as a result: "Household tags" is now "Your tags",
+and the German text no longer assumes the people sharing a catalogue live together.
 
 ## v0.8.0
 

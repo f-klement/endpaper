@@ -345,7 +345,7 @@ describe("BookCard lending willingness", () => {
 });
 
 describe("BookCard and multiple copies", () => {
-  it("says so when the household holds more than one", () => {
+  it("says so when the library holds more than one", () => {
     // Two copies are two rows and the grid draws both, so without this the
     // shelf looks like a catalogue that has double-added something.
     renderCard(makeBook({ title: "Dune", copy_count: 2 }));

@@ -52,7 +52,7 @@ Everything in it that is not the work is already per copy: `location`, `conditio
 `isbn` is nullable, which is deliberate: SQL treats NULLs as distinct, so any number of
 manually-added books can coexist without an ISBN. It is unique through
 `uq_books_isbn_single_copy`, a **partial** index over the rows whose `copy_group` is null,
-which is what lets a household own two paperbacks of one title while a re-scan of a book
+which is what lets a library own two paperbacks of one title while a re-scan of a book
 already on the shelf is still refused. See *Copies* below. `added_by_user_id` is nullable so
 deleting an account does not cascade away its books.
 
@@ -64,7 +64,7 @@ never be matched against any metadata source.
 `ownership` records whether a copy is **physically on the shelf**: `owned`, `not_owned` or
 `unknown`. It is deliberately **not** the same axis as read status. See below.
 
-`lending` records whether the household will lend the copy: `happy`, `in_use` or `never`,
+`lending` records whether the library will lend the copy: `happy`, `in_use` or `never`,
 and null while nobody has been asked. A third axis again, and not a fact about right now:
 see *Three axes, not one* below.
 
@@ -77,7 +77,7 @@ category names contain commas ("Fiction, general"). `google_books.join_categorie
 
 **`tags`.** 105 rows seeded at startup from `PREDEFINED_TAGS` in `main.py`, in three
 categories: `type` (10), `genre` (88) and `age` (7), plus a fourth category, `custom`, for
-tags a household invents for itself. Seeding is by name, so a predefined tag deleted by
+tags a library invents for itself. Seeding is by name, so a predefined tag deleted by
 hand comes back on the next restart, and renaming one means a migration rather than an
 edit to the list: `seed_tags()` would otherwise leave the old row and insert a second
 beside it.
@@ -91,7 +91,7 @@ book drops its tag links without touching the tags themselves. That cascade did 
 until `PRAGMA foreign_keys` was turned on: it is off by default in SQLite, which made every
 `ForeignKey` in `models.py` a comment. See *Connection settings* below.
 
-**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. Household
+**`collections`.** Named parts of the shelf, pointed at by `books.collection_id`. Library
 wide, one per book or none, and never a privacy boundary. See *Collections* below.
 
 **`user_books`.** Per-person read status, rating, reading dates (`unread` / `want_to_read` /
@@ -118,13 +118,13 @@ and the caption that scheme gave the number, as three columns rather than the on
 across languages and does not say which scheme it came from.
 
 **Tags, `books.categories` and this are one store with three jobs, not three vocabularies.**
-The difference is provenance. A tag is the household's own word. A category is whatever the
+The difference is provenance. A tag is this library's own word. A category is whatever the
 publisher claimed, uncontrolled. A row here is somebody at a national library placing the
 book in a published schedule, and only that one means anything to another institution.
 
 | Layer | What it is |
 |---|---|
-| `tags` | the household's own language, curated or invented |
+| `tags` | this library's own language, curated or invented |
 | `books.categories` | whatever the publisher claimed |
 | `classifications` | an assertion from a published scheme |
 
@@ -171,7 +171,7 @@ deliberately read by nothing: see [decisions.md](decisions.md).
 
 **The number is what gets matched, never the caption.** `004` is Informatik in a German
 record and Computing in an English one, so a rule reading the caption matches on the least
-portable part of the heading. `backend/ddc.py` projects the number onto the household's tag
+portable part of the heading. `backend/ddc.py` projects the number onto the library's tag
 vocabulary through the 100 published Dewey divisions. Measured against the DNB over ten
 German ISBNs on 2026-08-23: eight carried a DDC heading, and none of the eight captions
 matched any of the 105 seeded tag names. Only DDC is projected: a GND number is an
@@ -225,7 +225,7 @@ row is one moment somebody recorded a position, and nothing ever updates one. Se
 **`loans`.** One row per lending event, never deleted. `returned_at IS NULL` identifies
 the single active loan; a returned loan is retained as history. Two separate foreign keys
 point at `users` (borrower and lender), which is why the relationships declare explicit
-`foreign_keys=`. `due_at` is optional, because most household lending has no deadline;
+`foreign_keys=`. `due_at` is optional, because most library lending has no deadline;
 `is_overdue` is **computed per request, never stored**, since a stored flag would be wrong
 from the moment the deadline passed until something happened to write to the row.
 
@@ -244,7 +244,7 @@ rule is an index: a restore and an import both write rows without going through
 `LoanCreate`. The constraint also refuses an all-whitespace name, which satisfies
 `IS NOT NULL` and identifies nobody. `LoanCreate` rejects both or neither with a 422.
 
-Lending **from** an external, a book the household has borrowed rather than lent, is
+Lending **from** an external, a book the library has borrowed rather than lent, is
 deliberately not a loan. See [decisions.md](decisions.md).
 
 **`notes`.** Free text, attached to a book and authored by a user.
@@ -415,7 +415,7 @@ than data:
 |---|---|
 | `alias_key` | the key of the spelling being folded away. **Unique**: a spelling means one person |
 | `canonical_name` | the name to show, as a member typed or picked it. Need not be a name any book carries |
-| `created_by_user_id` | provenance, read by nothing, nullable so deleting an account keeps the household's decisions |
+| `created_by_user_id` | provenance, read by nothing, nullable so deleting an account keeps the library's decisions |
 
 Nothing in it is a foreign key, because there is no author row to point at, and that is what
 makes it survive: a spelling no book carries any more leaves an alias that matches nothing
@@ -438,14 +438,14 @@ author whose every book is private therefore appears for nobody else: nothing th
 credited to a spelling that resolves to that person. Merging an author nobody can see is
 **404**, not 403.
 
-The **mapping** is household wide, like a collection's name: every member resolves a spelling
+The **mapping** is library wide, like a collection's name: every member resolves a spelling
 to the same person, so identity does not fork per reader and an old link resolves the same way
 for everybody. What is filtered beside the shelf is what a member has evidence for: a folded
 spelling is listed, and its undo offered, only where it appears on a book they can see.
 
 ## Copies
 
-A household that genuinely owns two paperbacks of one title has two objects, and the whole
+A library that genuinely owns two paperbacks of one title has two objects, and the whole
 of the previous paragraph is per object. So a copy is a **second row**, and `copy_group` is
 what joins it to the first.
 
@@ -499,17 +499,17 @@ not answer.
 
 **Null means unfiled, and no collection was ever invented for existing books.** The
 migration backfills nothing. A default collection would need a name chosen in one language
-for households that never asked for the feature, and renaming a seeded string later means a
+for libraries that never asked for the feature, and renaming a seeded string later means a
 migration. So "in no collection" is an ordinary permanent state, like a null `format` or
 `lending`, and the API names it: `GET /api/books?unfiled=true`.
 
-**Household wide, and never a privacy boundary.** Any member may create one, rename it, and
+**Library wide, and never a privacy boundary.** Any member may create one, rename it, and
 file any book they can write to. Filing changes nothing about who can see the book:
 `visible_to()` remains the only access control on content, and it is not given a collection
 to consult. `Collection.created_by_user_id` is provenance and no query reads it, which is
 what keeps that true rather than merely intended.
 
-The one thing a household-wide label could disclose is a **count**, so every count is
+The one thing a library wide label could disclose is a **count**, so every count is
 filtered: `routers/collections._counts` and the `by_collection` statistic both apply
 `visible_to`. A member filing a private book onto a shared shelf does not thereby tell
 everybody it exists.
@@ -712,7 +712,7 @@ by collection is a browse over the whole catalogue rather than a search.
 **One person per spelling** (migration `a9c4e7b21d03`). `author_aliases.alias_key` is
 unique, so re-merging a spelling somewhere else replaces the row rather than adding a second
 one for a reader to choose between. No index on `canonical_name`: the table is read whole on
-every author request (it is one row per merge a household has made) and never searched.
+every author request (it is one row per merge a library has made) and never searched.
 
 **Lending willingness** (migration `d1a7f36b9c58`). `ix_books_lending`, for the same reason
 `ix_books_format` exists: "what could we lend the book club" is a filter over the whole

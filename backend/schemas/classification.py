@@ -13,7 +13,7 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: requests, so the per book total is unbounded: `POST /{id}/enrich/apply`
 #: takes a client supplied `BookMatch`, makes no outbound call and so carries
 #: no rate limiter, and eight rows per call times any number of calls is a
-#: stored denial of service the whole household pays for, since
+#: stored denial of service everyone here pays for, since
 #: `books_to_out` selectin-loads this relationship onto every row of every
 #: page.
 #:

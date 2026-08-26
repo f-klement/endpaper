@@ -175,7 +175,7 @@ POSTs to a webhook, on a timer, with no member behind it and no session on the r
 end. Two things bound it.
 
 **Private books are excluded**, in the query rather than by a filter afterwards. A webhook
-lands in a channel the whole household reads, so a private title there is readable by
+lands in a channel everyone here reads, so a private title there is readable by
 everyone in it, which is exactly what `is_private` exists to prevent. The digest reports
 `skipped_private` as a count and never names one. The owner is still chased in the app,
 where the overdue view is per member and already scoped.
@@ -188,7 +188,7 @@ The body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when
 is set, over the raw bytes that go on the wire. That authenticates the sender to the
 receiver; it is not confidentiality, and an `http://` destination sends book titles in
 clear. **Redirects are not followed**, unlike the metadata lookups, because a 302 from the
-configured host would send the household's book titles somewhere nobody approved.
+configured host would send the library's book titles somewhere nobody approved.
 
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
@@ -216,8 +216,8 @@ Five things are limited, for three different reasons:
 | `/auth/login` | 10 / min | username + address | Bounds guesses at a token |
 | `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
-| `/api/imports/*` | 3 / min | username | One call writes thousands of rows in one transaction, holding the single SQLite writer against the household |
-| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this household neither runs nor pays for |
+| `/api/imports/*` | 3 / min | username | One call writes thousands of rows in one transaction, holding the single SQLite writer against the library |
+| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this library neither runs nor pays for |
 
 The last is the one that is not about this deployment: spending somebody else's quota is a
 way to get this deployment's address rate-limited upstream, which loses metadata for
@@ -239,7 +239,7 @@ A successful login clears the count, so someone who mistypes twice and then gets
 is not left rationed.
 
 Storage is in-process, which suits a single container with a single worker. Restarting
-clears the windows, an accepted tradeoff for not adding Redis to a household bookshelf.
+clears the windows, an accepted tradeoff for not adding Redis to a catalogue this size.
 
 ## Uploads
 
@@ -264,7 +264,7 @@ one.
 **What it stops.** A hotlinked cover made every reader's browser request an image from
 `covers.openlibrary.org`, `portal.dnb.de` or Google, once per book, on every render of the
 grid. Those requests carry the reader's address, and the URL carries the ISBN, so the image
-service learned which books the household owns and roughly when they were being looked at.
+service learned which books the library holds and roughly when they were being looked at.
 Measured on the running deployment before the storage outage, the covers directory held zero
 files, so this described every cover in the library.
 

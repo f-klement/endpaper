@@ -13,7 +13,7 @@ interface TagEditorProps {
   /** Invent a tag and put it straight on this book. */
   onCreate: (name: string) => void;
   isCreating?: boolean;
-  /** Delete a household tag everywhere. Seeded ones are not offered. */
+  /** Delete a curated tag everywhere. Seeded ones are not offered. */
   onDelete: (tag: TagOut) => void;
 }
 

@@ -7,10 +7,15 @@
 ![languages](https://img.shields.io/badge/languages-DE%20%7C%20EN-blue)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/fklement)
 
-A self-hosted PWA for cataloging your household's physical book collection.
+A self-hosted catalogue for the books you share.
+
+Built for a household's shelves and for the library or archive that has outgrown a
+spreadsheet. Scan a barcode, get a real bibliographic record, and know who has what across
+the people and places that share it.
 
 Like Endpaper or find it useful? Offer me a coffee. It helps pay for the public
-server that can mediate between households. All features are free either way.
+server that lets two copies of Endpaper reach each other. All features are free
+either way.
 
 ## Quick Start
 
@@ -45,20 +50,20 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
   a shelf does not go blank when an image service moves a URL. Settings has a button that
   fetches the ones already missing, and your browser never tells a third party which books
-  the household owns
+  the library holds
 - **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
   Libib or Openreads. The columns are worked out for you and shown before anything is saved
-- **Per-book privacy**: a book can be yours alone inside a shared household catalogue.
+- **Per-book privacy**: a book can be yours alone inside a shared library catalogue.
   Nobody else sees it, in listings, in search, in stats or by guessing a URL
 - **Reading status**: per-person "unread / want to read / reading / read / did not finish",
   with ratings, notes and the dates you started and finished. A book you gave up on keeps
   the date you started it and is never counted as finished
 - **Quotes**: copy out a passage worth keeping, with the page it is on and a line about
-  why. Every quote the household can see is on one page, newest first
+  why. Every quote the library can see is on one page, newest first
 - **More than one copy**: two paperbacks of the same title are two objects, each with its
   own shelf, condition, price and loan. Scanning a book you already own still asks before
   it adds anything, so a mis-scan is caught and a real second copy is one more press
-- **Collections**: split the shelf the way your household already does, physical from
+- **Collections**: split the shelf the way your library already does, physical from
   ebook, kept from sold, yours from mine. A book is in one or in none, and filing it
   changes nothing about who can see it: that is still up to whether it is private
 - **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.

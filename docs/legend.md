@@ -38,7 +38,7 @@ store the second for authors. See [data-model.md](data-model.md).
 
 | Term | What it is |
 |---|---|
-| **DDC** | Dewey Decimal Classification. Numeric and hierarchical: ten classes, one hundred divisions, one thousand sections. `004` is computing. Those hundred divisions are what `backend/ddc.py` maps to the household's own tags, and the mapping is on the **number** precisely because the caption is language dependent. |
+| **DDC** | Dewey Decimal Classification. Numeric and hierarchical: ten classes, one hundred divisions, one thousand sections. `004` is computing. Those hundred divisions are what `backend/ddc.py` maps to this library's own tags, and the mapping is on the **number** precisely because the caption is language dependent. |
 | **LCC** | Library of Congress Classification. The alphanumeric alternative to Dewey, common in American academic libraries. |
 | **LCSH** | Library of Congress Subject Headings. Not a classification: a controlled vocabulary of subject *phrases*, with subdivisions joined by two hyphens (`Computer software -- Development`). Read here out of the `<subject authority="lcsh">` elements in the MODS record the search path already fetches, not from `id.loc.gov`, which this app does not call. The record carries no identifier for a heading, so the phrase itself is the access point. |
 | **GND** | Gemeinsame Normdatei, the shared authority file of the German speaking library world, covering people, organisations, subjects, places and works. Every entry carries an identifier. |

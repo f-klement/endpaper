@@ -4,7 +4,7 @@
 the number of guesses someone can make at a token. The library import is
 limited for a different reason: it is authenticated, but one call parses a whole
 file and writes thousands of rows inside a single transaction, so a member
-firing them back to back holds the one SQLite writer against the household. The
+firing them back to back holds the one SQLite writer against the library. The
 metadata routes are limited for a third reason again: the cost of a call lands
 on somebody else's server.
 
@@ -20,7 +20,7 @@ the username is known.
 
 Storage is in-process, which suits a single-container, single-worker app: there
 is no second process to share counters with. Restarting clears the windows,
-which is an accepted tradeoff for not adding Redis to a household bookshelf.
+which is an accepted tradeoff for not adding Redis to a catalogue this size.
 """
 
 import time
@@ -51,7 +51,7 @@ REGISTER_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
 # Every metadata call fans out to as many as four public catalogues, none of
-# which the household runs or pays for. One member holding the scan page open
+# which the library runs or pays for. One member holding the scan page open
 # with a script behind it would spend somebody else's quota and put this
 # deployment's address in front of their rate limiter, which is a way to lose
 # metadata for everyone. Sixty a minute is far above scanning a shelf by hand

@@ -66,7 +66,7 @@ class BookLookup(BaseModel):
     page_count: int | None = None
     #: What the catalogues placed this book at, kept whole: scheme, number and
     #: the caption they gave it. Here and not only in `suggested_tag_ids`
-    #: because the suggestion is the household's reading of the number and this
+    #: because the suggestion is the library's reading of the number and this
     #: is the library's own assertion.
     #:
     #: `ClassificationIn`, not `ClassificationOut`, and that is the point: this
@@ -76,7 +76,7 @@ class BookLookup(BaseModel):
     #: caption longer than the column is dropped there rather than 422ing the
     #: member's own request.
     classifications: list[ClassificationIn] = []
-    #: Tags the household might want on this book, from the subject headings
+    #: Tags the library might want on this book, from the subject headings
     #: **and** from any DDC number above. Never applied on its own: see
     #: `serialisation.suggested_tag_ids`.
     suggested_tag_ids: list[int] = []
@@ -175,7 +175,7 @@ class CopyCreate(BaseModel):
     #: Deliberately **not** inherited from the book being copied, unlike the
     #: work fields and unlike `is_private`. Which collection a copy belongs to
     #: is a fact about the object, like its shelf and its condition: the
-    #: household with an Ebooks collection buying the paperback wants the two
+    #: library with an Ebooks collection buying the paperback wants the two
     #: apart, and inheriting would put them together and call it a default.
     #: A copy starts unfiled unless this says otherwise.
     collection_id: RowIdField | None = None
@@ -237,7 +237,7 @@ class BookOut(BaseModel):
     google_books_id: str | None = None
 
     #: Published scheme headings, in insertion order. Distinct from `tags`
-    #: (the household's own words) and from `categories` (whatever the
+    #: (this library's own words) and from `categories` (whatever the
     #: publisher claimed): only this one carries a scheme that means something
     #: outside this house. Batched with the tags in `books_to_out`, so it costs
     #: no statement per book.
@@ -260,7 +260,7 @@ class BookOut(BaseModel):
 
     format: BookFormat | None = None
     condition: BookCondition | None = None
-    #: Whether the household will lend this copy. Null while nobody has said.
+    #: Whether the library will lend this copy. Null while nobody has said.
     lending: LendingWillingness | None = None
     #: Minor units (cents). The client divides by 100 to display it; storing a
     #: decimal would round-trip through a float over SQLite.
@@ -269,7 +269,7 @@ class BookOut(BaseModel):
     purchased_at: date | None = None
     purchase_source: str | None = None
 
-    #: How many copies of this title the household holds, counting this row.
+    #: How many copies of this title the library holds, counting this row.
     #:
     #: 1 for almost every book. Served on every payload rather than only on the
     #: detail page, because two copies are two rows and the library grid shows
@@ -278,7 +278,7 @@ class BookOut(BaseModel):
     #:
     #: Counts only the copies the caller may see, like everything else here. A
     #: member who made their own copy private does not thereby tell the rest of
-    #: the household that a third copy exists.
+    #: the library that a third copy exists.
     copy_count: int = 1
 
     # Nothing below here is a column. Every one is computed per request and
@@ -456,7 +456,7 @@ class BookDetailsUpdate(BaseModel):
     lending: LendingWillingness | None = None
     purchase_price_minor: int | None = Field(default=None, ge=0, le=MAX_PRICE_MINOR)
     # Upper case, three letters, ISO 4217 shaped without asserting the code is
-    # real: a household using a currency this app has never heard of is not an
+    # real: a library using a currency this app has never heard of is not an
     # error worth refusing an edit over.
     purchase_currency: str | None = Field(default=None, min_length=3, max_length=3)
     purchased_at: date | None = None

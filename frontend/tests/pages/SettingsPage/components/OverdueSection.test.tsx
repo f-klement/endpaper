@@ -53,7 +53,7 @@ function renderSection(
 
 describe("OverdueSection", () => {
   it("says on the page that private books are left out", () => {
-    // Stated where it is configured, not only in the docs: a household that
+    // Stated where it is configured, not only in the docs: a library that
     // expects five entries and gets four has no other way to learn why.
     renderSection();
     expect(

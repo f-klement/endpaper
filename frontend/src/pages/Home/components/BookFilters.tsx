@@ -208,7 +208,7 @@ export default function BookFilters({
         </button>
       </div>
 
-      {/* Only once a household has divided its shelf: a picker offering one
+      {/* Only once a library has divided its shelf: a picker offering one
           option, "Any collection", is a control that cannot do anything.
           **Or whenever a collection is being filtered on**, which is not the
           same condition and is the one that bites. An admin deleting the

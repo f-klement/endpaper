@@ -164,7 +164,7 @@ export default function SelectionBar({
               </select>
             </div>
 
-            {/* Only once a household has made one. An empty picker offering
+            {/* Only once a library has made one. An empty picker offering
                 only "take these out of every collection" is a control for a
                 state that cannot exist yet. */}
             {collections.length > 0 && (

@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "AppearanceOut": {
-        "description": "One member's own appearance. Never another member's.\n\nDeliberately not part of `UserOut`, which is served inside every book\npayload and the member list: appearance on that schema would tell everyone\nin the household what everyone else's library looks like.\n\nEvery field is nullable and null means \"has not chosen\", which is what a\nnew account and every directory shadow account start as. The client then\nfollows the system for the mode, uses the house palette, and picks a\ndifferent wallpaper each visit.",
+        "description": "One member's own appearance. Never another member's.\n\nDeliberately not part of `UserOut`, which is served inside every book\npayload and the member list: appearance on that schema would tell everyone\nin the library what everyone else's library looks like.\n\nEvery field is nullable and null means \"has not chosen\", which is what a\nnew account and every directory shadow account start as. The client then\nfollows the system for the mode, uses the house palette, and picks a\ndifferent wallpaper each visit.",
         "properties": {
           "mode": {
             "anyOf": [
@@ -299,7 +299,7 @@
         "type": "object"
       },
       "BookCondition": {
-        "description": "The state of this particular copy.\n\nA deliberately coarse scale. Collectors use finer ones (near fine, very\ngood plus) and nobody else can apply them consistently, so a household\nwould end up with five spellings of \"a bit battered\".\n\nEX_LIBRARY is not a point on the scale: it is a fact about provenance that\nchanges what a copy is worth and what it looks like, and it is the one\ncategory people actually recognise.",
+        "description": "The state of this particular copy.\n\nA deliberately coarse scale. Collectors use finer ones (near fine, very\ngood plus) and nobody else can apply them consistently, so a library\nwould end up with five spellings of \"a bit battered\".\n\nEX_LIBRARY is not a point on the scale: it is a fact about provenance that\nchanges what a copy is worth and what it looks like, and it is the one\ncategory people actually recognise.",
         "enum": [
           "new",
           "good",
@@ -746,7 +746,7 @@
         "type": "object"
       },
       "BookFormat": {
-        "description": "What kind of object the copy is.\n\nSeparate from everything else because \"do we own this\" has a different\nanswer per format: a household can own the audiobook and not the paperback,\nand a reader looking for something to take on a train cares which. Reviews\nof every competitor in this space ask for it by name, usually as \"where is\naudiobook\".\n\nOTHER exists so the list can stay short. A boxed set, a magazine or a\npamphlet is a real thing on a real shelf and does not need its own value.",
+        "description": "What kind of object the copy is.\n\nSeparate from everything else because \"do we own this\" has a different\nanswer per format: a library can hold the audiobook and not the paperback,\nand a reader looking for something to take on a train cares which. Reviews\nof every competitor in this space ask for it by name, usually as \"where is\naudiobook\".\n\nOTHER exists so the list can stay short. A boxed set, a magazine or a\npamphlet is a real thing on a real shelf and does not need its own value.",
         "enum": [
           "hardcover",
           "paperback",
@@ -1744,7 +1744,7 @@
         "type": "object"
       },
       "CollectionCreate": {
-        "description": "A collection the household is inventing.\n\nAny member may make one. A collection is shelving rather than permission,\nso there is nothing here to restrict to an admin.",
+        "description": "A collection the library is inventing.\n\nAny member may make one. A collection is shelving rather than permission,\nso there is nothing here to restrict to an admin.",
         "properties": {
           "name": {
             "maxLength": 80,
@@ -2212,7 +2212,7 @@
         "type": "object"
       },
       "LendingWillingness": {
-        "description": "Whether the household is prepared to lend this copy out.\n\n**Not the same question as a loan, and not the same as `ownership`.** A\nloan is a fact about right now, `ownership` is a fact about the shelf, and\nthis is a standing intention that survives both: a book can be marked\nhappy to lend while it is out, and a book nobody will ever lend is still\nowned. Storing it on the loan instead would mean the answer only existed\nwhile the book was somewhere else.\n\nIN_USE is the one that would otherwise be missing, and it is the reason\nthis is three values rather than a boolean. \"Ask me later\" is a real\nanswer, distinct from \"no\": the copy is spoken for at the moment and the\nperson asking should come back, which a yes/no field cannot say.\n\nNEVER is a rule, not a state. It is what a signed first edition or a copy\nsomebody was given gets, and nothing about the shelf can change it.\n\nNullable on the column rather than defaulted to HAPPY: an unanswered\nquestion is not an answer, and a guess written into every imported book at\nonce is worse than a blank, because nobody re-checks a field that looks\nfilled in. Same reasoning as `BookFormat`.",
+        "description": "Whether the library is prepared to lend this copy out.\n\n**Not the same question as a loan, and not the same as `ownership`.** A\nloan is a fact about right now, `ownership` is a fact about the shelf, and\nthis is a standing intention that survives both: a book can be marked\nhappy to lend while it is out, and a book nobody will ever lend is still\nowned. Storing it on the loan instead would mean the answer only existed\nwhile the book was somewhere else.\n\nIN_USE is the one that would otherwise be missing, and it is the reason\nthis is three values rather than a boolean. \"Ask me later\" is a real\nanswer, distinct from \"no\": the copy is spoken for at the moment and the\nperson asking should come back, which a yes/no field cannot say.\n\nNEVER is a rule, not a state. It is what a signed first edition or a copy\nsomebody was given gets, and nothing about the shelf can change it.\n\nNullable on the column rather than defaulted to HAPPY: an unanswered\nquestion is not an answer, and a guess written into every imported book at\nonce is worse than a blank, because nobody re-checks a field that looks\nfilled in. Same reasoning as `BookFormat`.",
         "enum": [
           "in_use",
           "never",
@@ -2580,7 +2580,7 @@
         "type": "string"
       },
       "OverdueNotifyResult": {
-        "description": "What one run of the overdue digest did.\n\nReported rather than logged, because \"send now\" exists so a person can see\nthe thing work. `skipped_private` is here for the same reason the exclusion\nexists: a household that expects five entries and gets four should be able\nto see why without reading the source.",
+        "description": "What one run of the overdue digest did.\n\nReported rather than logged, because \"send now\" exists so a person can see\nthe thing work. `skipped_private` is here for the same reason the exclusion\nexists: a library that expects five entries and gets four should be able\nto see why without reading the source.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -3129,7 +3129,7 @@
         "type": "string"
       },
       "RestoreResult": {
-        "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a household would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
+        "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a library would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
         "properties": {
           "books": {
             "minimum": 0.0,
@@ -3464,7 +3464,7 @@
         "type": "object"
       },
       "TagCategory": {
-        "description": "The groups tags are presented in throughout the UI.\n\nThe first three are the curated vocabulary, seeded at boot and the same in\nevery deployment. CUSTOM is everything a household invents for itself.\n\nKeeping them apart, rather than making every tag free-form as Jelu and\nOpenreads do, is deliberate: the curated list is what makes the tag picker\nuseful on the first day, before anybody has typed anything. What was wrong\nwas having no way past it.",
+        "description": "The groups tags are presented in throughout the UI.\n\nThe first three are the curated vocabulary, seeded at boot and the same in\nevery deployment. CUSTOM is everything a library invents for itself.\n\nKeeping them apart, rather than making every tag free-form as Jelu and\nOpenreads do, is deliberate: the curated list is what makes the tag picker\nuseful on the first day, before anybody has typed anything. What was wrong\nwas having no way past it.",
         "enum": [
           "type",
           "genre",
@@ -3475,7 +3475,7 @@
         "type": "string"
       },
       "TagCreate": {
-        "description": "A tag the household is inventing.\n\nNo category is accepted. Everything created this way is CUSTOM: asking\nsomebody to file \"Holiday reads\" under type, genre or age is asking a\nquestion with no right answer, and a wrong answer scatters their tag\nthrough a curated list.",
+        "description": "A tag the library is inventing.\n\nNo category is accepted. Everything created this way is CUSTOM: asking\nsomebody to file \"Holiday reads\" under type, genre or age is asking a\nquestion with no right answer, and a wrong answer scatters their tag\nthrough a curated list.",
         "properties": {
           "name": {
             "maxLength": 100,
@@ -3685,7 +3685,7 @@
     }
   },
   "info": {
-    "description": "Catalogue, lend and track a household's physical book collection.",
+    "description": "Catalogue, lend and track a collection of physical books, shared by the people who use it.",
     "title": "Endpaper",
     "version": "1.0.0"
   },
@@ -3693,7 +3693,7 @@
   "paths": {
     "/api/backup": {
       "get": {
-        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA household library is megabytes, not gigabytes.",
+        "description": "The whole database and every cover, as a zip.\n\nNot paginated and not streamed row by row: the archive has to be internally\nconsistent, so it is built in one pass from one session and then sent.\nA library is megabytes, not gigabytes.",
         "operationId": "download_backup",
         "responses": {
           "200": {
@@ -4675,7 +4675,7 @@
     },
     "/api/books/search": {
       "get": {
-        "description": "Free-text search, for adding a book nobody can scan.\n\nThe barcode path covers a book that is physically to hand. This covers the\nrest: a book with no barcode, a damaged one, one printed before ISBNs\nexisted, or one being added from a list rather than from the shelf. The\ncaller picks a result and the client prefills the form from it, so nothing\nis written until a person confirms.\n\n**No API key is required.** This used to be Google Books only and was\nhidden entirely from a household that had not configured one, which left\nthem with no way at all to add a book by title. Open Library answers\nwithout a key; Google is merged in on top when one is set, for the blurb\nand the categories its search index carries and Open Library's does not.\n\nTwo segments (`/google/search`) used to guard against this being confused\nwith `/{book_id}`; a single one is safe for the same reason `/export` is,\nwhich is that it is declared first.",
+        "description": "Free-text search, for adding a book nobody can scan.\n\nThe barcode path covers a book that is physically to hand. This covers the\nrest: a book with no barcode, a damaged one, one printed before ISBNs\nexisted, or one being added from a list rather than from the shelf. The\ncaller picks a result and the client prefills the form from it, so nothing\nis written until a person confirms.\n\n**No API key is required.** This used to be Google Books only and was\nhidden entirely from a library that had not configured one, which left\nthem with no way at all to add a book by title. Open Library answers\nwithout a key; Google is merged in on top when one is set, for the blurb\nand the categories its search index carries and Open Library's does not.\n\nTwo segments (`/google/search`) used to guard against this being confused\nwith `/{book_id}`; a single one is safe for the same reason `/export` is,\nwhich is that it is declared first.",
         "operationId": "search_books",
         "parameters": [
           {
@@ -4792,7 +4792,7 @@
     },
     "/api/books/tags": {
       "get": {
-        "description": "The curated vocabulary plus whatever the household has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group, which is\nthe only part the server can usefully settle.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
+        "description": "The curated vocabulary plus whatever the library has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group, which is\nthe only part the server can usefully settle.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
         "operationId": "list_tags",
         "responses": {
           "200": {
@@ -4868,7 +4868,7 @@
     },
     "/api/books/tags/{tag_id}": {
       "delete": {
-        "description": "Remove a tag the household invented, and take it off every book.\n\n**Admin only, and deliberately asymmetric with creating one.** Creating a\ntag is additive and reversible by deleting it, so it is open to everyone.\nDeleting one is neither: it strips the tag from every book in the house at\nonce, there is no undo for it as there is for a deleted book, and `Tag`\nrecords nobody as its author. One member should not be able to quietly\nunpick the shared vocabulary.\n\nA seeded tag is refused rather than deleted. `seed_tags()` runs at every\nboot and would put it straight back, so the delete would appear to work\nand then quietly undo itself at the next restart.\n\nDeclared before `/{book_id}`: two segments, but the ordering is what keeps\nthat true if either path is later reshaped.",
+        "description": "Remove a tag the library invented, and take it off every book.\n\n**Admin only, and deliberately asymmetric with creating one.** Creating a\ntag is additive and reversible by deleting it, so it is open to everyone.\nDeleting one is neither: it strips the tag from every book in the house at\nonce, there is no undo for it as there is for a deleted book, and `Tag`\nrecords nobody as its author. One member should not be able to quietly\nunpick the shared vocabulary.\n\nA seeded tag is refused rather than deleted. `seed_tags()` runs at every\nboot and would put it straight back, so the delete would appear to work\nand then quietly undo itself at the next restart.\n\nDeclared before `/{book_id}`: two segments, but the ordering is what keeps\nthat true if either path is later reshaped.",
         "operationId": "delete_tag",
         "parameters": [
           {
@@ -5263,7 +5263,7 @@
         ]
       },
       "post": {
-        "description": "Record that the household owns another copy of this book.\n\nThe deliberate half of the ISBN collision. Scanning a book already on the\nshelf answers 409 exactly as it always has, because the overwhelmingly\ncommon reason for it is a second pass through the same bookcase; this\nendpoint is the other reason, and it is reached by pressing something that\nsays so rather than by the app guessing.\n\n**`is_private` is inherited, never chosen here.** A copy of a private book\nthat came back public would disclose the book. The caller added the copy,\nso they are its owner and `PATCH /{id}/privacy` can change it afterwards.\n\n**Reading state is not copied.** Status, rating, progress, notes, quotes\nand loans all belong to a person and an object, and the new object is one\nnobody has read yet. Tags are copied: they describe the work, and\nre-picking six of them for a second paperback is exactly the friction this\nfeature exists to remove.",
+        "description": "Record that the library holds another copy of this book.\n\nThe deliberate half of the ISBN collision. Scanning a book already on the\nshelf answers 409 exactly as it always has, because the overwhelmingly\ncommon reason for it is a second pass through the same bookcase; this\nendpoint is the other reason, and it is reached by pressing something that\nsays so rather than by the app guessing.\n\n**`is_private` is inherited, never chosen here.** A copy of a private book\nthat came back public would disclose the book. The caller added the copy,\nso they are its owner and `PATCH /{id}/privacy` can change it afterwards.\n\n**Reading state is not copied.** Status, rating, progress, notes, quotes\nand loans all belong to a person and an object, and the new object is one\nnobody has read yet. Tags are copied: they describe the work, and\nre-picking six of them for a second paperback is exactly the friction this\nfeature exists to remove.",
         "operationId": "add_copy",
         "parameters": [
           {
@@ -5442,7 +5442,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain (the\nDNB and K10plus together, then Open Library, then Google), and by title and\nauthor otherwise, which runs the ranked search across all six sources.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty fields are filled unless `overwrite` is set: enrichment adds\nwhat is missing, it does not overrule what somebody typed.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain (the\nDNB and K10plus together, then Open Library, then Google), and by title and\nauthor otherwise, which runs the ranked search across all six sources.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {
@@ -5504,7 +5504,7 @@
     },
     "/api/books/{book_id}/enrich/apply": {
       "post": {
-        "description": "Fill this book in from an edition the member picked.\n\nSeparate from `POST /enrich`, which chooses for them. This exists because\nchoosing automatically is wrong often enough to matter: a paperback and its\nhardback are different page counts and different covers, and a search will\nhappily return the wrong printing of the right book. Nothing is written\nuntil somebody has looked at the candidates and said which one it is.\n\nThe merge rule is the same either way, and it is the server's rather than\nthe client's: only empty fields are filled unless `overwrite` is set, so a\npublisher somebody typed in by hand is never quietly replaced.",
+        "description": "Fill this book in from an edition the member picked.\n\nSeparate from `POST /enrich`, which chooses for them. This exists because\nchoosing automatically is wrong often enough to matter: a paperback and its\nhardback are different page counts and different covers, and a search will\nhappily return the wrong printing of the right book. Nothing is written\nuntil somebody has looked at the candidates and said which one it is.\n\nThe merge rule is the same either way, and it is the server's rather than\nthe client's: only empty fields are filled unless `overwrite` is set, so a\npublisher somebody typed in by hand is never quietly replaced.\n\nSelecting the row also confirms its Classifications. Automatic enrichment\nand refresh do not have that confirmation.",
         "operationId": "apply_enrichment",
         "parameters": [
           {
@@ -6758,7 +6758,7 @@
     },
     "/api/collections": {
       "get": {
-        "description": "Every collection in the household, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.",
+        "description": "Every collection in the library, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.",
         "operationId": "list_collections",
         "responses": {
           "200": {
@@ -6834,7 +6834,7 @@
     },
     "/api/collections/{collection_id}": {
       "delete": {
-        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the household's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.",
+        "description": "Remove a collection. Its books are unfiled, never deleted.\n\n**Admin only, and deliberately asymmetric with creating one**, exactly like\n`DELETE /api/books/tags/{id}`. Creating is additive and undone by deleting;\ndeleting empties a shelf label off every book in the house at once, with no\nundo, and one member should not be able to unpick the library's filing on\ntheir own.\n\nNothing here nulls the column by hand, and two things do it instead. The\nORM nulls the loaded children, which is what this delete actually emits;\n`books.collection_id` is also `ON DELETE SET NULL`, which is what covers a\nrestore or a statement run by hand, neither of which passes through here.\nThe second is the one worth keeping: a row left pointing at a destroyed\ncollection is a dangling foreign key, and it is also why\n`PRAGMA foreign_keys=ON` is load bearing here.",
         "operationId": "delete_collection",
         "parameters": [
           {
@@ -6935,7 +6935,7 @@
     },
     "/api/healthz": {
       "get": {
-        "description": "Whether this container can actually serve.\n\nThe Kubernetes probes used to request `/`, which the SPA mount answers from\ndisk: a pod whose database had gone (an unmounted volume, a corrupt file)\nstayed Ready and kept taking traffic, because index.html was still readable.\nTouching the database is the whole point, so this is a query rather than a\nconstant.\n\n**That was not enough, and the correction is the interesting half.**\nMeasured during a total NFS outage on 2026-08-22: `/api/healthz` answered\n200 continuously and the pod stayed 1/1 Ready for 39 hours while the volume\nwas unresponsive to every new namespace operation. `SELECT 1` on an\nalready-open SQLite handle is served from the page cache and issues no RPC,\nso the query crossed no wire. Readiness built on a long-lived handle\nmeasures the process, not its storage: an unmounted volume would have been\ncaught, a hung one could not be, by construction.\n\nSo the query is joined by a `stat` of the data directory, which is a\nnamespace operation and therefore has to cross the wire, under its own\ntimeout. See `storage_is_reachable`.\n\n**This is the liveness probe as well as readiness, and the consequence is\nintended.** Once the check works, a hung mount restarts the pod, and the\nrestarted pod blocks in `init_db()` on the same mount, so it stays down and\nvisible rather than coming back. A container in `CrashLoopBackOff` reaches\nevery alert a household has; a pod that is 1/1 Ready and serving nothing\nreaches none of them, which is what the 39 hours above were. It recovers by\nitself when the mount does.\n\nUnauthenticated, deliberately: a probe holds no token, and the only thing\ndisclosed is that the service is up, which anyone can tell by connecting.",
+        "description": "Whether this container can actually serve.\n\nThe Kubernetes probes used to request `/`, which the SPA mount answers from\ndisk: a pod whose database had gone (an unmounted volume, a corrupt file)\nstayed Ready and kept taking traffic, because index.html was still readable.\nTouching the database is the whole point, so this is a query rather than a\nconstant.\n\n**That was not enough, and the correction is the interesting half.**\nMeasured during a total NFS outage on 2026-08-22: `/api/healthz` answered\n200 continuously and the pod stayed 1/1 Ready for 39 hours while the volume\nwas unresponsive to every new namespace operation. `SELECT 1` on an\nalready-open SQLite handle is served from the page cache and issues no RPC,\nso the query crossed no wire. Readiness built on a long-lived handle\nmeasures the process, not its storage: an unmounted volume would have been\ncaught, a hung one could not be, by construction.\n\nSo the query is joined by a `stat` of the data directory, which is a\nnamespace operation and therefore has to cross the wire, under its own\ntimeout. See `storage_is_reachable`.\n\n**This is the liveness probe as well as readiness, and the consequence is\nintended.** Once the check works, a hung mount restarts the pod, and the\nrestarted pod blocks in `init_db()` on the same mount, so it stays down and\nvisible rather than coming back. A container in `CrashLoopBackOff` reaches\nevery alert a library has; a pod that is 1/1 Ready and serving nothing\nreaches none of them, which is what the 39 hours above were. It recovers by\nitself when the mount does.\n\nUnauthenticated, deliberately: a probe holds no token, and the only thing\ndisclosed is that the service is up, which anyone can tell by connecting.",
         "operationId": "healthz",
         "responses": {
           "200": {
@@ -7203,7 +7203,7 @@
         ]
       },
       "post": {
-        "description": "Record that a book has gone out.\n\n**A book marked `lending = never` is refused once, not forbidden.** Neither\nextreme is right here. Allowing it silently makes the field decorative, and\na household that took the trouble to mark a copy would find the app had\nquietly ignored it. Forbidding it outright is worse: the same household\nlends that book to a sibling anyway, and an app that will not let them\nrecord what actually happened gets a loan kept in somebody's head instead,\nwhich is the one thing this table exists to replace.\n\nSo the refusal costs one extra deliberate step: a 409 carrying\n`code: not_lendable`, then the same request again with\n`acknowledge_not_lendable`. The other two willingness values are not\nchecked at all. `in_use` means \"come back later\", which is a conversation\nbetween two people rather than a rule, and `happy` is a yes.\n\nThe flag is not stored: see `LoanCreate.acknowledge_not_lendable`.",
+        "description": "Record that a book has gone out.\n\n**A book marked `lending = never` is refused once, not forbidden.** Neither\nextreme is right here. Allowing it silently makes the field decorative, and\na library that took the trouble to mark a copy would find the app had\nquietly ignored it. Forbidding it outright is worse: the same library\nlends that book to a sibling anyway, and an app that will not let them\nrecord what actually happened gets a loan kept in somebody's head instead,\nwhich is the one thing this table exists to replace.\n\nSo the refusal costs one extra deliberate step: a 409 carrying\n`code: not_lendable`, then the same request again with\n`acknowledge_not_lendable`. The other two willingness values are not\nchecked at all. `in_use` means \"come back later\", which is a conversation\nbetween two people rather than a rule, and `happy` is a yes.\n\nThe flag is not stored: see `LoanCreate.acknowledge_not_lendable`.",
         "operationId": "create_loan",
         "requestBody": {
           "content": {

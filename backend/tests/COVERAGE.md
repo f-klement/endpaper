@@ -61,12 +61,12 @@ is why the helper uses regexes.
 | `routers/test_collections.py` | 19 | **Shelving, never permission.** Naming a part of the shelf, the case-insensitive uniqueness the database enforces, counts filtered to the caller, and a delete that unfiles rather than destroys |
 | `routers/test_books_collections.py` | 33 | Filing a book, the two list parameters and the 422 for both at once, the bulk verb, the merge that absorbs a collection, and the export column |
 | `routers/test_books_duplicates.py` | 31 | Duplicate detection and the merge, incl. the ORM cascade trap |
-| `routers/test_books_classifications.py` | 32 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a household tag, that the server writes no tag by itself, that automatic enrichment and refresh leave headings unchanged, and that a selected record, merging and purging each leave the right rows, including the per book ceiling that both capped writers of the table obey and the scheme ordering that decides what survives it |
+| `routers/test_books_classifications.py` | 32 | **A catalogue heading kept whole.** That the number survives the parse and a year does not become one, that a German caption still suggests a curated tag, that the server writes no tag by itself, that automatic enrichment and refresh leave headings unchanged, and that a selected record, merging and purging each leave the right rows, including the per book ceiling that both capped writers of the table obey and the scheme ordering that decides what survives it |
 | `routers/test_books_quotes.py` | 50 | **Passages copied out of a book.** The bounds on the excerpt, the remark and the page, reading order with the unpaged last, who may correct one, that a private book's quotes are 404, and that the cross-book listing filters its rows *and* its count |
 | `routers/test_books_progress.py` | 29 | **The reading log.** One unit per entry, the promotion to reading, that a member never sees another's, and the merge that would otherwise cascade it away |
 | `routers/test_books_reading.py` | 31 | Ratings, and the rules for stamping reading dates |
 | `routers/test_books_series.py` | 28 | Series gaps, shelf locations, and partial detail edits |
-| `routers/test_books_authors.py` | 47 | The author index and its privacy, the `?author=` filter, merging and reversing one, the household wide mapping against the filtered shelf, the flat map, and undoing a merge |
+| `routers/test_books_authors.py` | 47 | The author index and its privacy, the `?author=` filter, merging and reversing one, the library wide mapping against the filtered shelf, the flat map, and undoing a merge |
 | `routers/test_books.py` | 107 | Listing, search, sorting, tagging, covers, notes, export, ownership |
 | `routers/test_books_google.py` | 26 | Enrichment, the chosen-edition apply and that its body cannot overflow the database, candidates and that a record the schema refuses costs one heading rather than the whole response, that the work cluster is asked with the book's own ISBN, the feature gate |
 | `routers/test_books_search.py` | 40 | **Free-text search.** That it works with no API key, that all six catalogues answer, how they merge, that one record failing a bound costs one result rather than the response, that a record carrying more headings than the ceiling loses the ninth rather than its whole row, and that a Library of Congress record's shelf classifications lead a row crowded with subject headings |
@@ -158,7 +158,7 @@ Two things are **not** covered by choice:
   construction, bind sequence and guards, not any particular server's behaviour. Verifying
   against a real OpenLDAP would be an integration test with a container, and a different
   kind of investment.
-- **Concurrency.** Nothing exercises two simultaneous writers. SQLite and a household-sized
+- **Concurrency.** Nothing exercises two simultaneous writers. SQLite and a library-sized
   workload make this a poor investment; it would matter if the app ever moved to a
   multi-worker deployment.
 

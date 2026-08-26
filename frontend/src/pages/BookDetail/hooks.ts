@@ -112,7 +112,7 @@ export interface UseBookResult {
   users: UserOut[];
   /** Existing shelf locations, offered as suggestions when editing one. */
   locations: LocationOut[];
-  /** The household's collections, for the picker. */
+  /** The library's collections, for the picker. */
   collections: CollectionOut[];
   isLoading: boolean;
   error: unknown;
@@ -147,7 +147,7 @@ export interface UseBookActionsResult {
   /** Invent a tag and put it on this book in one step. */
   createTag: (name: string) => void;
   isCreatingTag: boolean;
-  /** Delete a household tag everywhere, after confirming. */
+  /** Delete a curated tag everywhere, after confirming. */
   deleteTag: (tag: TagOut) => void;
   removeTag: (tagId: number) => void;
   uploadCover: (file: File) => void;
@@ -188,7 +188,7 @@ export function useBookActions(
   const deleteTag = useDeleteTag({
     mutation: {
       onSuccess: () => {
-        // It came off every book in the household, not only this one.
+        // It came off every book in the library, not only this one.
         void queryClient.invalidateQueries();
       },
     },
@@ -266,7 +266,7 @@ export function useBookActions(
     createTag: (name) => createTag.mutate({ data: { name } }),
     isCreatingTag: createTag.isPending,
     deleteTag: (tag) => {
-      // Household-wide and not undoable, unlike deleting a book. The count is
+      // Library wide and not undoable, unlike deleting a book. The count is
       // in the message because "delete this tag" and "take this off 214 books"
       // are different decisions.
       if (
@@ -677,7 +677,7 @@ export interface UseBookSectionsResult {
  * | Section | Default | Why |
  * |---|---|---|
  * | reading | open | What a reader came to the page for. |
- * | filing | open | The same, and the controls a household edits most. |
+ * | filing | open | The same, and the controls a library edits most. |
  * | copies | `copy_count > 1` | One copy needs no list of copies. |
  * | lending | the book is out | A book somebody has does not hide who. |
  * | writing | closed | See below. |
@@ -688,7 +688,7 @@ export interface UseBookSectionsResult {
  * the counts arrive from `/notes` and `/quotes`, which are separate requests,
  * so a conditional default could only open the section after they land, which
  * is the flicker. Closed is also the honest guess, because notes and quotes
- * are empty on most books in a household catalogue. Put a count on `BookOut`
+ * are empty on most books in a library catalogue. Put a count on `BookOut`
  * and this becomes conditional like the rest.
  *
  * `about` is fixed for the opposite reason: `hasAbout()` decides whether it is

@@ -59,7 +59,7 @@ class AuthorOut(BaseModel):
     spellings: list[str] = Field(default_factory=list)
     #: The spellings folded in by a merge, each with the row that says so.
     #:
-    #: **Only the ones this caller can already see.** An alias is a household
+    #: **Only the ones this caller can already see.** An alias is a library
     #: wide statement about names, so it is shown like a collection name is;
     #: one whose spelling survives only on somebody else's private book is left
     #: out, because listing it would announce that the book exists.

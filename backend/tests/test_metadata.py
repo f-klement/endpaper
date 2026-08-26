@@ -320,7 +320,7 @@ class TestSourceOrder:
         """The bug this module replaced: a second hand-rolled request without it.
 
         Every fallback lookup went to the unauthenticated endpoint, which is
-        throttled per source address, so a household behind one address got a
+        throttled per source address, so a library behind one address got a
         429 and a "book not found" for every scan.
         """
         with respx.mock(assert_all_called=False) as mock:
@@ -1608,7 +1608,7 @@ class TestRanking:
         assert self.rank([english, german], "der schwarm schatzing", "de")[0] is german
 
     def test_the_readers_language_does_not_outrank_a_title_match(self):
-        """A German household searching an English title still gets it."""
+        """A German library searching an English title still gets it."""
         wanted = self.match(title="Moby Dick", author="Herman Melville", language="en")
         other = self.match(title="Etwas anderes", author="Herman Melville", language="de")
         assert self.rank([other, wanted], "moby dick melville", "de")[0] is wanted
@@ -1878,7 +1878,7 @@ class TestLibraryOfCongressSubjectHeadings:
     def test_a_subject_heading_is_never_read_as_a_dewey_number(self):
         """`ddc.parse_heading` accepts any three digit token, so a heading that
         opens with one would be stored as a Dewey number and would suggest a
-        household tag from it. The guard is structural: `<classification>` is
+        curated tag from it. The guard is structural: `<classification>` is
         the only element handed to `ddc`, and this path does not import it."""
         numeric = self.MODS.replace(
             "<topic>Computer programming</topic>",

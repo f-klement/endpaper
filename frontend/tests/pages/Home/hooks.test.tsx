@@ -299,7 +299,7 @@ describe("useLibrary collection filter", () => {
     expect(lastQuery().has("collection_id")).toBe(false);
   });
 
-  it("offers the household's collections to the filter", async () => {
+  it("offers the library's collections to the filter", async () => {
     api.on("/api/collections", { body: [makeCollection({ name: "Ebooks" })] });
     const { result } = renderLibrary();
 

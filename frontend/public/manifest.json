@@ -1,7 +1,7 @@
 {
   "name": "Endpaper",
   "short_name": "Endpaper",
-  "description": "Catalogue your household's physical book collection",
+  "description": "A self-hosted catalogue for the books you share",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

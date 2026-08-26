@@ -360,13 +360,13 @@ class TestMerging:
 
         assert res.status_code == 404
 
-    def test_a_name_is_household_wide_and_the_shelf_is_not(
+    def test_a_name_is_library_wide_and_the_shelf_is_not(
         self, client, admin, member, make_book
     ):
         """Where the privacy line actually sits, in one request.
 
         Folding into a spelling somebody else already folded resolves to their
-        canonical name, and that name is not withheld: it is household wide,
+        canonical name, and that name is not withheld: it is library wide,
         exactly like a collection's name. What is withheld is the **shelf**,
         so the private book credited to that spelling is not counted.
 
@@ -387,7 +387,7 @@ class TestMerging:
     def test_an_author_whose_every_book_is_private_appears_for_nobody_else(
         self, client, admin, member, make_book
     ):
-        """The argument the household wide mapping rests on.
+        """The argument the library wide mapping rests on.
 
         The mapping says who a name means. It never says a book exists, and an
         entry exists only because a book the caller can see is credited to a

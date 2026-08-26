@@ -5,7 +5,7 @@ pages are for changing it.
 
 | Document | What it covers |
 |---|---|
-| [CONTEXT.md](../CONTEXT.md) | The household library glossary and its canonical terms |
+| [CONTEXT.md](../CONTEXT.md) | The domain glossary and its canonical terms |
 | [adr/](adr/) | Durable architectural decisions and their tradeoffs |
 | [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
 | [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |

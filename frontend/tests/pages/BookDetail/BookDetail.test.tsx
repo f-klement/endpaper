@@ -856,7 +856,7 @@ const CANDIDATE = {
 describe("BookDetail enrichment", () => {
   it("is offered even with no Google Books key", async () => {
     // It used to hide itself without one. The other five catalogues need no
-    // key, so hiding it left a household unable to fill in exactly the books
+    // key, so hiding it left a library unable to fill in exactly the books
     // those catalogues cover best.
     stubLoad({ googleBooks: false });
     renderDetail();

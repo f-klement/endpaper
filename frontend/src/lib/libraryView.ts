@@ -2,14 +2,14 @@
  * How the library is drawn: covers, a table of metadata, or dense rows.
  *
  * localStorage rather than the account, for the same reason saved searches are:
- * this is a habit rather than household data, it needs no endpoint, no schema
+ * this is a habit rather than library data, it needs no endpoint, no schema
  * and no migration, and the cost of getting it wrong is one click. If it turns
  * out people want the choice to follow them onto a phone, that is the moment to
  * move it, not before.
  *
  * Three readers of a library want three different things from it. Somebody
  * browsing for something to read recognises covers. Somebody auditing what the
- * household owns wants publisher, condition and what it cost, all visible at
+ * library holds wants publisher, condition and what it cost, all visible at
  * once, which is a table. Somebody looking for a book they know they have wants
  * as many of them on the screen as will fit, with just enough to recognise one,
  * which is the list.

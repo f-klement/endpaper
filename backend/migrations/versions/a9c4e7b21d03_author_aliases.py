@@ -25,7 +25,7 @@ else replaces the row rather than adding a second one for a reader to choose
 between.
 
 **The downgrade is exact.** It drops the table, which loses which spellings a
-household had folded together, and it can do nothing else: no book row carries
+library had folded together, and it can do nothing else: no book row carries
 a trace of a merge. What it cannot do is corrupt anything, because the merges
 never wrote to `books` in the first place. After a downgrade the shelf shows
 every spelling as its own author again, which is precisely the state before the

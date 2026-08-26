@@ -1,8 +1,8 @@
-"""The Dewey Decimal Classification, and how a household reads one.
+"""The Dewey Decimal Classification, and how a library reads one.
 
 Two jobs, and they are the two halves of one heading. `parse_heading` splits
 `"004 Informatik"` into the number and the label a catalogue supplied.
-`tag_names` then projects the **number** onto the household's own vocabulary.
+`tag_names` then projects the **number** onto this library's own vocabulary.
 
 **Matching on the number is the whole point.** `004` is "Informatik" in a
 German record and "Computing" in an English one, so a rule that reads the label
@@ -103,7 +103,7 @@ def division(number: str) -> str | None:
 
 
 def tag_names(numbers: Iterable[str]) -> list[str]:
-    """The household tag names these classification numbers suggest.
+    """The curated tag names these classification numbers suggest.
 
     Deduplicated, in the order the numbers arrived, because a book classified
     at 004 and at 005.133 is one suggestion of Computing and not two.
@@ -125,7 +125,7 @@ def tag_names(numbers: Iterable[str]) -> list[str]:
 #: quotations and 310 is general statistics, and there is no tag in
 #: `PREDEFINED_TAGS` that any of them means. Inventing one would be the failure
 #: this whole design avoids: a machine derived tag that nobody chose, sitting
-#: in a list the household thinks it curated.
+#: in a list the library thinks it curated.
 #:
 #: Every value here must be a name in `PREDEFINED_TAGS`.
 #: `tests/test_ddc.py::test_every_mapped_tag_name_is_a_seeded_tag` pins that,
@@ -207,7 +207,7 @@ DIVISION_TAGS: Final[dict[str, str]] = {
     "600": "Technology",
     "610": "Medicine",
     "620": "Technology",
-    # 630 is agriculture, whose household facing half is 635, garden crops.
+    # 630 is agriculture, whose library facing half is 635, garden crops.
     "630": "Gardening",
     # 640 is home and family management, and 641, food and drink, is most of it.
     "640": "Cooking",

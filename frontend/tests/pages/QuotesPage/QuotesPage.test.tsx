@@ -95,7 +95,7 @@ describe("QuotesPage", () => {
 
   it("reports a failure rather than an empty shelf", async () => {
     // The distinction is the point: an empty state here would claim the
-    // household has saved nothing, which is a different and wrong statement
+    // library has saved nothing, which is a different and wrong statement
     // from "this request failed".
     api.on("/api/books/quotes", { status: 500, body: {} });
     renderWithProviders(<QuotesPage />);

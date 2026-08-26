@@ -64,7 +64,7 @@ class BookFormat(StrEnum):
     """What kind of object the copy is.
 
     Separate from everything else because "do we own this" has a different
-    answer per format: a household can own the audiobook and not the paperback,
+    answer per format: a library can hold the audiobook and not the paperback,
     and a reader looking for something to take on a train cares which. Reviews
     of every competitor in this space ask for it by name, usually as "where is
     audiobook".
@@ -84,7 +84,7 @@ class BookCondition(StrEnum):
     """The state of this particular copy.
 
     A deliberately coarse scale. Collectors use finer ones (near fine, very
-    good plus) and nobody else can apply them consistently, so a household
+    good plus) and nobody else can apply them consistently, so a library
     would end up with five spellings of "a bit battered".
 
     EX_LIBRARY is not a point on the scale: it is a fact about provenance that
@@ -100,7 +100,7 @@ class BookCondition(StrEnum):
 
 
 class LendingWillingness(StrEnum):
-    """Whether the household is prepared to lend this copy out.
+    """Whether the library is prepared to lend this copy out.
 
     **Not the same question as a loan, and not the same as `ownership`.** A
     loan is a fact about right now, `ownership` is a fact about the shelf, and
@@ -135,7 +135,7 @@ class TagCategory(StrEnum):
     """The groups tags are presented in throughout the UI.
 
     The first three are the curated vocabulary, seeded at boot and the same in
-    every deployment. CUSTOM is everything a household invents for itself.
+    every deployment. CUSTOM is everything a library invents for itself.
 
     Keeping them apart, rather than making every tag free-form as Jelu and
     Openreads do, is deliberate: the curated list is what makes the tag picker
@@ -262,7 +262,7 @@ class SettingKey(StrEnum):
     TOKEN_EPOCH = "token_epoch"
 
     # Where overdue reminders go, and how often. Settings rather than
-    # environment variables because the household changes them: which channel
+    # environment variables because the library changes them: which channel
     # gets chased, and how much nagging it tolerates, are decisions made after
     # the container is running.
     OVERDUE_WEBHOOK_ENABLED = "overdue_webhook_enabled"

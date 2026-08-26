@@ -19,7 +19,7 @@ from schemas import RestoreResult
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 #: An archive is a database plus every cover image, so the ordinary upload cap
-#: is far too small. This is generous enough for a household's whole library
+#: is far too small. This is generous enough for a library's whole library
 #: and small enough that a mistaken upload cannot exhaust the pod's memory.
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 
@@ -33,7 +33,7 @@ def download_backup(
 
     Not paginated and not streamed row by row: the archive has to be internally
     consistent, so it is built in one pass from one session and then sent.
-    A household library is megabytes, not gigabytes.
+    A library is megabytes, not gigabytes.
     """
     archive = backup_service.build_archive(db)
     filename = f"endpaper-backup-{date.today().isoformat()}.zip"

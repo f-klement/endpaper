@@ -577,7 +577,7 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
     PREVIOUS = "b1e7c94a2d05"
 
     def build_database_with_two_copies(self) -> None:
-        """A household owning two paperbacks of one title, before collections.
+        """A library holding two paperbacks of one title, before collections.
 
         Both rows carry the same ISBN and the same `copy_group`, which is the
         state the partial index exists to permit and a plain unique index would

@@ -332,7 +332,7 @@ because that is the document they will be reading.
 **It is the liveness probe as well as readiness, and that is intended.** A hung mount now
 restarts the pod, and the restarted pod blocks in `init_db()` on the same mount, so it stays
 down and visible. That is the right outcome: a container in `CrashLoopBackOff` reaches every
-alert a household has, where a pod that is 1/1 Ready and serving nothing reaches none of them,
+alert a library has, where a pod that is 1/1 Ready and serving nothing reaches none of them,
 which is the 39 hours this entry is about. It recovers by itself when the mount does.
 
 The stat runs in a **dedicated single-thread executor that is never joined**, and that is not
@@ -462,7 +462,7 @@ What it costs, which is real and is handled rather than waved at:
   backfill safe to press twice.
 
 `FORMAT_VERSION` stays at **1**: the backup envelope did not change, covers are the same
-files under `covers/` in the same zip, and bumping it would refuse every archive a household
+files under `covers/` in the same zip, and bumping it would refuse every archive a library
 already holds for no reason.
 
 ### The cover backfill is every member's own, not the admin's
@@ -615,7 +615,7 @@ limiter cannot see it: its key function runs before the body is parsed. Full rea
 A loan can name somebody with no account (`loans.loaned_to_name`), because the people most
 likely to keep a book are exactly the ones who will never have a login here.
 
-The other direction, a book the household has borrowed **from** somebody, is deliberately
+The other direction, a book the library has borrowed **from** somebody, is deliberately
 not modelled as a loan, and the reason is that it is not the same relation. `loans` answers
 "our book is with X, chase it": the row is created by a member, the book is one this
 library already holds, and the whole point is the overdue calculation running against
@@ -687,7 +687,7 @@ while the book was somewhere else, which is precisely when nobody needs to read 
 
 Three values rather than a boolean, and `in_use` is the reason. "I need it myself at the
 moment" is a real answer and is not a refusal: it means come back later, which yes-or-no
-cannot express. It arrived that way from the household that asked for the feature, in three
+cannot express. It arrived that way from the library that asked for the feature, in three
 sentences rather than a tick box.
 
 Nullable rather than defaulted, like `format` and `condition`: an unanswered question is
@@ -700,9 +700,9 @@ because nobody re-checks a field that looks filled in.
 `lending` is `never`, and creates the loan when the same request comes back with
 `acknowledge_not_lendable: true`.
 
-Neither extreme is right. Allowing it silently makes the field decorative: a household that
+Neither extreme is right. Allowing it silently makes the field decorative: a library that
 took the trouble to mark a copy would find the app had quietly ignored them. Forbidding it
-outright is worse, because the same household lends that book to a sibling anyway, and an
+outright is worse, because the same library lends that book to a sibling anyway, and an
 app that will not let them record what actually happened gets a loan kept in somebody's
 head instead. That is the one thing this table exists to replace.
 
@@ -711,7 +711,7 @@ not checked at all: the first means "come back later", which is a conversation b
 people rather than a rule, and the second is a yes.
 
 The acknowledgement is **not stored**. It says something about one request, not about the
-book, and a household that lent a never-lent book once has not changed its mind about
+book, and a library that lent a never-lent book once has not changed its mind about
 lending it to anybody else. Pinned by a test: lending it, returning it and lending it again
 asks again.
 
@@ -760,7 +760,7 @@ heading, and every one of the eight captions was German (`830 Deutsche Literatur
 caption based suggestion scored **zero** on exactly the catalogue that supplies the heading.
 
 So a heading is stored as scheme, number and caption in its own table, and
-`ddc.DIVISION_TAGS` projects the **number** onto the household's tags. `004` and `005.133`
+`ddc.DIVISION_TAGS` projects the **number** onto the library's tags. `004` and `005.133`
 both resolve to Computing whatever language the record was catalogued in.
 
 **Its own table, not three columns on `books`.** A book carries several at once: K10plus
@@ -784,7 +784,7 @@ what that catalogue supplies; keeping them raw leaves two spellings of one headi
 
 The mapping produces tag ids in `suggested_tag_ids`, and **no server path writes a tag from
 them**: no endpoint, no enrichment, no merge. Tags are a small curated vocabulary the
-household chooses from; a machine derived one applied on its own turns a chosen list into a
+library chooses from; a machine derived one applied on its own turns a chosen list into a
 generated one nobody can later tell apart. That is the same argument `books.categories`
 exists for, and it is why the DDC caption is not written into `categories` either.
 
@@ -818,7 +818,7 @@ already at the level this maps.
 An unmapped division is a real answer rather than a gap. Five are absent and `ddc.py` names
 each one: 040 is unassigned in the schedule, 060 is associations and museums, 080 is
 quotations, 090 is manuscripts and rare books, and 310 is general statistics. Inventing a
-household tag for any of them would be the failure this whole design avoids.
+curated tag for any of them would be the failure this whole design avoids.
 
 ### The Library of Congress is fetched over plaintext HTTP, knowingly
 
@@ -905,7 +905,7 @@ then selecting a Catalogue record.
 
 ### Only DDC is projected, though LCC, GND and LCSH are stored
 
-LCC has no published list short enough to ship as a mapping, and the household vocabulary it
+LCC has no published list short enough to ship as a mapping, and the library vocabulary it
 would project onto is the same one Dewey already covers. So an LCC number is stored whole,
 because a catalogue heading is worth keeping whole, and read by nothing yet.
 
@@ -941,7 +941,7 @@ against `lx2.loc.gov`, 20 records each, 2026-08-24, 900 MODS records:
 next step.** It is the one catalogue here reached over plaintext HTTP, which this file
 already records as accepted precisely because it is not on the scan path, and putting it
 there would add an outbound call to every scan. It would also buy nothing for this
-household's main case: of eight ISBNs measured, the Library of Congress held a record for
+library's main case: of eight ISBNs measured, the Library of Congress held a record for
 five and all five were English, the misses being both German ISBNs and one English title it
 does not hold. So LCSH appears on a search row and reaches a book the way any other picked
 row does, through `POST /{id}/enrich/apply`.
@@ -964,7 +964,7 @@ ceiling of eight rows that did not move. Migration `b7d41f0a2c95`.
 ### A subject heading never reaches the Dewey parser, on this source either
 
 `ddc.parse_heading` accepts any three digit token, so an LCSH heading opening with one
-(`004 Jahre Bauhaus`) would be stored as a Dewey number and would suggest a household tag
+(`004 Jahre Bauhaus`) would be stored as a Dewey number and would suggest a curated tag
 from it. Round 2 closed this for the DNB by making 082 the only field handed to `ddc`; the
 same shape holds here. `<classification>` is the only element `_loc_classifications` reads
 and the only one `ddc` ever sees, and `_loc_subject_headings` builds LCSH rows without
@@ -1186,7 +1186,7 @@ proposes **Medicine** and `computer science` proposes **Science**. Both match on
 boundary, and both are wrong because the subject is *about* the tag rather than an
 instance of it. That is a semantics problem and no matching rule solves it.
 
-The boundary is a lookaround (`(?<!\w)` / `(?!\w)`) rather than `\b`, because a household
+The boundary is a lookaround (`(?<!\w)` / `(?!\w)`) rather than `\b`, because a library
 tag may end in punctuation: after the `+` of `C++`, `\b` asserts that a word character
 follows, which is the opposite of what is wanted.
 
@@ -1367,14 +1367,14 @@ is the better of the two errors, because the other one invents reading that neve
 
 ### Overdue reminders are a generic webhook, not email and not one chat service
 
-A self-hosted app that other households run should not carry an integration with a service
+A self-hosted app that other libraries run should not carry an integration with a service
 nobody else runs, and email means SMTP credentials, deliverability and a second failure
 mode. A webhook is the shape every receiver already speaks: a chat bridge, a home
 automation flow, or a five-line script.
 
 Handy Library's named differentiator in this space is **configurable reminder timing**, and
 that is the part worth copying: a week is nagging in one house and silence in another, so
-`overdue_reminder_days` is the household's to set.
+`overdue_reminder_days` is the library's to set.
 
 Koha's `overdue_notices.pl` was read for the scheduling shape and **not** adopted. Its
 `--triggered` mode fires only when a loan is overdue by exactly the configured number of
@@ -1384,13 +1384,13 @@ because the ticker lives in the web process and dies with a restart.
 
 ### The overdue digest excludes private books
 
-A webhook has no member identity behind it and lands in a channel the whole household
+A webhook has no member identity behind it and lands in a channel everyone here
 reads, so shipping a private book's title through it defeats the single promise the data
 model makes. The exclusion is in the query, not a filter afterwards, so a counting mistake
 downstream cannot put one in the payload.
 
 The owner is still chased: the in-app overdue view is per member and already scoped. The
-digest reports `skipped_private` as a count so a household that expects five entries and
+digest reports `skipped_private` as a count so a library that expects five entries and
 receives four can see why, and the settings screen says so in words rather than leaving it
 to the docs.
 
@@ -1559,7 +1559,7 @@ that looks redundant beside its schema bounds, and it is not.
 
 ### A book belongs to one collection, not many
 
-A household separates physical from ebook, kept from sold, and one person's shelf from
+A library separates physical from ebook, kept from sold, and one person's shelf from
 another's. All three are **partitions**: a book is in exactly one side of each. So the
 collection is a column on `books` and not a join table.
 
@@ -1567,12 +1567,12 @@ A join table would answer "which collection is this in" with a list, and every f
 sort, export cell and payload field downstream would then need a rule for a book that is in
 three of them at once. It would also be a second tag system with a worse picker, because
 tags are already the many-to-many axis here and they are where an overlapping label
-belongs. If a household wants "Ebooks" and "Holiday reads" on the same book, the second one
+belongs. If a library wants "Ebooks" and "Holiday reads" on the same book, the second one
 is a tag.
 
 The cost of the column, stated plainly, and it is two costs rather than one.
 
-**Two objects: use two rows.** A household that wants the paperback in Physical and the
+**Two objects: use two rows.** A library that wants the paperback in Physical and the
 epub in Ebooks has two objects, and says so the way the data model already says it. That is
 the copies feature, and it is the right answer.
 
@@ -1580,7 +1580,7 @@ the copies feature, and it is the right answer.
 it is not answered by copies. Collections are sold on three splits (physical from ebook,
 kept from sold, one person's from another's), each of which is a separate axis, and one
 column holds one axis. An epub that is both "Ebooks" and "Sold" is a **single object**, so
-there is no second row to put it in: the household picks one axis for the collection and
+there is no second row to put it in: the library picks one axis for the collection and
 puts the other on a tag, which is what tags are and why this column is not a join table.
 Somebody who instead makes four collections will discover the swap by using the picker,
 which is the worst possible place to learn it, so it is said in the empty state as well as
@@ -1591,7 +1591,7 @@ here.
 `books.collection_id` is nullable and the migration backfills nothing. The alternative was a
 default collection created by the migration and every existing row moved into it, which
 sounds tidier and is worse in three ways. It needs a name chosen here, in one language,
-for a household that has not asked for the feature. It puts a concept in front of everybody
+for a library that has not asked for the feature. It puts a concept in front of everybody
 who never wanted it. And renaming a seeded string later means a migration, which this
 repository has already had to write once (`95b6a61d6668`).
 
@@ -1601,7 +1601,7 @@ so out loud rather than leaving it implicit: `GET /api/books?unfiled=true` is it
 parameter, and the library filter offers it as its own option, because "what have I not
 filed yet" is the question the feature creates.
 
-### A collection is per household, and is never a privacy boundary
+### A collection is per library, and is never a privacy boundary
 
 Any member may make one, rename it, and file any book they can write to into it. Filing a
 book changes **nothing** about who can see it.
@@ -1617,7 +1617,7 @@ So the separation is kept mechanical rather than intended. `visible_to()` is not
 collection to consult. `Collection.created_by_user_id` is recorded for provenance and no
 query reads it, which is what keeps the previous sentence true rather than merely meant.
 Every count served with a collection applies `visible_to` (`routers/collections._counts`,
-the `by_collection` statistic), because the count is the one thing a household-wide label
+the `by_collection` statistic), because the count is the one thing a library wide label
 could disclose: a member who files a private book onto a shared shelf must not thereby
 announce it to everybody as a number.
 
@@ -1644,14 +1644,14 @@ children cannot be what passes the test.
 
 Two copies of one title are two objects, and which part of the shelf each lives on is
 exactly the kind of fact that differs between them: the paperback in the living room and the
-epub on a reader are the household's physical and ebook collections respectively. So
+epub on a reader are the library's physical and ebook collections respectively. So
 `collection_id` is per row, like `location`, and `POST /api/books/{id}/copies` does **not**
 inherit it: the new copy starts unfiled unless the payload says otherwise.
 
 That is deliberately unlike `is_private`, which a copy does inherit, and the difference is
 the test for any future per-copy field. Privacy is inherited because getting it wrong
 discloses a book. A collection is not, because getting it wrong files a book on the wrong
-shelf, which is visible and one press to correct, and because the household that owns both
+shelf, which is visible and one press to correct, and because the library that holds both
 formats wants them apart.
 
 Two consequences worth having written down.
@@ -1687,14 +1687,14 @@ a second thing to keep in step with the first.
 
 **Peer sync does not carry it.** A collection is shelf taxonomy, which `implementation_plan.md`
 §9 already refuses to send for `location`, and a collection named after a member would leak
-a household member's name besides. It is also not a *scope* for a grant: scopes come from
-the stored grant and there are exactly two, and a third keyed on a household-wide label that
+a member's name besides. It is also not a *scope* for a grant: scopes come from
+the stored grant and there are exactly two, and a third keyed on a library wide label that
 any member can rename or delete would silently widen or narrow what a peer sees through an
 edit made for shelving reasons. The amendment recording this is A5 in that document.
 
 ### A copy is a row, not a count column
 
-`books.isbn` was `unique=True`, so a household that owned two paperbacks of one title could
+`books.isbn` was `unique=True`, so a library that owned two paperbacks of one title could
 not say so. Three models were on the table.
 
 **A `copies` count column.** One integer, no query multiplied, the constraint untouched.
@@ -1845,7 +1845,7 @@ the same breath.
 The backfill is **not** the escape hatch here, and leaning on it was the mistake underneath
 the mistake: a hand-uploaded cover has no remote source, so `resolve_and_store` has nothing
 to re-fetch. It repairs a cover that came from a metadata provider and cannot repair the
-files a household cared enough about to upload.
+files a library cared enough about to upload.
 
 The invariant is therefore worth stating on its own, in the half where it holds: **no cover
 file is moved or unlinked before the transaction has committed.** Creation is deliberately
@@ -2017,7 +2017,7 @@ reversible, and a shelf only an admin may tidy is a shelf nobody tidies. Deletin
 collection is admin only because it strips a label off every book at once with no undo;
 nothing here has that shape.
 
-### The alias mapping is household wide; the shelf is what `visible_to` filters
+### The alias mapping is library wide; the shelf is what `visible_to` filters
 
 The same shape as a collection, shipped the day before: **the name is everybody's, the count
 is yours.** Every alias applies to every member, so one book is filed under the same person
@@ -2062,8 +2062,8 @@ about the shelf, and any other answer confirms a book is on it.
 
 `implementation_plan.md` A6. The peer payload carries `author` as the string on the book, and
 that does not change: a peer receives the credit line as printed and applies its own
-household's decisions to it, if it has any. An alias is shelf taxonomy in the same class as
-`location` and a collection name, and it is one household's reading of its own shelf.
+library's decisions to it, if it has any. An alias is shelf taxonomy in the same class as
+`location` and a collection name, and it is one library's reading of its own shelf.
 
 This is the property the rewrite alternative could not have had. Since merging writes nothing
 to `books`, a merge changes no `updated_at` and produces no sync traffic at all.
@@ -2148,7 +2148,7 @@ notes on a book anyone may read; `list_progress` returns **only the caller's own
 because a reading log is a diary about a person rather than a fact about the book.
 
 Quotes follow the notes. A passage is a fact about the book, and copying one out is the
-household saying "this is worth reading", which is the whole pleasure of the feature. The
+library saying "this is worth reading", which is the whole pleasure of the feature. The
 alternative would be a per-row privacy flag, and that is the expensive part: privacy in
 this schema is a property of the **book**, expressed once in `visible_to()`, and a second
 rule that every query has to remember is the one that eventually gets forgotten.
@@ -2224,7 +2224,7 @@ loans and trash lists ask for one large `page_size` and offer no controls at all
 suits this one. A quote is up to 2,000 characters, so a page of fifty is a column of
 unpredictable height that an infinite list makes unnavigable: with "Load more" there is no
 way back to something seen two screens ago except scrolling past everything added since.
-One large page is worse again, because the ceiling here is a household's entire history of
+One large page is worse again, because the ceiling here is a library's entire history of
 saved passages rather than its shelf. Numbered pages give a stable position to return to.
 That is three idioms in one app, which is one more than anybody wants; the honest reading
 is that Home's infinite list is the odd one out and the others should converge on this,
@@ -2577,7 +2577,7 @@ genre purple, so the hue had to be looked up, and the pill has the word written
 on it. All four selected chips also failed AA, the green at 2.28:1.
 
 The three now share one neutral and custom keeps the accent, because a tag the
-household invented reading as theirs is a distinction with a reason behind it.
+library invented reading as theirs is a distinction with a reason behind it.
 The table stays keyed by category rather than collapsing to a default and one
 exception, so a category added to the backend enum is a compile error here
 instead of an unstyled pill.
@@ -2923,7 +2923,7 @@ side table buys a join on every read and a row that both shadow-account paths wo
 remember to create.
 
 Not on `UserOut` because that schema is served inside every book payload and the member
-list, so a field there would tell everyone in the household what everyone else's library
+list, so a field there would tell everyone in the library what everyone else's library
 looks like. `/api/users/me/appearance` takes no member id, so there is no object to
 authorize and no way to ask for somebody else's.
 
@@ -2998,7 +2998,7 @@ image, where there is one, covers it anyway.
 ### The appearance cache is keyed by account, and the login screen shows the last one
 
 The server is the authority; `localStorage` is a write-through cache, read before React
-mounts. Keyed by account because a household shares devices. The `last` pointer is what the
+mounts. Keyed by account because a library shares devices. The `last` pointer is what the
 login screen paints with, which does disclose to anyone holding the device that somebody
 here uses Gruvbox. That is a decision rather than an oversight: the alternative is a front
 door that looks like a different app every visit.
@@ -3201,7 +3201,7 @@ blurb, and it is one click away from the section this change added.
 ### Section state is per device and per section
 
 `localStorage`, like `libraryView` and the saved searches, and for the same reasons: a
-habit rather than household data, no endpoint, no schema, no migration, and the cost of
+habit rather than library data, no endpoint, no schema, no migration, and the cost of
 getting it wrong is one tap. Per member would be a settings round trip and a backend
 change for a preference that differs between a phone and a laptop anyway.
 
@@ -3228,7 +3228,7 @@ default from the book the page already has. It carries no note or quote count: t
 arrive from `/notes` and `/quotes`, which are separate requests, so a conditional default
 there could only open the section after they landed. That is a flicker, and a fixed
 default is better than one. Closed is also the honest guess, because notes and quotes are
-empty on most books in a household catalogue. Put a count on `BookOut` and this becomes
+empty on most books in a library catalogue. Put a count on `BookOut` and this becomes
 conditional like the rest.
 
 `about` is fixed too, open, for the opposite reason: it is drawn only when it has a blurb
@@ -3372,7 +3372,7 @@ bearing.
 **The button is served from this deployment** (`frontend/public/kofi-button.png`), not
 from `storage.ko-fi.com`. The CSP's `img-src` is derived from `covers.COVER_HOSTS`, so a
 hotlinked button would mean widening the policy for a decoration, and it would report the
-address of a private household server to Ko-fi every time somebody opened Settings.
+address of a private server to Ko-fi every time somebody opened Settings.
 `rel="noopener noreferrer"` keeps the same true of following the link.
 
 **The artwork is Ko-fi's trademark, not this project's.** It is their published button
@@ -3432,7 +3432,7 @@ top of the About card, and **none of it is an image**.
 `covers.COVER_HOSTS` (`backend/covers.py`), and this card already refused to widen it once,
 for the Ko-fi button, which is served from `/kofi-button.png` for exactly that reason. A
 badge is decoration, so it is the weakest possible case for a policy entry, and a remote
-one would report a private household server to a third party every time somebody opened
+one would report a private server to a third party every time somebody opened
 Settings.
 
 Drawn as markup and CSS instead, which is better here for three reasons that have nothing
@@ -3655,3 +3655,164 @@ shaped by this codebase rather than by the field: what decides them is
 `visible_to()`, the sync payload in `implementation_plan.md`, and `books.isbn`
 being unique. Reading a competitor will not tell you what breaking that
 constraint costs here.
+
+## Product
+
+### Small libraries and archives are a direction, not a second audience
+
+Decided by the owner on 2026-08-26. The question had been open in two roadmap files at once,
+each waiting on the other, and it was the cheapest answer available: it was blocking a mode
+switch that had no technical blocker at all, and seventeen features behind that switch.
+
+The framing that was rejected is worth stating, because it is the one somebody will propose
+again: **serve households, and let institutions use it if they happen to fit.** That reading
+makes every institutional feature optional forever, which sounds cautious and is actually the
+expensive answer, because it leaves each one permanently half specified and gated behind a mode
+nobody commits to finishing.
+
+Four things move from someday to core as a result.
+
+**The patron record brings the GDPR into the core product.** Everything stored until now is
+books and accounts. A patron is a real person's name, email, phone, street, house number,
+postcode and city, held by an Austrian operator. Its deletion rule, anonymise the loan rows or
+refuse deletion while history exists, has to be decided **before** the schema rather than after,
+because both choices are expensive to reverse once data exists.
+
+**Multi workstation is expected**, which withdrew a refusal. See the next entry.
+
+**MARC import and export, and label printing, are core work.** Both were previously behind a
+mode. Both are sized higher for this audience than for a household, because physical output
+means iterations against a real printer and record exchange means batch handling and error
+reporting rather than a parser.
+
+**The outward language has to stop presuming a household, and the claims have to stay staged.**
+Those are two separate obligations. Library mode is not built, so a page that advertises a
+public catalogue sends an archivist to install a household app. Widen the framing, stage the
+claims.
+
+What does not change: **private books stay private in every mode**, and the public catalogue
+exposes what was chosen for publication and never a private row. A direction decision makes the
+mode worth building. It does not relax the rule the mode exists inside.
+
+### Multi workstation is expected, and the shape is deliberately unchosen
+
+The desktop plan carried a pre written refusal: a small library with a circulation desk and
+three machines will ask for shared access, and the answer is the existing container, not a
+desktop app learning to be a server. Decide the refusal before somebody asks.
+
+Somebody asked. The owner answered on 2026-08-26 that multi workstation work is expected, so
+the refusal is withdrawn and **no replacement has been chosen**. Recorded here because a
+withdrawn refusal with nothing in its place is how a product gets decided by default.
+
+**The thing to know first: multi workstation already works.** The container is a server. One
+backend process, one SQLite file, many browsers, and concurrency handled at the HTTP layer and
+never at the file layer. Three desks is a deployment, not a feature.
+
+**It is the desktop shape that breaks it**, and precisely. The desktop client's single instance
+lock exists to stop two desktop processes opening one SQLite file, which is the corruption case.
+A second workstation running its own copy against a shared file is exactly that case, over a
+network filesystem, which is worse. So the real question is not whether this can serve three
+desks. It is which artefact the archive installs.
+
+| | Cost | What it gives up |
+|---|---|---|
+| The container is the answer | Documentation only | The audience that cannot run Docker, which is most of why a desktop client exists |
+| Desktop plus joined terminals | M to L, and mostly built | Nothing structural. The joined device enrolment already specified for phones does not care whether the device is a phone or a second desk |
+| The desktop app becomes a server | L to XL | This is the one the original refusal was right about |
+
+The second option is the find, and it was invisible from either plan alone: the desktop plan
+and the public library mode plan arrived at the same enrolment design from opposite directions.
+
+**Consequence for anyone starting the desktop client:** do not write the single instance lock
+before the shape is chosen. It is cheap now and a refactor later, and it is guarding different
+things under each option.
+
+### The outward language names both audiences, and the claims stay staged
+
+Adopted 2026-08-26, following the direction decision above. The line is:
+
+> A self-hosted catalogue for the books you share.
+>
+> Built for a household's shelves and for the library or archive that has outgrown a
+> spreadsheet. Scan a barcode, get a real bibliographic record, and know who has what across
+> the people and places that share it.
+
+**Two tiers, because one sentence cannot do both jobs.** A single line trying to address a
+family and an archive at once goes vague, which is the failure this was meant to avoid. So the
+headline is audience free and carries the places that only accept one string (a Docker Hub
+short description is capped at 100 characters), and the second line names both audiences
+explicitly where there is room.
+
+**"The books you share" is the unifying frame, and it was chosen over the obvious
+alternatives.** Not "shared collections", which is accurate and reads like enterprise software.
+Not a benefit line like "know what you own and who has it", which is memorable and says neither
+"books" nor "self-hosted", so it works as a subtitle and not as a headline.
+
+**The claims are staged behind what has shipped**, and that is the part most likely to be got
+wrong. Widening the framing is free; widening the feature claims is not.
+
+**What was deliberately not rewritten.** `CHANGELOG.md`, because its entries record what shipped
+when and restating them in today's vocabulary makes the file lie.
+
+**Capitalisation follows the file.** `CONTEXT.md` and `docs/adr/` capitalise domain terms
+because they are definitional. Everywhere else, including code comments and the rest of this
+file, the register is lowercase: measured on 2026-08-26, `docs/` contained 61 instances of "a
+book" and none of "a Book". A pass that capitalised them was reverted for that reason.
+
+### The glossary names the operator only where it has to
+
+The old glossary defined a household as "the group that shares one Library" and then built
+seven other definitions on top of it: the household's catalogue, a person who belongs to the
+household, a word the household curates. That made the family the load bearing noun of the
+whole domain language.
+
+**One deployment holds one Library, so the group that runs it rarely needs naming in code.**
+Name the **Library** or its **Members** instead, and the operator kind stops leaking into
+definitions that do not depend on it. Where it genuinely has to be named there are now two
+kinds, **Household** and **Institution**, and they are not interchangeable in tone or in
+obligation.
+
+Five terms were added rather than renamed, each because a decision resolved it: **Institution**,
+**Library mode**, **Patron**, **Call number** and **Accession number**. The last carries its
+constraint in the definition, because the constraint is not obvious and is expensive to
+discover: digits only and fixed length, since a barcode scanner in keyboard mode emits
+characters that the host keyboard layout decides, and only digits survive every layout.
+
+**`Tenant` and `organisation` stay on the avoid list**, and `customer`, `client` and `Kunde`
+join it for the Institution and Patron entries. A library does not have customers, and a reader
+will notice.
+
+**No code had to be renamed.** Checked on 2026-08-26: no table, column, enum, API field or
+variable contained the word. Only four test function names did. The domain model had never
+named the group, which is what made the glossary change cheap.
+
+### German address follows library mode, as an overlay rather than a second catalogue
+
+Decided by the owner on 2026-08-26. **du with library mode off, Sie with it on.**
+
+`de.ts` is informal throughout and its own header justified that as "a household bookshelf, not
+a bank". That was right for a household and wrong for an institution, because a German library
+addresses a Benutzer:in as Sie, and a public catalogue written in du reads as careless. It is
+the same class of mistake the patron work already avoided when it refused "Kunde" as a shop word
+a reader would notice.
+
+**The naive implementation is two catalogues and it is the wrong one.** Measured before
+choosing, because the estimate and the fact differ by an order of magnitude: of **640** string
+values in `de.ts`, **58 carry address at all**. Forty-four contain a du pronoun or possessive,
+fourteen contain a likely informal imperative, and that second figure is an overestimate because
+the probe counts nouns such as "Suche läuft". German interface labels mostly avoid address
+entirely: "Bibliothek", "Scannen", "Ausleihen" are the same in both registers.
+
+**So the formal register is an overlay.** `de.ts` stays informal and stays the whole catalogue.
+`deFormal.ts` holds only the keys that differ, typed as a partial, and is merged over `de` when
+library mode is on. Roughly **9%** of the file rather than 100% of it, and the 582 strings that
+carry no address exist once, so the two registers cannot drift on them.
+
+**The enforcement is a test, not discipline.** A partial overlay cannot use the `Messages` type
+to catch a *missing* formal variant the way `de.ts` catches a missing translation. What catches
+it instead: grep the merged formal catalogue for informal markers and fail on a survivor. That
+converts a permanent review cost into a one time one, which is the house pattern already used by
+`TestEveryBookQueryIsFiltered` and `houseRules.test.ts`.
+
+**Blocked on library mode existing**, because there is no mode to follow until then. English is
+unaffected: it has no equivalent distinction.

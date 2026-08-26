@@ -36,7 +36,7 @@ describe("TAG_CATEGORY_ORDER", () => {
     );
   });
 
-  it("is broad-to-narrow, with the household's own tags last", () => {
+  it("is broad-to-narrow, with this library's own tags last", () => {
     // Custom sits at the end rather than being interleaved: scattering
     // "Holiday reads" through a curated genre list is what makes the curated
     // list hard to scan, and being easy to scan on the first day is the whole
@@ -67,7 +67,7 @@ describe("style tables", () => {
     // Type, genre and age used to be a blue, a purple and a green, which was
     // the one place in this app where a colour was chosen at random. All four
     // selected chips failed AA on top of that, the green at 2.28:1. Custom
-    // keeps the accent, because a tag the household invented reading as theirs
+    // keeps the accent, because a tag the library invented reading as theirs
     // is a distinction with a reason.
     //
     // The four named here are the four that were deleted, and this asserts it

@@ -43,7 +43,7 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.OVERDUE_WEBHOOK_SECRET: "",
     # A week between reminders for the same loan. Weekly is the interval a
     # borrower reads as a reminder rather than as nagging, and it is the
-    # differentiator Handy Library is known for: the timing is the household's
+    # differentiator Handy Library is known for: the timing is the library's
     # to set, not the app's to assume.
     SettingKey.OVERDUE_REMINDER_DAYS: "7",
 }

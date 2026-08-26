@@ -20,7 +20,7 @@ interface CopiesPanelProps {
  * The other objects on the shelf that are this same book.
  *
  * Not `CopyPanel`, which edits the collector details of *this* copy. This one
- * is about there being more than one of them: a household that owns two
+ * is about there being more than one of them: a library that holds two
  * paperbacks owns two objects, each with its own shelf, condition and loan.
  *
  * Rendered even when there is only one, because the add action lives here and

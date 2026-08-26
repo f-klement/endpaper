@@ -5,7 +5,7 @@ Revises: f7c2a1e50b93
 
 One nullable column. Without it the overdue digest has only two behaviours,
 and both are wrong: send once and forget a loan that is still out, or repeat
-the same list into the household's channel on every run.
+the same list into the library's channel on every run.
 
 **The partial unique index is dropped and recreated around the batch block**,
 exactly as `d5c31b7a09fe` does and for the same reason: batch mode rewrites the

@@ -131,7 +131,7 @@ export default function StatsPage() {
         labelWidthClass="w-24"
       />
 
-      {/* Named collections only, so this section disappears for a household
+      {/* Named collections only, so this section disappears for a library
           that has not divided its shelf. The unfiled books are the difference
           between these and the total above, and the library's own filter is
           where somebody goes to see them. */}

@@ -7,7 +7,7 @@ usually lacks: page count, language, and the publisher's own subject
 categories.
 
 Needs an API key. The unauthenticated endpoint exists but is rate limited per
-IP, which for a household behind one address means a handful of lookups before
+IP, which for a library behind one address means a handful of lookups before
 everyone is throttled together.
 """
 
@@ -78,7 +78,7 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
         "page_count": info.get("pageCount"),
         "language": info.get("language"),
         # Stored as one string rather than related rows: these are whatever the
-        # publisher supplied, not the curated Tag vocabulary the household picks
+        # publisher supplied, not the curated Tag vocabulary the library picks
         # from, and mixing the two would muddle both.
         "categories": join_categories(categories),
         # Google serves these over plain **http**, which is mixed content on an

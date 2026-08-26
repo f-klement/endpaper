@@ -4,7 +4,7 @@ Revision ID: b1e7c94a2d05
 Revises: d1a7f36b9c58
 Create Date: 2026-08-23
 
-A household that owns two paperbacks of one title had no way to say so:
+A library that holds two paperbacks of one title had no way to say so:
 `books.isbn` was UNIQUE, and every per-object fact in that table (location,
 condition, what was paid, who has it) is already written per row. So a copy is
 a second row, and the constraint is what stood in the way.

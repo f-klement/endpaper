@@ -62,7 +62,7 @@ describe("the cache", () => {
   });
 
   it("keeps two accounts apart", () => {
-    // A household shares devices, and one member's dark Gruvbox is not the
+    // A library shares devices, and one member's dark Gruvbox is not the
     // other's. Keyed per account is the whole reason this is not one value.
     cacheAppearance(3, GRUVBOX);
     cacheAppearance(4, { palette: "nord", mode: "light", wallpaper: null });

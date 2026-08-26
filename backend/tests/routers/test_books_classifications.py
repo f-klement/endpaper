@@ -180,7 +180,7 @@ class TestTheLookup:
             {"scheme": "gnd", "number": "4026894-9", "label": "Informatik"},
         ]
 
-    def test_a_german_caption_still_suggests_the_household_tag(
+    def test_a_german_caption_still_suggests_the_curated_tag(
         self, client, admin, db
     ):
         """"Informatik" matches no seeded tag name. `004` maps to Computing,

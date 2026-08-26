@@ -85,7 +85,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books` | user | Paginated. Filter with `q`, `status`, `ownership`, `format`, `lending`, `discuss`, `series`, `author`, `location`, `collection_id`, `unfiled`, `unrated`, `tags`, `sort` |
 | POST | `/api/books` | user | **409** on an ISBN already in the catalogue |
 | POST | `/api/books/scan` | user | Same, named for the scan flow |
-| GET | `/api/books/tags` | user | The seeded vocabulary plus the household's own |
+| GET | `/api/books/tags` | user | The seeded vocabulary plus this library's own |
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
@@ -180,7 +180,7 @@ see [data-model.md](data-model.md) for the rules.
 
 Two fields that look alike and are not.
 
-`books.lending` is the household's standing answer to "would you lend this copy": `happy`,
+`books.lending` is the library's standing answer to "would you lend this copy": `happy`,
 `in_use` (wanted by its owner at the moment, so ask again later) or `never`. Null means
 nobody has been asked. It is set through `PATCH /{id}` with everything else about the copy,
 and it is **not** a fact about whether the book is out right now: that is `active_loan`.
@@ -244,7 +244,7 @@ folded in by a member with the alias row id behind each one.
 
 **Link either; the key is not more durable than the name.** `GET /api/books?author=` takes
 a key, a display name, or a spelling a merge has folded away, and resolves all three through
-the household's alias rows, which is what keeps an old link working after a tidy-up,
+the library's alias rows, which is what keeps an old link working after a tidy-up,
 **including a spelling no book carries any more**: the middle of a chain of merges is on
 nothing, and resolving through the shelf instead of through the mapping answered it with an
 empty library. A merge moves the key
@@ -294,7 +294,7 @@ person confirms.
 **Deliberate copies never appear here.** Each `copy_group` is collapsed to one row before
 the matching runs, so two paperbacks of one title are not offered for merge. They would
 otherwise be the strongest match this endpoint can produce, and merging them destroys a
-book the household owns.
+book the library holds.
 
 `POST /merge` takes `{book_ids, keep_id}` and `keep_id` must appear in `book_ids`, spelled
 out rather than inferred so a mistyped request fails instead of silently keeping whichever
@@ -313,7 +313,7 @@ objects, and it works: the survivor is left an ordinary book with no `copy_group
 
 ### Multiple copies of one title
 
-A household that owns two paperbacks of one title owns two objects, and every per-object
+A library that holds two paperbacks of one title owns two objects, and every per-object
 fact in the catalogue (location, condition, what was paid, who has it) is already recorded
 per book. So a copy is a **second book row**, joined to the first by a shared `copy_group`.
 
@@ -346,7 +346,7 @@ client offer both actions: open the one we have, or add another copy.
 **The library lists every copy**, and `copy_count` on every book payload says how many the
 caller can see. Counting only visible copies matters: a member who makes their own copy
 private does not thereby announce it on everybody else's card. Statistics count **items,
-not titles**, so a household with a spare paperback has a total one higher than its number
+not titles**, so a library with a spare paperback has a total one higher than its number
 of distinct works.
 
 **A CSV round trip collapses them.** `/export` writes one row per copy, which is correct,
@@ -380,7 +380,7 @@ book in the house at once with no undo.
 
 **A collection is shelving, never permission.** Filing a book into one changes nothing about
 who can see it: `is_private` remains the only access control on content. Every count here is
-filtered by the caller's visibility, because the count is the one thing a household-wide
+filtered by the caller's visibility, because the count is the one thing a library wide
 label could otherwise disclose.
 
 `BookOut` carries `collection_id` and `collection_name`. The name is a projection of the row
@@ -704,7 +704,7 @@ the first day, before anybody has typed anything. Jelu and Openreads make every
 tag free-form instead; what was wrong here was not having the curated list, it
 was having no way past it.
 
-The **custom** group is whatever a household invents. Creating one is open to
+The **custom** group is whatever a library invents. Creating one is open to
 any member rather than to admins: public books are a shared shelf anyone may
 curate, and a vocabulary only an admin can extend is one nobody uses. A name
 that already exists returns that tag rather than a 409, because somebody typing
@@ -826,7 +826,7 @@ request carrying `acknowledge_not_lendable: true` creates the loan. The code is 
 because the client has to branch on it: this 409 puts a confirmation in front of the lend
 button, and the already-out 409 does not, so matching on the prose would break the moment
 it was reworded. The flag is **not stored**, and the book still says it is never lent
-afterwards: it answers one request rather than changing the household's mind. `in_use` and
+afterwards: it answers one request rather than changing the library's mind. `in_use` and
 `happy` are not checked at all. The reasoning is in [decisions.md](decisions.md).
 
 **Overdue reminders** go out as one JSON digest POSTed to an admin-configured webhook,
@@ -856,7 +856,7 @@ none of them is an error in the request.
 
 Three properties of the request are load bearing. **Private books are excluded**, in the
 query rather than afterwards: a webhook has no member identity and lands in a channel the
-whole household reads. `skipped_private` counts what was held back, never names it. The
+whole library reads. `skipped_private` counts what was held back, never names it. The
 body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a secret is
 set, over the raw bytes, so a receiver verifying a re-serialised payload will fail. And
 **redirects are not followed**, unlike the metadata lookups: this is the one request in
@@ -1017,7 +1017,7 @@ this is reading these docs and not the source:
 restarts the pod, and the restarted pod runs `init_db()` against the same mount and blocks
 there, so it will not come Ready and will keep restarting. That is the correct outcome and
 not an accident: a pod whose storage is gone cannot serve, and a container in
-`CrashLoopBackOff` is visible to every alert a household has, where a pod that is 1/1 Ready
+`CrashLoopBackOff` is visible to every alert a library has, where a pod that is 1/1 Ready
 and serving nothing is visible to none of them. It also recovers on its own the moment the
 mount does. What would be wrong is answering 200 while the data is unreachable, which is what
 happened for 39 hours.

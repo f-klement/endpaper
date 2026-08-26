@@ -79,7 +79,7 @@ export function detectBrowserLocale(): Locale | null {
  * Which language to show, in order of how strong the signal is:
  *
  * 1. An explicit choice made in Settings, which is per person and per device.
- * 2. The browser's own language, so a German household gets German without
+ * 2. The browser's own language, so a German library gets German without
  *    anyone configuring anything.
  * 3. The server's default, which is the admin's answer for browsers set to a
  *    language this app does not speak.

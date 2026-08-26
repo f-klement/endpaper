@@ -40,7 +40,7 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
 }
 
 describe("the collection filter", () => {
-  it("is absent until the household has divided its shelf", () => {
+  it("is absent until the library has divided its shelf", () => {
     renderFilters();
 
     expect(screen.queryByLabelText("Collection")).not.toBeInTheDocument();

@@ -18,7 +18,7 @@ export function createQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // A household bookshelf changes slowly. Half a minute of staleness saves
+        // A bookshelf changes slowly. Half a minute of staleness saves
         // a refetch every time someone navigates back to the grid.
         staleTime: 30_000,
         retry: (failureCount, error) => {

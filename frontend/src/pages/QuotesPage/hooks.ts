@@ -10,7 +10,7 @@
 import { useListQuotes } from "../../api/generated/endpoints/books/books";
 import type { QuoteWithBookOut } from "../../api/generated/model";
 
-/** Rows per request. Enough that a household's whole shelf of quotes is one
+/** Rows per request. Enough that a library's whole shelf of quotes is one
  * or two pages, and inside the API's own ceiling of 200. */
 export const QUOTES_PER_PAGE = 50;
 

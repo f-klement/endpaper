@@ -7,7 +7,7 @@
  * already exist, so all that is missing is remembering a combination.
  *
  * localStorage rather than the database, deliberately. A saved view is a
- * personal habit, not shared household data, and it needs no migration, no
+ * personal habit, not shared library data, and it needs no migration, no
  * endpoint and no sync to be useful. If it turns out people want them on their
  * phone as well as their laptop, that is the moment to move them, not before.
  */
@@ -17,7 +17,7 @@ const VERSION = 1;
 
 const STORAGE_KEY = "savedSearches";
 
-/** Enough for the handful of habits a household has, few enough to stay a row. */
+/** Enough for the handful of habits a library has, few enough to stay a row. */
 export const MAX_SAVED = 12;
 
 export const MAX_NAME_LENGTH = 40;

@@ -179,7 +179,7 @@ class TestTheIndex:
         assert entries[0].alias_keys == frozenset()
 
     def test_every_alias_applies_whatever_is_on_this_shelf(self):
-        """The mapping is household wide, so a chain resolves to its end here
+        """The mapping is library wide, so a chain resolves to its end here
         too, even when the middle name is on no book in these rows.
 
         Filtering the mapping per caller was tried and withdrawn: it made one

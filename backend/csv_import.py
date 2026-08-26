@@ -53,7 +53,7 @@ MAX_TAGS_PER_ROW: Final = 20
 MAX_TAGS_PER_BOOK: Final = 50
 
 #: Distinct tags one import may invent. Measured: a 12 KB file of 200 rows
-#: created 4032 tags, which are household-wide, unpaginated and permanent. The
+#: created 4032 tags, which are library wide, unpaginated and permanent. The
 #: cap stops creating rather than failing the import: the books are still worth
 #: having.
 MAX_NEW_TAGS_PER_IMPORT: Final = 200

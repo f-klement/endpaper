@@ -48,7 +48,7 @@ const MIN_QUERY_LENGTH = 2;
 /**
  * The shelves already in use, for the location suggestions.
  *
- * Cached for five minutes: the set of shelves in a household changes about
+ * Cached for five minutes: the set of shelves in a library changes about
  * once a month, and re-fetching it per scanned book would be a request per
  * barcode for a list that has not moved.
  */

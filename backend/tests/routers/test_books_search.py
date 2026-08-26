@@ -2,7 +2,7 @@
 
 Free-text search is how a book with no barcode, a damaged one, or one printed
 before ISBNs existed gets into the catalogue. It used to be Google Books only,
-which meant a household that had not configured an API key was shown no search
+which meant a library that had not configured an API key was shown no search
 box at all and had no way to add such a book except by typing every field.
 
 So the case worth pinning hardest is the one that used to be impossible: a

@@ -7,7 +7,7 @@ import { useCollections } from "./hooks";
 import { Page, PageHeader } from "../components";
 
 /**
- * The household's collections: make one, rename one, delete one, browse one.
+ * The library's collections: make one, rename one, delete one, browse one.
  *
  * Its own page rather than a section of Settings, for two reasons. Settings is
  * admin only in practice (its first request is), and any member may make a

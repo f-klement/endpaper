@@ -26,7 +26,7 @@ import type { ThemePreference } from "../theme";
 /**
  * The order tag categories are presented in, everywhere.
  *
- * The household's own tags come last, after the curated three. Interleaving
+ * The library's own tags come last, after the curated three. Interleaving
  * them alphabetically would scatter "Holiday reads" through a genre list and
  * make the curated vocabulary harder to scan, which is the thing that makes
  * it useful on the first day.
@@ -155,7 +155,7 @@ const CURATED_PILL = "bg-paper-100 text-paper-700";
  * looked up, which is slower than reading the word already printed on the pill.
  * The three cost fifteen shades per mode to theme and encoded nothing.
  *
- * Custom keeps the accent, so a tag the household invented still reads as theirs
+ * Custom keeps the accent, so a tag the library invented still reads as theirs
  * rather than as a fourth colour picked at random.
  *
  * Still a four-key table holding two values, rather than a default and one

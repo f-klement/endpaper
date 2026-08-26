@@ -65,14 +65,14 @@ MAX_PAGE_NUMBER_IN_A_BOOK = 100_000
 
 
 class Collection(Base):
-    """A named part of the household's shelf.
+    """A named part of the library's shelf.
 
     What it is for is the three splits the field sells it for: physical from
     ebook, kept from sold, one person's shelf from another's. All three are
     **partitions**, which is why a book carries one collection rather than a
     list of them: see `Book.collection_id`.
 
-    **Household wide, and never a privacy boundary.** Any member may make one,
+    **Library wide, and never a privacy boundary.** Any member may make one,
     rename it or delete it, and filing a book into one changes nothing about
     who can see it. `visible_to()` remains the only access control on content,
     and this is deliberately not a second scoping axis beside it: a label that
@@ -83,13 +83,13 @@ class Collection(Base):
     `created_by_user_id` is provenance and nothing else. No query consults it,
     which is what keeps the previous paragraph true rather than merely
     intended. Nullable, so deleting an account does not cascade away the
-    household's shelving.
+    library's shelving.
     """
 
     __tablename__ = "collections"
 
     # Case-insensitively unique. "Ebooks" and "ebooks" as two separate shelves
-    # is a typo rather than an intention, and a household that acquires both
+    # is a typo rather than an intention, and a library that acquires both
     # has no way to tell them apart in a picker. A functional index rather than
     # a stored lowercase column, so there is one name and not a copy of it that
     # can fall out of step.
@@ -153,7 +153,7 @@ class AuthorAlias(Base):
     `tests/routers/test_books_authors.py::test_one_lookup_is_always_enough`
     asserts the invariant after three merges in a ring.
 
-    **The mapping is household wide and so are the names in it**, exactly like
+    **The mapping is library wide and so are the names in it**, exactly like
     a collection's name: every member resolves a spelling to the same person,
     and `canonical_name` is not withheld from anybody. What is filtered is the
     shelf, not the mapping. An author appears for a member only because that
@@ -212,7 +212,7 @@ class Tag(Base):
     # It decides two things. A predefined tag cannot be deleted, because
     # `seed_tags()` would put it back at the next restart and the delete would
     # look like it silently failed. And the picker groups by it, so the
-    # household's own tags do not scatter through a curated genre list.
+    # library's own tags do not scatter through a curated genre list.
     is_predefined: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
@@ -287,7 +287,7 @@ class Book(Base):
 
     # The ISBN is unique **only among rows that are not copies of each other**.
     #
-    # A household that owns two paperbacks of one title has two objects, and
+    # A library that holds two paperbacks of one title has two objects, and
     # every per-object fact in this table (location, condition, what was paid,
     # who has it) is already written per row. So a second copy is a second row,
     # and a plain UNIQUE on `isbn` is what made that impossible.
@@ -325,7 +325,7 @@ class Book(Base):
     # demand from Google Books, which carries them far more often than Open
     # Library does. `categories` is Google's own subject list and is
     # deliberately NOT the Tag system: tags are a small curated vocabulary the
-    # household chooses from, these are whatever the publisher supplied.
+    # library chooses from, these are whatever the publisher supplied.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     categories: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -364,14 +364,14 @@ class Book(Base):
     #
     # Per row rather than per copy group, for the same reason `location` is:
     # two copies of one title are two objects, and which shelf each lives on is
-    # exactly the kind of fact that differs between them. A household with an
+    # exactly the kind of fact that differs between them. A library with an
     # Ebooks collection and a physical copy of the same title wants them apart,
     # not together.
     #
     # Nullable, with no default collection invented by the migration. An
     # unfiled book is a real and permanent state, like `format` and `lending`
     # being null: a name chosen for somebody by an upgrade is a name in one
-    # language that nobody picked, and every household that never wanted the
+    # language that nobody picked, and every library that never wanted the
     # feature would carry it forever.
     #
     # `SET NULL`, never a cascade. Deleting a shelf label must not delete the
@@ -393,7 +393,7 @@ class Book(Base):
     # got this on audio" is a filter, not a search.
     format: Mapped[BookFormat | None] = mapped_column(String(20), nullable=True, index=True)
 
-    # Whether the household will lend this copy out, or null while nobody has
+    # Whether the library will lend this copy out, or null while nobody has
     # been asked. A standing intention rather than a state: the open `Loan`
     # answers "is it out", and a book can be marked happy to lend while it is
     # at somebody's house. Storing the answer on the loan would mean it only
@@ -427,7 +427,7 @@ class Book(Base):
     purchase_price_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Stored per book rather than as one setting, because a book bought on
-    # holiday really does have a different currency, and a single household
+    # holiday really does have a different currency, and a single library
     # currency would silently relabel it.
     purchase_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
 
@@ -440,7 +440,7 @@ class Book(Base):
     purchase_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # Which set of deliberate copies this row belongs to, or null while the
-    # household owns one of it.
+    # library holds one of it.
     #
     # An opaque shared token rather than a self-referencing foreign key, and
     # that is the whole design. "Is a copy of" is **symmetric**: two paperbacks
@@ -741,7 +741,7 @@ class Loan(Base):
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # Optional. A loan with no due date is still a loan, and most household lending
+    # Optional. A loan with no due date is still a loan, and most library lending
     # has no deadline. It exists so an open loan can be called overdue by
     # something other than a person remembering, which is the only reason to
     # record a loan in the first place.
@@ -751,7 +751,7 @@ class Loan(Base):
     # ever has. The whole state the digest keeps, and it is what makes the
     # difference between the two ways this feature goes wrong: without it the
     # digest either sends once and forgets a loan that is still out, or repeats
-    # the same list into the household's channel every single run.
+    # the same list into the library's channel every single run.
     #
     # Stamped only on a delivery that succeeded. A failure leaves it alone so
     # the next tick retries, which is why it is a timestamp on the loan rather
@@ -851,7 +851,7 @@ class Quote(Base):
         # different column or is partial; none of those reasons applies here.
         #
         # The listing's own ordering is by `created_at` and is deliberately not
-        # indexed: it sorts one page of a household's quotes.
+        # indexed: it sorts one page of a library's quotes.
         Index("ix_quotes_book_page", "book_id", "page"),
         # Mirrors `ck_reading_progress_bounds`. The schema bounds `page` too,
         # and both are needed: a restore inserts through Core and never sees a
@@ -957,7 +957,7 @@ class Classification(Base):
     half that identifies. `ClassificationScheme` says what that costs.
 
     **Not a tag, and not a category.** The three are one store with three jobs,
-    and the difference is provenance: a tag is the household's own word, a
+    and the difference is provenance: a tag is this library's own word, a
     category is whatever the publisher claimed, and a row here is somebody at a
     national library placing the book in a published schedule. Only the last
     means anything to another institution, which is why it is kept whole rather
@@ -965,7 +965,7 @@ class Classification(Base):
 
     **The number is what gets matched, never the label.** `004` is Informatik
     in a German record and Computing in an English one. `ddc.tag_names`
-    projects the number onto the household's vocabulary, and that projection is
+    projects the number onto the library's vocabulary, and that projection is
     a **suggestion** offered at add time: no endpoint writes a tag from it. See
     `serialisation.suggested_tag_ids` for what the client does with it.
 
@@ -1082,7 +1082,7 @@ def switch_targets() -> ColumnElement[bool]:
     Neither can be the only one: a row already loaded is a Python question,
     while "which rows are these" is a SQL question, and answering the second by
     loading every account and filtering in Python is the shortcut that is fine
-    until a household has more than a handful of them.
+    until a library has more than a handful of them.
 
     `routers/users.py` needs it so the list it offers as switch targets holds
     only accounts that are. `upsert_directory_user` deliberately does **not**:
@@ -1107,7 +1107,7 @@ def copy_group_token() -> str:
 
     Random rather than derived from a row id, so no member of the group is its
     owner and purging any of them leaves the label meaningful. Sixteen hex
-    characters: this is a household-local label, never a secret and never
+    characters: this is a library-local label, never a secret and never
     guessed at, and it only has to not collide with the handful of others in
     one database.
     """

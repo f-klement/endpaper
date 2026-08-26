@@ -44,7 +44,7 @@ interface OverdueSectionProps {
  * Where overdue reminders go, and how often.
  *
  * A generic webhook rather than an integration with one chat service, because
- * a self-hosted app other households run should not carry an integration with
+ * a self-hosted app other libraries run should not carry an integration with
  * something nobody else runs.
  *
  * The URL is a plain field and the secret is a write-only one. That asymmetry
@@ -99,7 +99,7 @@ export default function OverdueSection({
       />
 
       {/* Stated on the screen that configures it, not only in the docs. A
-          household that expects every overdue book to be chased and finds one
+          library that expects every overdue book to be chased and finds one
           missing has no other way to learn why. */}
       <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
         {t("settings.overduePrivacyNote")}

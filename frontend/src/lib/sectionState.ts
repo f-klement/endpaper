@@ -2,7 +2,7 @@
  * Which collapsible sections a reader has opened or closed by hand.
  *
  * localStorage rather than the account, for the same reason `libraryView` and
- * the saved searches are: this is a habit rather than household data, it needs
+ * the saved searches are: this is a habit rather than library data, it needs
  * no endpoint, no schema and no migration, and the cost of getting it wrong is
  * one tap. Per device is therefore also per browser, and a phone and a laptop
  * remember separately.

@@ -9,7 +9,7 @@ import { useTranslation } from "../../../i18n";
  * there means widening the image policy for decoration, which this card already
  * refused once over the Ko-fi button. Drawn instead, the row themes with
  * whichever of the seven palettes is in force, renders offline in the installed
- * PWA, and tells nobody that a private household server exists. Do not
+ * PWA, and tells nobody that a private server exists. Do not
  * "improve" it back into an `<img>`.
  *
  * **Only what is knowable without a network call.** Version, licence, source.
