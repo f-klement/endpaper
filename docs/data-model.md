@@ -519,10 +519,23 @@ database rather than a loop in the handler, because a restore and a hand-edited 
 the table without passing through one, and a row pointing at a destroyed collection is a
 dangling foreign key. That makes `PRAGMA foreign_keys=ON` load bearing here.
 
-**The name is unique case insensitively**, through `uq_collections_name_nocase`, a
-functional index on `lower(name)`. "Ebooks" and "ebooks" as two shelves is a typo nothing
-downstream can tell apart. A functional index rather than a stored lowercase column, so
-there is one name and not a copy of it to fall out of step.
+**The name is unique case insensitively**, through `uq_collections_name_folded`, a unique
+index on the stored `name_folded`. "Ebooks" and "ebooks" as two shelves is a typo nothing
+downstream can tell apart.
+
+`name_folded` is `name.lower()`, computed in Python by a `@validates` hook on the model and
+written on every ORM write of the name. `name` itself stays exactly what somebody typed,
+because that is what a picker shows.
+
+**It used to be a functional index on `lower(name)`, and that was ASCII only** (issue #77).
+SQLite folds the 26 ASCII letters and leaves every other letter alone, so `Ästhetik` and
+`ästhetik` were two shelves while `Fiction` and `fiction` were one. `COLLATE NOCASE` folds
+the same 26 letters: measured, `'Ästhetik' = 'ästhetik' COLLATE NOCASE` is 0. A Unicode
+aware `lower()` in SQLite needs the ICU extension, which this image does not build. So the
+fold moved to Python, where it is correct, and the copy that a stored column implies is
+kept in step by having exactly one place that derives it. `backup.restore` is the one
+writer a validator cannot reach, because Core `insert()` never fires one, so `_parse_row`
+recomputes the value on the way in.
 
 ### With copies
 
@@ -705,11 +718,14 @@ is the rule. `deleted_at` is deliberately **not** in the predicate. A trashed ro
 claim on the ISBN, which is the trap `_create_book` frees the holders to resolve, and excluding
 trashed rows here would move that trap rather than remove it.
 
-**One name per collection, case insensitively** (migration `c2f95a80d417`).
-`uq_collections_name_nocase`, a unique index on the **expression** `lower(name)` rather than
-on the column. A stored lowercase column would be the same name written twice, with the two
-free to disagree. `books.collection_id` is indexed beside it, because filtering the library
-by collection is a browse over the whole catalogue rather than a search.
+**One name per collection, case insensitively** (migrations `c2f95a80d417`, then
+`e7b3d02a5c94`). `uq_collections_name_folded`, a unique index on the stored `name_folded`.
+It began as a functional index on `lower(name)`, on the argument that a stored column is the
+same name written twice; what that bought was a rule that held for ASCII and nothing else,
+so the second migration reversed it. That migration also **merges** any pair a live library
+already holds, into the lower id, because the new index cannot keep both and an upgrade has
+nobody to ask. `books.collection_id` is indexed beside it, because filtering the library by
+collection is a browse over the whole catalogue rather than a search.
 
 **One person per spelling** (migration `a9c4e7b21d03`). `author_aliases.alias_key` is
 unique, so re-merging a spelling somewhere else replaces the row rather than adding a second

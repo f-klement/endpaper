@@ -27,6 +27,46 @@ def _python_sources() -> list[Path]:
     ]
 
 
+def _test_sources() -> list[Path]:
+    """Every file in the test tree. `_python_sources` deliberately excludes it."""
+    return [
+        path
+        for path in (BACKEND / "tests").rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+
+
+def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
+    """Every string constant that is a module, class or function docstring."""
+    found: set[ast.AST] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+        ):
+            continue
+        first = node.body[0] if node.body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(first.value)
+    return found
+
+
+#: The one helper allowed to turn foreign keys off, and the reason there is one.
+#:
+#: `database.py` sets its pragmas on the `connect` event, which SQLAlchemy fires
+#: once per **physical** connection rather than per checkout. A connection given
+#: back to the pool with foreign keys off keeps them off for whoever takes it
+#: next, and for that test every `ForeignKey` and the `ON DELETE CASCADE` on
+#: `book_tags` silently stop being enforced.
+#:
+#: The helper closes it by calling `connection.invalidate()` in a `finally`, so
+#: the pool discards the connection instead of handing it on.
+_FOREIGN_KEYS_OFF_HELPER = "_with_foreign_keys_off"
+
+
 #: Callables that carry a validation bound, whatever the layer: a query
 #: parameter, a path parameter, a header, a body field.
 BOUNDING_CALLS = frozenset(
@@ -1130,3 +1170,204 @@ class TestNoExceptionInstanceIsShared:
             "at the raise. Raising a shared one grows its traceback forever and pins "
             f"the locals of every frame it passed through: {offenders}"
         )
+
+
+class TestNoDatabaseFoldIsComparedAgainstAPythonFold:
+    """`func.lower(Column) == value` is one comparison written as two different
+    functions.
+
+    Measured: `lower('Ästhetik')` is `'Ästhetik'` in SQLite and `'ästhetik'` in
+    Python. Three instances of this have been found by hand, two of them 500s
+    (`importing.Import`, `routers/books.create_tag`) and one a quiet duplicate
+    that needed a migration to undo (`routers/collections`, issue #77). Every
+    one was mechanically visible, which is why it is a test now.
+
+    **A comparison is the test, not the call.** `func.lower` in an `ORDER BY`
+    is fine: it decides sort order rather than identity, and no fold moves an
+    accented letter anyway. Folding both sides in Python and comparing a stored
+    column is the shape that replaced all three.
+    """
+
+    #: SQL functions that fold case. `upper` is here because the mirror image
+    #: is the same defect, and cheaper to forbid now than to find later.
+    FOLDING_FUNCTIONS = frozenset({"lower", "upper"})
+
+    def _folds_in_sql(self, node: ast.AST) -> bool:
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            called = child.func
+            if not isinstance(called, ast.Attribute):
+                continue
+            if called.attr not in self.FOLDING_FUNCTIONS:
+                continue
+            owner = called.value
+            if isinstance(owner, ast.Name) and owner.id == "func":
+                return True
+        return False
+
+    def test_no_module_compares_a_sql_fold(self) -> None:
+        offenders: list[str] = []
+
+        for path in _python_sources():
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                sides = [node.left, *node.comparators]
+                if any(self._folds_in_sql(side) for side in sides):
+                    offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno}")
+
+        assert not offenders, (
+            "These compare a fold the database performs, which is ASCII only, against a "
+            "value folded somewhere else. Fold both sides in Python, or compare a stored "
+            f"folded column: {sorted(offenders)}"
+        )
+
+    def test_an_order_by_is_not_reported(self) -> None:
+        """The rule has to leave `list_collections` alone, which still orders by
+        `func.lower(Collection.name)` on purpose."""
+        tree = ast.parse("rows = query.order_by(func.lower(Collection.name)).all()")
+
+        assert not any(
+            isinstance(node, ast.Compare) and self._folds_in_sql(node.left)
+            for node in ast.walk(tree)
+        )
+
+    def test_the_rule_reports_the_shape_it_exists_for(self) -> None:
+        """A rule nothing can fail is a rule nobody notices deleting."""
+        tree = ast.parse("query.filter(func.lower(Collection.name) == name.lower())")
+
+        comparisons = [node for node in ast.walk(tree) if isinstance(node, ast.Compare)]
+
+        assert comparisons and self._folds_in_sql(comparisons[0].left)
+
+
+class TestOnlyOneHelperTurnsForeignKeysOff:
+    """`PRAGMA foreign_keys=OFF` on a pooled connection leaks to the next test.
+
+    This cost a full suite run to find, and the reason it was expensive is the
+    reason this rule exists rather than a comment. The suite runs `-n 2` with
+    per-test distribution, so whether the polluted connection reaches
+    `TestSqlitePragmas` is chance: every file passed on its own, and the full
+    run failed two tests that neither change had touched.
+
+    A grep would not do, because the defect is not writing the pragma, it is
+    writing it **without discarding the connection afterwards**. Requiring the
+    one helper is the cheap way to say that: the helper owns the `invalidate()`,
+    and anything spelling the pragma inline has by definition not called it.
+
+    **Blind spots, listed rather than left to be found.** The scan reads string
+    literals, so a pragma assembled at runtime dodges it: `"foreign_keys" + "=0"`
+    is two `ast.Constant` nodes and neither carries the match, which is how
+    `KEY` and `OFF` are written here without tripping the rule. So does a name
+    passed in from elsewhere, and so does any spelling SQLite accepts that this
+    does not enumerate.
+
+    That is deliberate rather than unnoticed. The failure mode being guarded is
+    a future test copying the line already in the tree, and the cost of an
+    evasion is a test running with foreign keys unenforced, which is fidelity
+    rather than a hole in the app: no production path writes this pragma off,
+    and `database.py` sets it `ON` on every connect. A rule that caught every
+    spelling would need to run SQL rather than read source.
+    """
+
+    #: Squeezed and lowercased before matching, and written apart so this file
+    #: does not trip its own rule.
+    KEY = "foreign_keys"
+    #: Everything SQLite accepts as off. `= 0` is exactly as silent as `=OFF`.
+    OFF = ("off", "0", "false", "no")
+    #: Both separators SQLite takes: `PRAGMA foreign_keys=0` and the function
+    #: form `PRAGMA foreign_keys(0)`.
+    SEPARATORS = ("=", "(")
+
+    def _turns_foreign_keys_off(self, value: str) -> bool:
+        squeezed = "".join(value.split()).lower()
+        return any(
+            self.KEY + separator + off in squeezed
+            for separator in self.SEPARATORS
+            for off in self.OFF
+        )
+
+    def test_no_test_writes_the_pragma_outside_the_helper(self) -> None:
+        offenders: list[str] = []
+        for path in _test_sources():
+            tree = ast.parse(path.read_text())
+            allowed = {
+                node
+                for parent in ast.walk(tree)
+                if isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef)
+                and parent.name == _FOREIGN_KEYS_OFF_HELPER
+                for node in ast.walk(parent)
+            }
+            # Docstrings are prose, not statements, and a rule that cannot be
+            # written down without tripping itself gets deleted rather than
+            # obeyed. This class's own docstring names the pragma.
+            allowed |= _docstring_nodes(tree)
+            # And the class stating the rule, whose fixtures are six spellings
+            # of the very thing it forbids. It opens no connection, so there is
+            # nothing here for the rule to catch; the exclusion is the same
+            # shape as the allowlist in `test_shelf.py`, named rather than
+            # implicit.
+            allowed |= {
+                node
+                for parent in ast.walk(tree)
+                if isinstance(parent, ast.ClassDef)
+                and parent.name == type(self).__name__
+                for node in ast.walk(parent)
+            }
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and self._turns_foreign_keys_off(node.value)
+                    and node not in allowed
+                ):
+                    offenders.append(f"{path.relative_to(BACKEND)}:{node.lineno}")
+
+        assert not offenders, (
+            f"These turn foreign keys off on a pooled connection. Use "
+            f"{_FOREIGN_KEYS_OFF_HELPER}, which discards the connection "
+            f"afterwards, or the next test to check it out runs with every "
+            f"foreign key unenforced: {sorted(offenders)}"
+        )
+
+    def test_the_helper_still_discards_the_connection(self) -> None:
+        """The rule points every caller at one helper, so the helper doing the
+        discarding is the whole of what makes it safe."""
+        source = (BACKEND / "tests" / "test_schema.py").read_text()
+        tree = ast.parse(source)
+        helper = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == _FOREIGN_KEYS_OFF_HELPER
+        )
+
+        assert any(
+            isinstance(node, ast.Attribute) and node.attr == "invalidate"
+            for node in ast.walk(helper)
+        )
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "PRAGMA foreign_keys=OFF",
+            "PRAGMA foreign_keys = OFF",
+            "PRAGMA foreign_keys=0",
+            "pragma foreign_keys=off",
+            "PRAGMA main.foreign_keys=OFF",
+            "PRAGMA foreign_keys(0)",
+        ],
+    )
+    def test_the_rule_reports_every_spelling_it_exists_for(self, spelling) -> None:
+        """A rule nothing can fail is a rule nobody notices deleting, and a
+        rule matching one spelling of six is a rule that reads as enforcement
+        and is not. Every one of these leaves the pragma at 0."""
+        assert self._turns_foreign_keys_off(spelling)
+
+    def test_turning_them_back_on_is_not_reported(self) -> None:
+        """The rule has to leave `database.py`'s own `PRAGMA foreign_keys=ON`
+        alone, and `on` starts with neither `off` nor a digit."""
+        assert not self._turns_foreign_keys_off("PRAGMA foreign_keys=ON")
+        assert not self._turns_foreign_keys_off("PRAGMA foreign_keys = 1")

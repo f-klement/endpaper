@@ -7,7 +7,7 @@
  * string on its way to the screen.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,7 @@ import {
   interpolate,
   readStoredLocale,
   resolveLocale,
+  useSortedByName,
   useTranslation,
 } from "../../src/i18n";
 
@@ -312,5 +313,64 @@ describe("catalogues", () => {
     });
 
     expect(mismatched).toEqual([]);
+  });
+});
+
+describe("useSortedByName", () => {
+  const wrap = (locale: Locale) =>
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return <LocaleProvider initialLocale={locale}>{children}</LocaleProvider>;
+    };
+
+  const named = (...names: string[]) => names.map((name) => ({ name }));
+
+  it("orders an accented name beside its plain letter", () => {
+    const { result } = renderHook(
+      () => useSortedByName(named("Zebra", "Ästhetik", "apple")),
+      { wrapper: wrap(Locale.en) },
+    );
+
+    expect(result.current.map((row) => row.name)).toEqual([
+      "apple",
+      "Ästhetik",
+      "Zebra",
+    ]);
+  });
+
+  it("returns the same array when nothing changed", () => {
+    // The memo is the point of the hook, not an optimisation on top of it.
+    // Without it every keystroke into a filter box beside one of these lists
+    // re-sorts the whole list.
+    const items = named("b", "a");
+    const { result, rerender } = renderHook(() => useSortedByName(items), {
+      wrapper: wrap(Locale.en),
+    });
+
+    const first = result.current;
+    rerender();
+
+    expect(result.current).toBe(first);
+  });
+
+  it("holds one identity for a list that has not arrived", () => {
+    // `undefined` rather than a caller's `?? []`: a fresh literal would be a
+    // new reference on every render and would defeat the memo for the whole
+    // time a query is pending.
+    const { result, rerender } = renderHook(() => useSortedByName(undefined), {
+      wrapper: wrap(Locale.en),
+    });
+
+    const first = result.current;
+    rerender();
+
+    expect(result.current).toBe(first);
+    expect(result.current).toEqual([]);
+  });
+
+  it("does not mutate the list it was given", () => {
+    const items = named("b", "a");
+    renderHook(() => useSortedByName(items), { wrapper: wrap(Locale.en) });
+
+    expect(items.map((row) => row.name)).toEqual(["b", "a"]);
   });
 });

@@ -4798,7 +4798,7 @@
     },
     "/api/books/tags": {
       "get": {
-        "description": "The curated vocabulary plus whatever the library has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group, which is\nthe only part the server can usefully settle.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
+        "description": "The curated vocabulary plus whatever the library has invented.\n\nThe **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`\nin the frontend), because that is a presentation decision and it needs the\nsame order in three places. This orders by name within the group so the\nresponse is deterministic. The order a reader sees is the client's too:\n`frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL\nfold moves `\u00c4`.\n\n`book_count` is one grouped query for the whole list rather than one per\ntag: this is fetched on nearly every page, so an N+1 here is an N+1\neverywhere.",
         "operationId": "list_tags",
         "responses": {
           "200": {
@@ -6764,7 +6764,7 @@
     },
     "/api/collections": {
       "get": {
-        "description": "Every collection in the library, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.",
+        "description": "Every collection in the library, with the caller's own counts.\n\nOrdered case insensitively by name: \"ebooks\" sorting after \"Zola\" because\nof its first letter's byte value is the kind of ordering a reader reads as\na bug.\n\n**Still `func.lower` here, deliberately.** The fold that decides uniqueness\nmoved into Python and into `name_folded`; this one only decides sort order,\nand switching it would change nothing a reader notices: both orderings sort\nby code point, so `\u00c4sthetik` lands past `z` either way. Putting it where a\nGerman reader expects needs a collation rather than a fold, which is a\ndifferent problem with a different owner. See `docs/decisions.md`.",
         "operationId": "list_collections",
         "responses": {
           "200": {
@@ -6881,7 +6881,7 @@
         ]
       },
       "patch": {
-        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.",
+        "description": "Rename one. Any member: a rename moves no book and is undone by another.\n\nRefuses a name another collection already holds. The alternative is a merge\nof two shelves, which is a different operation with different consequences\nfor the books in both, and nobody asked for it by typing a name.\n\n**One migration does merge, and it is not this rule being bent.** The\nrevision that made the name fold outside ASCII found libraries already\nholding a pair like `\u00c4sthetik` and `\u00e4sthetik`, which the new index cannot\nboth keep, and there was nobody to ask: an upgrade has no caller to answer\n409 to. So it merges the pair once, into the lower id, and logs what it\nmoved. Here there is a caller, and a caller who typed a name has asked for\nthat name and not for two shelves to become one.",
         "operationId": "rename_collection",
         "parameters": [
           {

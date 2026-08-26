@@ -55,6 +55,38 @@ book_tags = Table(
 #: already the wrong name.
 COLLECTION_NAME_MAX = 80
 
+#: Room for `Collection.name_folded`, which is `name.lower()` and can be longer
+#: than the name it came from.
+#:
+#: Exactly one code point in Unicode grows under `str.lower()`: U+0130, the
+#: Turkish dotted capital I, which folds to two code points. Measured by
+#: folding every code point from 0 to 0x10FFFF, so twice the name's bound is
+#: the worst case rather than a guess. SQLite does not enforce a VARCHAR
+#: length, so this documents the column rather than policing it, which is the
+#: same job `AUTHOR_KEY_MAX` does for NFKD expansion.
+COLLECTION_KEY_MAX = COLLECTION_NAME_MAX * 2
+
+
+def fold_collection_name(name: str) -> str:
+    """The value `Collection.name_folded` holds, wherever it is derived.
+
+    Three callers need it and only one of them can use the validator below:
+    the ORM write path, `routers/collections._named`, which has to fold the
+    incoming name to compare against the stored column, and `backup._parse_row`,
+    whose Core insert never fires a validator. A derivation copied into three
+    places is a derivation that drifts, and the note on `.lower()` versus
+    `.casefold()` in `_fold_the_name` is precisely the change that would
+    split them.
+
+    **`.lower()`, not `.casefold()`.** Casefold makes `Straße` and `STRASSE`
+    the same shelf, which may even be the better answer, but
+    `routers/books.py::create_tag` and `importing.Import` both fold tag names
+    with `.lower()`. A library where tags and collections fold differently is
+    a worse defect than either rule on its own, so changing this is a decision
+    that changes tags too, and it is changed here or nowhere.
+    """
+    return name.lower()
+
 #: The highest page a book is allowed to have, in the database's own words.
 #:
 #: The same number `schemas/progress.py` calls `MAX_PAGE` and `BookCreate`
@@ -89,16 +121,35 @@ class Collection(Base):
     __tablename__ = "collections"
 
     # Case-insensitively unique. "Ebooks" and "ebooks" as two separate shelves
-    # is a typo rather than an intention, and a library that acquires both
-    # has no way to tell them apart in a picker. A functional index rather than
-    # a stored lowercase column, so there is one name and not a copy of it that
-    # can fall out of step.
+    # is a typo rather than an intention, and a library that acquires both has
+    # no way to tell them apart in a picker.
+    #
+    # **On a stored fold, not on `lower(name)`, and that reversal is the whole
+    # of issue #77.** This index used to be functional, `lower(name)`, on the
+    # argument that a stored column is the same name twice and can fall out of
+    # step. What that bought was a rule that held for ASCII and for nothing
+    # else: SQLite's `lower()` folds the 26 ASCII letters and leaves every
+    # other letter alone, so `Ästhetik` and `ästhetik` were two shelves while
+    # `Fiction` and `fiction` were one. `COLLATE NOCASE` is the same 26 letters
+    # in different words and fixes nothing: measured,
+    # `'Ästhetik' = 'ästhetik' COLLATE NOCASE` is 0. A Unicode aware `lower()`
+    # in SQLite needs the ICU extension, which this image does not build.
+    #
+    # So the fold happens in Python, where it is correct, and is stored. The
+    # derivation lives in `fold_collection_name` and nowhere else: the ORM
+    # reaches it through `_fold_the_name` below, and the two writers that
+    # cannot (`routers/collections._named`, which folds an incoming name to
+    # compare, and `backup._parse_row`, whose Core insert fires no validator)
+    # call it directly.
     __table_args__ = (
-        Index("uq_collections_name_nocase", text("lower(name)"), unique=True),
+        Index("uq_collections_name_folded", "name_folded", unique=True),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(COLLECTION_NAME_MAX), nullable=False)
+    # Derived, never typed. `name` stays exactly what somebody wrote, because
+    # that is what a picker shows; this is what the database compares.
+    name_folded: Mapped[str] = mapped_column(String(COLLECTION_KEY_MAX), nullable=False)
     # Deliberately **not** indexed, like `loans.loaned_by_user_id`: nothing
     # queries by it, and there is no delete-account path whose child check it
     # would speed up. An index is a write cost, and this one would have no read
@@ -109,6 +160,22 @@ class Collection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     books: Mapped[list[Book]] = relationship("Book", back_populates="collection")
+
+    @validates("name")
+    def _fold_the_name(self, _key: str, name: str) -> str:
+        """Keep `name_folded` in step with every ORM write of `name`.
+
+        Two callers write this column, `create_collection` and
+        `rename_collection`, and a derivation either of them could forget is a
+        derivation that will eventually be forgotten. The unique index then
+        catches what slips past the ORM, which is the half a Python-only check
+        does not have.
+
+        The derivation itself is `fold_collection_name`, which the two writers
+        that cannot reach this validator also call.
+        """
+        self.name_folded = fold_collection_name(name)
+        return name
 
 
 #: The longest key an alias row files a spelling under.

@@ -40,7 +40,7 @@ import {
   type SavedSearch,
 } from "../../lib/savedSearches";
 import { useToast } from "../../app/toast";
-import { useTranslation } from "../../i18n";
+import { useSortedByName, useTranslation } from "../../i18n";
 import type { BookFilters } from "./types";
 
 /** Rows per request. Enough to fill a wide grid without over-fetching. */
@@ -151,6 +151,11 @@ export function useLibrary(): UseLibraryResult {
   // Cached like the locations, and for the same reason: how a library has
   // divided its shelf changes far less often than what is on it.
   const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
+  // The filter panel and the selection bar both draw this one field, so they
+  // are collated once here rather than twice at the two call sites.
+  // `locations` is left alone: it arrives most-populated first, which answers
+  // a different question. See `lib/nameOrder.ts`.
+  const filed = useSortedByName(collections.data);
 
   const flatBooks = useMemo(
     () => books.data?.pages.flatMap((page) => page.items) ?? [],
@@ -167,7 +172,7 @@ export function useLibrary(): UseLibraryResult {
     saveCurrentSearch: (name) => setSavedSearches(saveSearch(name, filters)),
     deleteSavedSearch: (id) => setSavedSearches(deleteSearch(id)),
     locations: locations.data ?? [],
-    collections: collections.data ?? [],
+    collections: filed,
     toggleTag: (tagId) =>
       setFilters((current) => ({
         ...current,

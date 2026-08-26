@@ -3,9 +3,9 @@
  *
  * Hoisted here by the colocation rule: anything used by one page lives in that
  * page's folder, and only what genuinely crosses pages moves up a level. Tag
- * grouping is used by Home's filter panel, ScanPage's tag picker, BookDetail's
- * tag editor and StatsPage's breakdown, so it belongs at this level rather
- * than being duplicated four times.
+ * grouping reaches Home's filter panel, ScanPage's tag picker and BookDetail's
+ * tag editor through the one `TagPicker` all three draw, so it belongs at this
+ * level rather than inside any of them.
  *
  * Wire types (BookOut, LoanOut, ...) are NOT redeclared here. They are
  * generated from the OpenAPI schema into `src/api/generated/model`.
@@ -19,8 +19,9 @@ import {
   ReadStatus,
   TagCategory,
 } from "../api/generated/model";
-import type { TagOut } from "../api/generated/model";
+import type { Locale, TagOut } from "../api/generated/model";
 import type { MessageKey } from "../i18n";
+import { sortByName } from "../lib/nameOrder";
 import type { ThemePreference } from "../theme";
 
 /**
@@ -192,17 +193,32 @@ export const TAG_CHIP_CLASSES: Record<TagCategory, string> = {
 export const TAG_CHIP_SELECTED =
   "bg-accent-fill border-accent-fill text-on-accent";
 
-/** Group a flat tag list into its categories, in display order. */
+/**
+ * Group a flat tag list into its categories, in display order.
+ *
+ * Ordered here rather than trusted from the endpoint, which sorts on
+ * `Tag.category, Tag.name` and so files an accented tag after `z` inside its
+ * category. Grouping and ordering are one call on purpose: this is the only
+ * road to a rendered tag list, so a caller cannot get the grouping without the
+ * ordering. The categories themselves keep `TAG_CATEGORY_ORDER`, which is a
+ * curated sequence and not alphabetical. See `lib/nameOrder.ts`.
+ */
 export function groupTagsByCategory(
   tags: TagOut[],
+  locale: Locale,
 ): Record<TagCategory, TagOut[]> {
+  const ordered = sortByName(tags, locale);
   return {
-    [TagCategory.type]: tags.filter((tag) => tag.category === TagCategory.type),
-    [TagCategory.genre]: tags.filter(
+    [TagCategory.type]: ordered.filter(
+      (tag) => tag.category === TagCategory.type,
+    ),
+    [TagCategory.genre]: ordered.filter(
       (tag) => tag.category === TagCategory.genre,
     ),
-    [TagCategory.age]: tags.filter((tag) => tag.category === TagCategory.age),
-    [TagCategory.custom]: tags.filter(
+    [TagCategory.age]: ordered.filter(
+      (tag) => tag.category === TagCategory.age,
+    ),
+    [TagCategory.custom]: ordered.filter(
       (tag) => tag.category === TagCategory.custom,
     ),
   };

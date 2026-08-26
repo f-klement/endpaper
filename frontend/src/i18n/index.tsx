@@ -1,14 +1,21 @@
 /**
- * Translation, hand-rolled.
+ * Everything derived from the language the reader chose.
  *
- * No i18n library: there are two languages and a flat key set, so the whole
- * mechanism is an object lookup plus placeholder substitution. What a library
- * would add here is a dependency, a bundle, and a plural-rules engine nothing
- * in this app needs.
+ * No i18n library: there are two languages and a flat key set, so translation
+ * here is an object lookup plus placeholder substitution. What a library would
+ * add is a dependency, a bundle, and a plural-rules engine nothing in this app
+ * needs.
  *
  * What it does keep is the property that matters: `de.ts` is typed as
  * `Messages`, so a key without a German translation fails the build rather
  * than surfacing as an English sentence inside a German page.
+ *
+ * **The module owns more than translation, and the boundary is written down
+ * so it stays a boundary.** Every export is a function of the chosen locale:
+ * the catalogue lookup, numbers through `interpolate`, name ordering through
+ * `useSortedByName`. A hook that does not read the locale does not belong
+ * here, and that test is what keeps this from becoming the file things land
+ * in.
  */
 
 import {
@@ -21,6 +28,7 @@ import {
 } from "react";
 
 import { Locale } from "../api/generated/model";
+import { sortByName } from "../lib/nameOrder";
 import { de } from "./de";
 import { en, type MessageKey, type Messages } from "./en";
 
@@ -30,6 +38,16 @@ const CATALOGUES: Record<Locale, Messages> = {
 };
 
 const STORAGE_KEY = "locale";
+
+/**
+ * The stand-in for a list that has not arrived.
+ *
+ * Load bearing, and the reason `useSortedByName` takes `undefined` rather
+ * than letting each caller write `?? []`: a fresh literal is a new reference
+ * every render, which would defeat the memo for the whole time a query is
+ * pending.
+ */
+const EMPTY: never[] = [];
 
 /** Values a placeholder can take. Numbers are formatted for the locale. */
 export type TranslateParams = Record<string, string | number>;
@@ -174,6 +192,30 @@ export function useTranslation(): LocaleContextValue {
     throw new Error("useTranslation must be used inside a LocaleProvider");
   }
   return context;
+}
+
+/**
+ * A name list in the order a reader of the chosen language expects.
+ *
+ * The door to `lib/nameOrder`, and the only one a component should use.
+ * Ordering names needs three things that are easy to get separately and easy
+ * to forget: the chosen locale, a collator built for it, and a memo. This
+ * supplies all three, so a new name list gets them by calling one hook rather
+ * than by remembering a recipe.
+ *
+ * The memo matters more than it looks. These lists are query cache entries,
+ * `sort` allocates, and a component that re-sorts inline re-sorts on every
+ * keystroke into any input beside it.
+ *
+ * Lives here rather than in `lib/`, which holds no React, and it belongs
+ * beside `interpolate` in any case: collation and number formatting are the
+ * same question asked of the same locale.
+ */
+export function useSortedByName<T extends { name: string }>(
+  items: readonly T[] | undefined,
+): T[] {
+  const { locale } = useTranslation();
+  return useMemo(() => sortByName(items ?? EMPTY, locale), [items, locale]);
 }
 
 export type { MessageKey, Messages };

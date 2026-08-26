@@ -53,6 +53,7 @@ from models import (
     User,
     UserBook,
     book_tags,
+    fold_collection_name,
 )
 
 logger = logging.getLogger("endpaper.backup")
@@ -193,7 +194,11 @@ def _temporal_columns(table: Table) -> dict[str, type[date] | type[datetime]]:
     return parsers
 
 
-def _parse_row(row: dict[str, Any], parsers: dict[str, type[date] | type[datetime]]) -> dict[str, Any]:
+def _parse_row(
+    row: dict[str, Any],
+    parsers: dict[str, type[date] | type[datetime]],
+    table: Table,
+) -> dict[str, Any]:
     parsed = dict(row)
     for name, kind in parsers.items():
         value = parsed.get(name)
@@ -225,6 +230,54 @@ def _parse_row(row: dict[str, Any], parsers: dict[str, type[date] | type[datetim
                 cover[:120],
             )
         parsed["cover_url"] = stored
+
+    # The second derived column with the same problem, and it is not optional
+    # the way the cover is. `Collection.name_folded` is written by a
+    # `@validates` hook, which a Core insert never fires, so an archive decides
+    # this value rather than the model. Two consequences, both real:
+    #
+    # * An archive taken **before** the revision that added the column carries
+    #   no value for it. The column is NOT NULL, so the insert raises
+    #   `IntegrityError`, which is not `RestoreError`, so the route answers 500
+    #   rather than the 400 its docstring promises. Recomputing here is what
+    #   keeps an older backup restorable, which is the rule `FORMAT_VERSION`
+    #   states: a column the archive does not carry must not throw a library's
+    #   backups away.
+    # * A hand-edited archive can carry a fold that disagrees with its name.
+    #   The unique index catches two rows folding the same; it can never catch
+    #   one row folding wrongly. Derived rather than trusted, for the same
+    #   reason an admin uploading the file is not a reason to trust the file.
+    #
+    # Keyed on the column being in this table, because `tags` and `users` have
+    # a name too and neither has a fold. `_TABLES` is the only caller and holds
+    # the `Table`, so the check costs nothing.
+    if "name_folded" in table.columns:
+        # `written_name` rather than `name`, which the date loop above binds to
+        # a column name. mypy catches the collision; a reader would not.
+        written_name = parsed.get("name")
+        # Refused rather than skipped. A non-string here used to fall past the
+        # recompute and leave the archive's own fold standing, which is the
+        # trust this block exists to withhold. SQLite's TEXT affinity then
+        # converts quietly: `{"name": 1}` and `{"name": true}` both insert as
+        # the string `'1'`, so two collections a reader cannot tell apart pass
+        # `uq_collections_name_folded` while their folds describe no name at
+        # all. Measured against the real column types before this line existed.
+        if not isinstance(written_name, str):
+            raise RestoreError(
+                f"A row in {table.name!r} has a name that is not text: "
+                # Truncated like the `cover_url` warning above, and for the
+                # same reason: a manifest may declare 1 GiB, so one value can
+                # carry ~500 MiB, and `repr` amplifies it about 4x before
+                # `json.dumps` takes another 5x into the response body.
+                #
+                # The slice is on the **repr**, not on the value. Everything
+                # reaching this line is by definition not a `str`, so
+                # `written_name[:120]` would raise `TypeError` on the int and
+                # bool cases this exists to report, and a JSON number can be
+                # arbitrarily long too.
+                f"{repr(written_name)[:120]}"
+            )
+        parsed["name_folded"] = fold_collection_name(written_name)
     return parsed
 
 
@@ -363,6 +416,49 @@ def _safe_cover_name(name: str) -> str | None:
     return tail.name
 
 
+def _refuse_a_colliding_pair(tables: dict[str, Any]) -> None:
+    """Refuse an archive holding two collections whose names fold the same.
+
+    Only an archive taken **before** `e7b3d02a5c94` can hold such a pair, which
+    is exactly the archive `_parse_row` recomputes the fold for. Recomputing
+    keeps the missing column restorable; it cannot keep the pair restorable,
+    because the pair is what the new unique index exists to forbid. Without
+    this the insert raises `IntegrityError`, which is not `RestoreError`, so
+    the route answers 500 rather than the 400 its docstring promises and says
+    nothing about which two names are the problem.
+
+    **Refused, not merged**, and the difference from the migration is the
+    caller. The migration is an upgrade nobody asked for and cannot consult, so
+    it merges and logs. A restore is something an admin chose to do to a file
+    they hold, so it can say what is wrong and let them fix it. This is
+    `rename_collection`'s rule, not the upgrade's.
+    """
+    first_by_fold: dict[str, str] = {}
+    for row in tables.get("collections") or []:
+        name = row.get("name")
+        if not isinstance(name, str):
+            continue  # `_parse_row` refuses it, with the table in the message.
+        folded = fold_collection_name(name)
+        seen = first_by_fold.get(folded)
+        if seen is not None:
+            # Any second row folding the same, **including one spelled
+            # identically**. An earlier version compared `seen != name` and so
+            # let two rows both named `Fiction` through, on the assumption that
+            # only a pre-revision archive reaches here and that such an archive
+            # came from a database whose old index caught the ASCII pair. That
+            # is the trusted-archive assumption `_parse_row` above explicitly
+            # withholds: a hand edited file is not required to be self
+            # consistent. The index is on the fold rather than the name, so the
+            # identical pair collides too, and the 500 it caused named neither
+            # collection.
+            raise RestoreError(
+                "This backup holds two collections whose names fold the same: "
+                f"{seen[:120]!r} and {name[:120]!r}. Merge them in the library "
+                "the backup came from, take a new backup, and restore that."
+            )
+        first_by_fold[folded] = name
+
+
 def restore(db: Session, data: bytes) -> dict[str, int]:
     """Replace the database and the covers with the archive's contents.
 
@@ -372,6 +468,8 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     manifest = read_manifest(data)
     tables = manifest["tables"]
     archive = zipfile.ZipFile(BytesIO(data))
+
+    _refuse_a_colliding_pair(tables)
 
     # Children first. The association table holds foreign keys into books and
     # tags, so it has to go before either of them.
@@ -384,7 +482,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
         rows = tables.get(name) or []
         if rows:
             parsers = _temporal_columns(table)
-            db.execute(table.insert(), [_parse_row(row, parsers) for row in rows])
+            db.execute(table.insert(), [_parse_row(row, parsers, table) for row in rows])
         restored[name] = len(rows)
 
     associations = tables.get("book_tags") or []
@@ -434,8 +532,14 @@ def _repair_seeded_tags(db: Session) -> None:
     before `tags.is_predefined` existed carries no value for it, so every tag
     comes back as `False`, which makes the built-in vocabulary deletable and
     duplicates it at the next boot when `seed_tags()` finds the names missing
-    its flag. Nothing else in the schema has a default that lies about
-    restored data.
+    its flag.
+
+    **It is no longer the only one, and the other is repaired earlier.**
+    `collections.name_folded` is derived too and is NOT NULL, so an archive
+    predating it would not restore at all rather than restore wrongly.
+    `_parse_row` recomputes it per row on the way in, which is where a derived
+    column belongs when it can be derived; this runs afterwards because a
+    seeded flag cannot be, `PREDEFINED_TAGS` being a list only the app has.
 
     `PREDEFINED_TAGS` is imported here rather than at module scope because
     `main` imports the routers, which import this module.

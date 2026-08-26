@@ -369,7 +369,9 @@ and another's. A book is in **one** or in none.
 | PATCH | `/api/collections/{id}` | user | Rename. **409** if another collection has that name |
 | DELETE | `/api/collections/{id}` | **admin** | 204. Its books are unfiled, never deleted |
 
-Names are unique **case insensitively**, enforced by an index on `lower(name)`. Creating one
+Names are unique **case insensitively** and outside ASCII too, enforced by a unique index on
+a stored fold of the name rather than on `lower(name)`, which SQLite evaluates and which
+folds only the 26 ASCII letters. Creating one
 with a name already in use returns the existing row rather than an error, because somebody
 typing a name that is there means that collection; renaming **onto** an occupied name is a
 409, because that would silently merge two shelves.

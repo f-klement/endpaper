@@ -45,11 +45,11 @@ export default function TagPicker({
   isCreating = false,
   onDelete,
 }: TagPickerProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [name, setName] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const panelId = useId();
-  const byCategory = groupTagsByCategory(tags);
+  const byCategory = groupTagsByCategory(tags, locale);
 
   /**
    * A category starts closed unless something in it is selected.

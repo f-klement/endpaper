@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
-from models import Book, Collection, User
+from models import Book, Collection, User, fold_collection_name
 from schemas import CollectionCreate, CollectionOut, CollectionUpdate
 from shelf import Shelf
 
@@ -29,12 +29,22 @@ router = APIRouter(prefix="/api/collections", tags=["collections"])
 def _named(db: Session, name: str, *, other_than: int | None = None) -> Collection | None:
     """The collection already carrying this name, case insensitively.
 
-    The database refuses the clash outright through `uq_collections_name_nocase`,
+    The database refuses the clash outright through `uq_collections_name_folded`,
     so this exists to answer with a 409 rather than letting an IntegrityError
     surface as a 500. The index is still the rule: this check races, that one
     cannot.
+
+    **Both sides fold in Python, and that is the point of the stored column.**
+    This used to compare `func.lower(Collection.name)`, which folds in SQLite,
+    against `name.lower()`, which folds in Python. The two agreed on ASCII and
+    on nothing else, so the check and the index it backs were wrong together
+    and `Ästhetik` and `ästhetik` were two shelves. See the comment on
+    `Collection.__table_args__` and `docs/decisions.md`, "SQLite folds case in
+    ASCII and Python does not".
     """
-    query = db.query(Collection).filter(func.lower(Collection.name) == name.lower())
+    query = db.query(Collection).filter(
+        Collection.name_folded == fold_collection_name(name)
+    )
     if other_than is not None:
         query = query.filter(Collection.id != other_than)
     return query.first()
@@ -70,6 +80,13 @@ def list_collections(db: DbSession, current_user: CurrentUser) -> list[Collectio
     Ordered case insensitively by name: "ebooks" sorting after "Zola" because
     of its first letter's byte value is the kind of ordering a reader reads as
     a bug.
+
+    **Still `func.lower` here, deliberately.** The fold that decides uniqueness
+    moved into Python and into `name_folded`; this one only decides sort order,
+    and switching it would change nothing a reader notices: both orderings sort
+    by code point, so `Ästhetik` lands past `z` either way. Putting it where a
+    German reader expects needs a collation rather than a fold, which is a
+    different problem with a different owner. See `docs/decisions.md`.
     """
     counts = _counts(db, current_user.id)
     return [
@@ -122,6 +139,14 @@ def rename_collection(
     Refuses a name another collection already holds. The alternative is a merge
     of two shelves, which is a different operation with different consequences
     for the books in both, and nobody asked for it by typing a name.
+
+    **One migration does merge, and it is not this rule being bent.** The
+    revision that made the name fold outside ASCII found libraries already
+    holding a pair like `Ästhetik` and `ästhetik`, which the new index cannot
+    both keep, and there was nobody to ask: an upgrade has no caller to answer
+    409 to. So it merges the pair once, into the lower id, and logs what it
+    moved. Here there is a caller, and a caller who typed a name has asked for
+    that name and not for two shelves to become one.
     """
     collection = db.get(Collection, collection_id)
     if collection is None:

@@ -294,6 +294,43 @@ class TestCollection:
         db.add(Collection(name="EBOOKS"))
         with pytest.raises(IntegrityError):
             db.commit()
+        db.rollback()
+
+    def test_the_name_is_unique_outside_ascii_too(self, db):
+        """Issue #77, as the test that failed before `name_folded` existed.
+
+        The index used to be `lower(name)` evaluated by SQLite, which folds the
+        26 ASCII letters and leaves every other letter alone, so this pair was
+        two shelves while "Ebooks" and "EBOOKS" were one.
+        """
+        db.add(Collection(name="Ästhetik"))
+        db.commit()
+        db.add(Collection(name="ästhetik"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+
+    def test_the_fold_is_stored_beside_the_name(self, db):
+        """The name is kept exactly as typed; the fold is what is compared."""
+        shelf = Collection(name="Ästhetik")
+        db.add(shelf)
+        db.commit()
+
+        assert shelf.name == "Ästhetik"
+        assert shelf.name_folded == "ästhetik"
+
+    def test_renaming_updates_the_fold(self, db):
+        """Without this the validator can be deleted and every route test still
+        passes: `create_collection` would keep working and `rename_collection`
+        would leave a fold describing the name the shelf used to have."""
+        shelf = Collection(name="Ebooks")
+        db.add(shelf)
+        db.commit()
+
+        shelf.name = "Ästhetik"
+        db.commit()
+
+        assert shelf.name_folded == "ästhetik"
 
     def test_two_different_names_coexist(self, db):
         db.add_all([Collection(name="Ebooks"), Collection(name="Sold")])

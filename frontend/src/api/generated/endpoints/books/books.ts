@@ -2551,8 +2551,10 @@ export const getListTagsUrl = () => {
  *
  * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
  * in the frontend), because that is a presentation decision and it needs the
- * same order in three places. This orders by name within the group, which is
- * the only part the server can usefully settle.
+ * same order in three places. This orders by name within the group so the
+ * response is deterministic. The order a reader sees is the client's too:
+ * `frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL
+ * fold moves `Ä`.
  *
  * `book_count` is one grouped query for the whole list rather than one per
  * tag: this is fetched on nearly every page, so an N+1 here is an N+1

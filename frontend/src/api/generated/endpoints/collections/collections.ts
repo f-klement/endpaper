@@ -60,6 +60,13 @@ export const getListCollectionsUrl = () => {
  * Ordered case insensitively by name: "ebooks" sorting after "Zola" because
  * of its first letter's byte value is the kind of ordering a reader reads as
  * a bug.
+ *
+ * **Still `func.lower` here, deliberately.** The fold that decides uniqueness
+ * moved into Python and into `name_folded`; this one only decides sort order,
+ * and switching it would change nothing a reader notices: both orderings sort
+ * by code point, so `Ästhetik` lands past `z` either way. Putting it where a
+ * German reader expects needs a collation rather than a fold, which is a
+ * different problem with a different owner. See `docs/decisions.md`.
  * @summary List Collections
  */
 export const listCollections = async (
@@ -415,6 +422,14 @@ export const getRenameCollectionUrl = (collectionId: number) => {
  * Refuses a name another collection already holds. The alternative is a merge
  * of two shelves, which is a different operation with different consequences
  * for the books in both, and nobody asked for it by typing a name.
+ *
+ * **One migration does merge, and it is not this rule being bent.** The
+ * revision that made the name fold outside ASCII found libraries already
+ * holding a pair like `Ästhetik` and `ästhetik`, which the new index cannot
+ * both keep, and there was nobody to ask: an upgrade has no caller to answer
+ * 409 to. So it merges the pair once, into the lower id, and logs what it
+ * moved. Here there is a caller, and a caller who typed a name has asked for
+ * that name and not for two shelves to become one.
  * @summary Rename Collection
  */
 export const renameCollection = async (

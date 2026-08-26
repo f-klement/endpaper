@@ -2167,13 +2167,16 @@ table once and keys it with Python's `.lower()`, so a cache miss means genuinely
 turns one query per unseen name into one per import.
 
 **The general rule: never compare a database fold against a Python fold.** If a lookup folds
-case, do it in one language, and prefer Python where the set is small enough to hold. The
-remaining instance is `routers/collections.py:37`, issue #77, and it is a different severity
-rather than the same bug waiting. There the check folds in SQLite and the index it backs,
-`uq_collections_name_nocase`, is `lower(name)` in SQLite too, so the two **agree** and nothing
-raises. The cost is that `Ästhetik` and `ästhetik` coexist as two Collections while `Fiction`
-and `fiction` do not. Fixing the check alone would split the pair and turn a quiet duplicate
-into an `IntegrityError`, so the index has to change, which needs a migration.
+case, do it in one language, and prefer Python where the set is small enough to hold.
+
+The third instance was `routers/collections.py`, issue #77, and it was a different severity
+rather than the same bug waiting. There the check folded in SQLite and the index it backed,
+`uq_collections_name_nocase`, was `lower(name)` in SQLite too, so the two **agreed** and
+nothing raised. The cost was that `Ästhetik` and `ästhetik` coexisted as two Collections
+while `Fiction` and `fiction` did not. Fixing the check alone would have split the pair and
+turned a quiet duplicate into an `IntegrityError`, so the index had to change, which needed
+a migration: see *A collection's name folds in Python, and the migration that did it merges*
+below.
 
 **Where two lookups fold the same set, they must break a tie the same way, and stability is
 not enough.** A dict comprehension and a `next(...)` over one `order_by(Tag.id)` are both
@@ -2182,6 +2185,135 @@ takes the first row. Measured on Tags at ids 106 and 107, the import resolved th
 and `create_tag` to 106, while both docstrings cited the ordering as what made them agree.
 Both now take the first, matching `_first_wins` in the same module. Such a pair is reachable
 on any database that met the bug above, because the old `create_tag` created exactly it.
+
+### A collection's name folds in Python, and the migration that did it merges
+
+Issue #77. `uq_collections_name_nocase` was a functional index on `lower(name)`, chosen over
+a stored lowercase column "so there is one name and not a copy of it that can fall out of
+step". The index it chose does not keep the promise the class docstring makes: SQLite's
+`lower()` folds the twenty six ASCII letters and leaves every other letter alone, so
+`Ästhetik` and `ästhetik` were two shelves while `Fiction` and `fiction` were one.
+
+`COLLATE NOCASE` is the same twenty six letters in different words and fixes nothing:
+measured, `'Ästhetik' = 'ästhetik' COLLATE NOCASE` is 0 while
+`'Fiction' = 'fiction' COLLATE NOCASE` is 1. A Unicode aware `lower()` in SQLite needs the
+ICU extension, which this image does not build, and a Python UDF registered per connection
+would leave the index unmaintainable by any connection that had not registered it: the
+`sqlite3` CLI, a restore, an ad hoc script. **Between a rule enforced on a derived column
+and a rule not enforced at all, the derived column wins**, so `collections.name_folded` is
+stored and `uq_collections_name_folded` is a plain unique index on it.
+
+**What keeps the copy in step is that one function derives it.** `fold_collection_name`
+in `models.py` is the whole derivation, and three sites call it, because three sites need
+it and only one of them can use a validator: `Collection._fold_the_name`, a
+`@validates("name")` hook covering both ORM writes; `routers/collections._named`, which
+folds an incoming name to compare against the stored column; and `backup._parse_row`,
+whose Core insert fires no validator. An earlier version of this entry and the comment in
+`models.py` both claimed one *place* derived it, which was false in the same three sites,
+and the `.lower()` versus `.casefold()` note below is exactly the change that would have
+split them.
+
+Three things follow at the restore, none of which grep showed the first time. An archive
+taken before the column existed would otherwise raise `IntegrityError`, which is not
+`RestoreError`, so the route would answer 500 rather than 400. A hand edited archive could
+store a fold disagreeing with its name, which a unique index can never catch because it
+only catches duplicates. And a name that is not a string is **refused** rather than skipped:
+SQLite's TEXT affinity converts `1` and `true` to the string `'1'`, so skipping the
+recompute for a non-string let two collections a reader cannot tell apart through the
+index with folds describing no name.
+
+**A pre-revision archive holding a colliding pair is refused, not merged**, which is the
+opposite of what the migration does with the same pair, and the difference is the caller.
+The migration is an upgrade nobody asked for and cannot consult, so it merges and logs. A
+restore is something an admin chose to do to a file they hold, so `_refuse_a_colliding_pair`
+names both spellings and asks them to merge in the source library. That is
+`rename_collection`'s rule, not the upgrade's.
+
+**`.lower()`, not `.casefold()`.** Casefold makes `Straße` and `STRASSE` one shelf, which
+may even be the better answer, but `create_tag` and `importing.Import` both fold tag names
+with `.lower()`, and a library where tags and collections fold differently is a worse defect
+than either rule alone. Changing it is a decision that changes tags too.
+
+**The migration merges, and that is not `rename_collection`'s rule being bent.**
+
+A database already holding the pair cannot keep both under the new index, and the owner
+settled it: merge, into the lower id. Lower id because that is how `_first_wins` in
+`importing.py` and `create_tag` break the same tie, and two folding rules disagreeing about
+the winner is the defect recorded above. Refusing to migrate was the alternative and was
+rejected: in a household with no operator that is an app that stopped overnight, and the
+person who can fix it may be the person who cannot read the log.
+
+`rename_collection` still answers 409, and its docstring now says why both are true: it
+refuses because a person typing a name has asked for that name and not for two shelves to
+become one, while an upgrade has no caller to ask and no other resolution.
+
+**The trap the merge had to be built around.**
+
+**`PRAGMA foreign_keys` is 0 in a migration connection.** The `ON` listener is bound to
+`database.engine`; Alembic builds its own in `migrations/env.py`. So `books.collection_id`'s
+`ON DELETE SET NULL` does not fire during a migration, and a book missed by the repoint does
+not get unfiled, it keeps a **dangling** id. Because the survivor is the lower id, the row
+deleted is the higher, which is the rowid SQLite hands to the next insert: measured, the
+book then reads as being in an unrelated collection created later.
+`migrations/versions/d4a91f3c72e8_user_defined_tags.py:48` already recorded the identical
+trap for tags. Hence: repoint every `books.collection_id` first, delete the losers second,
+and check that nothing dangles, because nothing else in the stack complains.
+
+**A failed revision may not roll back on SQLite, and where the checks sit is what works
+around that.** Alembic's `SQLiteImpl` sets `transactional_ddl = False` (verified on alembic
+1.19.1), so `context.begin_transaction()` in `migrations/env.py` returns a null context and
+nothing wraps the revision. What is left is pysqlite's own rule, and it is conditional
+rather than a flat split: **pysqlite opens a transaction for DML only. DDL executed while
+no transaction is open is durable immediately; DDL executed after any DML statement joins
+that transaction and rolls back with it.** Measured on the installed stack, sqlite 3.50.4:
+
+| Sequence | After the failure |
+|---|---|
+| `ALTER TABLE`, raise | the column is there |
+| `UPDATE`, `ALTER TABLE`, raise | the column is gone, the update is gone |
+
+Both halves matter here, and this revision contains both, on different databases.
+`op.add_column` is the first statement **only where there is no pair to merge**, and there
+it is durable on its own: that is the case originally measured, where the column had
+landed, the backfill had not, and `alembic_version` still named the previous revision, a
+state no rerun can apply twice. Where a merge ran, the repoint and the delete opened the
+transaction first, so `add_column` joins them and rolls back. The later `op.drop_index`,
+batch rebuild and `op.create_index` follow the backfill `UPDATE` on every database, so
+those always roll back.
+
+The conclusion is unchanged and the reason for it is narrower than "DDL is never
+transactional": because *some* DDL is durable, a check placed after any of it can leave a
+half-applied database. So both dangling checks run **before the first DDL statement**, and
+a database arriving with a dangling id is refused with the file untouched. This applies to
+every future migration here, not only this one.
+
+An earlier version of this entry stated the split unconditionally and was wrong in both
+directions. It was caught by a critic re-measuring the claim rather than reading it.
+
+**A dangling id is a hard failure, not a repair.** Nulling the column would unfile books the
+revision exists to keep filed; carrying on would file them under whatever collection later
+takes the freed rowid, which is worse because nobody can see it. The app cannot write one:
+`delete_collection`, the ORM and `ON DELETE SET NULL` under `PRAGMA foreign_keys=ON` each
+prevent it, so arriving with one means the rows were edited by hand.
+
+**Index ordering around the SQLite table rebuild.**
+
+The column is made NOT NULL with `batch_alter_table`, which rebuilds `collections` by
+reflecting it. Reflection loses an index on an expression: measured, reflecting the table
+warns "Skipped unsupported reflection of expression-based index uq_collections_name_nocase"
+and returns without it. So the old functional index is dropped **before** the rebuild rather
+than carried through it, and the new unique index is created **after**, where nothing can
+drop it and where a merge that somehow left a duplicate fails rather than ships. The foreign
+key from `books` and `ix_collections_id` both survive the rebuild, which is asserted rather
+than assumed, because `collections` is the parent side of that key.
+
+**The downgrade cannot un-merge.** It restores the schema, the losing rows and their names
+being gone, and says so rather than pretending.
+
+**Ordering by name was deliberately not part of this.** No fold moves `Ä`, which is above
+every ASCII letter, so `order_by(func.lower(Collection.name))` stays and is a different
+problem with a different answer: see *Name lists are ordered in the browser, not by the
+database*.
 
 ### A route docstring is API documentation, not an internal comment
 
@@ -3892,6 +4024,56 @@ wants one.
 phone. Wrapping rather than scrolling is the choice: a badge sliced in half at the card's
 edge is worse than a second line, and the second line costs 26px (20px of row plus
 `gap-1.5`), so 236px, on a screen where the card is the only thing on it.
+
+### Name lists are ordered in the browser, not by the database
+
+`Ästhetik` used to sort after `Zebra` in every picker. Measured against the deployment's
+own SQLite, both orderings the database can offer return the same thing:
+
+```
+order by lower(name)         -> ['apple', 'Banana', 'Zebra', 'Ästhetik']
+order by name collate nocase -> ['apple', 'Banana', 'Zebra', 'Ästhetik']
+```
+
+`Ä` is U+00C4, above every ASCII letter, so **no case fold moves it**. Locale aware
+collation in SQLite needs the ICU extension, and building one into the image for a picker's
+ordering was refused before it was proposed.
+
+So ordering by name is `frontend/src/lib/nameOrder.ts`, which owns one `Intl.Collator` per
+locale and exports `sortByName`. The lists it applies to are a library's collections, tags,
+series and authors: unpaginated, fully fetched, and small.
+
+**The locale is the chosen interface language, not `navigator.language`.** It is the one
+language this app knows the reader picked, `interpolate` already formats numbers with it,
+and two people reading the same library in the same language then see the same order.
+
+**The collator is cached per locale.** Measured on node 24 per 1,000 operations, by two
+seats independently: constructing a collator took 7.0 to 60.8ms, comparing two names 0.10
+to 0.31ms. Pairing each seat's own figures, the ratio ran from 28:1 to 243:1. The spread is
+wide and the conclusion is not: construction costs one to two orders of magnitude more than
+the comparison it exists to perform, so building one per call would cost more than the sort.
+
+**The server's `ORDER BY` clauses are left in place, and they are not a second opinion.**
+They make an unordered query deterministic, which the export and the API's own consumers
+still want. What they stopped being is the order a reader sees: a screen drawing a name
+list calls `sortByName` rather than trusting the order it was handed. Removing them would
+have been the other way to keep one fact in one place; it is refused because a paged or
+scripted consumer would then get rows in whatever order SQLite felt like.
+
+**There is no exception.** Home's filter panel and its selection bar were the two that
+still drew the endpoint's order, and both read one field, so `useLibrary` collates it once
+and both are fixed at a single site.
+
+**Five lists are deliberately not collated, for two reasons.** `/api/books/locations` and
+the three stats breakdowns (`per_user`, `by_tag`, `by_collection` in `routers/stats.py`)
+are ordered by count, which answers a different question: re-sorting them by name would
+throw away the ranking that is the whole point of the chart. The name is their tiebreak
+only. `/api/users` is the second reason: it is a list of account handles rather than of
+names, and the loan picker that draws it is choosing an account.
+
+**Grouping and ordering tags is one call.** `groupTagsByCategory(tags, locale)` sorts before
+it filters, so no caller can get the grouping without the ordering. The categories keep
+`TAG_CATEGORY_ORDER`, which is curated rather than alphabetical.
 
 ## Tooling
 

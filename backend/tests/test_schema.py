@@ -5,8 +5,12 @@ since before Alembic existed. These tests build such a database on purpose and
 then check it is adopted without losing data.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 import models  # noqa: F401  (registers the tables on Base.metadata)
@@ -680,7 +684,11 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
 
         with engine.connect() as connection:
             connection.execute(text("PRAGMA foreign_keys=ON"))
-            connection.execute(text("INSERT INTO collections (name) VALUES ('Ebooks')"))
+            # `name_folded` by hand: e7b3d02a5c94 made it NOT NULL, and the
+            # `@validates` hook that fills it in only fires through the ORM.
+            connection.execute(
+                text("INSERT INTO collections (name, name_folded) VALUES ('Ebooks','ebooks')")
+            )
             connection.execute(text("UPDATE books SET collection_id = 1"))
             connection.execute(text("DELETE FROM collections WHERE id = 1"))
             connection.commit()
@@ -795,3 +803,348 @@ class TestWideningTheClassificationNumber:
         command.downgrade(schema._alembic_config(), "e2c74a91b5d8")
 
         assert self.numbers() == ["005.133"]
+
+
+class TestFoldingCollectionNamesOutsideAscii:
+    """Revision e7b3d02a5c94, which merges rows in a live library.
+
+    Nothing else in this tree deletes somebody's data on an upgrade, so what
+    these tests defend is not the new column, it is the merge. The trap is that
+    a book missed by the repoint does not fail and does not look wrong: the
+    foreign key is off in a migration connection (`PRAGMA foreign_keys` is 0,
+    because the `ON` listener lives on `database.engine` and Alembic builds its
+    own), so `ON DELETE SET NULL` never fires, the id dangles, and the survivor
+    being the lower id means the freed rowid is the one SQLite hands to the
+    next collection created. The book then reads as filed under a shelf that
+    did not exist when it was filed.
+    """
+
+    PREVIOUS = "b7d41f0a2c95"
+
+    @staticmethod
+    @contextmanager
+    def _with_foreign_keys_off() -> Iterator[Connection]:
+        """A connection with `PRAGMA foreign_keys=OFF`, discarded afterwards.
+
+        AUTOCOMMIT because SQLite ignores the pragma inside a transaction, and
+        the insert these tests need would then be refused by the very rule they
+        are suspending.
+
+        **`invalidate()` is the load bearing half.** `database.py` sets the
+        pragmas on the `connect` event, which fires once per *physical*
+        connection, not per checkout. A connection handed back to the pool with
+        foreign keys off keeps them off for whoever checks it out next, and the
+        suite runs `-n 2` with per-test distribution, so whether that next
+        caller is `TestSqlitePragmas` is luck. It cost two failures in a full
+        run that passed file by file. Invalidating drops the connection instead
+        of returning it, so the next checkout is a fresh one the listener
+        configures.
+        """
+        connection = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        try:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            yield connection
+        finally:
+            connection.invalidate()
+            connection.close()
+
+    #: Named apart because they are the pair, and because reading `Ästhetik`
+    #: twice in an assertion is how a test ends up asserting nothing.
+    UPPER = "Ästhetik"
+    LOWER = "ästhetik"
+
+    def build_database_with_a_colliding_pair(self) -> None:
+        """A library holding both spellings, one book on each, one shelf beside.
+
+        `Fiction` is there to prove the merge is selective: a collection with no
+        case variant must come through untouched.
+
+        **`Fiction` is inserted first, and the order is load bearing.** It puts
+        the pair on ids 2 and 3, so the merge deletes the **highest** rowid.
+        SQLite hands out `max(rowid) + 1`, so only the highest freed id is ever
+        reused, and the freed-id test below can observe the reuse it is named
+        for only when the loser is that one. With the pair on ids 1 and 2 the
+        freed id was 2 while 3 still existed, the next insert took 4, and that
+        test passed however the migration behaved.
+        """
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            for name in ("Fiction", self.UPPER, self.LOWER):
+                connection.execute(
+                    text("INSERT INTO collections (name) VALUES (:name)"), {"name": name}
+                )
+            for title, collection_id in (("Other", 1), ("Upper", 2), ("Lower", 3)):
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, collection_id, added_by_user_id) "
+                        "VALUES (:title, :collection_id, 1)"
+                    ),
+                    {"title": title, "collection_id": collection_id},
+                )
+            connection.commit()
+
+    def collections(self) -> list[tuple[int, str, str]]:
+        with engine.connect() as connection:
+            return [
+                (row[0], row[1], row[2])
+                for row in connection.execute(
+                    text("SELECT id, name, name_folded FROM collections ORDER BY id")
+                )
+            ]
+
+    def names_only(self) -> list[tuple[int, str]]:
+        """`collections()` reads `name_folded`, which a refused upgrade has not
+        added, so the refusal tests need a query that predates the column."""
+        with engine.connect() as connection:
+            return [
+                (row[0], row[1])
+                for row in connection.execute(
+                    text("SELECT id, name FROM collections ORDER BY id")
+                )
+            ]
+
+    def shelf_of(self, title: str) -> int | None:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT collection_id FROM books WHERE title = :title"),
+                {"title": title},
+            ).scalar()
+
+    def dangling_books(self) -> int:
+        with engine.connect() as connection:
+            return int(
+                connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM books WHERE collection_id IS NOT NULL "
+                        "AND collection_id NOT IN (SELECT id FROM collections)"
+                    )
+                ).scalar_one()
+            )
+
+    def test_the_pair_becomes_one_collection(self):
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert [name for _id, name, _folded in self.collections()] == ["Fiction", self.UPPER]
+
+    def test_the_lower_id_survives(self):
+        """The tie-break, and it is not arbitrary: `_first_wins` in
+        `importing.py` and `create_tag` in `routers/books.py` fold the same way
+        and keep the same end. Two folding rules disagreeing about the winner
+        is the defect `docs/decisions.md` records."""
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert self.collections()[1][:2] == (2, self.UPPER)
+
+    def test_both_books_end_up_on_the_survivor(self):
+        """The assertion the whole revision turns on. An implementation that
+        deletes the loser without repointing leaves this book pointing at an id
+        that is gone, and nothing raises."""
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert self.shelf_of("Upper") == 2
+        assert self.shelf_of("Lower") == 2
+
+    def test_no_book_points_at_a_collection_that_is_gone(self):
+        """The second half of the same defect, and the one the first assertion
+        cannot see. A dangling id is not a null: the deleted row is the higher
+        rowid, which SQLite gives to the next insert, so the book silently
+        joins whatever collection is created next."""
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert self.dangling_books() == 0
+
+    def test_a_freed_id_is_not_reused_by_a_book_that_should_not_have_it(self):
+        """The failure mode above, made visible.
+
+        The merge frees the pair's higher id, which is the highest rowid in the
+        table, so the next insert takes it back. A migration that deleted the
+        loser without repointing would leave a book on that id, and this
+        collection would inherit it. See the note on the fixture: the insertion
+        order is what makes the freed id reachable at all.
+        """
+        self.build_database_with_a_colliding_pair()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO collections (name, name_folded) VALUES ('Later','later')")
+            )
+            connection.commit()
+            later = connection.execute(
+                text("SELECT id FROM collections WHERE name = 'Later'")
+            ).scalar_one()
+            # The point of the test: this is the id the merge freed. If it is
+            # not, the count below is true for a reason unrelated to the
+            # repoint and the test proves nothing.
+            assert later == 3
+            filed = connection.execute(
+                text("SELECT COUNT(*) FROM books WHERE collection_id = :later"),
+                {"later": later},
+            ).scalar_one()
+
+        assert filed == 0
+
+    def test_a_group_of_more_than_two_merges_in_one_go(self):
+        """Reachable, and not obviously so. A pair like "Ästhetik" and
+        "ÄSTHETIK" could never coexist, because they differ in ASCII letters
+        too and the old index caught that. Two accented letters make four
+        spellings that the old index saw as four names and Python folds to one,
+        so the repoint has to take a list of losers rather than a single id.
+        """
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            for index, name in enumerate(("ÄÖ", "äÖ", "Äö", "äö"), start=1):
+                connection.execute(
+                    text("INSERT INTO collections (name) VALUES (:name)"), {"name": name}
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, collection_id) VALUES (:title, :collection_id)"
+                    ),
+                    {"title": f"Book {index}", "collection_id": index},
+                )
+            connection.commit()
+
+        schema.upgrade_to_head()
+
+        assert [name for _id, name, _folded in self.collections()] == ["ÄÖ"]
+        assert [self.shelf_of(f"Book {index}") for index in range(1, 5)] == [1, 1, 1, 1]
+        assert self.dangling_books() == 0
+
+    def test_a_collection_with_no_variant_is_untouched(self):
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert self.shelf_of("Other") == 1
+
+    def test_the_fold_is_backfilled(self):
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        assert [folded for _id, _name, folded in self.collections()] == [
+            "fiction",
+            self.LOWER,
+        ]
+
+    def test_the_new_index_refuses_a_non_ascii_case_clash(self):
+        """The rule is the index rather than the handler's check, which races.
+        This is the pair that the old `lower(name)` index allowed."""
+        self.build_database_with_a_colliding_pair()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text("INSERT INTO collections (name, name_folded) VALUES (:name, :folded)"),
+                {"name": "ÄSTHETIK", "folded": self.LOWER},
+            )
+
+    def test_the_foreign_key_survives_the_table_rewrite(self):
+        """`collections` is rebuilt to make `name_folded` NOT NULL, and it is
+        the parent of `books.collection_id`. A rewrite that lost the constraint
+        would leave `ON DELETE SET NULL` decorative on every upgraded database,
+        which is the same class of regression `d5c31b7a09fe` had to work around
+        for a partial index."""
+        self.build_database_with_a_colliding_pair()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text("DELETE FROM collections WHERE id = 2"))
+            connection.commit()
+
+        assert self.shelf_of("Upper") is None
+        assert self.shelf_of("Lower") is None
+
+    def test_the_id_index_survives_the_table_rewrite(self):
+        self.build_database_with_a_colliding_pair()
+
+        schema.upgrade_to_head()
+
+        names = {index["name"] for index in inspect(engine).get_indexes("collections")}
+        assert "ix_collections_id" in names
+        assert "uq_collections_name_folded" in names
+
+    def test_a_book_already_pointing_nowhere_stops_the_upgrade(self):
+        """A dangling id cannot be written by the app: the delete route, the
+        ORM and `ON DELETE SET NULL` under `PRAGMA foreign_keys=ON` each
+        prevent it, which is why this test has to turn the pragma off to build
+        one. Arriving with one means the rows were edited by hand, and the
+        upgrade reports rather than guessing what they meant."""
+        self.build_database_with_a_colliding_pair()
+        with self._with_foreign_keys_off() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, collection_id, added_by_user_id) "
+                    "VALUES ('Nowhere', 9999, 1)"
+                )
+            )
+
+        with pytest.raises(RuntimeError, match="does not exist"):
+            schema.upgrade_to_head()
+
+    def test_a_refused_upgrade_changes_nothing(self):
+        """It has to leave the database exactly as it was found, because a
+        failed revision here does not roll back on its own: Alembic's SQLite
+        implementation sets `transactional_ddl = False`, so nothing wraps the
+        revision, and pysqlite runs DDL outside the transaction it opens for
+        DML. That is why both checks run before the first DDL statement.
+        """
+        self.build_database_with_a_colliding_pair()
+        with self._with_foreign_keys_off() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, collection_id, added_by_user_id) "
+                    "VALUES ('Nowhere', 9999, 1)"
+                )
+            )
+
+        with pytest.raises(RuntimeError):
+            schema.upgrade_to_head()
+
+        assert current_revision() == self.PREVIOUS
+        columns = {column["name"] for column in inspect(engine).get_columns("collections")}
+        assert "name_folded" not in columns
+        assert [name for _id, name in self.names_only()] == [
+            "Fiction",
+            self.UPPER,
+            self.LOWER,
+        ]
+
+    def test_the_downgrade_restores_the_old_index_and_cannot_un_merge(self):
+        """Schema, not data. The losing rows and the names on them are gone, so
+        a downgrade gives back the shape and not the shelves."""
+        from alembic import command
+
+        self.build_database_with_a_colliding_pair()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        with engine.connect() as connection:
+            definitions = [
+                row[0]
+                for row in connection.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master WHERE tbl_name = 'collections' "
+                        "AND sql IS NOT NULL"
+                    )
+                )
+            ]
+        assert any("lower(name)" in definition for definition in definitions)
+        assert not any("name_folded" in definition for definition in definitions)
+        assert [name for _id, name in self.names_only()] == ["Fiction", self.UPPER]

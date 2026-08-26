@@ -8,6 +8,8 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 
+import { useSortedByName } from "../../i18n";
+
 import {
   getListCollectionsQueryKey,
   useCreateCollection,
@@ -39,6 +41,10 @@ export interface UseCollectionsResult {
 export function useCollections(): UseCollectionsResult {
   const queryClient = useQueryClient();
   const query = useListCollections({ query: { retry: false } });
+  // The endpoint orders by `lower(name)`, which is a case fold and not a
+  // collation: it still files every accented name after `z`. See
+  // `lib/nameOrder.ts`.
+  const collections = useSortedByName(query.data);
 
   const refreshList = () =>
     void queryClient.invalidateQueries({ queryKey: getListCollectionsQueryKey() });
@@ -61,7 +67,7 @@ export function useCollections(): UseCollectionsResult {
   });
 
   return {
-    collections: query.data ?? [],
+    collections,
     isLoading: query.isPending,
     error: query.error,
     refetch: () => void query.refetch(),

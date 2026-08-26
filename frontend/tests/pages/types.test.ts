@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   LendingWillingness,
+  Locale,
   TagCategory,
 } from "../../src/api/generated/model";
 import {
@@ -94,7 +95,7 @@ describe("style tables", () => {
 
 describe("groupTagsByCategory", () => {
   it("puts each tag under its own category", () => {
-    const grouped = groupTagsByCategory(makeTagSet());
+    const grouped = groupTagsByCategory(makeTagSet(), Locale.en);
     expect(grouped[TagCategory.type].map((tag) => tag.name)).toEqual([
       "Fiction",
     ]);
@@ -107,28 +108,39 @@ describe("groupTagsByCategory", () => {
   it("returns an entry for every category, even when empty", () => {
     // Callers index straight into the result, so a missing key would be a
     // crash rather than an empty section.
-    const grouped = groupTagsByCategory([]);
+    const grouped = groupTagsByCategory([], Locale.en);
     for (const category of Object.values(TagCategory)) {
       expect(grouped[category]).toEqual([]);
     }
   });
 
   it("keeps several tags in the same category", () => {
-    const grouped = groupTagsByCategory([
-      makeTag({ name: "Fantasy", category: TagCategory.genre }),
-      makeTag({ name: "Horror", category: TagCategory.genre }),
-    ]);
+    const grouped = groupTagsByCategory(
+      [
+        makeTag({ name: "Fantasy", category: TagCategory.genre }),
+        makeTag({ name: "Horror", category: TagCategory.genre }),
+      ],
+      Locale.en,
+    );
     expect(grouped[TagCategory.genre]).toHaveLength(2);
   });
 
-  it("preserves the order it was given", () => {
-    const grouped = groupTagsByCategory([
-      makeTag({ name: "Horror", category: TagCategory.genre }),
-      makeTag({ name: "Fantasy", category: TagCategory.genre }),
-    ]);
+  it("orders the tags inside a category by name", () => {
+    // Not the order it was given, which used to be the assertion here: the
+    // endpoint's `Tag.category, Tag.name` is a codepoint sort, so an accented
+    // tag arrived below every ASCII one inside its own category.
+    const grouped = groupTagsByCategory(
+      [
+        makeTag({ name: "Horror", category: TagCategory.genre }),
+        makeTag({ name: "Ökologie", category: TagCategory.genre }),
+        makeTag({ name: "Fantasy", category: TagCategory.genre }),
+      ],
+      Locale.en,
+    );
     expect(grouped[TagCategory.genre].map((tag) => tag.name)).toEqual([
-      "Horror",
       "Fantasy",
+      "Horror",
+      "Ökologie",
     ]);
   });
 });

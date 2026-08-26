@@ -900,6 +900,206 @@ class TestCollectionsSurvive:
         assert res.json()["collections"] == 0
 
 
+class TestRestoringTheCollectionFold:
+    """`collections.name_folded` is derived, and a restore does not derive it.
+
+    `restore()` inserts through Core, so `Collection._fold_the_name` never
+    fires. `_parse_row` recomputes the value instead, which is the same reason
+    the `cover_url` block beside it exists.
+    """
+
+    def test_an_archive_written_before_the_fold_existed_still_restores(
+        self, client, admin, library, db
+    ):
+        """The column is NOT NULL, so without the recompute this is an
+        `IntegrityError`, which is not `RestoreError`, so the route answers 500
+        and the library's older backups become unrestorable."""
+        from models import Collection
+
+        client.post(
+            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["collections"]:
+            row.pop("name_folded", None)
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        db.expire_all()
+        assert db.query(Collection).one().name_folded == "ästhetik"
+
+    def test_a_fold_that_disagrees_with_its_name_is_recomputed(
+        self, client, admin, library, db
+    ):
+        """The unique index catches two rows folding the same. It can never
+        catch one row folding wrongly, and an archive is a file an admin was
+        handed rather than a file the app wrote."""
+        from models import Collection
+
+        client.post(
+            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["collections"]:
+            row["name_folded"] = "something else entirely"
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        assert db.query(Collection).one().name_folded == "ästhetik"
+
+    def test_a_name_that_is_not_text_is_refused(self, client, admin, library, db):
+        """The recompute used to be guarded by `isinstance(name, str)`, so a
+        non-string name skipped it and the archive's own fold stood.
+
+        SQLite's TEXT affinity then converts quietly. Measured against the real
+        column types: `{"name": 1}` and `{"name": true}` both insert as the
+        string `'1'`, so two collections a reader cannot tell apart pass
+        `uq_collections_name_folded` while their folds describe no name at all.
+        The unique index cannot catch it, because the folds differ. This is the
+        sibling of the test above and the one that reaches the guard: that one
+        leaves `name` a string, so it never did.
+        """
+        client.post(
+            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        manifest["tables"]["collections"][0]["name"] = 1
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400, res.text
+        assert "not text" in res.json()["detail"]
+
+    def test_two_collections_folding_the_same_are_refused(
+        self, client, admin, library, db
+    ):
+        """Only an archive taken before `e7b3d02a5c94` can hold such a pair,
+        which is the same archive the recompute exists to keep restorable.
+        Recomputing keeps the missing column restorable and cannot keep the
+        pair restorable: the pair is what the new index forbids.
+
+        Without the check the insert raises `IntegrityError`, which is not
+        `RestoreError`, so the route answers 500 rather than the 400 it
+        promises and names neither collection.
+        """
+        client.post(
+            "/api/collections", json={"name": "Ästhetik"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        rows = manifest["tables"]["collections"]
+        twin = dict(rows[0])
+        twin["id"] = max(int(row["id"]) for row in rows) + 1
+        twin["name"] = "ästhetik"
+        # Exactly a pre-revision archive: the column the pair predates.
+        for row in (*rows, twin):
+            row.pop("name_folded", None)
+        rows.append(twin)
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400, res.text
+        detail = res.json()["detail"]
+        assert "Ästhetik" in detail and "ästhetik" in detail
+
+    def test_two_collections_spelled_identically_are_refused(
+        self, client, admin, library, db
+    ):
+        """The sibling of the test above, and the one an earlier guard missed.
+
+        That guard compared the stored spelling rather than the fold, so a pair
+        differing in case was caught and a pair spelled **identically** was
+        waved through. The unique index is on the fold, so the identical pair
+        collides just the same, and what came back was a 500 naming neither
+        collection: exactly the outcome the refusal exists to replace.
+
+        Reachable because a hand edited archive is not required to be self
+        consistent, which is the same assumption
+        `test_a_name_that_is_not_text_is_refused` turns on.
+        """
+        client.post(
+            "/api/collections", json={"name": "Fiction"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        rows = manifest["tables"]["collections"]
+        twin = dict(rows[0])
+        twin["id"] = max(int(row["id"]) for row in rows) + 1
+        rows.append(twin)
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400, res.text
+        assert "Fiction" in res.json()["detail"]
+
+    def test_a_hostile_name_cannot_flood_the_error_body(
+        self, client, admin, library, db
+    ):
+        """Both refusals quote a name the archive supplied, and `repr` then
+        `json.dumps` amplify it about twenty times on the way out. The manifest
+        parse is unbounded at 1 GiB, which is pre-existing; this is the
+        amplification on top of it, and it costs one slice."""
+        client.post(
+            "/api/collections", json={"name": "Fiction"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        rows = manifest["tables"]["collections"]
+        twin = dict(rows[0])
+        twin["id"] = max(int(row["id"]) for row in rows) + 1
+        twin["name"] = "F" * 100_000
+        rows[0]["name"] = "F" * 100_000
+        rows.append(twin)
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 400, res.text
+        # Two names at 120 characters each, plus the sentence around them.
+        assert len(res.json()["detail"]) < 500
+
+    def test_a_tag_name_is_left_alone(self, client, admin, library, db):
+        """`tags` has a `name` too and no fold. Keyed on the column being in
+        the table, not on the row having a name."""
+        row = backup._parse_row({"name": "Fiction"}, {}, Base.metadata.tables["tags"])
+
+        assert row == {"name": "Fiction"}
+
+
 class TestTheRestoreReportCannotSilentlyDropATable:
     """The report says a number for every field it declares, and each of those
     numbers has to have been counted.

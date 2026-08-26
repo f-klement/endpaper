@@ -18,7 +18,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useToast } from "../../app/toast";
-import { useTranslation } from "../../i18n";
+import { useSortedByName, useTranslation } from "../../i18n";
 
 import {
   getListAuthorSuggestionsQueryKey,
@@ -53,6 +53,11 @@ export function useAuthors(): UseAuthorsResult {
   const authors = useListAuthors({ query: { retry: false } });
   const suggestions = useListAuthorSuggestions({ query: { retry: false } });
 
+  // `build_index` sorts on `name.casefold()`, which is a fold and not a
+  // collation: it files Ä after Z. An index of people is the one list here a
+  // reader scans alphabetically rather than searches. See `lib/nameOrder.ts`.
+  const ordered = useSortedByName(authors.data);
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: getListAuthorsQueryKey() });
     void queryClient.invalidateQueries({
@@ -84,7 +89,7 @@ export function useAuthors(): UseAuthorsResult {
   const undo = useUnmergeAuthor({ mutation: { onSuccess: refresh } });
 
   return {
-    authors: authors.data ?? [],
+    authors: ordered,
     // A failure here costs the suggestions, not the page: the index is the
     // reason somebody opened it.
     suggestions: suggestions.data ?? [],

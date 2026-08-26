@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Changed: two shelves whose names differ only in case are now one shelf, and an
+upgrade merges any pair a library already has.** A library that had both "Ästhetik"
+and "ästhetik" had two shelves nothing downstream could tell apart, because the rule
+that keeps one name per collection compared only the twenty six plain English letters
+and left every accented one alone. It now compares every letter, so the pair cannot be
+made again. Where one already exists, the upgrade keeps the older of the two shelves,
+moves every book from the newer one onto it, and writes both spellings into the log.
+No book is deleted and none is left unfiled. Merging two shelves cannot be undone.
+
+Restoring a backup does the opposite and says so. An old backup holding such a pair
+is refused, naming both spellings, rather than merged quietly: an upgrade cannot ask
+anybody anything, but somebody restoring a file can be told what is wrong with it and
+where to fix it.
+
+**Fixed: a name starting with an accented letter sorted after every other name.**
+A collection called "Ästhetik" or an author called "Émile Zola" was filed below
+"Zebra" rather than beside "A" and "E", because the database compares letters by
+their number and an accented letter's number is above every plain one. Collections,
+tags, series and the author index are now ordered by the browser, in the language
+the app is set to.
+
 **Internal: one module now owns every book query.** `backend/shelf.py` is the only
 place that applies the privacy rule, so a listing, a count, an index or an export
 is scoped to what a member may see by how it is built rather than by remembering a

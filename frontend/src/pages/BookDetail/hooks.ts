@@ -74,7 +74,7 @@ import {
 import { useListUsers } from "../../api/generated/endpoints/users/users";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
-import { useTranslation } from "../../i18n";
+import { useSortedByName, useTranslation } from "../../i18n";
 import type {
   BookMatch,
   BookDetailsUpdate,
@@ -128,12 +128,18 @@ export function useBook(bookId: number): UseBookResult {
   const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
   const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
 
+  // The picker is a name list, and the endpoint's `lower(name)` is a fold
+  // rather than a collation. `locations` is deliberately left alone: it arrives
+  // most-populated first, which is an answer to a different question. See
+  // `lib/nameOrder.ts`.
+  const filed = useSortedByName(collections.data);
+
   return {
     book: book.data,
     tags: tags.data ?? [],
     users: users.data ?? [],
     locations: locations.data ?? [],
-    collections: collections.data ?? [],
+    collections: filed,
     isLoading: book.isPending,
     error: book.error,
     refetch: () => void book.refetch(),

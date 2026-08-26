@@ -57,13 +57,26 @@ class TestMakingOne:
         assert len(collections(client, admin["headers"]).json()) == 1
 
     def test_the_database_refuses_a_case_insensitive_clash(self, db):
-        """The handler's check races; `uq_collections_name_nocase` does not."""
+        """The handler's check races; `uq_collections_name_folded` does not."""
         db.add(Collection(name="Ebooks"))
         db.commit()
         db.add(Collection(name="EBOOKS"))
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
+
+    def test_a_non_ascii_case_variant_returns_that_collection(self, client, admin):
+        """Issue #77. This answered 201 with a second id, and the library then
+        held two shelves a picker cannot tell apart. It is the ASCII case above
+        with one letter changed, and it behaved differently because SQLite's
+        `lower()` folds ASCII and nothing else."""
+        first = make_collection(client, admin["headers"], "Ästhetik").json()
+
+        again = make_collection(client, admin["headers"], "ästhetik")
+
+        assert again.status_code == 201
+        assert again.json()["id"] == first["id"]
+        assert len(collections(client, admin["headers"]).json()) == 1
 
     def test_an_anonymous_caller_is_refused(self, client):
         assert client.post("/api/collections", json={"name": "Ebooks"}).status_code == 401
@@ -125,6 +138,25 @@ class TestRenaming:
         res = client.patch(
             f"/api/collections/{sold['id']}",
             json={"name": "ebooks"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 409
+
+    def test_renaming_onto_a_non_ascii_case_variant_is_refused(self, client, admin):
+        """409 and not 500, which is the distinction that matters here.
+
+        `_named` and the unique index both fold in Python now. Had only the
+        check been fixed, it would have found no clash, the insert would have
+        hit the index, and the tag version of this bug is exactly that: an
+        `IntegrityError` reaching the client as a 500.
+        """
+        make_collection(client, admin["headers"], "Ästhetik")
+        sold = make_collection(client, admin["headers"], "Sold").json()
+
+        res = client.patch(
+            f"/api/collections/{sold['id']}",
+            json={"name": "ästhetik"},
             headers=admin["headers"],
         )
 
