@@ -31,13 +31,32 @@ with that id exists, which is precisely what privacy is meant to withhold. `403`
 reserved for cases where the thing is known to exist but the *decision* is not the
 caller's: changing the privacy of a public book someone else added.
 
-### Where the rule must be applied by hand
+### Where the rule is applied
 
 `visible_to()` is a query predicate, not a row-level policy, so **every query that returns
-or counts books has to apply it**. That includes the four statistics aggregations and the
-loans list, which would otherwise disclose the title of a book the caller cannot see along
-with who currently has it. Forgetting it in a new endpoint leaks data and nothing else in
-the stack will notice.
+or counts books has to apply it**. That includes the statistics aggregations and the loans
+list, which would otherwise disclose the title of a book the caller cannot see along with
+who currently has it.
+
+It is applied in exactly one module. `backend/shelf.py` is the only place that imports the
+predicate and the only place that builds a query **naming** `Book`, so a new endpoint gets
+the rule by asking for a shelf rather than by remembering a filter. "Naming" is the load
+bearing word: `backup.py` reads every row of `books` through a loop variable, which no rule
+of this shape can see, and it is covered below rather than by that sentence. Two named functions read
+past a viewer and neither is a general escape: `whole_table_for_uniqueness()`, because the
+ISBN and copy-group constraints span the table and a filtered check would miss the row
+that collides, and `rereading_filtered_rows()`, which takes ids a caller already filtered.
+
+Two modules are deliberately outside it. `notifications.py`: the overdue digest runs on a
+schedule for the library and has no viewer, so it partitions on privacy (`is_(False)` for
+the reminders it sends, `is_(True)` for a count of what privacy held back) rather than
+filtering by it. `backup.py`: it reads every row of every table so that a restore cannot
+produce a library missing rows, which is why it is admin only.
+
+`backend/tests/test_shelf.py::TestTheShelfIsTheOnlyWayIn` enforces all of that and names
+both rather than letting either pass quietly. `backup.py` needs naming most, because it
+builds its query from a loop variable and no rule reading the arguments to `query()` can
+see it at all.
 
 ## Authentication
 

@@ -24,10 +24,11 @@ import csv_import
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
 from enums import OwnershipStatus, ReadStatus, TagCategory
-from models import Book, Note, Tag, UserBook, visible_to
+from models import Book, Note, Tag, UserBook
 from ratelimit import import_limiter
 from schemas import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.tag import MAX_TAG_NAME
+from shelf import Shelf, whole_table_for_uniqueness
 
 logger = logging.getLogger("endpaper.imports")
 
@@ -283,8 +284,8 @@ class _CatalogueIndex:
     @classmethod
     def build(cls, db: DbSession, user_id: int) -> _CatalogueIndex:
         visible = (
-            db.query(Book.id, Book.isbn, Book.title)
-            .filter(visible_to(user_id))
+            Shelf.seen_by(db, user_id)
+            .select(Book.id, Book.isbn, Book.title)
             .order_by(Book.id)
             .all()
         )
@@ -298,11 +299,17 @@ class _CatalogueIndex:
             # title collide, which is acceptable for a status and would not be
             # for anything destructive.
             by_title=_first_wins((title.lower(), book_id) for book_id, _isbn, title in visible),
-            # visible_to exempt: the ISBN is unique across the whole table, so
-            # an import row that collides with a book this member cannot see
-            # still collides. Filtering here would let the import write a row
-            # the database then refuses, turning a reported conflict into a 500.
-            taken_isbns={isbn for (isbn,) in db.query(Book.isbn).filter(Book.isbn.isnot(None))},
+            # `whole_table_for_uniqueness`: the ISBN is unique across the
+            # whole table, so an import row that collides with a book this
+            # member cannot see still collides. Filtering here would let the
+            # import write a row the database then refuses, turning a reported
+            # conflict into a 500.
+            taken_isbns={
+                isbn
+                for (isbn,) in whole_table_for_uniqueness(db, Book.isbn).filter(
+                    Book.isbn.isnot(None)
+                )
+            },
             statuses={
                 row.book_id: row
                 for row in db.query(UserBook).filter(UserBook.user_id == user_id)

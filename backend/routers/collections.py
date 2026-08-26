@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, RowId
-from models import Book, Collection, User, visible_to
+from models import Book, Collection, User
 from schemas import CollectionCreate, CollectionOut, CollectionUpdate
+from shelf import Shelf
 
 logger = logging.getLogger("endpaper.collections")
 
@@ -53,8 +54,9 @@ def _counts(db: Session, user_id: int) -> dict[int, int]:
     an N+1 here would be an N+1 nearly everywhere.
     """
     rows = (
-        db.query(Book.collection_id, func.count(Book.id))
-        .filter(Book.collection_id.isnot(None), visible_to(user_id))
+        Shelf.seen_by(db, user_id)
+        .select(Book.collection_id, func.count(Book.id))
+        .filter(Book.collection_id.isnot(None))
         .group_by(Book.collection_id)
         .all()
     )

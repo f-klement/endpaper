@@ -397,7 +397,7 @@ addition: a table of the decisions grouping cannot make. See *Authors* below.
 **There is no `authors` table.** `books.author` is a single free text column holding a
 **comma separated** credit line, and an author is a name inside it. Everything the author
 pages serve is a `GROUP BY` over that column, exactly as the series pages are a `GROUP BY`
-over `series_name`, and `backend/authors.py` is the whole of the derivation.
+over `series_name`. `backend/authorship.py` is the whole of the derivation: it owns the index query, the alias rows and the merge writes, over the pure rules in `backend/authors.py`.
 
 An author is addressed by a **key**, which is derived from the name rather than being an
 identity behind it: `authors.author_key(name)` casefolds, strips accents, turns punctuation
@@ -602,16 +602,18 @@ and_(
 )
 ```
 
-**Every query that returns or counts books must apply it.** It is used by the list,
-search, export and all four statistics aggregations. Forgetting it in a new endpoint
-leaks other people's private books and nothing else in the stack will catch it. That is why
-it is a named function rather than a condition retyped at each call site.
+**Every query that returns or counts books applies it, and none of them says so.**
+`backend/shelf.py` owns the predicate: a caller asks `Shelf.seen_by(db, member_id)` and
+narrows what comes back, so visibility is a property of how the query was built rather
+than something each endpoint has to remember. It used to be retyped at each call site,
+and forgetting it in a new endpoint leaked other people's private books with nothing else
+in the stack to catch it.
 
 **The trashed check rides along here on purpose.** Deleting a book stamps `deleted_at`
 rather than dropping the row, so an accidental delete can be undone. Hiding a trashed book
 needs exactly the same universal reach that privacy does, and every book query already
-calls this function, which is why soft deletion did not have to be chased through twenty
-call sites. A second rule that every query must remember would be the one eventually
+went through this function, which is why soft deletion did not have to be chased through
+twenty call sites. A second rule that every query must remember would be the one eventually
 forgotten. The trash view opts out with `in_trash_for(user_id)`, a separate function rather
 than a flag on this one: a predicate that means "on the shelf" or "in the trash" depending
 on an argument is one a caller can get backwards, and getting it backwards shows every

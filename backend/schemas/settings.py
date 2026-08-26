@@ -188,3 +188,10 @@ class RestoreResult(BaseModel):
     #: be rescanned and a cover refetched, and a quote cannot, so a restore
     #: that silently dropped them is the worst case this field guards against.
     quotes: int = Field(default=0, ge=0)
+    #: The author merge decisions. The clearest case this field exists for: a
+    #: merge writes nothing to `books`, so an archive without these rows
+    #: restored a library where every merged author had split back into its
+    #: spellings while every book looked perfectly intact. The table was
+    #: missing from `backup._TABLES` entirely until 2026-08-26 and no count
+    #: reported its absence.
+    author_aliases: int = Field(default=0, ge=0)

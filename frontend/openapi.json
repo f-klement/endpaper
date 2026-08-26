@@ -3131,6 +3131,12 @@
       "RestoreResult": {
         "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a library would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
         "properties": {
+          "author_aliases": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Author Aliases",
+            "type": "integer"
+          },
           "books": {
             "minimum": 0.0,
             "title": "Books",
@@ -4137,7 +4143,7 @@
     },
     "/api/books/authors/aliases/{alias_id}": {
       "delete": {
-        "description": "Undo one merge. The spelling becomes its own author again.\n\nThis is why merging is allowed to guess. Nothing was rewritten, so removing\nthe row restores exactly the state before it was written, and the books\nwere never involved.\n\nA row whose spelling is on no book this caller can see is **404**, and the\nreason is authority rather than secrecy: undo what you can see the effect\nof. The page offers this beside the spelling it folded, so a row with no\nsuch spelling on your shelf has no button here and no meaning here either.\n\nThat leaves an **orphan** alias, whose spelling is on nobody's shelf because\nthe book was deleted, unreachable and undeletable. Accepted: it maps a name\nnothing is credited with, so it changes no view, and it starts working again\nby itself if an import re-creates that spelling, which is the property the\nwhole design is for.",
+        "description": "Undo one merge. The spelling becomes its own author again.\n\nThis is why merging is allowed to guess. Nothing was rewritten, so removing\nthe row restores exactly the state before it was written, and the books\nwere never involved.\n\nA row whose spelling is on no book this caller can see is **404**, and the\nreason is authority rather than secrecy: undo what you can see the effect\nof. The page offers this beside the spelling it folded, so a row with no\nsuch spelling on your shelf has no button here and no meaning here either.\n\nThat leaves an **orphan** alias, whose spelling is on nobody's shelf because\nthe book was deleted, unreachable and undeletable. Accepted: it maps a name\nnothing is credited with, so it changes no view, and it starts working again\nby itself if an import re-creates that spelling, which is the property the\nwhole design is for.\n\nHow that is carried out is `authorship.Authorship.unmerge`.",
         "operationId": "unmerge_author",
         "parameters": [
           {
@@ -4180,7 +4186,7 @@
     },
     "/api/books/authors/merge": {
       "post": {
-        "description": "Say that these spellings are one person.\n\n**Nothing in `books` is written.** Every named author keeps its credit line\nexactly as printed, and what changes is one row per spelling saying who\nthat spelling means. Deleting the row undoes it, and a later import that\nre-creates the spelling is folded by the row that is already there. A\nrewrite of the strings could do neither: it is not reversible, and it\nrepairs a split only until the same file is imported again.\n\nAny member, like creating and renaming a collection, and for the same\nreason: it is reversible, and a shelf only an admin can tidy is one nobody\ntidies. Unlike deleting a collection, which is admin only because it\nstrips a label off every book with no undo.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is:\na 403 would confirm that somebody owns a book by that name.\n\nA `keep_name` that is itself already folded into somebody resolves to that\nsomebody, so the map stays one lookup deep. One exception, below: a row\nnaming one of the keys being merged is not followed, because that is how a\nmerge is reversed.\n\nA `keep_name` that no book carries is allowed and is the point: \"Le Guin,\nUrsula K.\" splits into two people, neither spelled correctly, and the\nrepair is a name typed by hand.",
+        "description": "Say that these spellings are one person.\n\n**Nothing in `books` is written.** Every named author keeps its credit line\nexactly as printed, and what changes is one row per spelling saying who\nthat spelling means. Deleting the row undoes it, and a later import that\nre-creates the spelling is folded by the row that is already there.\n\nAny member, like creating and renaming a collection, and for the same\nreason: it is reversible, and a shelf only an admin can tidy is one nobody\ntidies. Unlike deleting a collection, which is admin only because it\nstrips a label off every book with no undo.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is:\na 403 would confirm that somebody owns a book by that name.\n\nA `keep_name` that no book carries is allowed and is the point: \"Le Guin,\nUrsula K.\" splits into two people, neither spelled correctly, and the\nrepair is a name typed by hand. One that is itself already folded into\nsomebody resolves to that somebody, so the mapping stays one lookup deep.\n\nHow that is carried out is `authorship.Authorship.merge`.",
         "operationId": "merge_authors",
         "requestBody": {
           "content": {
@@ -4561,7 +4567,7 @@
     },
     "/api/books/quotes": {
       "get": {
-        "description": "Every passage the caller may see, from every book.\n\nDeclared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches\nin declaration order, so the reverse would make this a request for the book\nwith id \"quotes\".\n\n**This is a book query wearing a different hat**, and `visible_to` is on\nboth halves of it. Without it a quote from somebody else's private book\nwould be listed here with its title and cover, which discloses the book,\nthe passage and that the member owns it, in one 200. The count is filtered\nfor the same reason: an unfiltered total announces how many are hidden.\n\nNewest first. A book's own quotes come back in reading order because a book\nhas one; a list spanning the shelf does not, and the interesting end of it\nis the one somebody just added.\n\nJoined to the book rather than fetching one per row: a hundred quotes over\nninety books is ninety extra statements, which is the N+1 `_books_to_out`\nexists to avoid.",
+        "description": "Every passage the caller may see, from every book.\n\nDeclared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches\nin declaration order, so the reverse would make this a request for the book\nwith id \"quotes\".\n\n**This is a book query wearing a different hat**, so both halves of it are\nrooted at the shelf and joined outward to `quotes`. Without that a quote\nfrom somebody else's private book would be listed here with its title and\ncover, which discloses the book, the passage and that the member owns it,\nin one 200. The count is scoped for the same reason: an unfiltered total\nannounces how many are hidden.\n\nThe count used to be spelled `count(Book.id)` rather than `count(Quote.id)`\nso that the AST guard could see it was a book query at all. That guard is\ngone and the spelling now carries no such weight, but it is left alone\nbecause the two are identical over an inner join on a primary key and\nchanging it would be a diff with no reader.\n\nNewest first. A book's own quotes come back in reading order because a book\nhas one; a list spanning the shelf does not, and the interesting end of it\nis the one somebody just added.\n\nJoined to the book rather than fetching one per row: a hundred quotes over\nninety books is ninety extra statements, which is the N+1 `_books_to_out`\nexists to avoid.",
         "operationId": "list_quotes",
         "parameters": [
           {
@@ -7486,7 +7492,7 @@
     },
     "/api/stats": {
       "get": {
-        "description": "Collection statistics, scoped to what this member may see.\n\nEvery aggregation applies `visible_to` independently. Omitting it from any\none of them would leak another member's private books as a count, which is\nquieter than leaking a title but leaks all the same.",
+        "description": "Collection statistics, scoped to what this member may see.\n\n**Every aggregation is rooted at the same shelf**, which is what makes the\nscoping structural rather than repeated. Each one used to apply a predicate\nbound to a local, and omitting it from any single aggregation would leak\nanother member's private books as a count: quieter than leaking a title,\nand a leak all the same.\n\nEvery join here is written **outward from `books`**, which is the direction\n`Shelf.select` anchors. Written the other way round, a query naming another\ntable and forgetting the join is a cartesian product SQLite answers rather\nthan refuses.",
         "operationId": "get_stats",
         "responses": {
           "200": {

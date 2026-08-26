@@ -590,8 +590,9 @@ class TestEveryRequestBodyRowIdIsBounded:
     def test_the_stated_model_counts_are_the_measured_ones(self) -> None:
         """The docstring's two numbers, recomputed.
 
-        Modelled on `test_models.py::test_the_exemptions_are_still_the_known_ones`,
-        which parses its count out of its own docstring for the same reason.
+        The same habit as `test_serialisation.py`'s
+        `test_the_number_in_the_docstring_is_the_number_it_costs`, which reads
+        its count back out of the docstring rather than trusting it.
         Growing either number is fine; growing it without updating the sentence
         a reader believes is not.
         """
@@ -881,3 +882,251 @@ class TestTheBoundsActuallyRefuse:
         )
         assert response.status_code == 200
         assert response.json()["items"] == []
+
+#: The names an `HTTPException` can be constructed under in this tree.
+#:
+#: `main.py` and `errors.py` both import Starlette's under an alias, so a rule
+#: matching the bare name sees neither.
+_HTTP_EXCEPTION_NAMES = frozenset({"HTTPException", "StarletteHTTPException"})
+
+
+def _http_exception_aliases(tree: ast.Module) -> set[str]:
+    """Every local name in one module that means an HTTP exception class.
+
+    Resolves `from fastapi import HTTPException as HE` the way
+    `test_shelf.py::_book_aliases` resolves the `Book` model, which is the
+    resolver this one is copied from. The attribute form
+    (`fastapi.HTTPException(...)`) is handled at the call instead, since it
+    binds no local name.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in _HTTP_EXCEPTION_NAMES:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def _walk_outside_lambdas(node: ast.AST):
+    """Every node inside this expression, not entering a `Lambda` body.
+
+    A lambda body runs per call, exactly as a function body does, so an
+    exception built inside one is fresh each time.
+    """
+    pending: list[ast.AST] = [node]
+    while pending:
+        current = pending.pop()
+        yield current
+        # Not descended into, and the check is on `current` rather than on its
+        # children because the assigned value can itself be the lambda:
+        # `_MK = lambda: HTTPException(404)` hands this function the `Lambda`
+        # node directly.
+        if isinstance(current, ast.Lambda):
+            continue
+        pending.extend(ast.iter_child_nodes(current))
+
+
+def _constructs_http_exception(node: ast.AST, names: set[str]) -> bool:
+    """Whether an expression constructs an HTTP exception anywhere inside it.
+
+    **Anywhere**, not just at the top: `_ERRORS = {"nf": HTTPException(...)}`
+    and `_A, _B = HTTPException(...), HTTPException(...)` both hide the call
+    one level down, and both share the instance exactly as a bare assignment
+    does.
+    """
+    # A `Lambda` is not descended into: `_MK = lambda: HTTPException(404)` is a
+    # factory that builds a fresh instance per call, which is the approved
+    # shape, and walking through it reported the approved shape as an offence.
+    for child in _walk_outside_lambdas(node):
+        if not isinstance(child, ast.Call):
+            continue
+        func = child.func
+        if isinstance(func, ast.Name) and func.id in names:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in _HTTP_EXCEPTION_NAMES:
+            return True
+    return False
+
+
+def _executed_once(tree: ast.Module):
+    """Every statement that runs once, at import or at class definition.
+
+    The module body and the class bodies inside it, descending through `if`,
+    `try` and `with` but never into a function. A statement inside a function
+    runs per call, and an exception built there is fresh each time.
+    """
+    pending: list[ast.AST] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        yield node
+        if isinstance(node, ast.ClassDef):
+            pending.extend(node.body)
+            continue
+        pending.extend(
+            child for child in ast.iter_child_nodes(node) if isinstance(child, ast.stmt)
+        )
+        # An `except` clause is an `ExceptHandler`, not a statement, so the
+        # filter above drops it and its whole body with it. Measured: the body
+        # of a module level `try` was inspected and its handler was not, while
+        # the docstring and the fixture both claimed `try` was covered.
+        if isinstance(node, ast.Try):
+            pending.extend(
+                statement for handler in node.handlers for statement in handler.body
+            )
+
+
+class TestNoExceptionInstanceIsShared:
+    """House rule: an `HTTPException` is constructed where it is raised.
+
+    A shared instance re-raised per request appends a frame to its
+    `__traceback__` at **every** raise and never releases it, so each refusal
+    permanently pins that frame's locals. On the routes this was found on that
+    meant a `Session` and a `User` row, password hash included, per 404.
+    Measured on the author route: 20 requests took the traceback from 0 to 180
+    frames and retained 20 handler frames. Sync handlers also run in a
+    threadpool, so two concurrent refusals mutate one object's `__traceback__`
+    and `__cause__`.
+
+    Found by a critic on `routers/books.py`, where a refactor had just
+    introduced one, and `dependencies.py` turned out to have had the same
+    defect at three higher traffic sites since it was written. Writing the rule
+    then found a **third** in `routers/covers.py` with five raise sites, which
+    is the worst of them: a cover 404 is ordinary rather than exceptional. That
+    is why this is a rule rather than two fixes.
+
+    **Its blind spots**, because a guard whose limits are undocumented is read
+    as a guarantee it never made:
+
+    * A factory decorated with `@lru_cache` returns one instance forever and
+      looks exactly like the approved fix. Nothing here can see that.
+    * An instance built at import time and stashed on something this rule does
+      not walk: a class attribute reached through a call, a module `__getattr__`,
+      a mutable default mutated later.
+    * Any exception class this rule does not name. It tests HTTP exceptions
+      because those are the ones raised per request; a shared `ValueError`
+      raised in a loop has the same defect and is not covered, and so is a
+      subclass (`class NotFound(HTTPException)`).
+    * A `global` assigned from an `_init()` that import time calls, or a helper
+      that returns one instance. Both are the `@lru_cache` case by another
+      route.
+    * A decorator argument, and a walrus inside a bare expression statement.
+      Measured by the security seat as the only two remaining shapes it could
+      construct; neither is a shape anybody writes, and widening the walk to
+      reach them was refused on that.
+
+    Both fixtures below guard the other direction, because a rule that reports
+    the approved shape is worse than no rule: a factory `def` and a `lambda`
+    both build fresh per call and must stay silent.
+    """
+
+    #: Shapes that must be reported. Asserted per shape, because a rule with no
+    #: test that fails when it is removed is not enforced: mistyping the class
+    #: name would leave every assertion below green against a clean tree.
+    #:
+    #: Ten of these eleven passed the first version of this rule, which matched
+    #: `ast.Name` at `tree.body` only. Measured by the security seat.
+    EVASIONS = {
+        "bare name": "from fastapi import HTTPException\n_NF = HTTPException(404)\n",
+        "attribute form": "import fastapi\n_NF = fastapi.HTTPException(404)\n",
+        "import alias": "from fastapi import HTTPException as HE\n_NF = HE(404)\n",
+        "starlette alias": (
+            "from starlette.exceptions import HTTPException as StarletteHTTPException\n"
+            "_NF = StarletteHTTPException(404)\n"
+        ),
+        "inside a dict": "from fastapi import HTTPException\n_E = {'nf': HTTPException(404)}\n",
+        "tuple unpacking": (
+            "from fastapi import HTTPException\n_A, _B = HTTPException(404), HTTPException(403)\n"
+        ),
+        "annotated": (
+            "from fastapi import HTTPException\n_NF: HTTPException = HTTPException(404)\n"
+        ),
+        "class attribute": (
+            "from fastapi import HTTPException\nclass E:\n    NOT_FOUND = HTTPException(404)\n"
+        ),
+        "default argument": (
+            "from fastapi import HTTPException\ndef f(exc=HTTPException(404)):\n    raise exc\n"
+        ),
+        "inside a try": (
+            "from fastapi import HTTPException\ntry:\n    _NF = HTTPException(404)\n"
+            "except Exception:\n    _NF = None\n"
+        ),
+        "inside a list": "from fastapi import HTTPException\n_E = [HTTPException(404)]\n",
+        "inside an except handler": (
+            "from fastapi import HTTPException\ntry:\n    x = 1\n"
+            "except Exception:\n    _NF = HTTPException(404)\n"
+        ),
+    }
+
+    @staticmethod
+    def _offenders(name: str, source: str) -> list[str]:
+        """Statements that build an exception **once** and hand it out repeatedly.
+
+        Only nodes that execute once are inspected: the module body, class
+        bodies inside it, and the default arguments of any function. A function
+        **body** is deliberately not walked, because a local built there is
+        fresh on every call, which is the approved fix. `auth.py:201,247` are
+        exactly that shape and were reported by a version of this rule that
+        walked everything.
+        """
+        tree = ast.parse(source)
+        names = _http_exception_aliases(tree)
+        found = []
+
+        for node in _executed_once(tree):
+            if (
+                isinstance(node, ast.Assign | ast.AnnAssign)
+                and node.value is not None
+                and _constructs_http_exception(node.value, names)
+            ):
+                found.append(f"{name}:{node.lineno}")
+
+        # Anywhere, including nested: a default argument is evaluated once when
+        # the `def` runs, so an exception built there is as shared as a global.
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            defaults = [d for d in [*node.args.defaults, *node.args.kw_defaults] if d]
+            if any(_constructs_http_exception(d, names) for d in defaults):
+                found.append(f"{name}:{node.lineno}")
+
+        return sorted(set(found))
+
+    @pytest.mark.parametrize("shape", sorted(EVASIONS))
+    def test_the_rule_catches_every_shape_that_shares_an_instance(self, shape: str) -> None:
+        assert self._offenders("probe.py", self.EVASIONS[shape]), f"{shape} evades the rule"
+
+    #: Shapes that build fresh per call and must never be reported. A rule that
+    #: reports the approved fix is worse than no rule.
+    APPROVED = {
+        "factory function": (
+            "from fastapi import HTTPException\n"
+            "def _not_found() -> HTTPException:\n"
+            "    return HTTPException(404)\n"
+        ),
+        "lambda factory": "from fastapi import HTTPException\n_MK = lambda: HTTPException(404)\n",
+        "local in a function": (
+            "from fastapi import HTTPException\n"
+            "def f():\n"
+            "    exc = HTTPException(404)\n"
+            "    raise exc\n"
+        ),
+    }
+
+    @pytest.mark.parametrize("shape", sorted(APPROVED))
+    def test_the_rule_does_not_report_a_shape_that_builds_fresh(self, shape: str) -> None:
+        assert self._offenders("probe.py", self.APPROVED[shape]) == [], shape
+
+    def test_no_module_shares_an_http_exception_instance(self) -> None:
+        offenders = [
+            hit
+            for path in _python_sources()
+            for hit in self._offenders(path.name, path.read_text())
+        ]
+        assert offenders == [], (
+            "These modules hold an HTTPException instance rather than building one "
+            "at the raise. Raising a shared one grows its traceback forever and pins "
+            f"the locals of every frame it passed through: {offenders}"
+        )

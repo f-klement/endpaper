@@ -11,9 +11,8 @@ from typing import Annotated, Any, Final
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, nullslast, or_
-from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy.sql.elements import UnaryExpression
+from sqlalchemy import func, nullslast
+from sqlalchemy.orm import Session, joinedload
 
 import covers
 import google_books
@@ -21,13 +20,7 @@ import isbn as isbn_utils
 import metadata
 import settings_store
 from auth import require_admin
-from authors import (
-    AuthorEntry,
-    author_key,
-    build_index,
-    resolve_alias_map,
-    suggest_merges,
-)
+from authorship import AuthorNotFound, Authorship
 from config import COVERS_DIR
 from dependencies import (
     BookForOwner,
@@ -54,7 +47,6 @@ from enums import (
 )
 from models import (
     AUTHOR_KEY_MAX,
-    AuthorAlias,
     Book,
     Classification,
     Collection,
@@ -67,14 +59,11 @@ from models import (
     UserBook,
     book_tags,
     copy_group_token,
-    in_trash_for,
-    visible_to,
 )
 from ratelimit import cover_backfill_limiter, metadata_limiter
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_ROW_ID,
-    AuthorMergeOut,
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
@@ -112,6 +101,13 @@ from schemas import (
     TagOut,
 )
 from serialisation import book_to_out, books_to_out, suggested_tag_ids
+from shelf import (
+    BookFilters,
+    Loading,
+    Shelf,
+    order_for,
+    whole_table_for_uniqueness,
+)
 from uploads import read_image_upload, replace_image
 
 logger = logging.getLogger("endpaper.books")
@@ -141,9 +137,9 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
     # member could watch somebody else's private additions accrue in a number
     # their own listing said was zero.
     counts = dict(
-        db.query(book_tags.c.tag_id, func.count(book_tags.c.book_id))
-        .join(Book, Book.id == book_tags.c.book_id)
-        .filter(visible_to(current_user.id))
+        Shelf.seen_by(db, current_user.id)
+        .select(book_tags.c.tag_id, func.count(book_tags.c.book_id))
+        .join(book_tags, book_tags.c.book_id == Book.id)
         .group_by(book_tags.c.tag_id)
         .all()
     )
@@ -497,21 +493,7 @@ def export_books(
     current_user: CurrentUser,
     format: Annotated[ExportFormat, Query()] = ExportFormat.CSV,
 ) -> StreamingResponse:
-    books = (
-        db.query(Book)
-        # `Book.collection` eagerly, because the CSV writes its name per row.
-        # A many-to-one lazy load would be answered from the identity map after
-        # the first book on each shelf, so the cost is small and the reason to
-        # state it is that it is not zero and not obvious.
-        .options(
-            joinedload(Book.added_by),
-            joinedload(Book.collection),
-            selectinload(Book.tags),
-        )
-        .filter(visible_to(current_user.id))
-        .order_by(Book.title)
-        .all()
-    )
+    books = Shelf.seen_by(db, current_user.id).all(Book.title.asc(), load=Loading.EXPORTED)
 
     # Batch the read statuses rather than querying per book.
     status_map: dict[int, str] = {}
@@ -638,26 +620,6 @@ def _price_column(minor: int | None) -> str:
 
 # ── Listing ───────────────────────────────────────────────────────────────────
 
-# Annotated explicitly: without it mypy widens the heterogeneous values to
-# `object`, and passing that to order_by() is an error.
-_SORT_CLAUSES: dict[BookSort, UnaryExpression[Any]] = {
-    BookSort.TITLE_ASC: Book.title.asc(),
-    BookSort.TITLE_DESC: Book.title.desc(),
-    BookSort.AUTHOR: Book.author.asc(),
-    BookSort.YEAR_ASC: Book.year.asc(),
-    BookSort.YEAR_DESC: Book.year.desc(),
-    BookSort.NEWEST: Book.added_at.desc(),
-}
-
-# Series order needs two columns and a null rule, so it does not fit the table
-# above. `nullslast` keeps the un-serialised books together at the end instead
-# of scattering them through the list wherever SQLite puts NULL.
-_SERIES_ORDER: tuple[UnaryExpression[Any], ...] = (
-    nullslast(Book.series_name.asc()),
-    nullslast(Book.series_index.asc()),
-)
-
-
 @router.get("", response_model=Page[BookOut])
 def list_books(
     db: DbSession,
@@ -700,147 +662,59 @@ def list_books(
     ] = False,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
 ) -> Page[BookOut]:
-    query = db.query(Book).filter(visible_to(current_user.id))
-
     # Two parameters rather than a magic id for "none", and refused together
     # rather than one silently winning. "Books in collection 3" and "books in
     # no collection" are different questions, and a caller that asked both has
     # made a mistake worth being told about: picking one for them is how a
     # filter quietly shows the wrong shelf.
+    #
+    # Refused here rather than in `BookFilters`, because it is a fact about
+    # this request and the answer is a 422 with a sentence in it. A filter
+    # value object that raised HTTP exceptions would be a schema wearing a
+    # router's hat.
     if collection_id is not None and unfiled:
         raise HTTPException(
             status_code=422,
             detail="Ask for one collection or for the unfiled books, not both.",
         )
-    if collection_id is not None:
-        query = query.filter(Book.collection_id == collection_id)
-    if unfiled:
-        query = query.filter(Book.collection_id.is_(None))
 
-    if ownership is not None:
-        query = query.filter(Book.ownership == ownership)
-
-    if format is not None:
-        query = query.filter(Book.format == format)
-
-    if lending is not None:
-        query = query.filter(Book.lending == lending)
-
-    if series is not None:
-        query = query.filter(Book.series_name == series)
-
-    # An author is a name inside a comma separated column, so this filter
-    # cannot be a comparison: SQLite can neither split the column nor fold the
-    # case, accents and punctuation that decide whether two spellings are one
-    # person, and it knows nothing about the alias rows that decide the rest.
-    # The ids are resolved in Python and handed back as a set, which is exactly
-    # what `/duplicates` does with the same normalisation and for the same
-    # reason.
+    # The author name is resolved to ids **here**, not on the shelf: deciding
+    # which spellings are one person needs the alias rows and the folding
+    # rules, which is an identity question and belongs to `authorship.py`. See
+    # `BookFilters.author_ids`.
     #
-    # The list is bounded by the visible catalogue, because every id in it came
-    # out of a query that applied `visible_to`. Two extra statements, and they
-    # are **per page rather than per request**: this runs again for every page
-    # of a filtered listing, and each time it re-reads every visible credit
-    # line and re-splits it. Measured in `test_books_authors.py`.
-    #
-    # One id is one bound parameter, and SQLite has a ceiling on those:
-    # `SQLITE_LIMIT_VARIABLE_NUMBER`, measured per environment rather than
-    # assumed, is **250,000** in the shipped image (SQLite 3.53.2) and in the
-    # container the suites run in, which CI and the repository's test runner
-    # pin to one digest (3.51.2). Every runtime that runs the suite therefore
-    # agrees with production, and the suite can reach the boundary production
-    # has.
-    #
-    # The one place that differs is a bare `uv run` on a developer's machine:
-    # SQLite 3.50.4, **32,766**. `CLAUDE.md` forbids running the suites there
-    # anyway, but it is worth the sentence, because a debugging session on this
-    # query can raise `OperationalError` at 32,767 rows for a clause neither CI
-    # nor production would refuse, and the obvious conclusion from that is the
-    # wrong one.
-    #
-    # Against a library catalogue of a few thousand books, of which one
-    # author holds a fraction, every one of these numbers is far away. If that
-    # stops being true the fix is a temporary table, not a bigger IN clause.
-    if author is not None:
-        query = query.filter(Book.id.in_(_author_book_ids(db, current_user.id, author)))
+    # The resolution is bounded by the visible catalogue, because every id it
+    # returns came out of a query that applied the predicate. Two extra
+    # statements, and they are **per page rather than per request**: this runs
+    # again for every page of a filtered listing, and each time it re-reads
+    # every visible credit line and re-splits it. Measured in
+    # `test_books_authors.py`.
+    author_ids = (
+        None
+        if author is None
+        else Authorship.seen_by(db, current_user.id).book_ids_for(author)
+    )
 
-    if location is not None:
-        query = query.filter(Book.location == location)
+    filters = BookFilters(
+        q=q,
+        status=status_filter,
+        tag_ids=[int(t) for t in tags.split(",") if t.strip().isdigit()] if tags else (),
+        ownership=ownership,
+        format=format,
+        lending=lending,
+        series=series,
+        author_ids=author_ids,
+        location=location,
+        collection_id=collection_id,
+        unfiled=unfiled,
+        unrated=unrated,
+        discuss=discuss,
+    )
 
-    if q:
-        like = f"%{q}%"
-        query = query.filter(
-            or_(Book.title.ilike(like), Book.author.ilike(like), Book.isbn.ilike(like))
-        )
-
-    if status_filter is not None:
-        query = query.join(
-            UserBook,
-            (UserBook.book_id == Book.id) & (UserBook.user_id == current_user.id),
-            isouter=True,
-        )
-        if status_filter is ReadStatus.UNREAD:
-            # A book with no row has never been touched, which is unread.
-            query = query.filter(
-                or_(UserBook.status == ReadStatus.UNREAD, UserBook.id.is_(None))
-            )
-        else:
-            query = query.filter(UserBook.status == status_filter)
-
-    if unrated:
-        # A separate correlated exists rather than reusing the status join
-        # above: that join is conditional, and depending on it here would make
-        # this filter silently do nothing whenever no status filter was sent.
-        #
-        # `correlate(Book)` is load bearing. When the status filter *has* added
-        # its own UserBook join, SQLAlchemy otherwise auto-correlates UserBook
-        # out of this subquery too, leaving it with no FROM clause at all and
-        # raising rather than filtering. Naming the one table to correlate
-        # against keeps UserBook inside the subquery where it belongs.
-        rated = (
-            db.query(UserBook.id)
-            .filter(UserBook.book_id == Book.id, UserBook.user_id == current_user.id)
-            .filter(UserBook.rating.isnot(None))
-            .correlate(Book)
-        )
-        query = query.filter(~rated.exists())
-
-    if discuss:
-        # **Anybody's** flag, not the caller's, which is the same choice
-        # `discuss_with` on the payload makes and for the same reason: the
-        # filter has to select exactly the books that carry the marker the
-        # grid draws, or pressing it hides half of them.
-        #
-        # `correlate(Book)` for the reason spelled out above `rated`: with a
-        # status filter also in play, SQLAlchemy would otherwise pull UserBook
-        # out of this subquery and leave it with no FROM clause.
-        offered = (
-            db.query(UserBook.id)
-            .filter(UserBook.book_id == Book.id)
-            .filter(UserBook.wants_to_discuss.is_(True))
-            .correlate(Book)
-        )
-        query = query.filter(offered.exists())
-
-    if tags:
-        for tag_id in (int(t) for t in tags.split(",") if t.strip().isdigit()):
-            query = query.filter(Book.tags.any(Tag.id == tag_id))
-
-    # Count before paging: `total` is how many rows match the filters, not how
-    # many are on this page.
-    total = query.with_entities(func.count(Book.id)).order_by(None).scalar() or 0
-
-    # id breaks ties so paging is stable: two books with the same title would
-    # otherwise be free to swap between pages.
-    books = (
-        query.options(joinedload(Book.added_by), selectinload(Book.tags))
-        .order_by(
-            *(_SERIES_ORDER if sort is BookSort.SERIES else (_SORT_CLAUSES[sort],)),
-            Book.id.asc(),
-        )
-        .offset(paging.offset)
-        .limit(paging.limit)
-        .all()
+    books, total = (
+        Shelf.seen_by(db, current_user.id)
+        .matching(filters)
+        .page(paging.offset, paging.limit, *order_for(sort), load=Loading.SERIALISED)
     )
 
     return Page[BookOut](
@@ -919,10 +793,11 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # but rows written before canonicalisation may hold the ISBN-10, so both
     # spellings are checked or the same book gets added twice.
     #
-    # This query deliberately does NOT apply `visible_to`: the ISBN is unique
-    # across the whole table, so a clash with somebody else's private book is
-    # still a clash. That also means it sees **trashed** rows, which is the
-    # trap soft deletion introduces and `_freeable` exists to resolve.
+    # The ISBN walk below reads through `whole_table_for_uniqueness` rather
+    # than a shelf: the ISBN is unique across the whole table, so a clash with
+    # somebody else's private book is still a clash. That also means it sees
+    # **trashed** rows, which is the trap soft deletion introduces and
+    # `_freeable` exists to resolve.
     # Before the ISBN walk below, which purges trashed rows to free the number.
     # A bad collection id refused afterwards would have destroyed them first.
     _checked_collection(db, payload.collection_id)
@@ -931,9 +806,10 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     if payload.isbn:
         forms = isbn_utils.equivalent_forms(payload.isbn)
         if forms:
-            # visible_to exempt: the ISBN is unique across the whole table,
-            # invisible rows included, so a filtered check would miss the row
-            # that is actually going to collide and turn a 409 into a 500.
+            # `whole_table_for_uniqueness`, not a shelf: the ISBN is unique
+            # across the whole table, invisible rows included, so a filtered
+            # check would miss the row that is actually going to collide and
+            # turn a 409 into a 500.
             #
             # **Every holder, not the first one.** Copies made it possible for
             # several rows to hold one ISBN, and freeing only the first was
@@ -948,7 +824,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
             # Ordered live-first so the row named in a 409 is the one on the
             # shelf rather than one in the trash.
             holders = (
-                db.query(Book)
+                whole_table_for_uniqueness(db)
                 .filter(Book.isbn.in_(forms))
                 .order_by(Book.deleted_at.isnot(None), Book.id)
                 .all()
@@ -1184,11 +1060,7 @@ def bulk_action(
     after a release is a breaking change rather than a tidy-up.
     """
     requested = set(payload.book_ids)
-    books = (
-        db.query(Book)
-        .filter(Book.id.in_(requested), visible_to(current_user.id))
-        .all()
-    )
+    books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(requested)).all()
     # Skipped covers both halves of "not yours to change": ids that do not
     # exist and ids belonging to somebody else's private book. Distinguishing
     # them in the response would disclose which of the two it was.
@@ -1388,8 +1260,9 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
     considered rather than the current page.
     """
     rows = (
-        db.query(Book.series_name, Book.series_index)
-        .filter(Book.series_name.isnot(None), visible_to(current_user.id))
+        Shelf.seen_by(db, current_user.id)
+        .select(Book.series_name, Book.series_index)
+        .filter(Book.series_name.isnot(None))
         .all()
     )
 
@@ -1428,109 +1301,20 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
 # endpoints group the column exactly as `list_series` groups `series_name`. The
 # one thing that is stored is `author_aliases`, which holds decisions rather than
 # data: see `models.AuthorAlias` and `docs/decisions.md`.
+#
+# Everything below is a thin call into `authorship.py`, which owns both halves of
+# author identity: the pure rules in `authors.py` and the queries and writes that
+# used to sit here. The 404-not-403 rule is the one thing these handlers still
+# do themselves, because it is an HTTP answer rather than a rule about names.
 
+def _author_not_found() -> HTTPException:
+    """Absent and forbidden reported identically, exactly as
+    `dependencies._not_found` does for a book: a 403 would confirm that
+    somebody owns a book by that name.
 
-def _author_index(
-    db: Session, user_id: int
-) -> tuple[list[AuthorEntry], list[AuthorAlias]]:
-    """Every author this caller can see, and the alias rows behind them.
-
-    **Two statements, whatever the shelf holds**: the visible credit lines, and
-    the alias table. Measured by `test_books_authors.py::
-    test_the_author_index_costs_two_statements` on a shelf of 40 books, which
-    is the same number it costs on a shelf of one.
-
-    The scan is unpaginated on purpose, like `/duplicates` and `/locations`
-    before it: the grouping needs the whole catalogue to count anything
-    correctly, and a page of it would count only the page. It selects two
-    columns rather than whole rows, so what comes back is one id and one string
-    per book.
-
-    `visible_to` is applied here and nowhere else in the feature. Every author,
-    every count and every book id downstream is derived from these rows, so a
-    private book cannot reach an author page, a count, a suggestion or a filter
-    without passing this line first.
+    A fresh instance per raise, for the reason that function records.
     """
-    # `.tuples()` rather than `.all()`: a `Row` is a tuple at runtime and is
-    # not one to a type checker, and `build_index` takes pairs.
-    rows = (
-        db.query(Book.id, Book.author)
-        .filter(Book.author.isnot(None), visible_to(user_id))
-        .tuples()
-        .all()
-    )
-    # Ordered oldest first, which is what makes "the most recent decision wins"
-    # mean something in `build_index` when two aliases name one person with
-    # different spellings.
-    aliases = db.query(AuthorAlias).order_by(AuthorAlias.id).all()
-    return build_index(rows, {row.alias_key: row.canonical_name for row in aliases}), aliases
-
-
-def _author_out(entry: AuthorEntry, alias_ids: dict[str, int]) -> AuthorOut:
-    """One index entry as the API serves it.
-
-    `merged` is built from the entry's own `alias_keys`, which `build_index`
-    fills in only for a spelling that appears on a book **this caller can
-    see**. That is the privacy line for the alias table: the rows are library
-    wide, and one whose spelling survives only on somebody else's private book
-    would otherwise announce that the book exists.
-
-    The author's own key is left out of it: see the comment below.
-    """
-    spelling_for = {author_key(spelling): spelling for spelling in reversed(entry.spellings)}
-    return AuthorOut(
-        key=entry.key,
-        name=entry.name,
-        book_count=len(entry.book_ids),
-        spellings=list(entry.spellings),
-        merged=sorted(
-            (
-                AuthorMergeOut(alias_id=alias_ids[key], spelling=spelling_for.get(key, entry.name))
-                for key in entry.alias_keys
-                # The author's own key is not a spelling folded **into** them.
-                # A merge writes a row for every key it was given, the kept one
-                # included, which is what pins the display name; listing it
-                # here put "Folded in: J. R. R. Tolkien" under the heading
-                # "J. R. R. Tolkien", with an undo beside it.
-                if key != entry.key and key in alias_ids
-            ),
-            key=lambda merged: merged.spelling.casefold(),
-        ),
-    )
-
-
-def _author_book_ids(db: Session, user_id: int, author: str) -> list[int]:
-    """The visible books credited to one author, by key or by any spelling.
-
-    Liberal in what it accepts: `author_key` is idempotent on a key this API
-    issued, so a link carrying the key and a link carrying the display name
-    both land here. A spelling that a merge folded away resolves to the person
-    it was folded into, which is what makes an old link keep working after a
-    tidy-up.
-
-    Resolved through the **whole** alias map rather than through the spellings
-    on this caller's shelf. A link may name a spelling no book carries any more:
-    fold "Le Guin" into "Ursula K. Le Guin", then that into "U. K. Le Guin",
-    and the middle name is on nothing. Resolving through the shelf returned an
-    empty list for it, which reads as "we own nothing by her".
-
-    **Re-read per page, not per request.** The listing is paginated and this
-    runs on every page of it, so a scroll through an author's shelf re-scans
-    and re-splits the whole visible catalogue once per page. Acceptable at
-    library size and the same trade `/duplicates` makes, but it is per page,
-    which is the number to remember if this ever needs a cache.
-
-    An unknown name gives an empty list rather than a 404. This is a filter on
-    a listing, and a listing that matches nothing is empty: the alternative
-    turns a stale bookmark into an error page.
-    """
-    entries, aliases = _author_index(db, user_id)
-    resolved = resolve_alias_map({row.alias_key: row.canonical_name for row in aliases})
-    key = author_key(author)
-    canonical = resolved.get(key)
-    if canonical is not None:
-        key = author_key(canonical)
-    return next((list(entry.book_ids) for entry in entries if entry.key == key), [])
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Author not found")
 
 
 @router.get("/authors", response_model=list[AuthorOut])
@@ -1544,9 +1328,7 @@ def list_authors(db: DbSession, current_user: CurrentUser) -> list[AuthorOut]:
     row than `/duplicates` already returns unpaginated with a whole `BookOut`
     per book.
     """
-    entries, aliases = _author_index(db, current_user.id)
-    alias_ids = {row.alias_key: row.id for row in aliases}
-    return [_author_out(entry, alias_ids) for entry in entries]
+    return Authorship.seen_by(db, current_user.id).listing()
 
 
 @router.get("/authors/suggestions", response_model=list[AuthorSuggestionOut])
@@ -1560,13 +1342,7 @@ def list_author_suggestions(
     was. `authors.suggest_merges` records which rule produced each group so a
     reader can tell a near-certainty from a guess before pressing anything.
     """
-    entries, _ = _author_index(db, current_user.id)
-    return [
-        AuthorSuggestionOut(
-            keys=list(group.keys), names=list(group.names), reasons=list(group.reasons)
-        )
-        for group in suggest_merges(entries)
-    ]
+    return Authorship.seen_by(db, current_user.id).suggestions()
 
 
 @router.post("/authors/merge", response_model=AuthorOut)
@@ -1578,9 +1354,7 @@ def merge_authors(
     **Nothing in `books` is written.** Every named author keeps its credit line
     exactly as printed, and what changes is one row per spelling saying who
     that spelling means. Deleting the row undoes it, and a later import that
-    re-creates the spelling is folded by the row that is already there. A
-    rewrite of the strings could do neither: it is not reversible, and it
-    repairs a split only until the same file is imported again.
+    re-creates the spelling is folded by the row that is already there.
 
     Any member, like creating and renaming a collection, and for the same
     reason: it is reversible, and a shelf only an admin can tidy is one nobody
@@ -1590,83 +1364,19 @@ def merge_authors(
     An author nobody can see is **404, not 403**, exactly as a private book is:
     a 403 would confirm that somebody owns a book by that name.
 
-    A `keep_name` that is itself already folded into somebody resolves to that
-    somebody, so the map stays one lookup deep. One exception, below: a row
-    naming one of the keys being merged is not followed, because that is how a
-    merge is reversed.
-
     A `keep_name` that no book carries is allowed and is the point: "Le Guin,
     Ursula K." splits into two people, neither spelled correctly, and the
-    repair is a name typed by hand.
+    repair is a name typed by hand. One that is itself already folded into
+    somebody resolves to that somebody, so the mapping stays one lookup deep.
+
+    How that is carried out is `authorship.Authorship.merge`.
     """
-    entries, aliases = _author_index(db, current_user.id)
-    by_key = {entry.key: entry for entry in entries}
-
-    # `author_key` on what arrived, not the raw string. It is idempotent on a
-    # key this API issued, so a caller may send either the key or a spelling of
-    # the name and gets the same answer.
-    requested = {author_key(key) for key in payload.keys}
-    # An author the caller can see, or a spelling a previous merge folded away
-    # that they can still see the effect of. The second half is what lets a
-    # merge be corrected without undoing it first: the folded spelling is no
-    # longer an author in its own right, so it is not in `by_key`.
-    reachable = by_key.keys() | {key for entry in entries for key in entry.alias_keys}
-    if any(key not in reachable for key in requested):
-        raise HTTPException(status_code=404, detail="Author not found")
-
-    by_alias_key = {row.alias_key: row for row in aliases}
-    keep_name = payload.keep_name
-    existing_target = by_alias_key.get(author_key(keep_name))
-    # Followed whoever the row belongs to: a canonical name is library wide,
-    # like a collection's name, so there is nothing here to withhold. Gating
-    # this on what the caller can see was tried and withdrawn: it made a chain
-    # storable, and it disagreed with the `reachable` set above, which is a
-    # different question with a different answer.
-    #
-    # **But not a row naming one of the keys being merged.** Reversing a merge
-    # is folding A and B the other way round, which arrives as the same two
-    # keys with the other `keep_name`; following the row that says "B means A"
-    # would rewrite the request back into itself and answer 200 with nothing
-    # changed.
-    if existing_target is not None and existing_target.alias_key not in requested:
-        # The name to keep is one that a previous merge already folded into
-        # somebody else. Following it keeps the map flat: without this the new
-        # rows would point at a name that itself points elsewhere, and
-        # resolution would depend on the order the rows are read in.
-        keep_name = existing_target.canonical_name
-    keep_key = author_key(keep_name)
-
-    for row in aliases:
-        # Rows that pointed at a name being folded away have to come along, or
-        # they are left naming somebody who is now a spelling of somebody else.
-        if author_key(row.canonical_name) in requested and row.alias_key != keep_key:
-            row.canonical_name = keep_name
-
-    for key in sorted(requested):
-        existing = by_alias_key.get(key)
-        if existing is not None:
-            existing.canonical_name = keep_name
-        else:
-            db.add(
-                AuthorAlias(
-                    alias_key=key,
-                    canonical_name=keep_name,
-                    created_by_user_id=current_user.id,
-                )
-            )
-
-    db.commit()
-
-    entries, aliases = _author_index(db, current_user.id)
-    alias_ids = {row.alias_key: row.id for row in aliases}
-    merged = next((entry for entry in entries if entry.key == keep_key), None)
-    if merged is None:
-        # Unreachable while every requested key named an author with a visible
-        # book, which is what the 404 above enforces. It is here for the race:
-        # another member trashing the last of those books between the two index
-        # reads leaves an author with nothing to show.
-        raise HTTPException(status_code=404, detail="Author not found")
-    return _author_out(merged, alias_ids)
+    try:
+        return Authorship.seen_by(db, current_user.id).merge(
+            payload.keys, payload.keep_name, by_user_id=current_user.id
+        )
+    except AuthorNotFound:
+        raise _author_not_found() from None
 
 
 @router.delete("/authors/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1687,17 +1397,16 @@ def unmerge_author(alias_id: RowId, db: DbSession, current_user: CurrentUser) ->
     nothing is credited with, so it changes no view, and it starts working again
     by itself if an import re-creates that spelling, which is the property the
     whole design is for.
+
+    How that is carried out is `authorship.Authorship.unmerge`.
     """
-    alias = db.get(AuthorAlias, alias_id)
-    if alias is None:
-        raise HTTPException(status_code=404, detail="Author not found")
+    try:
+        Authorship.seen_by(db, current_user.id).unmerge(alias_id)
+    except AuthorNotFound:
+        raise _author_not_found() from None
 
-    entries, _ = _author_index(db, current_user.id)
-    if not any(alias.alias_key in entry.alias_keys for entry in entries):
-        raise HTTPException(status_code=404, detail="Author not found")
 
-    db.delete(alias)
-    db.commit()
+# ── Shelf locations ───────────────────────────────────────────────────────────
 
 
 @router.get("/locations", response_model=list[LocationOut])
@@ -1708,13 +1417,23 @@ def list_locations(db: DbSession, current_user: CurrentUser) -> list[LocationOut
     no suggestions turns into six spellings of "living room" within a week.
     """
     rows = (
-        db.query(Book.location, func.count(Book.id))
-        .filter(Book.location.isnot(None), Book.location != "", visible_to(current_user.id))
+        Shelf.seen_by(db, current_user.id)
+        .select(Book.location, func.count(Book.id))
+        .filter(Book.location.isnot(None), Book.location != "")
         .group_by(Book.location)
         .order_by(func.count(Book.id).desc(), Book.location)
         .all()
     )
     return [LocationOut(name=name, book_count=count) for name, count in rows]
+
+
+# ── Duplicates and merging ────────────────────────────────────────────────────
+#
+# "Is this the same **book**", which is a different question from "is this the
+# same **person**" above: these share `authors.author_key` as a normalisation
+# and nothing else, and nothing here reads or writes `author_aliases`. They sat
+# under the Authors header until the author logic moved to `authorship.py` and
+# left the header describing 361 lines it no longer covered.
 
 
 @router.get("/duplicates", response_model=list[DuplicateGroup])
@@ -1743,12 +1462,7 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
     # seconds over 2000 books, on an endpoint that is unpaginated and backs a
     # UI page. `BookOut.tags` lazy-loaded once per book, and `books_to_out`
     # was called once per group rather than once for the lot.
-    books = (
-        db.query(Book)
-        .options(joinedload(Book.added_by), selectinload(Book.tags))
-        .filter(visible_to(current_user.id))
-        .all()
-    )
+    books = Shelf.seen_by(db, current_user.id).all(load=Loading.SERIALISED)
 
     groups: dict[str, list[Book]] = {}
     for book in _one_per_copy_group(books):
@@ -1840,11 +1554,7 @@ def merge_books(
     if payload.keep_id not in payload.book_ids:
         raise HTTPException(status_code=422, detail="keep_id must be one of book_ids")
 
-    books = (
-        db.query(Book)
-        .filter(Book.id.in_(payload.book_ids), visible_to(current_user.id))
-        .all()
-    )
+    books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(payload.book_ids)).all()
     found = {book.id: book for book in books}
     if payload.keep_id not in found:
         raise HTTPException(status_code=404, detail="Book not found")
@@ -2198,10 +1908,7 @@ def backfill_covers(
     # being safe to run twice.
     on_disk = covers.stored_ids()
     catalogue = (
-        db.query(Book)
-        .filter(visible_to(current_user.id), Book.id > after_id)
-        .order_by(Book.id)
-        .all()
+        Shelf.seen_by(db, current_user.id).where(Book.id > after_id).all(Book.id.asc())
     )
     candidates = [book for book in catalogue if book.id not in on_disk]
     batch = candidates[:MAX_BACKFILL_BOOKS]
@@ -2352,15 +2059,12 @@ def list_trash(
     Most recently deleted first. The trash is read to find something just lost,
     not to browse a history.
     """
-    query = db.query(Book).filter(in_trash_for(current_user.id))
-    total = query.with_entities(func.count(Book.id)).order_by(None).scalar() or 0
-
-    books = (
-        query.options(joinedload(Book.added_by), selectinload(Book.tags))
-        .order_by(Book.deleted_at.desc(), Book.id.desc())
-        .offset(paging.offset)
-        .limit(paging.limit)
-        .all()
+    books, total = Shelf.trashed_by(db, current_user.id).page(
+        paging.offset,
+        paging.limit,
+        Book.deleted_at.desc(),
+        Book.id.desc(),
+        load=Loading.SERIALISED,
     )
     return Page[BookOut](
         items=books_to_out(books, current_user, db),
@@ -2382,11 +2086,18 @@ def list_quotes(
     in declaration order, so the reverse would make this a request for the book
     with id "quotes".
 
-    **This is a book query wearing a different hat**, and `visible_to` is on
-    both halves of it. Without it a quote from somebody else's private book
-    would be listed here with its title and cover, which discloses the book,
-    the passage and that the member owns it, in one 200. The count is filtered
-    for the same reason: an unfiltered total announces how many are hidden.
+    **This is a book query wearing a different hat**, so both halves of it are
+    rooted at the shelf and joined outward to `quotes`. Without that a quote
+    from somebody else's private book would be listed here with its title and
+    cover, which discloses the book, the passage and that the member owns it,
+    in one 200. The count is scoped for the same reason: an unfiltered total
+    announces how many are hidden.
+
+    The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+    so that the AST guard could see it was a book query at all. That guard is
+    gone and the spelling now carries no such weight, but it is left alone
+    because the two are identical over an inner join on a primary key and
+    changing it would be a diff with no reader.
 
     Newest first. A book's own quotes come back in reading order because a book
     has one; a list spanning the shelf does not, and the interesting end of it
@@ -2396,27 +2107,25 @@ def list_quotes(
     ninety books is ninety extra statements, which is the N+1 `_books_to_out`
     exists to avoid.
     """
-    # `count(Book.id)`, not `count(Quote.id)`, and that is not a preference.
-    # The two are identical here (an inner join, and `Book.id` is a primary key
-    # that is never null), but `TestEveryBookQueryIsFiltered` recognises a book
-    # query by the arguments to `query()`, so the `Quote.id` spelling put this
-    # statement outside the net entirely: dropping the filter from it was
-    # measured to produce **no** offender, while dropping it from the rows
-    # below correctly reported this file. A count of visible books is what this
-    # is, so it is spelled that way and the rule can see it.
+    # `count(Book.id)`, not `count(Quote.id)`. The two are identical here: an
+    # inner join, and `Book.id` is a primary key that is never null.
+    #
+    # The spelling used to be load bearing. `TestEveryBookQueryIsFiltered`
+    # recognised a book query by the arguments to `query()`, so `count(Quote.id)`
+    # put this statement outside the guard entirely, and dropping its filter was
+    # measured to produce no offender. That guard is gone, and both halves below
+    # are rooted at the shelf instead, so nothing now depends on which column is
+    # counted. Left alone because a count of visible books is what this is.
+    shelf = Shelf.seen_by(db, current_user.id)
+
     total = (
-        db.query(func.count(Book.id))
-        .join(Quote, Quote.book_id == Book.id)
-        .filter(visible_to(current_user.id))
-        .scalar()
-        or 0
+        shelf.select(func.count(Book.id)).join(Quote, Quote.book_id == Book.id).scalar() or 0
     )
 
     rows = (
-        db.query(Quote, Book.title, Book.author, Book.cover_url)
-        .join(Book, Book.id == Quote.book_id)
+        shelf.select(Quote, Book.title, Book.author, Book.cover_url)
+        .join(Quote, Quote.book_id == Book.id)
         .options(joinedload(Quote.author))
-        .filter(visible_to(current_user.id))
         .order_by(Quote.created_at.desc(), Quote.id.desc())
         .offset(paging.offset)
         .limit(paging.limit)
@@ -2448,7 +2157,7 @@ def empty_trash(db: DbSession, current_user: CurrentUser) -> PurgeResult:
     scheduler, and a sweep at startup would delete on restart timing rather
     than on any schedule anybody chose.
     """
-    books = db.query(Book).filter(in_trash_for(current_user.id)).all()
+    books = Shelf.trashed_by(db, current_user.id).all()
     purged = [_purge(book, db) for book in books]
     db.commit()
     # After the commit. See `_purge`: an unlink before it is a file loss no
@@ -2511,11 +2220,9 @@ def list_copies(book: BookForRead, db: DbSession, current_user: CurrentUser) -> 
         return [book_to_out(book, current_user, db)]
 
     copies = (
-        db.query(Book)
-        .options(joinedload(Book.added_by), selectinload(Book.tags))
-        .filter(Book.copy_group == book.copy_group, visible_to(current_user.id))
-        .order_by(Book.id)
-        .all()
+        Shelf.seen_by(db, current_user.id)
+        .where(Book.copy_group == book.copy_group)
+        .all(Book.id.asc(), load=Loading.SERIALISED)
     )
     return books_to_out(copies, current_user, db)
 
@@ -2609,17 +2316,18 @@ def _normalise_copy_group(token: str | None, db: Session) -> None:
     """
     if token is None:
         return
-    # visible_to exempt: this is the uniqueness rule, which spans the whole
-    # table. A group counted per member would clear a token another member's
-    # private copy still needs, and the index does not care who can see a row.
-    remaining = db.query(Book).filter(Book.copy_group == token).all()
+    # `whole_table_for_uniqueness`, not a shelf: this is the uniqueness rule,
+    # which spans the whole table. A group counted per member would clear a
+    # token another member's private copy still needs, and the index does not
+    # care who can see a row.
+    remaining = whole_table_for_uniqueness(db).filter(Book.copy_group == token).all()
     if len(remaining) != 1:
         return
     survivor = remaining[0]
     if survivor.isbn is not None:
-        # visible_to exempt: same rule, same reason as above.
+        # Same rule, same reason as above.
         clash = (
-            db.query(Book.id)
+            whole_table_for_uniqueness(db, Book.id)
             .filter(
                 Book.isbn == survivor.isbn,
                 Book.copy_group.is_(None),

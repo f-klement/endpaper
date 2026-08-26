@@ -40,6 +40,7 @@ import settings_store
 from config import COVERS_DIR
 from database import Base
 from models import (
+    AuthorAlias,
     Book,
     Classification,
     Collection,
@@ -105,6 +106,27 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # quotes existed restores with none, which is the state it was written
         # in.
         ("quotes", Quote),
+        # The author merge decisions. Its only foreign key is `users`, which is
+        # first in this tuple, so it could sit anywhere after that; it is here
+        # beside the other tables that hold what members decided rather than
+        # what the catalogue says.
+        #
+        # **It was missing until 2026-08-26**, and the symptom was silent: a
+        # restore produced a library where every merged author had split back
+        # into its spellings, with the books themselves perfectly intact,
+        # because the merges were never written to `books` in the first place.
+        # Nothing errored, and `docs/data-model.md` called this "the one stored
+        # table in the feature" the whole time. `test_holds_every_table` now
+        # asserts that the archive's **manifest** carries every table in the
+        # metadata, so the next one cannot be forgotten the same way. The
+        # manifest rather than this tuple, because `book_tags` is in the
+        # manifest and deliberately not here: it has no model of its own and is
+        # read straight from the table.
+        #
+        # Absent from `_REQUIRED_TABLES` for the reason `quotes` and
+        # `classifications` are: an archive written before this restores with
+        # no aliases, which is the state it was written in.
+        ("author_aliases", AuthorAlias),
         ("settings", Setting),
     )
 )

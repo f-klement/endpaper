@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+**Internal: one module now owns every book query.** `backend/shelf.py` is the only
+place that applies the privacy rule, so a listing, a count, an index or an export
+is scoped to what a member may see by how it is built rather than by remembering a
+filter. Nothing about what anybody sees has changed; the rule it enforces is the
+same one, enforced in one place instead of twenty four.
+
+**Fixed: a backup did not include the author merges, so restoring one split
+every merged author back into its spellings.** The books themselves were always
+intact, which is why nothing looked wrong: a merge records a decision and never
+rewrites a book. Backups taken from now on carry the decisions. An older archive
+restores with none, which is the state it was written in.
+
+**Fixed: some pages could leave the server holding on to memory it never freed.**
+Every "not found" answer from the cover, book and author routes kept a little
+state alive for the lifetime of the process. Nothing was exposed and nothing was
+lost; a busy library would have seen memory climb slowly.
+
+**Internal: author identity has one owner too.** The rules for deciding that two
+spellings are one person were already in their own module and were already pure;
+everything the database knew about it was in a route handler. Both halves now sit
+together. Nothing about merging, undoing a merge or filtering by an author has
+changed.
+
 ## v0.9.0
 
 _2026-08-26_

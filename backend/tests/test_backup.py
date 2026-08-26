@@ -17,9 +17,10 @@ from io import BytesIO
 import pytest
 
 import backup
+from authors import author_key
 from backup import RestoreError
-from database import SessionLocal
-from models import Book, Loan, Note, Quote, Tag, UserBook
+from database import Base, SessionLocal
+from models import AuthorAlias, Book, Loan, Note, Quote, Tag, UserBook
 
 
 def read_manifest(data: bytes) -> dict:
@@ -100,11 +101,29 @@ def _sign_in(client, account) -> dict[str, str]:
 
 class TestTheArchive:
     def test_holds_every_table(self, client, admin, library):
-        data = client.get("/api/backup", headers=admin["headers"]).content
-        tables = read_manifest(data)["tables"]
+        """Derived from the metadata, never from a list written by hand.
 
-        assert {"users", "tags", "books", "user_books", "reading_progress",
-                "loans", "notes", "quotes", "settings", "book_tags"} <= set(tables)
+        **This test was named "every table" and asserted a hand-written subset
+        with `<=`.** `author_aliases` was in neither the archive nor the list,
+        for as long as the author feature existed, and the symptom was silent:
+        a restore produced a library where every merged author had split back
+        into its spellings while the books themselves were perfectly intact,
+        because a merge never writes to `books`. Nothing errored, and
+        `docs/data-model.md` called it "the one stored table in the feature"
+        the whole time.
+
+        Equality rather than a subset, so a table added to the schema and
+        forgotten here fails, and so does a manifest key naming a table that no
+        longer exists.
+        """
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        tables = set(read_manifest(data)["tables"])
+
+        assert tables == set(Base.metadata.tables), (
+            "the archive and the schema disagree about which tables exist: "
+            f"missing {sorted(set(Base.metadata.tables) - tables)}, "
+            f"unexpected {sorted(tables - set(Base.metadata.tables))}"
+        )
 
     def test_holds_the_book_tag_links(self, client, admin, library):
         """No model of its own, so it is the one that gets forgotten.
@@ -114,6 +133,20 @@ class TestTheArchive:
         """
         data = client.get("/api/backup", headers=admin["headers"]).content
         assert read_manifest(data)["tables"]["book_tags"]
+
+    def test_holds_the_author_merge_decisions(self, client, admin, library):
+        """The one stored table in the author feature, and the one that was
+        missing. A merge writes no `books` row, so losing these rows loses the
+        decision with nothing else looking wrong."""
+        client.post(
+            "/api/books/authors/merge",
+            json={"keys": [author_key("Frank Herbert")], "keep_name": "F. Herbert"},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        aliases = read_manifest(data)["tables"]["author_aliases"]
+        assert [row["canonical_name"] for row in aliases] == ["F. Herbert"]
 
     def test_holds_the_cover_files(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -163,6 +196,37 @@ class TestRoundTrip:
 
         assert res.status_code == 200
         assert res.json()["books"] == 2
+
+    def test_the_author_merges_come_back(self, client, admin, library, db):
+        """The bug this table was added for, end to end.
+
+        A merge writes no `books` row, so when the alias table was left out of
+        the archive a restore came back looking correct in every visible way
+        and quietly split every merged author into its spellings again.
+        """
+        client.post(
+            "/api/books/authors/merge",
+            json={"keys": [author_key("Frank Herbert")], "keep_name": "F. Herbert"},
+            headers=admin["headers"],
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        for alias in db.query(AuthorAlias).all():
+            db.delete(alias)
+        db.commit()
+        assert db.query(AuthorAlias).count() == 0
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["author_aliases"] == 1
+        restored = db.query(AuthorAlias).one()
+        assert restored.canonical_name == "F. Herbert"
 
     def test_the_notes_come_back(self, client, admin, library, db):
         data = client.get("/api/backup", headers=admin["headers"]).content

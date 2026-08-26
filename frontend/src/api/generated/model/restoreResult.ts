@@ -21,6 +21,8 @@
  */
 export interface RestoreResult {
   /** @minimum 0 */
+  author_aliases?: number;
+  /** @minimum 0 */
   books: number;
   /** @minimum 0 */
   collections?: number;

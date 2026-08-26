@@ -25,12 +25,13 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session
 
 from auth import get_current_user, get_current_user_for_cover
 from database import get_db
-from models import Book, User, in_trash_for, visible_to
+from models import Book, User
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID
+from shelf import Loading, Shelf
 
 #: A row id read out of the URL path, bounded at both ends.
 #:
@@ -49,9 +50,23 @@ from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID
 #: exactly as `routers/covers.py` already spells it.
 RowId = Annotated[int, PathParam(ge=1, le=MAX_ROW_ID)]
 
-# Absent and forbidden are reported identically on purpose: a 403 would confirm
-# that a book with this id exists, which is exactly what privacy withholds.
-_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+def _not_found() -> HTTPException:
+    """The answer for a book that is absent, and for one that is not yours.
+
+    **Identical on purpose**: a 403 would confirm that a book with this id
+    exists, which is exactly what privacy withholds.
+
+    A function returning a fresh instance, not a module level singleton, and
+    that is not style. Raising one shared exception object appends a frame to
+    its `__traceback__` on **every** raise and never releases it, so each 404
+    permanently pins that frame's locals: here a `Session` and a `User` row,
+    password hash included. Measured on the author route that had the same
+    shape: 20 requests grew the traceback from 0 to 180 frames and retained 20
+    handler frames. Sync handlers also run in a threadpool, so two concurrent
+    404s would mutate one object's `__traceback__` and `__cause__`.
+    """
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
 
 def book_for_read(
@@ -65,13 +80,12 @@ def book_for_read(
     book does not cost a query per related row later.
     """
     book = (
-        db.query(Book)
-        .options(joinedload(Book.added_by), selectinload(Book.tags))
-        .filter(Book.id == book_id, visible_to(current_user.id))
-        .first()
+        Shelf.seen_by(db, current_user.id)
+        .where(Book.id == book_id)
+        .first(load=Loading.SERIALISED)
     )
     if book is None:
-        raise _NOT_FOUND
+        raise _not_found()
     return book
 
 
@@ -90,13 +104,9 @@ def book_for_cover(
     No eager loading: this one serialises nothing, it decides whether to open a
     file.
     """
-    book = (
-        db.query(Book)
-        .filter(Book.id == book_id, visible_to(current_user.id))
-        .first()
-    )
+    book = Shelf.seen_by(db, current_user.id).where(Book.id == book_id).first()
     if book is None:
-        raise _NOT_FOUND
+        raise _not_found()
     return book
 
 
@@ -115,13 +125,12 @@ def book_in_trash(
     private book stays invisible in the trash too.
     """
     book = (
-        db.query(Book)
-        .options(joinedload(Book.added_by), selectinload(Book.tags))
-        .filter(Book.id == book_id, in_trash_for(current_user.id))
-        .first()
+        Shelf.trashed_by(db, current_user.id)
+        .where(Book.id == book_id)
+        .first(load=Loading.SERIALISED)
     )
     if book is None:
-        raise _NOT_FOUND
+        raise _not_found()
     return book
 
 

@@ -9,9 +9,10 @@ import notifications
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness
-from models import Book, Loan, User, visible_to
+from models import Book, Loan, User
 from schemas import LoanCreate, LoanOut, OverdueNotifyResult, Page
 from serialisation import books_to_out
+from shelf import Shelf
 
 router = APIRouter(prefix="/api/loans", tags=["loans"])
 
@@ -77,11 +78,11 @@ def list_loans(
     active_only: bool = True,
     overdue_only: bool = False,
 ) -> Page[LoanOut]:
-    query = db.query(Loan).join(Book, Loan.book_id == Book.id)
-
-    # A loan of a book the caller cannot see would otherwise disclose its
-    # title and who has it, straight through the loans list.
-    query = query.filter(visible_to(current_user.id))
+    # Rooted at the shelf and joined outward to `loans`, so the privacy
+    # predicate is on the query by construction. A loan of a book the caller
+    # cannot see would otherwise disclose its title and who has it, straight
+    # through the loans list.
+    query = Shelf.seen_by(db, current_user.id).select(Loan).join(Loan, Loan.book_id == Book.id)
 
     if active_only:
         query = query.filter(Loan.returned_at.is_(None))
@@ -156,11 +157,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
 
     The flag is not stored: see `LoanCreate.acknowledge_not_lendable`.
     """
-    book = (
-        db.query(Book)
-        .filter(Book.id == payload.book_id, visible_to(current_user.id))
-        .first()
-    )
+    book = Shelf.seen_by(db, current_user.id).where(Book.id == payload.book_id).first()
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -237,9 +234,10 @@ def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> Loa
     """Recording a return is a shelf action, not an ownership one, so any member
     may do it, for any book they can see."""
     loan = (
-        db.query(Loan)
-        .join(Book, Loan.book_id == Book.id)
-        .filter(Loan.id == loan_id, visible_to(current_user.id))
+        Shelf.seen_by(db, current_user.id)
+        .select(Loan)
+        .join(Loan, Loan.book_id == Book.id)
+        .filter(Loan.id == loan_id)
         .first()
     )
     if loan is None:

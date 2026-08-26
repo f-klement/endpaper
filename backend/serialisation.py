@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
 import ddc
 from enums import ClassificationScheme, ReadStatus
-from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook, visible_to
+from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook
 from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserOut
+from shelf import Shelf, rereading_filtered_rows
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
 # part that is ours rather than theirs: mapping whatever subject headings a
@@ -275,8 +276,9 @@ def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str
     if not groups:
         return {}
     rows = (
-        db.query(Book.copy_group, func.count(Book.id))
-        .filter(Book.copy_group.in_(groups), visible_to(current_user.id))
+        Shelf.seen_by(db, current_user.id)
+        .select(Book.copy_group, func.count(Book.id))
+        .filter(Book.copy_group.in_(groups))
         .group_by(Book.copy_group)
         .all()
     )
@@ -381,10 +383,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     book_ids = [book.id for book in books]
 
-    # visible_to exempt: not a visibility question. These rows were fetched by
-    # a caller that applied the predicate, and this re-reads the same ids to
-    # populate a relationship on the objects already in hand. Filtering here
-    # would answer a question nobody asked.
+    # `rereading_filtered_rows`, not a shelf: this is not a visibility
+    # question. These ids came out of a query that applied the predicate, and
+    # this re-reads the same rows to populate a relationship on the objects
+    # already in hand. Filtering here would answer a question nobody asked.
     #
     # Tags in one query for the whole page. `BookOut.model_validate` reads
     # `book.tags`, which is a lazy relationship, so without this a page of 25
@@ -397,9 +399,9 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # SELECT for the whole page, not one per book: `selectinload` issues a
     # statement per relationship, so this option is why the count above is 7
     # and not 6.
-    db.query(Book).options(
+    rereading_filtered_rows(db, book_ids).options(
         selectinload(Book.tags), selectinload(Book.classifications)
-    ).filter(Book.id.in_(book_ids)).all()
+    ).all()
 
     active_loans = {
         loan.book_id: loan

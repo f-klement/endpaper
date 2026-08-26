@@ -242,7 +242,7 @@ def squashed_key(name: str) -> str:
 def resolve_alias_map(aliases: Mapping[str, str]) -> dict[str, str]:
     """Flatten `alias_key -> canonical name` so one lookup is always enough.
 
-    The writer keeps the map flat (`routers/books.merge_authors` repoints any
+    The writer keeps the map flat (`authorship.Authorship.merge` repoints any
     row that pointed at a name being folded away, and follows a name that is
     itself folded before storing it), so this is a guard rather than a
     mechanism: a hand-edited database, or a future writer that forgets, would

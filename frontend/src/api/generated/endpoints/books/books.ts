@@ -683,6 +683,8 @@ export const getUnmergeAuthorUrl = (aliasId: number) => {
  * nothing is credited with, so it changes no view, and it starts working again
  * by itself if an import re-creates that spelling, which is the property the
  * whole design is for.
+ *
+ * How that is carried out is `authorship.Authorship.unmerge`.
  * @summary Unmerge Author
  */
 export const unmergeAuthor = async (
@@ -774,9 +776,7 @@ export const getMergeAuthorsUrl = () => {
  * **Nothing in `books` is written.** Every named author keeps its credit line
  * exactly as printed, and what changes is one row per spelling saying who
  * that spelling means. Deleting the row undoes it, and a later import that
- * re-creates the spelling is folded by the row that is already there. A
- * rewrite of the strings could do neither: it is not reversible, and it
- * repairs a split only until the same file is imported again.
+ * re-creates the spelling is folded by the row that is already there.
  *
  * Any member, like creating and renaming a collection, and for the same
  * reason: it is reversible, and a shelf only an admin can tidy is one nobody
@@ -786,14 +786,12 @@ export const getMergeAuthorsUrl = () => {
  * An author nobody can see is **404, not 403**, exactly as a private book is:
  * a 403 would confirm that somebody owns a book by that name.
  *
- * A `keep_name` that is itself already folded into somebody resolves to that
- * somebody, so the map stays one lookup deep. One exception, below: a row
- * naming one of the keys being merged is not followed, because that is how a
- * merge is reversed.
- *
  * A `keep_name` that no book carries is allowed and is the point: "Le Guin,
  * Ursula K." splits into two people, neither spelled correctly, and the
- * repair is a name typed by hand.
+ * repair is a name typed by hand. One that is itself already folded into
+ * somebody resolves to that somebody, so the mapping stays one lookup deep.
+ *
+ * How that is carried out is `authorship.Authorship.merge`.
  * @summary Merge Authors
  */
 export const mergeAuthors = async (
@@ -1987,11 +1985,18 @@ export const getListQuotesUrl = (params?: ListQuotesParams) => {
  * in declaration order, so the reverse would make this a request for the book
  * with id "quotes".
  *
- * **This is a book query wearing a different hat**, and `visible_to` is on
- * both halves of it. Without it a quote from somebody else's private book
- * would be listed here with its title and cover, which discloses the book,
- * the passage and that the member owns it, in one 200. The count is filtered
- * for the same reason: an unfiltered total announces how many are hidden.
+ * **This is a book query wearing a different hat**, so both halves of it are
+ * rooted at the shelf and joined outward to `quotes`. Without that a quote
+ * from somebody else's private book would be listed here with its title and
+ * cover, which discloses the book, the passage and that the member owns it,
+ * in one 200. The count is scoped for the same reason: an unfiltered total
+ * announces how many are hidden.
+ *
+ * The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+ * so that the AST guard could see it was a book query at all. That guard is
+ * gone and the spelling now carries no such weight, but it is left alone
+ * because the two are identical over an inner join on a primary key and
+ * changing it would be a diff with no reader.
  *
  * Newest first. A book's own quotes come back in reading order because a book
  * has one; a list spanning the shelf does not, and the interesting end of it

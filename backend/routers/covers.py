@@ -70,7 +70,28 @@ _MEDIA_TYPES: Final[dict[str, str]] = {
     "webp": "image/webp",
 }
 
-_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
+
+def _not_found() -> HTTPException:
+    """A cover that is absent, or one on a book this caller may not see.
+
+    A fresh instance per raise, never a module level one, for the reason
+    `dependencies._not_found` records: a shared exception object accumulates a
+    frame on its `__traceback__` at every raise and never releases it.
+
+    **This route is the worst place in the app to get that wrong.** It has five
+    raise sites, and a cover 404 is ordinary rather than exceptional: every
+    `<img>` on every page hits it, and a book with no stored cover answers 404
+    by design.
+
+    Three of the five pinned a `Session` and the `User` the cover cookie
+    resolved to. The other two are in `get_login_background`, which is public:
+    measured, `GET /api/covers/login_bg.png` answers 404 with no `Authorization`
+    header and no cookie. Those pinned no identity and needed no session at all,
+    which is the sharper half: an unauthenticated caller could grow that object
+    without ever signing in.
+    """
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover not found")
+
 
 #: The same constant `routers/settings.py` writes the file under, from the module
 #: that owns what the covers directory is called. It used to be a third copy,
@@ -101,11 +122,11 @@ def get_login_background(
     """
     normalised = extension.lower()
     if normalised not in ALLOWED_IMAGE_EXTENSIONS:
-        raise _NOT_FOUND
+        raise _not_found()
 
     path = (COVERS_DIR / f"{_LOGIN_BG_BASE}.{normalised}").resolve()
     if not path.is_file():
-        raise _NOT_FOUND
+        raise _not_found()
 
     return FileResponse(
         path,
@@ -135,7 +156,7 @@ def get_cover(
     """
     normalised = extension.lower()
     if normalised not in ALLOWED_IMAGE_EXTENSIONS:
-        raise _NOT_FOUND
+        raise _not_found()
 
     # Built from the book id the router already parsed as an int, and an
     # extension constrained to letters by the route pattern, so neither half
@@ -147,10 +168,10 @@ def get_cover(
     try:
         path.relative_to(Path(COVERS_DIR).resolve())
     except ValueError:  # pragma: no cover
-        raise _NOT_FOUND from None
+        raise _not_found() from None
 
     if not path.is_file():
-        raise _NOT_FOUND
+        raise _not_found()
 
     return FileResponse(
         path,

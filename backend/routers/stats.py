@@ -4,8 +4,9 @@ from fastapi import APIRouter
 from sqlalchemy import func
 
 from dependencies import CurrentUser, DbSession
-from models import Book, Collection, ReadingProgress, Tag, User, UserBook, book_tags, visible_to
+from models import Book, Collection, ReadingProgress, Tag, User, UserBook, book_tags
 from schemas import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
+from shelf import Shelf
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
@@ -56,78 +57,82 @@ def _pages_by_month(rows: list[tuple[int, datetime, int]]) -> list[MonthStat]:
 def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
     """Collection statistics, scoped to what this member may see.
 
-    Every aggregation applies `visible_to` independently. Omitting it from any
-    one of them would leak another member's private books as a count, which is
-    quieter than leaking a title but leaks all the same.
-    """
-    visible = visible_to(current_user.id)
+    **Every aggregation is rooted at the same shelf**, which is what makes the
+    scoping structural rather than repeated. Each one used to apply a predicate
+    bound to a local, and omitting it from any single aggregation would leak
+    another member's private books as a count: quieter than leaking a title,
+    and a leak all the same.
 
-    total = db.query(func.count(Book.id)).filter(visible).scalar() or 0
+    Every join here is written **outward from `books`**, which is the direction
+    `Shelf.select` anchors. Written the other way round, a query naming another
+    table and forgetting the join is a cartesian product SQLite answers rather
+    than refuses.
+    """
+    shelf = Shelf.seen_by(db, current_user.id)
+
+    total = shelf.count()
 
     per_user = (
-        db.query(User.username, func.count(Book.id).label("count"))
-        .join(Book, Book.added_by_user_id == User.id)
-        .filter(visible)
+        shelf.select(User.username, func.count(Book.id).label("count"))
+        .join(User, Book.added_by_user_id == User.id)
         .group_by(User.id)
         .order_by(func.count(Book.id).desc(), User.username)
         .all()
     )
 
     by_tag = (
-        db.query(Tag.name, Tag.category, func.count(book_tags.c.book_id).label("count"))
-        .join(book_tags, Tag.id == book_tags.c.tag_id)
-        .join(Book, Book.id == book_tags.c.book_id)
-        .filter(visible)
+        shelf.select(Tag.name, Tag.category, func.count(book_tags.c.book_id).label("count"))
+        .join(book_tags, Book.id == book_tags.c.book_id)
+        .join(Tag, Tag.id == book_tags.c.tag_id)
         .group_by(Tag.id)
         .order_by(Tag.category, func.count(book_tags.c.book_id).desc(), Tag.name)
         .all()
     )
 
-    # Named collections only, and joined to Book so the same privacy predicate
-    # applies: a shelf holding one member's private books must not report them
-    # as a number to everybody else. Unfiled books are deliberately not a row
-    # here; `total` minus the sum of these is how many there are.
+    # Named collections only, and joined out from Book so the same privacy
+    # predicate applies: a shelf holding one member's private books must not
+    # report them as a number to everybody else. Unfiled books are deliberately
+    # not a row here; `total` minus the sum of these is how many there are.
     by_collection = (
-        db.query(Collection.name, func.count(Book.id).label("count"))
-        .join(Book, Book.collection_id == Collection.id)
-        .filter(visible)
+        shelf.select(Collection.name, func.count(Book.id).label("count"))
+        .join(Collection, Book.collection_id == Collection.id)
         .group_by(Collection.id)
         .order_by(func.count(Book.id).desc(), Collection.name)
         .all()
     )
 
     by_month = (
-        db.query(
+        shelf.select(
             func.strftime("%Y-%m", Book.added_at).label("month"),
             func.count(Book.id).label("count"),
         )
-        .filter(visible)
         .group_by("month")
         .order_by("month")
         .all()
     )
 
-    # Joined to Book so the privacy predicate still applies: a finished private
-    # book of somebody else's must not appear even as an anonymous count.
+    # Joined out from Book so the privacy predicate still applies: a finished
+    # private book of somebody else's must not appear even as an anonymous count.
     finished_by_month = (
-        db.query(
+        shelf.select(
             func.strftime("%Y-%m", UserBook.finished_at).label("month"),
             func.count(UserBook.id).label("count"),
         )
-        .join(Book, UserBook.book_id == Book.id)
-        .filter(visible, UserBook.user_id == current_user.id, UserBook.finished_at.isnot(None))
+        .join(UserBook, UserBook.book_id == Book.id)
+        .filter(UserBook.user_id == current_user.id, UserBook.finished_at.isnot(None))
         .group_by("month")
         .order_by("month")
         .all()
     )
 
-    # Joined to Book for the privacy predicate, like the aggregation above.
-    # Page-unit entries only: a percent cannot be added to a page count.
+    # Joined out from Book for the privacy predicate, like the aggregation
+    # above. Page-unit entries only: a percent cannot be added to a page count.
     progress_rows = (
-        db.query(ReadingProgress.book_id, ReadingProgress.recorded_at, ReadingProgress.page)
-        .join(Book, ReadingProgress.book_id == Book.id)
+        shelf.select(
+            ReadingProgress.book_id, ReadingProgress.recorded_at, ReadingProgress.page
+        )
+        .join(ReadingProgress, ReadingProgress.book_id == Book.id)
         .filter(
-            visible,
             ReadingProgress.user_id == current_user.id,
             ReadingProgress.page.isnot(None),
         )
@@ -142,9 +147,9 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
     )
 
     rating_row = (
-        db.query(func.avg(UserBook.rating), func.count(UserBook.id))
-        .join(Book, UserBook.book_id == Book.id)
-        .filter(visible, UserBook.user_id == current_user.id, UserBook.rating.isnot(None))
+        shelf.select(func.avg(UserBook.rating), func.count(UserBook.id))
+        .join(UserBook, UserBook.book_id == Book.id)
+        .filter(UserBook.user_id == current_user.id, UserBook.rating.isnot(None))
         .one()
     )
     average, rated_count = rating_row

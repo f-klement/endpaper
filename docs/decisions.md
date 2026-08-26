@@ -42,6 +42,115 @@ six call sites is one that will eventually be forgotten at one of them. Note the
 truthiness and collapses to a constant, quietly matching every row. It looks more idiomatic
 and is completely wrong.
 
+### The Shelf owns the privacy rule, and the AST guard is gone
+
+`backend/shelf.py` is now the only module that imports `visible_to` or `in_trash_for` and
+the only one that builds a query over `Book`. A caller asks `Shelf.seen_by(db, member_id)`
+and narrows what comes back, so **visibility is a property of how the query was built**
+rather than a step each endpoint has to remember.
+
+**A deleted guard with no record reads as a regression, so this is the record.** What was
+deleted is `test_models.py::TestEveryBookQueryIsFiltered`, 681 lines that walked the AST of
+every backend module, tracked scopes and bindings through `symtable` to accept a predicate
+bound to a local, carried five `# visible_to exempt:` comments, and had a second test
+parsing its own docstring to count them. It was good at its job. It was also scar tissue
+over a missing seam: `dependencies.py` had owned the rule for **one** book since the round
+that found fourteen endpoints with no check at all, and nothing owned it for **many**,
+which is exactly where the leaks were. `list_tags` counted books unfiltered and disclosed
+which tags existed only on somebody's private books.
+
+What replaced it is `test_shelf.py::TestTheShelfIsTheOnlyWayIn`: three flat `ast` passes
+asking who imports the predicate, who builds a query naming `Book`, and who reaches `books`
+through a join. It resolves which local names mean `Book` first, so an alias or a rebinding
+is caught, and it carries two short allowlists rather than five opt-out comments. What it
+does not need is the scope and binding machinery the old guard was built from, and the
+reason is structural rather than clever: outside `shelf.py` the correct answer is zero, so
+there is no "was a predicate applied here" question left to answer.
+
+**It is wider than what it replaced, and the first version of it was not.** That is worth
+recording in full, because it is the round's most useful finding and both critics reached
+it independently.
+
+The rule shipped for review as two regexes over the source. It claimed to close the old
+guard's documented blind spot: a statement reaching the table through `.join(Book, ...)`
+while naming no `Book` inside `query()`, of which the old docstring recorded **10** in the
+tree. The claim was false, and four shapes were measured passing it clean, each of them a
+location index publishing a name and a count over every Member's Private Books:
+
+| Shape | Old regexes |
+|---|---|
+| `db.query(Loan.id, Book.title).join(Book, ...)` | passes |
+| `db.query(models.Book.location)` | passes |
+| `db.query(B.location)` after `from models import Book as B` | passes |
+| `db.execute(sa.select(Book.location))` | passes |
+
+**A guard whose limits are undocumented gets read as a guarantee it never made, and this
+one documented the opposite of its limit**, which is worse than the hole.
+
+It is now a small `ast` pass instead: resolve which local names are bound to `Book`, then
+report `query(...)` or `select(...)` mentioning one, and `.join(Book, ...)` separately.
+All four shapes are caught, and `test_the_rule_catches_every_evasion_that_defeated_its_first_version`
+keeps them caught. It is still nothing like the guard it replaced: that one tracked scopes
+and bindings through `symtable` because a predicate could be applied anywhere and it had to
+decide whether it had been. Here the answer outside `shelf.py` is always zero, so there is
+nothing to decide.
+
+Teaching the **old** guard the join shape was costed at 30 inspected statements to 40, for
+four fresh exemptions on correct code, and refused on that arithmetic. The same widening
+here costs **one allowlist entry**, `notifications.py`, because it is the only module in the
+tree taking that shape. That is the difference the seam makes: the same rule is cheap once
+the correct answer is zero. (The quotes entry below states that old measurement as 30 to 39
+for three exemptions. The two disagreed in the tree before this refactor and the guard that
+could settle it is gone, so both are recorded rather than one being picked.)
+
+**There is a third way past a viewer, and it is not in this module.** `backup.py` reads
+every row of every table through `db.query(model)` on a loop variable, so no rule that reads
+the arguments to `query()` can see it, including the one above. That is deliberate: a backup
+omitting everyone else's Private Books would restore to a Library missing rows. It is
+unfiltered on purpose and admin only for that reason, and it is asserted by name in
+`test_shelf.py` rather than left to pass silently, because "the only place that reads past a
+viewer" was written in three documents before anybody counted.
+
+**It is narrower in two ways**, stated for the same reason. It cannot tell a module
+importing `Book` for a `db.get(Book, id)` or a type annotation from one importing it to
+build a listing, which is why it tests query shapes rather than the import of `Book`. And
+it cannot see a query built from a variable rather than a literal, which is the `backup.py`
+case above.
+
+**`Shelf.select()` anchors the FROM at `books` and that fixes the join direction only.** It
+was documented as preventing the cartesian product that a query naming two tables and
+joining neither produces. Measured: `db.query(Tag.name).filter(visible_to(1))` compiles to
+`FROM tags, books` and `Shelf.seen_by(db, 1).select(Tag.name)` compiles to `FROM books,
+tags`. Two FROMs either way. The limit is now pinned by a test rather than claimed away,
+and `where()` carries the same warning, because it is the more used method and had none.
+
+**The five exemptions became two named functions, because they were two rules.** Four were
+about uniqueness (`whole_table_for_uniqueness`): the ISBN and copy-group constraints span
+the whole table, so a clash with a book the caller cannot see is still a clash, and
+filtering would miss the row that collides and turn a 409 into a 500. One was a re-read
+(`rereading_filtered_rows`): the ids came out of a filtered query and it repopulates a
+relationship on objects already in hand, so it takes ids rather than criteria and cannot
+quietly become a way to read the table. Designing those as one escape hatch was the
+obvious mistake and is the reason they are two.
+
+**`notifications.py` is deliberately outside all of it**, and is named in the rule rather
+than left to pass quietly. The overdue digest runs on a schedule for the library, so it has
+no viewer to be scoped to, and its two halves **partition** on privacy rather than
+filtering by it: `is_(False)` for the reminders it sends and `is_(True)` for the count of
+what privacy held back. A Shelf would have to mean both at once, which is what
+`in_trash_for` being a separate function from `visible_to` exists to avoid.
+
+**`select()` refuses a shelf narrowed by read status**, which is worth knowing before
+somebody removes the check. Every narrowing is a clause except that one, which is an outer
+join to `user_books`; `select()` rebuilds a query over other columns from the accumulated
+clauses, so on a joined shelf it would silently drop the join and return every book instead
+of the unread ones. A wrong answer, not an error, hence the explicit refusal.
+
+**Why now rather than with the peer sync work.** That work introduces `shareable_to_peer()`,
+a second predicate over the same queries. One adapter is a hypothetical seam; two is a real
+one. Doing this first makes that one change behind one interface instead of the same
+migration twice, the second time across a wider surface.
+
 ### Book access lives in dependencies, not in handlers
 
 See [security.md](security.md). Endpoints ask for a book through `book_for_read` /
@@ -2017,6 +2126,75 @@ reversible, and a shelf only an admin may tidy is a shelf nobody tidies. Deletin
 collection is admin only because it strips a label off every book at once with no undo;
 nothing here has that shape.
 
+### A route docstring is API documentation, not an internal comment
+
+FastAPI serves a handler's docstring as the operation description at `/docs`, `/redoc` and
+`/openapi.json`, and `orval` ships it as a doc comment in `frontend/src/api/generated/`. So
+a route docstring has an audience that cannot open the repository.
+
+Recorded because moving logic out of two handlers took their documentation with it.
+Measured on `openapi.json`: `POST /api/books/authors/merge` went from **1277 characters to
+395** and `DELETE /api/books/authors/aliases/{id}` from **853 to 198**, and what replaced
+them was a pointer to `authorship.Authorship.merge`. Gone from the served description: that
+nothing in `books` is written, that an author nobody can see is 404 and not 403, that a
+`keep_name` no book carries is allowed, and what an orphan alias is. Both critic seats found
+it independently, and the same session's other refactor had moved two descriptions the
+**other** way, which is what made it a regression rather than a style.
+
+**"Make the handlers thin" is about code.** The split is: caller-facing rules stay in the
+handler, implementation reasoning goes on the module, and the handler ends with one line
+naming where that reasoning lives.
+
+The corollary is a house rule that already existed and was broken twice in one session:
+**regenerate the client after any change a docstring or a schema makes to the OpenAPI
+document**, not only after a field change. Nothing in CI catches a stale client, and
+`bun run api:generate` cannot run on the test host, whose frontend image has no `uv`: dump
+the schema locally with `uv --directory backend run python scripts/dump_openapi.py` and run
+`orval` on its own.
+
+### `authorship.py` owns author identity, and `authors.py` stays pure underneath
+
+`authors.py` was always the right module: `author_key`, `squashed_key`,
+`resolve_alias_map`, `build_index`, `suggest_merges`, no session, no writes, easy to test.
+Its purity was never the problem. The problem was that **everything the database knew about
+"these two spellings are one person" lived in a route handler**: the index query, the merge
+write, the repointing pass, the alias delete, and the resolution behind `?author=`. The pure
+functions had been extracted so they could be tested, and the failures that mattered were in
+the calling code left behind. A locality problem, not a testing one.
+
+`authorship.py` owns both halves and takes the session at its seam. `authors.py` is
+unchanged and is now the implementation underneath, still imported directly by the three
+modules that need `AUTHOR_NAME_MAX`, `author_key` and `split_authors`: `models.py`,
+`schemas/author.py` and `schemas/book.py`. The four routes are one to six lines each.
+
+Two things worth recording:
+
+**The index is read fresh, and there is no cache.** An earlier version cached it per
+instance and invalidated it from the two writes. It saved nothing: no path reads the index
+twice without a write between the two reads, `merge` loads, writes and loads again for two
+loads either way, and every route builds an instance for a single call. It was removed on
+this module's own argument against a session watcher, machinery guarding a caller that does
+not exist. What is pinned is the behaviour that still has to hold: one read costs two
+statements, and a read after a write is not stale.
+
+**It raises `AuthorNotFound`, not `HTTPException`.** The module does not know what HTTP is.
+The router maps the exception to 404 rather than 403, for the reason an invisible Book is a
+404: a 403 confirms that somebody owns a book by that name. Splitting the two made the rule
+testable as a rule about names rather than as a status code.
+
+### Book duplicates are not author identity
+
+`GET /duplicates` and `POST /merge` were listed inside the author cluster's line range and
+are deliberately **not** in `authorship.py`. They share a normalisation, `_duplicate_key`
+folds a title and an author with the same `author_key`, and nothing else: they ask "is this
+the same **Book**", and the alias table answers "is this the same **person**". Neither reads
+nor writes `author_aliases`.
+
+Folding them in would have moved code without anything becoming deeper, which is the exact
+test the router split failed. If the duplicate scan ever earns its own module, the thing it
+would own is `_duplicate_key`, `_one_per_copy_group`, `_absorb_fields` and
+`_repoint_relations`, and that is a different module from this one.
+
 ### The alias mapping is library wide; the shelf is what `visible_to` filters
 
 The same shape as a collection, shipped the day before: **the name is everybody's, the count
@@ -2203,16 +2381,19 @@ It is also **a second book listing wearing a different hat**. Every row carries 
 author and a cover, so `visible_to()` filters the rows *and* the count, and a quote on
 somebody's private book is neither listed nor counted.
 
-**The count is spelled `count(Book.id)`, not `count(Quote.id)`, and that is a decision.**
-The two are identical over an inner join on a primary key that is never null. The
-difference is that `TestEveryBookQueryIsFiltered` identifies a book query by the arguments
-to `query()`, so the `Quote.id` spelling put the count outside the guard entirely: removing
-its filter was measured to produce **no** offender, while removing the row half's filter
-correctly reported the file. Both critics found this independently, which is the strongest
-signal that review process produces. The alternative, teaching the rule about
-`.join(Book, ...)`, was measured too and refused: 30 inspected statements to 39, three of
-them correct code needing fresh exemptions. The rule's own docstring now records the
-join-only blind spot, because the class is wider than this one instance.
+**The count is spelled `count(Book.id)`, not `count(Quote.id)`, and it used to be a
+decision.** The two are identical over an inner join on a primary key that is never null.
+The difference was that `TestEveryBookQueryIsFiltered` identified a book query by the
+arguments to `query()`, so the `Quote.id` spelling put the count outside the guard
+entirely: removing its filter was measured to produce **no** offender, while removing the
+row half's filter correctly reported the file. Both critics found this independently,
+which is the strongest signal that review process produces.
+
+That guard is gone (see "The Shelf owns the privacy rule"), and both halves are now rooted
+at the shelf and joined outward to `quotes`, so nothing depends on which column is counted.
+The spelling is left alone because a count of visible books is what it is, and changing it
+would be a diff with no reader. Kept here because the reasoning is what a future reader
+needs in order to know the constraint has been lifted rather than forgotten.
 
 Editing is deliberately **not** offered there. A quote is corrected on the book it came
 from, where the page number and the passage can be checked against the book in somebody's
@@ -3812,7 +3993,7 @@ carry no address exist once, so the two registers cannot drift on them.
 to catch a *missing* formal variant the way `de.ts` catches a missing translation. What catches
 it instead: grep the merged formal catalogue for informal markers and fail on a survivor. That
 converts a permanent review cost into a one time one, which is the house pattern already used by
-`TestEveryBookQueryIsFiltered` and `houseRules.test.ts`.
+`TestTheShelfIsTheOnlyWayIn` and `houseRules.test.ts`.
 
 **Blocked on library mode existing**, because there is no mode to follow until then. English is
 unaffected: it has no equivalent distinction.

@@ -1,7 +1,7 @@
 # Backend test coverage
 
-**2223 tests**, in 51 files. Line coverage was last measured at **96%** (4303 statements,
-186 missed) when the suite held 1571, which is 568 tests ago, and has not been re-measured
+**2308 tests**, in 53 files. Line coverage was last measured at **96%** (4303 statements,
+186 missed) when the suite held 1571, which is 734 tests ago, and has not been re-measured
 since: the gate runs `pytest` without `--cov`, and a percentage carried forward across that
 many new tests is a number that looks measured and is not.
 
@@ -36,7 +36,7 @@ is why the helper uses regexes.
 | `test_config.py` | 52 | Settings resolution, the startup secret guard, upload limits, the frontend switch |
 | `test_isbn.py` | 37 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number, and that every mapped tag name is a tag that exists |
-| `test_backup.py` | 63 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores |
+| `test_backup.py` | 65 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. That the manifest carries every table in the metadata, compared by equality against `Base.metadata` rather than a hand-written list, which is why `author_aliases` went missing for as long as the author feature existed: the old assertion was a subset check named "every table". And that an author merge survives a round trip, which is the symptom that bug had, since a merge writes nothing to `books` |
 | `test_metadata.py` | 149 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache, that a classification keeps its number, its caption and its scheme, what a MARC record carries that a Dublin Core crosswalk had cleaned up (repeated subfields, non-sorting delimiters, decomposed text), and Open Library's three records: that its subjects never become classifications, that a key out of a response cannot move the host, that the edition cluster drops a translation, and that a Library of Congress subject heading keeps its subdivisions, refuses the other twenty two authorities in the same record and never reaches the Dewey parser |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 60 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
@@ -46,14 +46,16 @@ is why the helper uses regexes.
 | `test_notifications.py` | 42 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, and that a failure leaves the loan to retry |
 | `test_settings_store.py` | 23 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
-| `test_models.py` | 77 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that the unfiltered-book-query walk sees a query for one column as well as for a row, cannot be laundered by a binding in another function, by any binding form `symtable` knows about (including three an AST walk structurally cannot see), by a shadowing parameter or by a class body it never visited, reads its own exemption count out of its docstring, and that a quote's length ceilings are a CHECK rather than a `String(n)` SQLite ignores |
+| `test_models.py` | 59 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary, and that a quote's length ceilings are a CHECK rather than a `String(n)` SQLite ignores |
+| `test_authorship.py` | 21 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale, which is what says there is no cache; that the module raises a domain error rather than an HTTP one; and the three rules the design rests on: a key is derived from the name and never chosen, removing one is allowed while no operation retypes one in place, and a key is per spelling so the kept spelling gets a row too. Plus resolution through a chain of folded names, and the privacy line on the alias table: the rows are library wide, but a spelling surviving only on somebody else's private book is not listed |
+| `test_shelf.py` | 58 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. The house rule in three `ast` passes: no module but `shelf.py` imports a visibility predicate, none but `shelf.py` builds a query naming `Book`, none but `notifications.py` reaches `books` through a join. Nineteen evasion shapes that defeated earlier versions of the rule across five review rounds, each asserted against the pass that must catch it, so deleting a pass fails a test. That `notifications.py` and `backup.py` are outside the seam on purpose, with `backup.py`'s guards counted against its routes rather than against a literal, because it is invisible to every rule here. Who sees what; that no narrowing widens past the predicate, `select()` included, which is the column form that publishes a name and a count; every listing filter and that `matching()` reads all thirteen; stable paging and the series null rule; the statement cost of all three `Loading` members plus a relative check that the cost does not grow with the page; that anchoring the FROM fixes join direction and not join presence, measured on both `select()` and `where()`; and that the two named ways past a viewer are two rules rather than one hatch, with their **call sites** counted rather than their modules |
 | `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules, and the two bounds that keep them from being a plantable denial of service: a cap per bucket and a budget for the pass |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 22 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |
 | `test_middleware.py` | 25 | Security headers, CSP contents, HSTS conditions |
 | `test_main.py` | 57 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route, and `SERVE_FRONTEND=false` taking both away |
-| `test_house_rules.py` | 29 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed |
+| `test_house_rules.py` | 45 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter, a path parameter or a body field; that the guards themselves can fail, including on a shared alias that lost its ceiling; that the bounds actually refuse, per route; that a provenance column stays unread, and that the stated model counts are recomputed rather than believed. Plus the rule that an `HTTPException` is constructed where it is raised, with twelve shapes that share an instance and three that do not, each asserted individually, because a shared one grows its traceback forever and pins a `Session` and a `User` per refusal |
 | `test_serialisation.py` | 42 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match, that the copy count and the collection name each cost one statement for a page rather than one per book, and that the statement count stated in the docstring is the one measured |
 | `test_schema.py` | 44 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial, and that widening the classification number kept the unique index and the rows |
 | `test_database.py` | 27 | Engine setup and the session dependency |
@@ -88,10 +90,12 @@ signed-in member against *any* book, including another member's private one:
 sides (the owner, another member, and a member acting on someone else's private book) and
 asserts the private case reports **404, not 403**, because a 403 confirms the book exists.
 
-**Privacy.** `visible_to()` must be applied by every query that returns or counts books.
-Its absence is covered from several angles: listings, search, export, all four statistics
-aggregations, and the loans list (which would otherwise disclose the title of a book the
-caller cannot see, along with who has it).
+**Privacy.** Every query that returns or counts books is built through `shelf.py`, which
+applies `visible_to()` by construction. Its absence is covered from several angles:
+listings, search, export, all four statistics aggregations, and the loans list (which
+would otherwise disclose the title of a book the caller cannot see, along with who has
+it). `test_shelf.py` covers the seam itself, including that a narrowing cannot widen past
+the predicate and that the two named ways past a viewer are not general escapes.
 
 **The N+1.** `test_dependencies.py::TestPagination` pins the paging contract. The query
 count itself is measured separately, see *Not covered here* below.
