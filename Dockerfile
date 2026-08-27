@@ -48,6 +48,12 @@ FROM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd
 # Alpine ships no package manager userland worth keeping current beyond this, but the
 # principle that bit webpage applies here too: pinning a base image by digest pins its
 # PATCH LEVEL, and the digest stops moving while the distro keeps publishing fixes.
+#
+# **This line is only true if the layer is not cached**, and on 2026-08-27 it was not
+# true: kaniko's default cache TTL is two weeks, so this ran once and every release
+# afterwards inherited that day's patch level. v0.10.0 was refused by `verify:image`
+# over a fixed openssl HIGH the upgrade should have taken. `release:build` now passes
+# `--cache-ttl=6h`; if that flag is ever removed, this line becomes decorative again.
 RUN apk upgrade --no-cache
 
 WORKDIR /app
