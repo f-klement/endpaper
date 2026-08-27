@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.10.1
+
+_2026-08-27_
+
+**v0.10.0 was tagged and never published**, so this is that release plus the one
+change that lets it ship. `verify:image` refused the image over a fixed openssl
+advisory and skipped all three publish jobs, which is the gate working: nothing
+went to Docker Hub. The cause was that the image build cached the layer which
+upgrades the base system's packages, so the upgrade had not actually run against
+the current package index for some time. The cache is now bounded and the
+upgrade runs again. No application code differs between the two.
+
+Everything below shipped as part of this release.
+
 ## v0.10.0
 
 _2026-08-27_
