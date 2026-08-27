@@ -31,6 +31,7 @@ import { Locale } from "../api/generated/model";
 import { sortByName } from "../lib/nameOrder";
 import { de } from "./de";
 import { en, type MessageKey, type Messages } from "./en";
+import { tagName } from "./tagNames";
 
 const CATALOGUES: Record<Locale, Messages> = {
   [Locale.en]: en,
@@ -220,3 +221,11 @@ export function useSortedByName<T extends { name: string }>(
 
 export type { MessageKey, Messages };
 export { en, de };
+// A function of the chosen locale, which is this module's boundary, and the
+// one door to a tag's name. **The table itself is deliberately not re-exported
+// here.** `TAG_NAMES[locale][tag.key]` reads the same words while skipping the
+// fallback that covers a tag with no key, and it is invisible to the rule in
+// `houseRules.test.ts`, which watches for `.name` on a tag rather than for a
+// second road. The only other reader is that table's own test, which imports
+// it from `./tagNames` directly.
+export { tagName };

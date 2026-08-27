@@ -361,3 +361,46 @@ describe("no dash is used as punctuation", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("a tag reaches a reader through tagName", () => {
+  /** The one module allowed to read a tag's stored name. */
+  const TAG_NAME_OWNER = "i18n/tagNames.ts";
+
+  it("is not printed from the stored name at a call site", () => {
+    // `tags.name` is the **English** name, and only the English name: the
+    // German one is looked up by `tags.key` in `i18n/tagNames.ts`. A component
+    // that prints `tag.name` therefore prints English into a German page, with
+    // nothing failing and nothing to see in a diff. Counted 2026-08-27 against
+    // the tree this rule arrived in: **9** reads in 6 files, every one of them
+    // a tag on screen, which is why this is a rule rather than a habit.
+    //
+    // Said out loud so nobody trusts it as total: this counts a spelling. It
+    // matches an identifier whose name ends in `tag` or `tags`, which is what
+    // every site in this tree calls one, and a site that named its variable
+    // `chip` or destructured `{ name }` off a `TagOut` would walk past it. No
+    // regex closes that gap: it is the distance between a concept and the
+    // characters it is usually written with.
+    const offenders = entries()
+      .filter(([path]) => path !== TAG_NAME_OWNER)
+      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .flatMap(([path, code]) =>
+        [...code.matchAll(/\b\w*[Tt]ags?\.name\b/g)].map(
+          (match) => `${path}: ${match[0]}`,
+        ),
+      );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is watching something", () => {
+    // A rule whose subject has been renamed passes by matching nothing. There
+    // are tag names on screen in this tree; the rule is that every one of them
+    // goes through the function.
+    const callers = entries().filter(
+      ([path, source]) =>
+        path !== TAG_NAME_OWNER && /\btagName\(/.test(withoutProse(source)),
+    );
+
+    expect(callers.length).toBeGreaterThan(4);
+  });
+});

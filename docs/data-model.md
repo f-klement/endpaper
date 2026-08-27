@@ -82,6 +82,24 @@ hand comes back on the next restart, and renaming one means a migration rather t
 edit to the list: `seed_tags()` would otherwise leave the old row and insert a second
 beside it.
 
+**`tags.key` is what a translated name is looked up by**, and it is nullable. A seeded row
+carries the `TagKey` naming which curated tag it is; a tag the library invented has none,
+and neither has a seeded row somebody renamed, because migration `c1f8a7e3d240` keyed only
+the rows whose name still matched the English seed name exactly. So a null key means "this
+row is theirs" and both cases fall back to the name as typed. `name` holds the **English**
+name and nothing else translates it in the database: the German names live in
+`frontend/src/i18n/tagNames.ts`, typed `Record<TagKey, string>` against the generated
+client, so a seeded tag with no German name fails the frontend build the way a missing
+message in `de.ts` does. Matching never reads it: `ddc.tag_names` projects a classification
+number onto an English seed name, and the suggestion travels as a tag id. The cost of that,
+which predates the key and is not closed by it: a household that renamed **Computing** gets
+no tag suggested for DDC 004, silently, because the projection looks up a name.
+
+Two derived columns on this table are recomputed after a restore rather than trusted from
+the archive, in `backup._repair_seeded_tags`: `is_predefined`, and `key` by the migration's
+rule. An archive taken before either existed carries neither, and a restored library would
+otherwise read as one that had renamed its entire vocabulary.
+
 The list is long on purpose. A curated vocabulary that does not contain the genre somebody
 wants is a vocabulary they work around, so the picker groups by category and starts each
 group collapsed rather than trimming the list to what fits on a screen.
@@ -212,7 +230,7 @@ index cannot collapse.
 field holds the notation and the printed schedule holds the words. Since the DNB moved to
 MARC21 on 2026-08-24 **no source supplies a Dewey caption at all**, where `dc:subject` used
 to answer `830 Deutsche Literatur`. A GND heading still arrives captioned, and
-`_union_classifications` still fills a missing caption from any source that has one. Unique per book, scheme
+`catalogue.Record` still fills a missing caption from any source that has one. Unique per book, scheme
 and number (`uq_classifications_book_scheme_number`), so selecting the same record twice
 fills nothing in twice; **not** unique on the number alone, because a book carries a DDC and
 an LCC at once and often two DDC numbers at two precisions. `ON DELETE

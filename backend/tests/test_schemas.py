@@ -1,9 +1,12 @@
 """Tests for backend/schemas.py: the Pydantic request/response contracts."""
 
-import pytest
-from pydantic import ValidationError
+from collections.abc import Iterable
+from typing import Annotated, Any, Optional, get_args
 
-from enums import ReadStatus
+import pytest
+from pydantic import BaseModel, BeforeValidator, ValidationError
+
+from enums import ReadStatus, TagCategory, TagKey
 from schemas import (
     BookCreate,
     BookOut,
@@ -12,7 +15,10 @@ from schemas import (
     LoginRequest,
     NoteCreate,
     QuoteCreate,
+    TagOut,
+    TagStat,
     UserCreate,
+    known_key,
 )
 
 
@@ -127,6 +133,131 @@ class TestBookOut:
         schema = BookOut.model_json_schema()
         assert "LoanOut" in schema["$defs"]
         assert "active_loan" in schema["$defs"]["BookOut"]["properties"]
+
+
+def _unguarded(models: Iterable[Any]) -> list[str]:
+    """Every field naming a `TagKey` that is not carrying `known_key`.
+
+    The rule itself, as a function, so that the test asserting it is clean and
+    the test proving it can fail run the identical code over different input. A
+    guard whose self-test reimplements it proves nothing about the guard.
+
+    **Both clauses have been wrong once, and both times the failure was passing
+    clean**, which is the shape nobody notices. The annotation test was
+    `annotation is TagKey | None`, which is False against an identical
+    annotation because `TagKey | None` builds a fresh `UnionType` on every
+    evaluation. The metadata test asked whether *a* before-validator existed,
+    which a model bringing its own passes while still raising on the value this
+    whole class is named for. Hence `entry.func is known_key`: the rule, not the
+    shape of the rule.
+    """
+    return sorted(
+        f"{model.__name__}.{name}"
+        for model in models
+        if isinstance(model, type) and issubclass(model, BaseModel)
+        for name, field in model.model_fields.items()
+        if TagKey in get_args(field.annotation) or field.annotation is TagKey
+        if not any(
+            isinstance(entry, BeforeValidator) and entry.func is known_key
+            for entry in field.metadata
+        )
+    )
+
+
+class TestEveryModelCarryingATagKeyAgreesAboutAnUnknownOne:
+    """One rule, and it is a type rather than a habit.
+
+    `known_key` exists because the tag list is one response for the whole
+    vocabulary, drawn on nearly every page, so refusing a key a newer image
+    wrote would take the page down over one translation. `TagStat` shipped as
+    the bare enum and therefore **raised** where `TagOut` forgot: the same
+    library, two answers, depending on which model the screen happened to draw.
+    Both now annotate `KnownTagKey`, and this is what stops a third model being
+    added without it.
+    """
+
+    UNKNOWN = "quantum_gardening"
+
+    def test_tag_out_forgets_it(self):
+        tag = TagOut(id=1, name="Computing", category=TagCategory.GENRE, key=self.UNKNOWN)
+        assert tag.key is None
+
+    def test_tag_stat_forgets_it_too(self):
+        row = TagStat(name="Computing", category=TagCategory.GENRE, key=self.UNKNOWN, count=1)
+        assert row.key is None
+
+    def test_a_key_they_both_know_survives(self):
+        assert TagOut(id=1, name="Computing", category=TagCategory.GENRE, key="computing").key
+        assert TagStat(name="Computing", category=TagCategory.GENRE, key="computing", count=1).key
+
+    def test_every_model_naming_a_tag_key_uses_the_shared_rule(self):
+        """The third model, before it exists.
+
+        One declaring the key itself would pass every test above, because those
+        name the two models that exist, and would still raise on the value they
+        exist to forgive.
+
+        `AuthorOut.key` and `DuplicateGroup.key` are plain `str` and are not a
+        tag key, so they are outside this by annotation rather than by name.
+        """
+        import schemas
+
+        assert _unguarded(vars(schemas).values()) == []
+
+    def test_the_rule_catches_every_way_of_writing_it_wrong(self):
+        """The guard attacked rather than read, which is how both of its bugs
+        were found.
+
+        Five shapes, each a model somebody could plausibly write, and every one
+        of them raises `ValidationError` on an unknown key, which is what makes
+        being missed here a real hole rather than a technicality. The last is
+        the shape an earlier version of this rule passed clean: reaching for
+        `Annotated` and bringing a validator that is not the rule.
+        """
+
+        class Bare(BaseModel):
+            key: TagKey = TagKey.FICTION
+
+        class Nullable(BaseModel):
+            key: TagKey | None = None
+
+        class Optionally(BaseModel):
+            key: Optional[TagKey] = None  # noqa: UP045  (the point is the spelling)
+
+        class Annotated_(BaseModel):
+            key: Annotated[TagKey | None, "a note, not a rule"] = None
+
+        class OwnValidator(BaseModel):
+            key: Annotated[TagKey | None, BeforeValidator(lambda value: value)] = None
+
+        evasions = [Bare, Nullable, Optionally, Annotated_, OwnValidator]
+
+        assert _unguarded(evasions) == [
+            "Annotated_.key",
+            "Bare.key",
+            "Nullable.key",
+            "Optionally.key",
+            "OwnValidator.key",
+        ]
+
+        # And each of them really does raise, so the guard is not reporting
+        # models that would have been fine.
+        for model in evasions:
+            with pytest.raises(ValidationError):
+                model(key="quantum_gardening")
+
+    def test_that_rule_is_watching_something(self):
+        """A guard whose subject has been renamed passes by matching nothing."""
+        import schemas
+
+        guarded = [
+            model.__name__
+            for model in vars(schemas).values()
+            if isinstance(model, type) and issubclass(model, BaseModel)
+            for _name, field in model.model_fields.items()
+            if TagKey in get_args(field.annotation)
+        ]
+        assert sorted(guarded) == ["TagOut", "TagStat"]
 
 
 class TestSmallSchemas:

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+**Added: the predefined tags are shown in your own language.** The tags a new library
+starts with are now translated, and German is the first language they exist in. A tag you
+have renamed is left exactly as you typed it and stays that way: renaming a tag is how you
+tell the app you want your own word for it, and there is no way to end up with a name you
+did not choose showing over one you did. Tags you invented were never translated and still
+are not.
+
+**Fixed: a catalogue answering with an enormous record could stall every search at once.**
+A response crafted to repeat one book thousands of times, with a single entry carrying
+thousands of subjects, made the merge re-read that entry once per repeat. Measured at the
+worst shape that fits inside the response size limit, that was over thirty seconds during
+which nobody else's search would run. Repeats are now folded once, when the record is
+built, and the time no longer depends on how much the record carries.
+
+**Fixed: a book only Google Books knew about was refreshed without its page count, its
+language or its Google id.** The fallback lookup dropped them on the way out of the source.
+The same omission was found and fixed for Open Library on 2026-08-24.
+
+**Internal: one type now carries every catalogue's answer.** Six source adapters used to
+hand their answer across the seam as a dictionary, in two different shapes, with two
+functions existing only to convert between them and one of those living in a route handler.
+`backend/catalogue.py` replaces both with a `Record`. Folding a repeated heading, filling a
+caption from whichever source has one, and treating an empty list as an absence rather than
+as an answer were three rules spread across three sites; each is now one rule applied where
+the record is built. Adding a catalogue is a mapping rather than a new dialect of keys for
+every consumer to guess at. No behaviour change on the shelf.
+
 **Added: a library can define its own fields on a book.** Name a field once, say
 whether it holds text or a web link, and every book can carry a value for it. A link
 field renders as a link out to another system, which is what this was built for: a

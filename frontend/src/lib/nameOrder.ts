@@ -66,13 +66,21 @@ function collatorFor(locale: Locale): Intl.Collator {
  * would order the page by something the reader never chose and cannot see, and
  * would disagree with the numbers printed beside it.
  *
+ * `nameOf` is for a list whose printed name is not the stored one, which is the
+ * predefined tags and nothing else so far. Sorting those by `name` would order
+ * a German picker by the English words behind it, so **Belletristik** would
+ * file under F: correct against data the reader cannot see. Read once per
+ * comparison rather than precomputed, because the lists here are a hundred
+ * items and a lookup in a literal object is not what costs anything in a sort.
+ *
  * Returns a new array. The input is a query cache entry at every call site, and
  * `Array.prototype.sort` mutates.
  */
 export function sortByName<T extends { name: string }>(
   items: readonly T[],
   locale: Locale,
+  nameOf: (item: T) => string = (item) => item.name,
 ): T[] {
   const { compare } = collatorFor(locale);
-  return [...items].sort((a, b) => compare(a.name, b.name));
+  return [...items].sort((a, b) => compare(nameOf(a), nameOf(b)));
 }

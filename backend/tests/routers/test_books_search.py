@@ -660,10 +660,11 @@ class TestOneBadRecordCostsOneResult:
     ):
         """The bound is a bound, not a cliff.
 
-        `_as_match` deduplicates and does not slice, `BookMatch` refuses a
-        ninth entry, and the handler in `search_books` drops the whole row on a
-        `ValidationError`. So before this fix a well catalogued record vanished
-        from the search page. Measured over four live DNB `WOE=` searches on
+        Three things used to meet: a record was deduplicated and not sliced,
+        `BookMatch` refuses a ninth entry, and the handler in `search_books`
+        drops the whole row on a `ValidationError`. So before this fix a well
+        catalogued record vanished from the search page. Measured over four live
+        DNB `WOE=` searches on
         2026-08-24: 8 of 189 records carry more than eight headings, and the
         worst query lost 6 of its 50 results.
         """
@@ -733,9 +734,9 @@ class TestOneBadRecordCostsOneResult:
 
     def test_a_record_repeating_one_number_yields_one_heading(self, client, admin):
         """Live K10plus returns 082 `$a` values of `['100', '610', '610']` on a
-        single record. The lookup path deduplicates in `_merge`; the search path
-        has no merge, so without `_union_classifications` in `_as_match` the
-        repetition spends the payload's budget of eight twice on nothing."""
+        single record. `catalogue.Record` folds them at construction, which is
+        the same rule on both paths; without it the repetition spends the
+        payload's budget of eight twice on nothing."""
         [match] = self._search(
             client,
             admin["headers"],
@@ -826,9 +827,9 @@ class TestSubjectHeadingsOnASearchRow:
         """A record carrying more subject headings than the whole book budget.
 
         Measured live: one record carries 14 against at most two
-        classifications. `_as_match` slices before `_SCHEME_ORDER` is applied,
-        so the parser emitting the `<classification>` elements first is what
-        keeps the Dewey number and the call number on the row, and
+        classifications. `Record.match_headings` slices before `_SCHEME_ORDER`
+        is applied, so the parser emitting the `<classification>` elements first
+        is what keeps the Dewey number and the call number on the row, and
         `_headings` then puts the Dewey number in front.
         """
         match = self._search(

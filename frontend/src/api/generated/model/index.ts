@@ -108,6 +108,7 @@ export * from "./settingsUpdate.ts";
 export * from "./statsOut.ts";
 export * from "./tagCategory.ts";
 export * from "./tagCreate.ts";
+export * from "./tagKey.ts";
 export * from "./tagOut.ts";
 export * from "./tagStat.ts";
 export * from "./themeMode.ts";

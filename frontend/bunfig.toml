@@ -7,14 +7,14 @@
 # `bun audit fix --dry-run` report reads `false` no matter how new the fix is.
 # Measured on the pinned bun 1.4.0 against lodash 4.18.0, 148 days old: unset
 # gives false, 0 gives false, and 315360000 gives true. It is config driven and
-# there was no config, so the flag `ci/autopatch/decide.py` reads to refuse a
+# there was no config, so the flag the unattended patch pipeline reads to refuse a
 # brand new fix was answering a question nobody had asked.
 #
 # 259200 is bun's own documented example and the same three days the unattended
 # release applies to PyPI through `uv lock --exclude-newer`, so one number
 # covers both ecosystems.
 #
-# Why repo wide rather than only in the unattended job: `renovate.json`
+# Why repo wide rather than only in the unattended job: the dependency bot
 # automerges npm minor and patch updates, so a compromised release reaches
 # `main` and the shipped image without anyone looking at it. That is the same
 # exposure the nightly bumper has, and it is the more common one.
@@ -25,8 +25,8 @@
 # three days old will now fail its install instead, loudly and in CI. That is
 # the intended direction; wait for the version to age rather than removing this.
 #
-# **This key is also the fallback, and the fallback can drift.** `ci/autopatch/run.sh`
-# passes `--minimum-release-age` explicitly so the unattended path does not depend on
+# **This key is also the fallback, and the fallback can drift.** The unattended
+# release passes `--minimum-release-age` explicitly so the unattended path does not depend on
 # this file, but bun does not reject unknown flags: `bun audit fix
 # --minimum-release-age-typo=1` exits 0 and is silently ignored. So if a future bun
 # renames the flag, npm falls back to the number here, which is correct only while it

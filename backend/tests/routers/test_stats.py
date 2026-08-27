@@ -60,6 +60,26 @@ class TestByTag:
         make_book(admin["headers"], title="Untagged")
         assert stats()["by_tag"] == []
 
+    def test_rows_carry_their_key(self, client, admin, make_book, db, stats):
+        """The stats page prints these names, so it needs what to translate by.
+
+        Without it that page would be the one screen still naming a seeded tag
+        in English while every other tag in the app was in the member's
+        language.
+        """
+        fantasy = db.query(Tag).filter(Tag.name == "Fantasy").one()
+        book = make_book(admin["headers"])
+        client.post(f"/api/books/{book['id']}/tags/{fantasy.id}", headers=admin["headers"])
+        assert stats()["by_tag"][0]["key"] == "fantasy"
+
+    def test_an_invented_tag_carries_no_key(self, client, admin, make_book, stats):
+        invented = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        ).json()
+        book = make_book(admin["headers"])
+        client.post(f"/api/books/{book['id']}/tags/{invented['id']}", headers=admin["headers"])
+        assert stats()["by_tag"][0]["key"] is None
+
     def test_rows_carry_their_category(self, client, admin, make_book, db, stats):
         fantasy = db.query(Tag).filter(Tag.name == "Fantasy").one()
         book = make_book(admin["headers"])

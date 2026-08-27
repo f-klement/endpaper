@@ -9,8 +9,9 @@ import {
   type TagOut,
 } from "../../../api/generated/model";
 import { errorText } from "../../../components/ErrorState";
-import { useTranslation } from "../../../i18n";
+import { tagName, useTranslation } from "../../../i18n";
 import { Icon } from "../../../components";
+import { TAG_CATEGORY_ORDER, groupTagsByCategory } from "../../types";
 
 interface SelectionBarProps {
   selectedCount: number;
@@ -45,7 +46,16 @@ export default function SelectionBar({
   onRun,
   onDone,
 }: SelectionBarProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  // Grouped and then flattened, which is the order the endpoint already sends
+  // (category, then name) with one difference that matters here: inside a
+  // category the sort is on the name being **printed**. On the stored names,
+  // Anthology, Comics and Fiction would list as Anthologie, Comics,
+  // Belletristik: alphabetical in a language the reader is not looking at.
+  const byCategory = groupTagsByCategory(tags, locale);
+  const orderedTags = TAG_CATEGORY_ORDER.flatMap(
+    (category) => byCategory[category],
+  );
   // The extra verbs are behind a disclosure. Marking a shelf is the common
   // case and deserves the primary buttons; deleting forty books is not, and
   // should not sit one mis-tap away from them.
@@ -156,9 +166,9 @@ export default function SelectionBar({
                 className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
               >
                 <option value="">{t("bulk.addTag")}</option>
-                {tags.map((tag) => (
+                {orderedTags.map((tag) => (
                   <option key={tag.id} value={tag.id}>
-                    {tag.name}
+                    {tagName(tag, locale)}
                   </option>
                 ))}
               </select>

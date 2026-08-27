@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 
 from enums import TagCategory
+from schemas.tag import KnownTagKey
 
 
 class PerUserStat(BaseModel):
@@ -12,6 +13,11 @@ class TagStat(BaseModel):
     name: str
     category: TagCategory
     count: int = Field(ge=0)
+    #: Carried for the same reason `TagOut` carries it: the stats page prints
+    #: these names, and without the key it would print the English ones into a
+    #: German page while every other tag on screen was translated. The same
+    #: `KnownTagKey`, so the two models cannot disagree about an unknown one.
+    key: KnownTagKey = None
 
 
 class CollectionStat(BaseModel):

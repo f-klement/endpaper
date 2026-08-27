@@ -76,7 +76,7 @@ store the second for authors. See [data-model.md](data-model.md).
 | Term | What it is |
 |---|---|
 | **ILS** | Integrated Library System: the software a library runs its circulation, cataloguing and catalogue on. |
-| **Koha** | Not an acronym, a Maori word. The long established open source ILS, read here as a reference for the public library mode design. What its licence does and does not permit is settled in `archive/implementation_plan.md` under 30e and 30h. |
+| **Koha** | Not an acronym, a Maori word. The long established open source ILS, read here as a reference for the public library mode design. What its licence does and does not permit is settled, and the short version is that its interface may be read but its GPL code may not be copied here. |
 | **OPAC** | Online Public Access Catalogue: the public facing search interface of an ILS, as opposed to the staff interface behind it. |
 | **Patron** | The library word for a borrower. Not a customer: a library has no customers, and the German is Benutzer:in, registering one a Neuanmeldung. Koha's interface says patron while its schema says `borrowers`. |
 

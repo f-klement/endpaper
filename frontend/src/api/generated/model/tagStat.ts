@@ -6,10 +6,12 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { TagCategory } from "./tagCategory.ts";
+import type { TagKey } from "./tagKey.ts";
 
 export interface TagStat {
   category: TagCategory;
   /** @minimum 0 */
   count: number;
+  key?: TagKey | null;
   name: string;
 }

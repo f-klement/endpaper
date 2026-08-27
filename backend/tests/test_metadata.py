@@ -27,6 +27,7 @@ catalogue.
 """
 
 import asyncio
+from typing import Any
 from xml.etree import ElementTree
 
 import httpx
@@ -35,6 +36,7 @@ import respx
 
 import fetch
 import metadata
+from catalogue import Heading, Record
 from enums import ClassificationScheme
 from metadata import (
     Outcome,
@@ -45,7 +47,6 @@ from metadata import (
     _marc_fields,
     _pages_from_extent,
     _parsed,
-    _union_classifications,
     lookup,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
@@ -146,6 +147,8 @@ GOOGLE_VOLUME = {
                 "title": "Dune",
                 "authors": ["Frank Herbert"],
                 "publishedDate": "1965",
+                "pageCount": 412,
+                "language": "en",
                 "industryIdentifiers": [
                     {"type": "ISBN_13", "identifier": "9780441013593"}
                 ],
@@ -313,8 +316,37 @@ class TestSourceOrder:
             result = await lookup(ENGLISH_ISBN)
 
         assert result.source == "google_books"
-        assert result.data is not None
-        assert result.data["title"] == "Dune"
+        assert result.record is not None
+        assert result.record.title == "Dune"
+
+    @pytest.mark.asyncio
+    async def test_the_google_fallback_keeps_the_page_count_and_the_language(self):
+        """Both were dropped on the way out of this source until 2026-08-27.
+
+        `google_books._volume_to_fields` has read `pageCount` and `language`
+        all along; the dictionary this adapter built out of them named neither,
+        so a Google fallback answered without two of the seven fields
+        `Record.completeness` scores, and a refresh of a Google-only book left
+        its page count empty. The same omission was found and fixed for Open
+        Library on 2026-08-24. `google_books_id` was dropped the same way and is
+        the one field only this source has.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json=GOOGLE_VOLUME)
+            )
+            result = await lookup(ENGLISH_ISBN)
+
+        assert result.record is not None
+        assert result.record.page_count == 412
+        assert result.record.language == "en"
+        assert result.record.google_books_id == "gbid-1"
 
     @pytest.mark.asyncio
     async def test_the_google_request_carries_the_api_key(self):
@@ -508,13 +540,13 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["title"] == "Praxiswissen Docker"
-        assert result.data["subtitle"] == "Grundlagen und Best Practices"
-        assert result.data["publisher"] == "O'Reilly"
-        assert result.data["year"] == 2024
-        assert result.data["language"] == "de"
-        assert result.data["page_count"] == 390
+        assert result.record is not None
+        assert result.record.title == "Praxiswissen Docker"
+        assert result.record.subtitle == "Grundlagen und Best Practices"
+        assert result.record.publisher == "O'Reilly"
+        assert result.record.year == 2024
+        assert result.record.language == "de"
+        assert result.record.page_count == 390
 
     @pytest.mark.asyncio
     async def test_keeps_the_authors_and_drops_the_translator(self):
@@ -528,8 +560,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["author"] == "Sean P. Kane, Karl Matthias"
+        assert result.record is not None
+        assert result.record.author == "Sean P. Kane, Karl Matthias"
 
     @pytest.mark.asyncio
     async def test_the_subject_heading_is_the_caption_without_its_number(self):
@@ -543,8 +575,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["subjects"] == ["Informatik"]
+        assert result.record is not None
+        assert result.record.subjects == ("Informatik",)
 
     @pytest.mark.asyncio
     async def test_the_same_heading_in_650_and_689_is_one_subject(self):
@@ -558,8 +590,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert len(result.data["classifications"]) == 2
+        assert result.record is not None
+        assert len(result.record.headings) == 2
 
     @pytest.mark.asyncio
     async def test_the_subject_heading_arrives_with_its_gnd_number(self):
@@ -573,12 +605,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert {
-            "scheme": ClassificationScheme.GND,
-            "number": "4026894-9",
-            "label": "Informatik",
-        } in result.data["classifications"]
+        assert result.record is not None
+        assert Heading(ClassificationScheme.GND, "4026894-9", "Informatik") in result.record.headings
 
     @pytest.mark.asyncio
     async def test_the_dewey_number_comes_before_the_subject_headings(self):
@@ -593,12 +621,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["classifications"][0] == {
-            "scheme": ClassificationScheme.DDC,
-            "number": "004",
-            "label": None,
-        }
+        assert result.record is not None
+        assert result.record.headings[0] == Heading(ClassificationScheme.DDC, "004")
 
     @pytest.mark.asyncio
     async def test_the_sachgruppe_letter_does_not_hide_the_dewey_number(self):
@@ -619,11 +643,11 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(record))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
+        assert result.record is not None
         assert [
-            entry["number"]
-            for entry in result.data["classifications"]
-            if entry["scheme"] is ClassificationScheme.DDC
+            entry.number
+            for entry in result.record.headings
+            if entry.scheme is ClassificationScheme.DDC
         ] == ["004"]
 
     @pytest.mark.asyncio
@@ -648,17 +672,13 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(record))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
+        assert result.record is not None
         assert [
-            entry["number"]
-            for entry in result.data["classifications"]
-            if entry["scheme"] is ClassificationScheme.DDC
+            entry.number
+            for entry in result.record.headings
+            if entry.scheme is ClassificationScheme.DDC
         ] == ["004"]
-        assert {
-            "scheme": ClassificationScheme.GND,
-            "number": "4026894-9",
-            "label": "100 Jahre Bauhaus",
-        } in result.data["classifications"]
+        assert Heading(ClassificationScheme.GND, "4026894-9", "100 Jahre Bauhaus") in result.record.headings
 
     @staticmethod
     def _two_records(first: str, second: str) -> str:
@@ -695,8 +715,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(answer))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["page_count"] == 390
+        assert result.record is not None
+        assert result.record.page_count == 390
 
     @pytest.mark.asyncio
     async def test_an_online_record_is_taken_rather_than_reporting_a_miss(self):
@@ -717,8 +737,8 @@ class TestDnbRecord:
             result = await lookup(GERMAN_ISBN)
 
         assert result.outcome is Outcome.FOUND
-        assert result.data is not None
-        assert result.data["title"] == "Praxiswissen Docker"
+        assert result.record is not None
+        assert result.record.title == "Praxiswissen Docker"
 
     @pytest.mark.asyncio
     async def test_a_disc_is_refused_rather_than_ranked_down(self):
@@ -751,8 +771,8 @@ class TestDnbRecord:
 
         Recorded rather than implied: see `docs/decisions.md`, "The author\'s
         GND is read by nothing". A row here would answer the author identity
-        question `docs/archive/implementation_plan.md` §30g defers, and that answer is
-        expensive to change once data exists.
+        question that entry defers, and that answer is expensive to change once
+        data exists.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
@@ -763,8 +783,8 @@ class TestDnbRecord:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert "1042243212" not in str(result.data)
+        assert result.record is not None
+        assert "1042243212" not in str(result.record)
 
     @pytest.mark.asyncio
     async def test_an_empty_result_set_is_a_miss_not_an_outage(self):
@@ -818,7 +838,7 @@ class TestTitleStatement:
 
 
 class TestSearchMatches:
-    """`_as_match` is the shape every search result arrives in."""
+    """`Record.match_headings` is what bounds a row before the picker sees it."""
 
     def test_a_match_carries_no_more_headings_than_the_schema_accepts(self):
         """`BookMatch` refuses a ninth entry and `main.py` catches no
@@ -831,17 +851,16 @@ class TestSearchMatches:
         oversight: this is the bound that travels with the record, and theirs is
         the one that also drops an entry the column cannot hold.
         """
-        record = {
-            "title": "Ein Buch",
-            "classifications": [
-                {"scheme": ClassificationScheme.GND, "number": f"{index}", "label": "x"}
+        record = Record(
+            source="dnb",
+            title="Ein Buch",
+            headings=tuple(
+                Heading(ClassificationScheme.GND, f"{index}", "x")
                 for index in range(12)
-            ],
-        }
+            ),
+        )
 
-        match = metadata._as_match(record, "dnb")
-
-        assert len(match["classifications"]) == MAX_CLASSIFICATIONS_PER_BOOK
+        assert len(record.match_headings()) == MAX_CLASSIFICATIONS_PER_BOOK
 
 
 class TestCatalogueXml:
@@ -1109,8 +1128,8 @@ class TestK10plusIdentity:
             result = await lookup(ENGLISH_ISBN)
 
         assert result.source == "k10plus"
-        assert result.data is not None
-        assert result.data["title"] == "The Great Gatsby"
+        assert result.record is not None
+        assert result.record.title == "The Great Gatsby"
 
     @pytest.mark.asyncio
     async def test_prefers_the_fullest_of_several_printings(self):
@@ -1128,8 +1147,8 @@ class TestK10plusIdentity:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(ENGLISH_ISBN)
 
-        assert result.data is not None
-        assert result.data["description"] == "Long Island, 1922."
+        assert result.record is not None
+        assert result.record.description == "Long Island, 1922."
 
 
 class TestK10plusRecord:
@@ -1141,24 +1160,24 @@ class TestK10plusRecord:
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(_marc(record)))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(isbn)
-        assert result.data is not None
-        return result.data
+        assert result.record is not None
+        return result.record
 
     @pytest.mark.asyncio
     async def test_maps_the_record_onto_book_fields(self):
         data = await self._lookup(_marc_record())
-        assert data["title"] == "The Great Gatsby"
-        assert data["author"] == "F. Scott Fitzgerald"
-        assert data["publisher"] == "Scribner"
-        assert data["year"] == 1925
-        assert data["page_count"] == 218
-        assert data["language"] == "en"
+        assert data.title == "The Great Gatsby"
+        assert data.author == "F. Scott Fitzgerald"
+        assert data.publisher == "Scribner"
+        assert data.year == 1925
+        assert data.page_count == 218
+        assert data.language == "en"
 
     @pytest.mark.asyncio
     async def test_reads_the_year_out_of_a_free_text_date(self):
         """`$c` really does arrive as "1925 (copyright)"."""
         data = await self._lookup(_marc_record())
-        assert data["year"] == 1925
+        assert data.year == 1925
 
     @pytest.mark.asyncio
     async def test_drops_the_punctuation_that_introduces_the_next_subfield(self):
@@ -1171,8 +1190,8 @@ class TestK10plusRecord:
                 )
             )
         )
-        assert data["title"] == "The Great Gatsby"
-        assert data["subtitle"] == "a novel"
+        assert data.title == "The Great Gatsby"
+        assert data.subtitle == "a novel"
 
     @pytest.mark.asyncio
     async def test_closes_the_filing_space_after_an_elided_article(self):
@@ -1180,7 +1199,7 @@ class TestK10plusRecord:
         data = await self._lookup(
             _marc_record(title="<subfield code=\"a\">L' etranger</subfield>")
         )
-        assert data["title"] == "L'etranger"
+        assert data.title == "L'etranger"
 
     @pytest.mark.asyncio
     async def test_a_numbered_volume_becomes_a_title_and_a_series(self):
@@ -1197,9 +1216,9 @@ class TestK10plusRecord:
                 )
             )
         )
-        assert data["title"] == "The philosopher's stone"
-        assert data["series_name"] == "Harry Potter"
-        assert data["series_index"] == 1
+        assert data.title == "The philosopher's stone"
+        assert data.series_name == "Harry Potter"
+        assert data.series_index == 1
 
     @pytest.mark.asyncio
     async def test_keeps_the_author_and_drops_the_translator(self):
@@ -1212,7 +1231,7 @@ class TestK10plusRecord:
                 )
             )
         )
-        assert data["author"] == "F. Scott Fitzgerald"
+        assert data.author == "F. Scott Fitzgerald"
 
     @pytest.mark.asyncio
     async def test_ignores_an_added_entry_for_the_original_work(self):
@@ -1226,7 +1245,7 @@ class TestK10plusRecord:
                 )
             )
         )
-        assert data["author"] == "F. Scott Fitzgerald"
+        assert data.author == "F. Scott Fitzgerald"
 
     @pytest.mark.asyncio
     async def test_leaves_a_corporate_name_in_catalogue_order(self):
@@ -1239,7 +1258,7 @@ class TestK10plusRecord:
             '<subfield code="a">Springer, Berlin, Heidelberg</subfield>'
             '<subfield code="4">aut</subfield></datafield></record>'
         )
-        assert data["author"] == "Springer, Berlin, Heidelberg"
+        assert data.author == "Springer, Berlin, Heidelberg"
 
 
 class TestCrossReferenceGuard:
@@ -1302,12 +1321,12 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
+        assert result.record is not None
         # The DNB leads for a German ISBN and keeps its own title.
-        assert result.data["title"] == "Praxiswissen Docker"
+        assert result.record.title == "Praxiswissen Docker"
         # The blurb exists only on the K10plus record. A DNB record never
         # carries one, so this is the field that proves a merge happened.
-        assert result.data["description"] == "Long Island, 1922."
+        assert result.record.description == "Long Island, 1922."
         assert result.source == "dnb+k10plus"
 
     @pytest.mark.asyncio
@@ -1327,8 +1346,8 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["title"] == "Praxiswissen Docker"
+        assert result.record is not None
+        assert result.record.title == "Praxiswissen Docker"
 
     @pytest.mark.asyncio
     async def test_subjects_are_unioned_because_both_feed_the_tag_guess(self):
@@ -1350,8 +1369,8 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert set(result.data["subjects"]) == {"Informatik", "Science Fiction"}
+        assert result.record is not None
+        assert set(result.record.subjects) == {"Informatik", "Science Fiction"}
 
     @pytest.mark.asyncio
     async def test_a_classification_is_kept_whole_and_its_caption_too(self):
@@ -1372,15 +1391,11 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["classifications"] == [
-            {"scheme": ClassificationScheme.DDC, "number": "004", "label": None},
-            {
-                "scheme": ClassificationScheme.GND,
-                "number": "4026894-9",
-                "label": "Informatik",
-            },
-        ]
+        assert result.record is not None
+        assert result.record.headings == (
+            Heading(ClassificationScheme.DDC, "004"),
+            Heading(ClassificationScheme.GND, "4026894-9", "Informatik"),
+        )
 
     @pytest.mark.asyncio
     async def test_a_marc_dewey_number_arrives_with_no_caption(self):
@@ -1404,14 +1419,10 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["classifications"] == [
-            {
-                "scheme": ClassificationScheme.DDC,
-                "number": "005.133",
-                "label": None,
-            }
-        ]
+        assert result.record is not None
+        assert result.record.headings == (
+            Heading(ClassificationScheme.DDC, "005.133"),
+        )
 
     @pytest.mark.asyncio
     async def test_the_marc_segmentation_prime_is_stripped(self):
@@ -1436,14 +1447,10 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["classifications"] == [
-            {
-                "scheme": ClassificationScheme.DDC,
-                "number": "005.133",
-                "label": None,
-            }
-        ]
+        assert result.record is not None
+        assert result.record.headings == (
+            Heading(ClassificationScheme.DDC, "005.133"),
+        )
 
     @pytest.mark.asyncio
     async def test_a_marc_field_that_is_not_a_dewey_number_is_dropped(self):
@@ -1467,36 +1474,8 @@ class TestMerge:
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             result = await lookup(GERMAN_ISBN)
 
-        assert result.data is not None
-        assert result.data["classifications"] == []
-
-    @pytest.mark.asyncio
-    def test_one_number_from_two_sources_keeps_the_caption(self):
-        """Taking the leading source whole would throw a caption away.
-
-        **No live source pair exercises this for DDC any more**, and that is
-        the reason it is pinned at the unit level rather than through a lookup.
-        Until 2026-08-24 the DNB captioned its Dewey number and K10plus did
-        not; both now answer with the number alone, so the case a merge can
-        still meet is a stored heading being re-enriched, which
-        `_write_classifications` resolves with this same rule.
-        """
-        assert metadata._union_classifications(
-            [
-                {"scheme": ClassificationScheme.DDC, "number": "004", "label": None},
-                {
-                    "scheme": ClassificationScheme.DDC,
-                    "number": "004",
-                    "label": "Informatik",
-                },
-            ]
-        ) == [
-            {
-                "scheme": ClassificationScheme.DDC,
-                "number": "004",
-                "label": "Informatik",
-            }
-        ]
+        assert result.record is not None
+        assert result.record.headings == ()
 
     @pytest.mark.asyncio
     async def test_k10plus_leads_for_a_non_german_isbn(self):
@@ -1513,8 +1492,8 @@ class TestMerge:
             )
             result = await lookup(ENGLISH_ISBN)
 
-        assert result.data is not None
-        assert result.data["title"] == "The Great Gatsby"
+        assert result.record is not None
+        assert result.record.title == "The Great Gatsby"
 
 
 class TestSearchTerms:
@@ -1613,21 +1592,10 @@ class TestAccentsAndNearSpellings:
 class TestRanking:
     """The catalogues return catalogue order, so the ranking here is the ranking."""
 
-    def match(self, **overrides):
-        base = {
-            "source": "open_library",
-            "title": None,
-            "subtitle": None,
-            "author": None,
-            "series_name": None,
-            "language": None,
-            "year": None,
-            "publisher": None,
-            "page_count": None,
-            "isbn13": None,
-            "cover_url": None,
-        }
-        return {**base, **overrides}
+    def match(self, **overrides: Any) -> Record:
+        """One row, defaulting to a primary source so the penalty is opt in."""
+        overrides.setdefault("source", "open_library")
+        return Record(**overrides)
 
     def rank(self, matches, query, prefer_language=None):
         terms = metadata._search_terms(query)
@@ -1665,7 +1633,7 @@ class TestRanking:
             year=2024,
             publisher="Bloomsbury",
             page_count=100,
-            isbn13="9780747532699",
+            isbn="9780747532699",
             cover_url="https://example.test/cover.jpg",
         )
         ranked = self.rank([unrelated, matching], "harry potter philosopher stone")
@@ -1679,7 +1647,7 @@ class TestRanking:
             year=1965,
             publisher="Chilton",
             page_count=412,
-            isbn13="9780441013593",
+            isbn="9780441013593",
         )
         assert self.rank([sparse, full], "dune herbert")[0] is full
 
@@ -1703,7 +1671,7 @@ class TestRanking:
         """Being confirmed by a second catalogue is not a reason to demote."""
         confirmed = self.match(
             title="Der Schwarm", author="Frank Schätzing", source="bnf+k10plus",
-            isbn13="9783596164530",
+            isbn="9783596164530",
         )
         thin = self.match(title="Der Schwarm", author="Frank Schätzing", source="k10plus")
         assert self.rank([thin, confirmed], "der schwarm schatzing")[0] is confirmed
@@ -1719,7 +1687,7 @@ class TestRanking:
             subtitle="A Handbook of Agile Software Craftsmanship",
             author="Robert C. Martin",
             year=2008,
-            isbn13="9780132350884",
+            isbn="9780132350884",
             publisher="Prentice Hall",
             page_count=444,
         )
@@ -1784,31 +1752,31 @@ class TestSearchDeadline:
     ):
         monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 0.05)
 
-        async def quick() -> list[dict[str, object]]:
-            return [{"title": "Fast"}]
+        async def quick() -> list[Record]:
+            return [Record(title="Fast")]
 
-        async def slow() -> list[dict[str, object]]:
+        async def slow() -> list[Record]:
             await asyncio.sleep(5)
-            return [{"title": "Slow"}]
+            return [Record(title="Slow")]
 
         results = await metadata._within_deadline([quick(), slow()])
 
-        assert results == [[{"title": "Fast"}]]
+        assert results == [[Record(title="Fast")]]
 
     @pytest.mark.asyncio
     async def test_everything_that_answers_in_time_is_kept_in_order(self):
-        async def first() -> list[dict[str, object]]:
-            return [{"title": "One"}]
+        async def first() -> list[Record]:
+            return [Record(title="One")]
 
-        async def second() -> list[dict[str, object]]:
+        async def second() -> list[Record]:
             await asyncio.sleep(0.01)
-            return [{"title": "Two"}]
+            return [Record(title="Two")]
 
         # Order matters downstream: the merge reads source precedence from the
         # order rows arrive in, and `asyncio.wait` returns an unordered set.
         results = await metadata._within_deadline([first(), second()])
 
-        assert results == [[{"title": "One"}], [{"title": "Two"}]]
+        assert results == [[Record(title="One")], [Record(title="Two")]]
 
 
 class TestLibraryOfCongressClassifications:
@@ -1831,26 +1799,16 @@ class TestLibraryOfCongressClassifications:
         "</mods>"
     )
 
-    def _classifications(self) -> list[dict[str, object]]:
+    def _classifications(self) -> tuple[Heading, ...]:
         parsed = _loc_record(ElementTree.fromstring(self.MODS))
         assert parsed is not None
-        found = parsed["classifications"]
-        assert isinstance(found, list)
-        return found
+        return parsed.headings
 
     def test_both_schemes_are_kept(self):
-        assert self._classifications() == [
-            {
-                "scheme": ClassificationScheme.LCC,
-                "number": "QA76.73.P98 V53 2021",
-                "label": None,
-            },
-            {
-                "scheme": ClassificationScheme.DDC,
-                "number": "005.133",
-                "label": None,
-            },
-        ]
+        assert self._classifications() == (
+            Heading(ClassificationScheme.LCC, "QA76.73.P98 V53 2021"),
+            Heading(ClassificationScheme.DDC, "005.133"),
+        )
 
     def test_a_dewey_number_goes_through_the_same_normaliser(self):
         """MODS carries the prime too, so the LoC path must not be the one
@@ -1862,9 +1820,9 @@ class TestLibraryOfCongressClassifications:
         parsed = _loc_record(ElementTree.fromstring(mods))
         assert parsed is not None
         numbers = [
-            entry["number"]
-            for entry in parsed["classifications"]
-            if entry["scheme"] is ClassificationScheme.DDC
+            entry.number
+            for entry in parsed.headings
+            if entry.scheme is ClassificationScheme.DDC
         ]
 
         assert numbers == ["005.133"]
@@ -1872,7 +1830,7 @@ class TestLibraryOfCongressClassifications:
     def test_an_authority_with_no_reading_here_is_dropped(self):
         """RVK is a German shelving scheme this app has no mapping for, and a
         number nothing can read is a string pretending to be a citation."""
-        schemes = {entry["scheme"] for entry in self._classifications()}
+        schemes = {entry.scheme for entry in self._classifications()}
 
         assert ClassificationScheme.DDC in schemes
         assert "rvk" not in schemes
@@ -1901,26 +1859,20 @@ class TestLibraryOfCongressSubjectHeadings:
         "</mods>"
     )
 
-    def _classifications(self, mods: str | None = None) -> list[dict[str, object]]:
+    def _classifications(self, mods: str | None = None) -> tuple[Heading, ...]:
         parsed = _loc_record(ElementTree.fromstring(mods or self.MODS))
         assert parsed is not None
-        found = parsed["classifications"]
-        assert isinstance(found, list)
-        return found
+        return parsed.headings
 
     def _lcsh(self, mods: str | None = None) -> list[str]:
         return [
-            str(entry["number"])
+            str(entry.number)
             for entry in self._classifications(mods)
-            if entry["scheme"] is ClassificationScheme.LCSH
+            if entry.scheme is ClassificationScheme.LCSH
         ]
 
     def test_a_heading_becomes_a_row_under_its_own_scheme(self):
-        assert {
-            "scheme": ClassificationScheme.LCSH,
-            "number": "Computer programming",
-            "label": None,
-        } in self._classifications()
+        assert Heading(ClassificationScheme.LCSH, "Computer programming") in self._classifications()
 
     def test_a_subdivided_heading_is_one_row_and_not_two(self):
         """`Computer software` alone is a different heading with a different
@@ -1934,11 +1886,11 @@ class TestLibraryOfCongressSubjectHeadings:
         rows = [
             entry
             for entry in self._classifications()
-            if entry["scheme"] is ClassificationScheme.LCSH
+            if entry.scheme is ClassificationScheme.LCSH
         ]
 
         assert rows
-        assert all(entry["label"] is None for entry in rows)
+        assert all(entry.label is None for entry in rows)
 
     def test_a_vocabulary_this_app_has_no_reading_for_is_dropped(self):
         """The Library of Congress mixes 23 authority values into one record.
@@ -2008,20 +1960,20 @@ class TestLibraryOfCongressSubjectHeadings:
             "<topic>004 Jahre Bauhaus</topic>",
         )
         dewey = [
-            entry["number"]
+            entry.number
             for entry in self._classifications(numeric)
-            if entry["scheme"] is ClassificationScheme.DDC
+            if entry.scheme is ClassificationScheme.DDC
         ]
 
         assert dewey == ["005.133"]
         assert "004 Jahre Bauhaus" in self._lcsh(numeric)
 
     def test_the_shelf_classifications_come_before_the_subject_headings(self):
-        """Which is load bearing rather than tidy. `_as_match` slices this list
-        to eight and `routers/books._headings` applies `_SCHEME_ORDER` only
-        afterwards, so on the search path a record's own order is the only
-        thing keeping its Dewey number. One live record carries 14 LCSH
-        headings against at most two classifications."""
+        """Which is load bearing rather than tidy. `Record.match_headings`
+        slices this list to eight and `routers/books._headings` applies
+        `_SCHEME_ORDER` only afterwards, so on the search path a record's own
+        order is the only thing keeping its Dewey number. One live record
+        carries 14 LCSH headings against at most two classifications."""
         crowded = self.MODS.replace(
             "</mods>",
             "".join(
@@ -2030,9 +1982,8 @@ class TestLibraryOfCongressSubjectHeadings:
             )
             + "</mods>",
         )
-        found = self._classifications(crowded)
-        kept = _union_classifications(found)[:MAX_CLASSIFICATIONS_PER_BOOK]
-        schemes = [entry["scheme"] for entry in kept]
+        record = Record(source="loc", title="x", headings=self._classifications(crowded))
+        schemes = [entry.scheme for entry in record.match_headings()]
 
         assert schemes[:2] == [ClassificationScheme.LCC, ClassificationScheme.DDC]
         assert ClassificationScheme.LCSH in schemes
@@ -2097,70 +2048,68 @@ def _open_library_routes(mock: respx.Router, **parts: httpx.Response) -> None:
 
 
 class TestMergingTwoSearchRows:
-    """`_merge_matches` when one row has classifications and the other does not."""
+    """`_merge_matches` when one row has headings and the other does not."""
 
     def test_a_populated_list_beats_an_empty_one(self):
         """The regression this was written for, measured live before fixing.
 
         Every scalar a catalogue omits arrives as None, so "fill where the value
-        `is None`" was the whole rule until `classifications` became the one list
-        valued key `_as_match` writes. It always writes a list, so a source that
-        found nothing wrote `[]`, which is not None, so it beat a populated list
-        from the next source. Over 30 live title searches, 6 of the 10 merged
-        rows whose Library of Congress half carried LCSH lost every heading, and
-        in 6 of 6 the leading row's list was empty.
+        `is None`" was the whole rule until the classifications became the one
+        list valued key a match carried. A source that found nothing wrote `[]`,
+        which is not None, so it beat a populated list from the next source.
+        Over 30 live title searches, 6 of the 10 merged rows whose Library of
+        Congress half carried LCSH lost every heading, and in 6 of 6 the leading
+        row's list was empty. `Record.filled_from` now tests the collections and
+        the scalars separately, so the two cannot be confused again.
         """
-        leading = {
-            "source": "bnf",
-            "title": "Les Miserables",
-            "classifications": [],
-        }
-        following = {
-            "source": "loc",
-            "title": "Les Miserables",
-            "classifications": [{"scheme": "lcsh", "number": "France -- History"}],
-        }
+        leading = Record(source="bnf", title="Les Miserables")
+        following = Record(
+            source="loc",
+            title="Les Miserables",
+            headings=(Heading(ClassificationScheme.LCSH, "France -- History"),),
+        )
 
         merged = metadata._merge_matches([leading, following])
 
         assert len(merged) == 1
-        assert merged[0]["classifications"] == [
-            {"scheme": "lcsh", "number": "France -- History"}
-        ]
+        assert merged[0].headings == (
+            Heading(ClassificationScheme.LCSH, "France -- History"),
+        )
 
     def test_a_zero_is_a_value_and_not_an_absence(self):
-        """`== []` rather than `not current`, pinned.
+        """A scalar is tested with `is None`, pinned.
 
         Falsiness would reclassify a `page_count` of 0, a `year` of 0, a
         `series_index` of 0.0 and any empty string from present to absent, and
-        the next source would overwrite them. Nothing else in this file
-        distinguishes the two conditions, because `[]` is falsy under both.
+        the next source would overwrite them.
         """
-        leading = {"source": "bnf", "title": "A pamphlet", "page_count": 0}
-        following = {"source": "loc", "title": "A pamphlet", "page_count": 480}
+        leading = Record(source="bnf", title="A pamphlet", page_count=0)
+        following = Record(source="loc", title="A pamphlet", page_count=480)
 
         merged = metadata._merge_matches([leading, following])
 
-        assert merged[0]["page_count"] == 0
+        assert merged[0].page_count == 0
 
     def test_a_populated_list_is_not_replaced_by_a_later_one(self):
-        """Only absence is filled. Unioning two populated lists would be a
-        change to how every field merges, and is deliberately not what this does.
+        """Only absence is filled. Unioning two populated lists is the lookup
+        path's rule and deliberately not this one: a search row is bounded at
+        `MAX_CLASSIFICATIONS_PER_BOOK` before it becomes a `BookMatch`, so
+        unioning two full rows would cost the row rather than the heading.
         """
-        leading = {
-            "source": "open_library",
-            "title": "Les Miserables",
-            "classifications": [{"scheme": "ddc", "number": "843.7"}],
-        }
-        following = {
-            "source": "loc",
-            "title": "Les Miserables",
-            "classifications": [{"scheme": "lcsh", "number": "France -- History"}],
-        }
+        leading = Record(
+            source="open_library",
+            title="Les Miserables",
+            headings=(Heading(ClassificationScheme.DDC, "843.7"),),
+        )
+        following = Record(
+            source="loc",
+            title="Les Miserables",
+            headings=(Heading(ClassificationScheme.LCSH, "France -- History"),),
+        )
 
         merged = metadata._merge_matches([leading, following])
 
-        assert merged[0]["classifications"] == [{"scheme": "ddc", "number": "843.7"}]
+        assert merged[0].headings == (Heading(ClassificationScheme.DDC, "843.7"),)
 
 
 class TestTheOpenLibraryLookup:
@@ -2185,12 +2134,12 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.found
-        assert result.data is not None
-        assert result.data["subjects"] == [
+        assert result.record is not None
+        assert result.record.subjects == (
             "Computer algorithms",
             "Algorithms",
             "open_syllabus_project",
-        ]
+        )
 
     @pytest.mark.asyncio
     async def test_a_subject_list_is_bounded(self):
@@ -2206,8 +2155,8 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert len(result.data["subjects"]) == metadata._OPEN_LIBRARY_MAX_SUBJECTS
+        assert result.record is not None
+        assert len(result.record.subjects) == metadata._OPEN_LIBRARY_MAX_SUBJECTS
 
     @pytest.mark.asyncio
     async def test_the_editions_own_subjects_come_first(self):
@@ -2223,8 +2172,8 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["subjects"][0] == "Set theory"
+        assert result.record is not None
+        assert result.record.subjects[0] == "Set theory"
 
     @pytest.mark.asyncio
     async def test_a_subject_is_never_a_classification(self):
@@ -2243,9 +2192,9 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["subjects"]
-        assert result.data["classifications"] == []
+        assert result.record is not None
+        assert result.record.subjects
+        assert result.record.headings == ()
 
     @pytest.mark.asyncio
     async def test_a_dewey_number_and_one_call_number_become_classifications(self):
@@ -2260,19 +2209,11 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["classifications"] == [
-            {
-                "scheme": ClassificationScheme.DDC,
-                "number": "005.1",
-                "label": None,
-            },
-            {
-                "scheme": ClassificationScheme.LCC,
-                "number": "QA76.6 .I5858 2009",
-                "label": None,
-            },
-        ]
+        assert result.record is not None
+        assert result.record.headings == (
+            Heading(ClassificationScheme.DDC, "005.1"),
+            Heading(ClassificationScheme.LCC, "QA76.6 .I5858 2009"),
+        )
 
     @pytest.mark.asyncio
     async def test_a_dewey_value_that_is_not_a_number_is_dropped(self):
@@ -2291,8 +2232,8 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["classifications"] == []
+        assert result.record is not None
+        assert result.record.headings == ()
 
     @pytest.mark.asyncio
     async def test_the_work_supplies_the_author_the_edition_does_not_credit(self):
@@ -2307,13 +2248,14 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["author"] == "Thomas H. Cormen"
+        assert result.record is not None
+        assert result.record.author == "Thomas H. Cormen"
 
     @pytest.mark.asyncio
     async def test_the_page_count_and_the_language_are_read(self):
         """Both were missing entirely until this round, so a fallback lookup
-        answered without two of the seven fields `_completeness` scores."""
+        answered without two of the seven fields `Record.completeness`
+        scores."""
         with respx.mock(assert_all_called=False) as mock:
             _open_library_routes(
                 mock,
@@ -2323,9 +2265,9 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["page_count"] == 1292
-        assert result.data["language"] == "en"
+        assert result.record is not None
+        assert result.record.page_count == 1292
+        assert result.record.language == "en"
 
     @pytest.mark.asyncio
     async def test_a_key_that_is_not_open_librarys_is_never_fetched(self):
@@ -2355,8 +2297,8 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["author"] is None
+        assert result.record is not None
+        assert result.record.author is None
         assert not elsewhere.called
 
     @pytest.mark.asyncio
@@ -2372,9 +2314,9 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.found
-        assert result.data is not None
-        assert result.data["title"] == "Introduction to Algorithms"
-        assert result.data["subjects"] == []
+        assert result.record is not None
+        assert result.record.title == "Introduction to Algorithms"
+        assert result.record.subjects == ()
 
     @pytest.mark.asyncio
     async def test_a_work_timing_out_costs_the_subjects_only(self):
@@ -2399,9 +2341,9 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.found
-        assert result.data is not None
-        assert result.data["title"] == "Introduction to Algorithms"
-        assert result.data["subjects"] == []
+        assert result.record is not None
+        assert result.record.title == "Introduction to Algorithms"
+        assert result.record.subjects == ()
 
     @pytest.mark.asyncio
     async def test_an_author_timing_out_costs_the_author_only(self):
@@ -2418,9 +2360,9 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.found
-        assert result.data is not None
-        assert result.data["author"] is None
-        assert result.data["subjects"]
+        assert result.record is not None
+        assert result.record.author is None
+        assert result.record.subjects
 
     @pytest.mark.asyncio
     async def test_a_body_that_is_valid_json_but_not_an_object_is_not_a_500(self):
@@ -2451,8 +2393,8 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.found
-        assert result.data is not None
-        assert result.data["subjects"] == []
+        assert result.record is not None
+        assert result.record.subjects == ()
 
     @pytest.mark.asyncio
     async def test_a_page_count_no_book_could_have_is_dropped(self):
@@ -2472,8 +2414,8 @@ class TestTheOpenLibraryLookup:
             )
             result = await self._lookup(mock)
 
-        assert result.data is not None
-        assert result.data["page_count"] is None
+        assert result.record is not None
+        assert result.record.page_count is None
 
 
 #: An editions listing, in the shape `/works/{key}/editions.json` returns.
@@ -2527,7 +2469,7 @@ class TestTheEditionCluster:
             self._routes(mock)
             rows = await metadata.editions(ENGLISH_ISBN, 5)
 
-        assert [row["isbn13"] for row in rows] == [
+        assert [row.isbn for row in rows] == [
             "9780262270830",
             "9783486590029",
             None,
@@ -2535,15 +2477,15 @@ class TestTheEditionCluster:
 
     @pytest.mark.asyncio
     async def test_the_most_complete_printing_leads(self):
-        """`_completeness`, the same function `_merge` uses to choose between
-        printings: a row with a publisher, a year and a page count is one
-        somebody can recognise their copy from."""
+        """`Record.completeness`, the same score `_merge` uses to choose
+        between printings: a row with a publisher, a year and a page count is
+        one somebody can recognise their copy from."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
             rows = await metadata.editions(ENGLISH_ISBN, 5)
 
-        assert rows[0]["page_count"] == 1320
-        assert rows[-1]["publisher"] is None
+        assert rows[0].page_count == 1320
+        assert rows[-1].publisher is None
 
     @pytest.mark.asyncio
     async def test_a_printing_in_another_language_is_not_a_candidate(self):
@@ -2553,7 +2495,7 @@ class TestTheEditionCluster:
             self._routes(mock)
             rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
 
-        assert [row["isbn13"] for row in rows] == ["9783486590029", None]
+        assert [row.isbn for row in rows] == ["9783486590029", None]
 
     @pytest.mark.asyncio
     async def test_a_printing_declaring_the_wanted_language_leads(self):
@@ -2588,7 +2530,7 @@ class TestTheEditionCluster:
             self._routes(mock, listing)
             rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
 
-        assert [row["title"] for row in rows] == ["Es", "Es, Turkish printing"]
+        assert [row.title for row in rows] == ["Es", "Es, Turkish printing"]
 
     @pytest.mark.asyncio
     async def test_a_printing_declaring_no_language_survives_the_filter(self):
@@ -2598,8 +2540,8 @@ class TestTheEditionCluster:
             self._routes(mock)
             rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="fr")
 
-        assert [row["title"] for row in rows] == ["Introduction to Algorithms"]
-        assert rows[0]["language"] is None
+        assert [row.title for row in rows] == ["Introduction to Algorithms"]
+        assert rows[0].language is None
 
     @pytest.mark.asyncio
     async def test_one_author_request_serves_every_row(self):
@@ -2613,7 +2555,7 @@ class TestTheEditionCluster:
             rows = await metadata.editions(ENGLISH_ISBN, 5)
 
         assert author.call_count == 1
-        assert rows[0]["author"] == "Thomas H. Cormen"
+        assert rows[0].author == "Thomas H. Cormen"
 
     @pytest.mark.asyncio
     async def test_a_classification_on_a_sibling_printing_is_carried(self):
@@ -2623,9 +2565,9 @@ class TestTheEditionCluster:
             self._routes(mock)
             rows = await metadata.editions(ENGLISH_ISBN, 5)
 
-        assert rows[0]["classifications"] == [
-            {"scheme": ClassificationScheme.DDC, "number": "005.1", "label": None}
-        ]
+        assert rows[0].headings == (
+            Heading(ClassificationScheme.DDC, "005.1"),
+        )
 
     @pytest.mark.asyncio
     async def test_an_isbn_that_is_not_one_asks_nothing(self):
@@ -2697,7 +2639,7 @@ class TestTheCandidates:
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
-        assert rows[0]["isbn13"] == "9780262270830"
+        assert rows[0].isbn == "9780262270830"
 
     @pytest.mark.asyncio
     async def test_the_cluster_never_takes_the_whole_page(self):
@@ -2747,8 +2689,8 @@ class TestTheCandidates:
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
-        assert rows[0]["title"] == rows[-1]["title"]
-        assert "9780262046305" in [row["isbn13"] for row in rows]
+        assert rows[0].title == rows[-1].title
+        assert "9780262046305" in [row.isbn for row in rows]
 
     @pytest.mark.asyncio
     async def test_a_search_row_repeating_a_cluster_isbn_is_dropped(self):
@@ -2772,7 +2714,7 @@ class TestTheCandidates:
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
-        assert [row["isbn13"] for row in rows].count("9780262270830") == 1
+        assert [row.isbn for row in rows].count("9780262270830") == 1
 
     @pytest.mark.asyncio
     async def test_a_book_with_no_isbn_still_gets_the_search(self):
@@ -2792,7 +2734,7 @@ class TestTheCandidates:
                 "Introduction to Algorithms", isbn=None, limit=5
             )
 
-        assert [row["isbn13"] for row in rows] == ["9780262046305"]
+        assert [row.isbn for row in rows] == ["9780262046305"]
 
     @pytest.mark.asyncio
     async def test_a_slow_cluster_costs_its_rows_and_not_the_response(
@@ -2825,4 +2767,4 @@ class TestTheCandidates:
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
-        assert [row["isbn13"] for row in rows] == ["9780262046305"]
+        assert [row.isbn for row in rows] == ["9780262046305"]

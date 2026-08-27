@@ -132,6 +132,15 @@ def tag_names(numbers: Iterable[str]) -> list[str]:
 #: because a typo would otherwise produce a suggestion that silently matches
 #: nothing.
 #:
+#: **A name, still, and not a `TagKey`, which costs a renamed tag its
+#: suggestion.** `serialisation.suggested_tag_ids` looks the value up against
+#: `tags.name`, so a household that renamed Computing gets no suggestion for
+#: DDC 004: not an error anywhere, exactly as above. The key beside that column
+#: would fix it and would also change what a suggestion means, since a renamed
+#: row is deliberately no longer the seeded tag anywhere else in the app. Left
+#: as it is because the language work that added the key changed display only;
+#: this is where to start if it is ever picked up.
+#:
 #: The 800s all map to Fiction rather than to a genre. A division there is a
 #: literature by language (`830` is German literature), which says nothing
 #: about whether the book is a novel, a play or a work of criticism. Fiction is

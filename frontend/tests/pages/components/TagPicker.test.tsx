@@ -5,7 +5,7 @@ import { renderLocalised } from "../../utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TagCategory } from "../../../src/api/generated/model";
+import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
 import TagPicker from "../../../src/pages/components/TagPicker";
 import { makeTag, makeTagSet, resetIds } from "../../factories";
 
@@ -19,6 +19,78 @@ describe("TagPicker", () => {
     expect(screen.getByText("Type")).toBeInTheDocument();
     expect(screen.getByText("Genre")).toBeInTheDocument();
     expect(screen.getByText("Age")).toBeInTheDocument();
+  });
+
+  it("shows a German reader the German name of a seeded tag", () => {
+    // The ticket's first user story. The picker is where a German household
+    // meets the English vocabulary, and where a tag suggested from a DDC
+    // number arrives pre-selected.
+    //
+    // Selected rather than clicked open: a category holding a selection opens
+    // itself, which keeps this test synchronous and asserts one thing.
+    const tags = makeTagSet();
+    renderLocalised(
+      <TagPicker tags={tags} selectedIds={[tags[0]!.id]} onToggle={vi.fn()} />,
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Belletristik" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Fiction" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("leaves a tag the library invented as it was typed", () => {
+    // A tag with no key is theirs, in any language. It is also the shape a
+    // renamed seeded tag arrives in, which is how a rename survives.
+    const invented = makeTag({
+      name: "Holiday reads",
+      category: TagCategory.custom,
+    });
+    renderLocalised(
+      <TagPicker
+        tags={[invented]}
+        selectedIds={[invented.id]}
+        onToggle={vi.fn()}
+      />,
+      { locale: Locale.de },
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Holiday reads" }),
+    ).toBeInTheDocument();
+  });
+
+  it("orders a category by the name it prints, not the one it stores", () => {
+    // Belletristik files under B and Comics under C. On the English names
+    // behind them the order is the other way round: correct against data the
+    // reader cannot see.
+    const comics = makeTag({
+      name: "Comics",
+      category: TagCategory.type,
+      key: TagKey.comics,
+    });
+    const fiction = makeTag({
+      name: "Fiction",
+      category: TagCategory.type,
+      key: TagKey.fiction,
+    });
+    renderLocalised(
+      <TagPicker
+        tags={[comics, fiction]}
+        selectedIds={[comics.id]}
+        onToggle={vi.fn()}
+      />,
+      { locale: Locale.de },
+    );
+
+    const chips = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((text) => text === "Belletristik" || text === "Comics");
+    expect(chips).toEqual(["Belletristik", "Comics"]);
   });
 
   it("omits a category with no tags", () => {

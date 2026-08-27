@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 import main
 from database import Base, engine
+from enums import TagKey
 from models import Tag
 
 
@@ -34,11 +35,40 @@ class TestSeedTags:
         assert db.query(Tag).filter(Tag.name == "Fantasy").count() == 1
 
     def test_every_predefined_tag_has_a_known_category(self):
-        assert {category for _, category in main.PREDEFINED_TAGS} == {"type", "genre", "age"}
+        assert {tag.category for tag in main.PREDEFINED_TAGS} == {"type", "genre", "age"}
 
     def test_predefined_tag_names_are_unique(self):
-        names = [name for name, _ in main.PREDEFINED_TAGS]
+        names = [tag.name for tag in main.PREDEFINED_TAGS]
         assert len(names) == len(set(names))
+
+    def test_it_writes_the_key_on_a_tag_it_inserts(self, db):
+        db.query(Tag).filter(Tag.name == "Computing").delete()
+        db.commit()
+
+        main.seed_tags()
+
+        assert db.query(Tag).filter(Tag.name == "Computing").one().key == "computing"
+
+
+class TestTheSeededVocabularyIsKeyed:
+    """`TagKey` and `PREDEFINED_TAGS` are one list written in two places.
+
+    They have to be: the enum is what reaches the OpenAPI schema and therefore
+    the German table in `frontend/src/i18n/tagNames.ts`, and the list is what
+    reaches the database. A member with no entry is a translation for a tag
+    nobody has; an entry with no member cannot be translated at all, and
+    neither says so anywhere.
+
+    One assertion, because the sorted comparison below catches all three ways
+    they can drift: a member nothing uses, a member used twice, and an entry
+    naming something that is not a member. A second test asking whether every
+    entry's key is a `TagKey` was deleted rather than kept: `PredefinedTag.key`
+    is typed, so it could only fail if mypy had already failed.
+    """
+
+    def test_every_key_is_used_exactly_once(self):
+        used = [tag.key for tag in main.PREDEFINED_TAGS]
+        assert sorted(used) == sorted(TagKey)
 
 
 class TestAppWiring:

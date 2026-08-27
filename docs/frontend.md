@@ -37,7 +37,7 @@ src/
 │   ├── query-client.ts     cache and retry defaults
 │   └── generated/          Orval output, committed, never hand-edited
 ├── components/             general dumb components only
-├── i18n/                    en.ts · de.ts · index.tsx (provider + useTranslation)
+├── i18n/                    en.ts · de.ts · tagNames.ts · index.tsx (provider + useTranslation)
 ├── lib/                     isbn.ts, goodreads.ts: pure functions, no React
 ├── pages/
 │   ├── components/         shared by several pages (TagPicker, BookCard)
@@ -147,6 +147,17 @@ sentence appearing mid-paragraph in a German page.
 const { t, locale, setLocale } = useTranslation();
 t("book.by", { author: book.author });   // "by Frank Herbert"
 ```
+
+**The seeded tag names are the one piece of data that is translated**, and they are
+translated by key rather than by message. `tags.name` holds the English name, and
+`tagNames.ts` maps `TagKey` to the German one; `tagName(tag, locale)` is the only road to a
+tag's name on screen, asserted by `houseRules.test.ts`. A tag with no key is one the library
+invented or renamed, and is shown exactly as typed.
+
+`TAG_NAMES` is `Record<Exclude<Locale, "en">, Record<TagKey, string>>`, which buys the same
+compile error `Messages` does, twice over: English is absent because the database already
+holds it, and a key added to the backend enum has no German name until somebody writes one.
+Regenerate the client first, or the key is not in the union and the error does not appear.
 
 `{placeholder}` substitution only. Numbers are formatted with `Intl.NumberFormat` for the
 locale; an unsupplied placeholder is left visible, because a literal `{count}` on screen is

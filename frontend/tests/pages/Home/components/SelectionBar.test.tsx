@@ -1,11 +1,16 @@
 /** Tests for src/pages/Home/components/SelectionBar.tsx. */
 
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { OwnershipStatus } from "../../../../src/api/generated/model";
-import { makeCollection } from "../../../factories";
+import {
+  Locale,
+  OwnershipStatus,
+  TagCategory,
+  TagKey,
+} from "../../../../src/api/generated/model";
+import { makeCollection, makeTag } from "../../../factories";
 import SelectionBar from "../../../../src/pages/Home/components/SelectionBar";
 import { renderLocalised } from "../../../utils";
 
@@ -148,6 +153,48 @@ describe("SelectionBar extra actions", () => {
     await user.selectOptions(screen.getByLabelText("Add tag"), "7");
 
     expect(props.onRun).toHaveBeenCalledWith("add_tag", 7);
+  });
+
+  it("names the tags in the reader's language, in the order they print", async () => {
+    // Two seeded tags in one category. Sorted on the stored English names the
+    // order is Comics, Fiction; on the German ones it is Belletristik, Comics,
+    // and this list shows the German ones.
+    renderLocalised(
+      <SelectionBar
+        selectedCount={2}
+        isApplying={false}
+        result={null}
+        error={null}
+        tags={[
+          makeTag({
+            name: "Comics",
+            category: TagCategory.type,
+            key: TagKey.comics,
+          }),
+          makeTag({
+            name: "Fiction",
+            category: TagCategory.type,
+            key: TagKey.fiction,
+          }),
+        ]}
+        collections={[]}
+        onSelectAll={vi.fn()}
+        onRun={vi.fn()}
+        onClear={vi.fn()}
+        onApply={vi.fn()}
+        onDone={vi.fn()}
+      />,
+      { locale: Locale.de },
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Weitere Aktionen/ }));
+
+    // Scoped to the tag select. The bar holds a status select too, and an
+    // unscoped option query reads both of them.
+    const options = within(screen.getByLabelText("Schlagwort hinzufügen"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(options.slice(1)).toEqual(["Belletristik", "Comics"]);
   });
 
   it("asks before deleting", async () => {

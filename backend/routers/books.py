@@ -3,7 +3,7 @@ import csv
 import io
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, nullslast
 from sqlalchemy.orm import Session, joinedload
 
+import catalogue
 import covers
 import custom_fields
 import google_books
@@ -157,6 +158,10 @@ def list_tags(db: DbSession, current_user: CurrentUser) -> list[TagOut]:
             id=tag.id,
             name=tag.name,
             category=TagCategory(tag.category),
+            # Straight off the row: `KnownTagKey` forgets a key this version
+            # has never heard of, so one costs that tag its translation rather
+            # than 500ing a list drawn on nearly every page.
+            key=tag.key,
             is_predefined=tag.is_predefined,
             book_count=counts.get(tag.id, 0),
         )
@@ -381,18 +386,19 @@ async def lookup_isbn(
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
-    assert result.data is not None
-    data = dict(result.data)
-    subjects = data.pop("subjects", [])
-    # Built here rather than left to `BookLookup(**data)` so the same objects
-    # feed the tag suggestion and the response, and the two cannot disagree
-    # about what the catalogues said.
-    classifications = _headings(data.pop("classifications", None))
+    assert result.record is not None
+    record = result.record
+    # Built here rather than left to the schema so the same objects feed the tag
+    # suggestion and the response, and the two cannot disagree about what the
+    # catalogues said.
+    classifications = _headings(record.headings)
     all_tags = db.query(Tag).all()
     return BookLookup(
-        **data,
+        **record.as_lookup(),
         classifications=classifications,
-        suggested_tag_ids=suggested_tag_ids(subjects, classifications, all_tags),
+        suggested_tag_ids=suggested_tag_ids(
+            list(record.subjects), classifications, all_tags
+        ),
     )
 
 
@@ -441,7 +447,7 @@ _SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
 }
 
 
-def _headings(entries: object) -> list[ClassificationIn]:
+def _headings(entries: Iterable[catalogue.Heading]) -> list[ClassificationIn]:
     """The classifications in a catalogue record, through the schema a client posts.
 
     **An upstream catalogue is no more trusted than a browser.** The lookup
@@ -465,12 +471,14 @@ def _headings(entries: object) -> list[ClassificationIn]:
     first things dropped. Ordering here is what makes "the Dewey number
     survives" true of a book rather than of a record.
     """
-    if not isinstance(entries, list):
-        return []
     headings: list[ClassificationIn] = []
     for entry in entries:
         try:
-            headings.append(ClassificationIn.model_validate(entry))
+            headings.append(
+                ClassificationIn(
+                    scheme=entry.scheme, number=entry.number, label=entry.label
+                )
+            )
         except ValidationError:
             logger.info("Discarded an unusable classification: %s", _clipped(entry))
     # Stable, so within one scheme the catalogues keep the order they answered
@@ -480,7 +488,7 @@ def _headings(entries: object) -> list[ClassificationIn]:
 
 
 def _match_rows(
-    matches: list[dict[str, Any]], all_tags: list[Tag] | None
+    matches: list[catalogue.Record], all_tags: list[Tag] | None
 ) -> list[BookMatch]:
     """Catalogue records as search rows, dropping any the schema refuses.
 
@@ -501,12 +509,13 @@ def _match_rows(
     `MAX_YEAR` 2200, and 9999 is MARC's own open ended date for a continuing
     resource.
 
-    **`_headings` is still called here although `metadata._as_match` now bounds
+    **`_headings` is still called here although `Record.match_headings` bounds
     the count**, and the two are not the same job. That bound stops a ninth
     heading; this drops an entry the column could not hold, so a 400 character
     caption costs its own heading rather than the row. What it no longer does
-    on this path is the count: `_as_match` has already sliced, so on the search
-    path the parser's own order decides what survives and not `_SCHEME_ORDER`.
+    on this path is the count: `match_headings` has already sliced, so on the
+    search path the parser's own order decides what survives and not
+    `_SCHEME_ORDER`.
     Two parsers now have to keep that true, not one. `_dnb_record` emits its
     Dewey number ahead of its GND headings, and `_loc_record` emits its
     `<classification>` elements ahead of its LCSH ones, which is where the
@@ -523,23 +532,25 @@ def _match_rows(
     """
     rows: list[BookMatch] = []
     for match in matches:
-        subjects = google_books.split_categories(match.get("categories"))
-        match["classifications"] = _headings(match.get("classifications"))
         try:
-            row = BookMatch(**match)
+            row = BookMatch(
+                **match.as_match(),
+                classifications=_headings(match.match_headings()),
+            )
         except ValidationError:
             logger.info(
                 "Discarded an unusable search result from %r: %s",
-                match.get("source"),
+                match.source,
                 _clipped(match),
             )
             continue
-        # Derived from the validated rows on the model rather than from the raw
-        # dict, which would run the bounds and the tidying twice and let the
-        # two copies drift.
+        # The record's own subjects rather than the joined string it puts on the
+        # wire: splitting `categories` back apart to feed this was a round trip
+        # through a separator, and the classifications come off the validated
+        # model so the bounds and the tidying are not run twice.
         if all_tags is not None:
             row.suggested_tag_ids = suggested_tag_ids(
-                subjects, row.classifications, all_tags
+                list(match.subjects), row.classifications, all_tags
             )
         rows.append(row)
     return rows
@@ -2806,24 +2817,24 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
-    assert result.data is not None
-    data = result.data
+    assert result.record is not None
+    record = result.record
 
-    book.title = data["title"] or book.title
-    book.subtitle = data.get("subtitle")
-    book.author = data.get("author")
-    book.publisher = data.get("publisher")
-    book.year = data.get("year")
-    book.description = data.get("description")
+    book.title = record.title or book.title
+    book.subtitle = record.subtitle
+    book.author = record.author
+    book.publisher = record.publisher
+    book.year = record.year
+    book.description = record.description
 
     # Only ever filled in, never cleared: a refresh whose source lacks the page
     # count should not delete the one already on the record.
-    book.language = data.get("language") or book.language
-    book.page_count = data.get("page_count") or book.page_count
+    book.language = record.language or book.language
+    book.page_count = record.page_count or book.page_count
 
     # A cover the member uploaded outranks whatever the source offers.
     if not covers.is_local(book.cover_url):
-        book.cover_url = data.get("cover_url")
+        book.cover_url = record.cover_url
         # `to_thread` rather than a direct call: this handler is a coroutine, and
         # `resolve_and_store` runs its own event loop.
         await asyncio.to_thread(_store_cover, book)
@@ -3040,18 +3051,27 @@ async def enrich_book(
         else ""
     )
 
+    # `as_match()` on both paths, and it carries no Classifications by
+    # construction. That is ADR 0006 held by the type rather than by this
+    # handler remembering: an unattended write has nothing to write.
     fields: dict[str, Any] | None = None
     if book.isbn:
         result = await metadata.lookup(book.isbn, api_key)
+        # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
+        # test for the record. This is the third consumer of a `Lookup` and the
+        # only one that writes to a Book without telling the Member why nothing
+        # happened, so it is the one that must not decide on a different
+        # question from its two siblings.
         if result.found:
-            fields = _enrichment_fields(result.data or {})
+            assert result.record is not None
+            fields = result.record.as_match()
 
     if fields is None:
         # No ISBN, or no catalogue carries this edition under it.
         query = " ".join(part for part in (book.title, book.author) if part)
         matches = await metadata.search(query, api_key, limit=1)
         if matches:
-            fields = dict(matches[0])
+            fields = matches[0].as_match()
 
     if fields is None:
         return BookEnrichmentOut(
@@ -3070,20 +3090,6 @@ async def enrich_book(
     return BookEnrichmentOut(
         book=book_to_out(book, current_user, db), updated_fields=updated, found=True
     )
-
-
-def _enrichment_fields(record: dict[str, Any]) -> dict[str, Any]:
-    """A lookup record in the shape `google_books.merge_into` writes from.
-
-    Two differences and no more: the merger reads `categories` as the joined
-    string a book row stores, where a lookup carries a list of subject
-    headings, and it has no use for the ISBN it was already given.
-    """
-    fields = dict(record)
-    subjects = fields.pop("subjects", None)
-    if subjects:
-        fields["categories"] = google_books.join_categories(subjects)
-    return fields
 
 
 @router.post("/{book_id}/enrich/apply", response_model=BookEnrichmentOut)

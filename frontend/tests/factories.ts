@@ -9,6 +9,7 @@
 import {
   ReadStatus,
   TagCategory,
+  TagKey,
   type BookOut,
   type CollectionOut,
   type LoanOut,
@@ -50,12 +51,27 @@ export function makeTag(overrides: Partial<TagOut> = {}): TagOut {
   };
 }
 
-/** One tag per category, for the grouped pickers. */
+/**
+ * One tag per category, for the grouped pickers.
+ *
+ * Keyed, because all three are seeded names and a seeded row carries its key:
+ * a set without one would be three tags a German reader is shown in English,
+ * which is the state this fixture is least like. `makeTag` stays unkeyed,
+ * which is the other real shape, a tag the library invented.
+ */
 export function makeTagSet(): TagOut[] {
   return [
-    makeTag({ name: "Fiction", category: TagCategory.type }),
-    makeTag({ name: "Fantasy", category: TagCategory.genre }),
-    makeTag({ name: "Adult", category: TagCategory.age }),
+    makeTag({
+      name: "Fiction",
+      category: TagCategory.type,
+      key: TagKey.fiction,
+    }),
+    makeTag({
+      name: "Fantasy",
+      category: TagCategory.genre,
+      key: TagKey.fantasy,
+    }),
+    makeTag({ name: "Adult", category: TagCategory.age, key: TagKey.adult }),
   ];
 }
 

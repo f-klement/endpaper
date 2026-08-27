@@ -6,9 +6,15 @@ import {
   ReadStatus,
   TagCategory,
   type BookOut,
+  type Locale,
   type TagOut,
 } from "../../api/generated/model";
-import { useTranslation, type MessageKey, type Translate } from "../../i18n";
+import {
+  tagName,
+  useTranslation,
+  type MessageKey,
+  type Translate,
+} from "../../i18n";
 import { formatMinor } from "../../lib/money";
 import {
   CONDITION_LABELS,
@@ -101,7 +107,15 @@ function priceText(book: BookOut): string | null {
     : amount;
 }
 
-function factsFor(book: BookOut, hiddenTags: TagOut[], t: Translate): Fact[] {
+function factsFor(
+  book: BookOut,
+  hiddenTags: TagOut[],
+  t: Translate,
+  // Taken as an argument rather than read from a hook: this is a plain
+  // function, and the tag names in it are the one fact here that is not
+  // already a message key.
+  locale: Locale,
+): Fact[] {
   const candidates: [MessageKey, string | number | null | undefined][] = [
     ["series.label", seriesText(book, t)],
     ["field.year", book.year],
@@ -118,7 +132,7 @@ function factsFor(book: BookOut, hiddenTags: TagOut[], t: Translate): Fact[] {
       (book.discuss_with ?? []).map((member) => member.username).join(", "),
     ],
     ["field.pageCount", book.page_count],
-    ["library.tags", hiddenTags.map((tag) => tag.name).join(", ")],
+    ["library.tags", hiddenTags.map((tag) => tagName(tag, locale)).join(", ")],
     ["copy.price", priceText(book)],
     ["copy.purchasedAt", book.purchased_at],
     ["copy.purchaseSource", book.purchase_source],
@@ -157,7 +171,7 @@ export default function BookCard({
   isSelected = false,
   onToggleSelect,
 }: BookCardProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
 
   const status = book.my_status ?? ReadStatus.unread;
@@ -166,7 +180,7 @@ export default function BookCard({
   const tags = book.tags ?? [];
   const shown = facePills(tags);
   const hidden = tags.filter((tag) => !shown.includes(tag));
-  const facts = factsFor(book, hidden, t);
+  const facts = factsFor(book, hidden, t, locale);
 
   const face = (
     <>
@@ -252,7 +266,7 @@ export default function BookCard({
               key={tag.id}
               className={`text-xs px-2 py-0.5 rounded-full font-medium ${TAG_PILL_CLASSES[tag.category]}`}
             >
-              {tag.name}
+              {tagName(tag, locale)}
             </span>
           ))}
         </div>

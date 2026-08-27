@@ -720,6 +720,19 @@ because that test would silently reclassify a tag the moment somebody renamed
 one in the seed list, and renaming a seeded tag has already happened once here
 (migration `95b6a61d6668`).
 
+**`key` is sent beside it, and says *which* seeded tag the row is.** The flag
+cannot: it records that a row was seeded, which is not enough to pick a
+translated name for it. `name` is the English name, and the client prints the
+one matching the reader's language by looking the key up in
+`frontend/src/i18n/tagNames.ts`. It is null on a tag the library invented and
+null on a seeded row somebody renamed, and both are then shown as typed.
+`TagStat` carries it too, because the stats page prints tag names of its own.
+
+A key the running version does not recognise is **forgotten rather than
+refused** (`schemas.tag.known_key`): the tag list is one response for the whole
+vocabulary, so a row written by a newer version would otherwise 500 every page
+that draws a tag.
+
 ### Custom fields
 
 | Method | Path | Access | Notes |

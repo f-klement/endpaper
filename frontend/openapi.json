@@ -3914,6 +3914,118 @@
         "title": "TagCreate",
         "type": "object"
       },
+      "TagKey": {
+        "description": "The stable identity of a seeded tag, independent of what it is called.\n\nA predefined tag is shown in the member's language, and the row a\ntranslation belongs to is found through this, never by matching the name.\nMatching the name is the bug migration `95b6a61d6668` exists to fix,\nrepeated at display time: it breaks the moment a household renames a tag.\n\nOnly seeded rows carry one. `tags.key` is nullable and a tag the library\ninvented has none, so it is shown as typed, and so is a seeded row somebody\nhas renamed: the migration sets a key only where the name still matches the\nEnglish seed name exactly, and a row without one has stopped tracking the\ncurated vocabulary.\n\n**A member is exactly the value of the key**, not derived from the name.\nThe English name can be corrected without every German library's tags\nsilently changing which translation they get.\n\nDeclared as an enum rather than left a plain string for one downstream\nreason: FastAPI emits it into the OpenAPI schema, Orval generates a union\nfrom it, and `frontend/src/i18n/tagNames.ts` types its German table as\n`Record<TagKey, string>`. A tag added to `PREDEFINED_TAGS` with no German\nname is then a failed frontend build rather than an English word in a\nGerman picker, which is the property `de.ts` has and the reason it is typed\nagainst `en.ts`.\n\nEvery member appears in `PREDEFINED_TAGS` exactly once and every entry\nthere names one of these:\n`tests/test_main.py::TestTheSeededVocabularyIsKeyed` pins both directions.",
+        "enum": [
+          "fiction",
+          "non_fiction",
+          "reference",
+          "textbook",
+          "anthology",
+          "comics",
+          "manga",
+          "play",
+          "essays",
+          "picture_book",
+          "adventure",
+          "classic",
+          "contemporary_fiction",
+          "crime",
+          "detective",
+          "dystopian",
+          "epic_fantasy",
+          "fairy_tales",
+          "fantasy",
+          "folklore",
+          "gothic",
+          "graphic_novel",
+          "historical_fiction",
+          "horror",
+          "humour",
+          "literary_fiction",
+          "magical_realism",
+          "mystery",
+          "mythology",
+          "noir",
+          "paranormal",
+          "poetry",
+          "post_apocalyptic",
+          "romance",
+          "satire",
+          "science_fiction",
+          "short_stories",
+          "space_opera",
+          "speculative_fiction",
+          "spy_fiction",
+          "steampunk",
+          "suspense",
+          "thriller",
+          "urban_fantasy",
+          "war",
+          "western",
+          "anthropology",
+          "archaeology",
+          "architecture",
+          "art",
+          "astronomy",
+          "autobiography",
+          "biography",
+          "biology",
+          "business",
+          "chemistry",
+          "computing",
+          "cooking",
+          "design",
+          "diaries_and_letters",
+          "economics",
+          "education",
+          "environment",
+          "ethics",
+          "feminism",
+          "film_and_tv",
+          "finance",
+          "gardening",
+          "geography",
+          "health_and_fitness",
+          "history",
+          "journalism",
+          "language",
+          "law",
+          "linguistics",
+          "mathematics",
+          "medicine",
+          "memoir",
+          "music",
+          "nature",
+          "parenting",
+          "philosophy",
+          "photography",
+          "physics",
+          "politics",
+          "popular_science",
+          "psychology",
+          "religion",
+          "science",
+          "self_help",
+          "sociology",
+          "sports",
+          "technology",
+          "theatre",
+          "travel",
+          "true_crime",
+          "urbanism",
+          "wine_and_drink",
+          "baby_and_toddler",
+          "children",
+          "early_reader",
+          "middle_grade",
+          "young_adult",
+          "new_adult",
+          "adult"
+        ],
+        "title": "TagKey",
+        "type": "string"
+      },
       "TagOut": {
         "properties": {
           "book_count": {
@@ -3932,6 +4044,16 @@
             "default": false,
             "title": "Is Predefined",
             "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagKey"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "title": "Name",
@@ -3955,6 +4077,16 @@
             "minimum": 0.0,
             "title": "Count",
             "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagKey"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "name": {
             "title": "Name",

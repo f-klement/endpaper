@@ -574,7 +574,7 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
     alembic 1.19.1 with SQLAlchemy 2.0.52, which is why this migration does no
     such dance, and which is what these tests hold: `conftest.py` builds the
     schema with `create_all`, so **no other test in the suite puts `books`
-    through this migration at all**, and `renovate.json` automerges minor and
+    through this migration at all**, and the dependency bot automerges minor and
     patch releases of both libraries.
     """
 
@@ -1279,3 +1279,189 @@ class TestCustomFieldsOnABook:
         command.downgrade(schema._alembic_config(), self.PREVIOUS)
 
         assert not ({"custom_fields", "custom_field_values"} & table_names())
+
+
+class TestKeyingTheSeededTags:
+    """Revision c1f8a7e3d240, which decides which rows are still the seeded ones.
+
+    The rule is one line and the whole feature rests on it: a row is keyed only
+    where its name still matches the English seed name exactly. Everything else
+    keeps a null key and is shown as typed, which is what stops the upgrade
+    putting the curated word back over a name a household chose.
+    """
+
+    PREVIOUS = "b8e2f4c7a913"
+
+    def build_database_with_tags(self) -> dict[str, int]:
+        """A database one revision back, holding three tags and a tagged book.
+
+        Seeded and untouched, seeded and renamed, and one the library invented.
+        Returns the ids by name.
+        """
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        names = {
+            "Computing": "genre",
+            "Stories": "type",
+            "Holiday reads": "custom",
+        }
+        ids = {}
+        with engine.connect() as connection:
+            for name, category in names.items():
+                connection.execute(
+                    text("INSERT INTO tags (name, category) VALUES (:name, :category)"),
+                    {"name": name, "category": category},
+                )
+                ids[name] = int(
+                    connection.execute(
+                        text("SELECT id FROM tags WHERE name = :name"), {"name": name}
+                    ).scalar_one()
+                )
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, is_private, added_at, ownership) "
+                    "VALUES ('Dune', 0, datetime('now'), 'owned')"
+                )
+            )
+            book_id = connection.execute(text("SELECT id FROM books")).scalar_one()
+            # Tagged with both the keyed row and the renamed one: the second is
+            # the case worth pinning, because an upgrade that lost it would
+            # take the tag off a book to fix a display problem.
+            for tag_id in (ids["Computing"], ids["Stories"]):
+                connection.execute(
+                    text("INSERT INTO book_tags (book_id, tag_id) VALUES (:b, :t)"),
+                    {"b": book_id, "t": tag_id},
+                )
+            connection.commit()
+        return ids
+
+    def keys(self) -> dict[str, str | None]:
+        """Every tag's key, by name."""
+        with engine.connect() as connection:
+            rows = connection.execute(text("SELECT name, key FROM tags")).all()
+        return {str(row[0]): row[1] for row in rows}
+
+    def test_a_row_still_carrying_the_seeded_name_is_keyed(self):
+        self.build_database_with_tags()
+
+        schema.upgrade_to_head()
+
+        assert self.keys()["Computing"] == "computing"
+
+    def test_a_renamed_row_is_left_unkeyed(self):
+        """The decision the ticket turns on: their word, not ours.
+
+        "Stories" is the seeded **Fiction** row after somebody renamed it. It
+        matches no seed name, so it gets no key and is an ordinary invented tag
+        from here on.
+        """
+        self.build_database_with_tags()
+
+        schema.upgrade_to_head()
+
+        assert self.keys()["Stories"] is None
+
+    def test_a_tag_the_library_invented_is_left_unkeyed(self):
+        self.build_database_with_tags()
+
+        schema.upgrade_to_head()
+
+        assert self.keys()["Holiday reads"] is None
+
+    def test_it_creates_and_deletes_no_row(self):
+        """A rename over seeded rows is where a duplicated vocabulary comes
+        from, so the count is asserted rather than assumed."""
+        self.build_database_with_tags()
+
+        with engine.connect() as connection:
+            before = connection.execute(text("SELECT COUNT(*) FROM tags")).scalar_one()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            after = connection.execute(text("SELECT COUNT(*) FROM tags")).scalar_one()
+        assert after == before
+
+    def test_a_book_keeps_both_its_tags(self):
+        """Including the renamed one, which is the row this migration decides
+        to leave alone."""
+        ids = self.build_database_with_tags()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            links = connection.execute(text("SELECT tag_id FROM book_tags")).scalars().all()
+        assert sorted(links) == sorted([ids["Computing"], ids["Stories"]])
+
+    def test_seeding_afterwards_does_not_duplicate_the_keyed_row(self):
+        """The property `95b6a61d6668` exists to protect, restated for the key.
+
+        `seed_tags()` still matches on name, so the keyed row is found and left
+        alone. The renamed row is **not** matched, and Fiction is inserted
+        beside it: that is the seeded tag coming back, not a duplicate of
+        theirs.
+        """
+        import main
+
+        self.build_database_with_tags()
+        schema.upgrade_to_head()
+
+        main.seed_tags()
+
+        keys = self.keys()
+        assert keys["Computing"] == "computing"
+        assert keys["Stories"] is None
+        assert keys["Fiction"] == "fiction"
+
+    def test_two_rows_cannot_share_a_key(self):
+        self.build_database_with_tags()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO tags (name, category, key) "
+                    "VALUES ('Second', 'custom', 'computing')"
+                )
+            )
+
+    def test_many_rows_may_share_a_null_key(self):
+        """Which is the shape every invented tag has, so it is not incidental."""
+        self.build_database_with_tags()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO tags (name, category) VALUES ('Beach', 'custom')")
+            )
+            connection.execute(
+                text("INSERT INTO tags (name, category) VALUES ('Loft', 'custom')")
+            )
+            connection.commit()
+
+        assert self.keys()["Beach"] is None
+        assert self.keys()["Loft"] is None
+
+    def test_the_downgrade_drops_the_column(self):
+        from alembic import command
+
+        self.build_database_with_tags()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        with engine.connect() as connection:
+            columns = {row[1] for row in connection.execute(text("PRAGMA table_info(tags)"))}
+        assert "key" not in columns
+
+    def test_a_downgraded_database_upgrades_again(self):
+        """The keys are derived, so the round trip has to restore them."""
+        from alembic import command
+
+        self.build_database_with_tags()
+        schema.upgrade_to_head()
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        schema.upgrade_to_head()
+
+        assert self.keys()["Computing"] == "computing"

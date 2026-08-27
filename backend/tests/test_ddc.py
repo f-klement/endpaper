@@ -142,7 +142,7 @@ def test_every_mapped_tag_name_is_a_seeded_tag():
     `PREDEFINED_TAGS` is not an error anywhere: the book just never gets the
     suggestion, and nothing says why.
     """
-    seeded = {name for name, _category in PREDEFINED_TAGS}
+    seeded = {tag.name for tag in PREDEFINED_TAGS}
     unknown = sorted(set(ddc.DIVISION_TAGS.values()) - seeded)
 
     assert unknown == []

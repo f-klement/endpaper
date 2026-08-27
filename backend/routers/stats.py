@@ -82,7 +82,9 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
     )
 
     by_tag = (
-        shelf.select(Tag.name, Tag.category, func.count(book_tags.c.book_id).label("count"))
+        shelf.select(
+            Tag.name, Tag.category, Tag.key, func.count(book_tags.c.book_id).label("count")
+        )
         .join(book_tags, Book.id == book_tags.c.book_id)
         .join(Tag, Tag.id == book_tags.c.tag_id)
         .group_by(Tag.id)
@@ -146,7 +148,8 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         total=total,
         per_user=[PerUserStat(username=username, count=count) for username, count in per_user],
         by_tag=[
-            TagStat(name=name, category=category, count=count) for name, category, count in by_tag
+            TagStat(name=name, category=category, key=key, count=count)
+            for name, category, key, count in by_tag
         ],
         by_collection=[
             CollectionStat(name=name, count=count) for name, count in by_collection

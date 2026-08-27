@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 import anyio.to_thread
 from fastapi import APIRouter, FastAPI, HTTPException, status
@@ -33,7 +33,7 @@ from config import (
 )
 from database import engine
 from dependencies import DbSession
-from enums import TagCategory
+from enums import TagCategory, TagKey
 from errors import register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from models import Tag
@@ -58,7 +58,22 @@ from schema import upgrade_to_head
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("endpaper")
 
-PREDEFINED_TAGS: list[tuple[str, TagCategory]] = [
+
+class PredefinedTag(NamedTuple):
+    """One entry in the curated vocabulary: what it is, what it is called, where it files.
+
+    `key` is the identity and `name` is only the English name. The two are
+    separate so a name can be corrected without a library's German tags
+    silently changing which translation they get, and so a household that
+    renamed a row can be told apart from one that did not. See `TagKey`.
+    """
+
+    key: TagKey
+    name: str
+    category: TagCategory
+
+
+PREDEFINED_TAGS: list[PredefinedTag] = [
     # The vocabulary a library gets before it has typed anything, which is
     # the whole reason for having a curated list at all (Jelu and Openreads
     # make every tag free-form and start empty).
@@ -69,122 +84,128 @@ PREDEFINED_TAGS: list[tuple[str, TagCategory]] = [
     # would leave the old row in place and insert a second beside it. That has
     # already happened once: see 95b6a61d6668.
     #
+    # **A tag added here needs three things, not one**: a `TagKey` member, an
+    # entry below, and a German name in `frontend/src/i18n/tagNames.ts`. The
+    # third is a compile error if it is missing, because that table is typed
+    # `Record<TagKey, string>` against the generated client. Regenerate it
+    # (`bun run api:generate`) or the new key is not in the union yet.
+    #
     # Long on purpose. A picker of thirty tags is a list; a picker of a hundred
     # and thirty is a vocabulary, and it is why the categories collapse in the
     # UI rather than all being on screen at once.
 
     # ── Type: what kind of thing it is ──────────────────────────────────────
-    ("Fiction", TagCategory.TYPE),
-    ("Non-Fiction", TagCategory.TYPE),
-    ("Reference", TagCategory.TYPE),
-    ("Textbook", TagCategory.TYPE),
-    ("Anthology", TagCategory.TYPE),
-    ("Comics", TagCategory.TYPE),
-    ("Manga", TagCategory.TYPE),
-    ("Play", TagCategory.TYPE),
-    ("Essays", TagCategory.TYPE),
-    ("Picture Book", TagCategory.TYPE),
+    PredefinedTag(TagKey.FICTION, "Fiction", TagCategory.TYPE),
+    PredefinedTag(TagKey.NON_FICTION, "Non-Fiction", TagCategory.TYPE),
+    PredefinedTag(TagKey.REFERENCE, "Reference", TagCategory.TYPE),
+    PredefinedTag(TagKey.TEXTBOOK, "Textbook", TagCategory.TYPE),
+    PredefinedTag(TagKey.ANTHOLOGY, "Anthology", TagCategory.TYPE),
+    PredefinedTag(TagKey.COMICS, "Comics", TagCategory.TYPE),
+    PredefinedTag(TagKey.MANGA, "Manga", TagCategory.TYPE),
+    PredefinedTag(TagKey.PLAY, "Play", TagCategory.TYPE),
+    PredefinedTag(TagKey.ESSAYS, "Essays", TagCategory.TYPE),
+    PredefinedTag(TagKey.PICTURE_BOOK, "Picture Book", TagCategory.TYPE),
 
     # ── Genre: fiction ──────────────────────────────────────────────────────
-    ("Adventure", TagCategory.GENRE),
-    ("Classic", TagCategory.GENRE),
-    ("Contemporary Fiction", TagCategory.GENRE),
-    ("Crime", TagCategory.GENRE),
-    ("Detective", TagCategory.GENRE),
-    ("Dystopian", TagCategory.GENRE),
-    ("Epic Fantasy", TagCategory.GENRE),
-    ("Fairy Tales", TagCategory.GENRE),
-    ("Fantasy", TagCategory.GENRE),
-    ("Folklore", TagCategory.GENRE),
-    ("Gothic", TagCategory.GENRE),
-    ("Graphic Novel", TagCategory.GENRE),
-    ("Historical Fiction", TagCategory.GENRE),
-    ("Horror", TagCategory.GENRE),
-    ("Humour", TagCategory.GENRE),
-    ("Literary Fiction", TagCategory.GENRE),
-    ("Magical Realism", TagCategory.GENRE),
-    ("Mystery", TagCategory.GENRE),
-    ("Mythology", TagCategory.GENRE),
-    ("Noir", TagCategory.GENRE),
-    ("Paranormal", TagCategory.GENRE),
-    ("Poetry", TagCategory.GENRE),
-    ("Post-Apocalyptic", TagCategory.GENRE),
-    ("Romance", TagCategory.GENRE),
-    ("Satire", TagCategory.GENRE),
-    ("Science Fiction", TagCategory.GENRE),
-    ("Short Stories", TagCategory.GENRE),
-    ("Space Opera", TagCategory.GENRE),
-    ("Speculative Fiction", TagCategory.GENRE),
-    ("Spy Fiction", TagCategory.GENRE),
-    ("Steampunk", TagCategory.GENRE),
-    ("Suspense", TagCategory.GENRE),
-    ("Thriller", TagCategory.GENRE),
-    ("Urban Fantasy", TagCategory.GENRE),
-    ("War", TagCategory.GENRE),
-    ("Western", TagCategory.GENRE),
+    PredefinedTag(TagKey.ADVENTURE, "Adventure", TagCategory.GENRE),
+    PredefinedTag(TagKey.CLASSIC, "Classic", TagCategory.GENRE),
+    PredefinedTag(TagKey.CONTEMPORARY_FICTION, "Contemporary Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.CRIME, "Crime", TagCategory.GENRE),
+    PredefinedTag(TagKey.DETECTIVE, "Detective", TagCategory.GENRE),
+    PredefinedTag(TagKey.DYSTOPIAN, "Dystopian", TagCategory.GENRE),
+    PredefinedTag(TagKey.EPIC_FANTASY, "Epic Fantasy", TagCategory.GENRE),
+    PredefinedTag(TagKey.FAIRY_TALES, "Fairy Tales", TagCategory.GENRE),
+    PredefinedTag(TagKey.FANTASY, "Fantasy", TagCategory.GENRE),
+    PredefinedTag(TagKey.FOLKLORE, "Folklore", TagCategory.GENRE),
+    PredefinedTag(TagKey.GOTHIC, "Gothic", TagCategory.GENRE),
+    PredefinedTag(TagKey.GRAPHIC_NOVEL, "Graphic Novel", TagCategory.GENRE),
+    PredefinedTag(TagKey.HISTORICAL_FICTION, "Historical Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.HORROR, "Horror", TagCategory.GENRE),
+    PredefinedTag(TagKey.HUMOUR, "Humour", TagCategory.GENRE),
+    PredefinedTag(TagKey.LITERARY_FICTION, "Literary Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.MAGICAL_REALISM, "Magical Realism", TagCategory.GENRE),
+    PredefinedTag(TagKey.MYSTERY, "Mystery", TagCategory.GENRE),
+    PredefinedTag(TagKey.MYTHOLOGY, "Mythology", TagCategory.GENRE),
+    PredefinedTag(TagKey.NOIR, "Noir", TagCategory.GENRE),
+    PredefinedTag(TagKey.PARANORMAL, "Paranormal", TagCategory.GENRE),
+    PredefinedTag(TagKey.POETRY, "Poetry", TagCategory.GENRE),
+    PredefinedTag(TagKey.POST_APOCALYPTIC, "Post-Apocalyptic", TagCategory.GENRE),
+    PredefinedTag(TagKey.ROMANCE, "Romance", TagCategory.GENRE),
+    PredefinedTag(TagKey.SATIRE, "Satire", TagCategory.GENRE),
+    PredefinedTag(TagKey.SCIENCE_FICTION, "Science Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.SHORT_STORIES, "Short Stories", TagCategory.GENRE),
+    PredefinedTag(TagKey.SPACE_OPERA, "Space Opera", TagCategory.GENRE),
+    PredefinedTag(TagKey.SPECULATIVE_FICTION, "Speculative Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.SPY_FICTION, "Spy Fiction", TagCategory.GENRE),
+    PredefinedTag(TagKey.STEAMPUNK, "Steampunk", TagCategory.GENRE),
+    PredefinedTag(TagKey.SUSPENSE, "Suspense", TagCategory.GENRE),
+    PredefinedTag(TagKey.THRILLER, "Thriller", TagCategory.GENRE),
+    PredefinedTag(TagKey.URBAN_FANTASY, "Urban Fantasy", TagCategory.GENRE),
+    PredefinedTag(TagKey.WAR, "War", TagCategory.GENRE),
+    PredefinedTag(TagKey.WESTERN, "Western", TagCategory.GENRE),
 
     # ── Genre: non-fiction ──────────────────────────────────────────────────
-    ("Anthropology", TagCategory.GENRE),
-    ("Archaeology", TagCategory.GENRE),
-    ("Architecture", TagCategory.GENRE),
-    ("Art", TagCategory.GENRE),
-    ("Astronomy", TagCategory.GENRE),
-    ("Autobiography", TagCategory.GENRE),
-    ("Biography", TagCategory.GENRE),
-    ("Biology", TagCategory.GENRE),
-    ("Business", TagCategory.GENRE),
-    ("Chemistry", TagCategory.GENRE),
-    ("Computing", TagCategory.GENRE),
-    ("Cooking", TagCategory.GENRE),
-    ("Design", TagCategory.GENRE),
-    ("Diaries and Letters", TagCategory.GENRE),
-    ("Economics", TagCategory.GENRE),
-    ("Education", TagCategory.GENRE),
-    ("Environment", TagCategory.GENRE),
-    ("Ethics", TagCategory.GENRE),
-    ("Feminism", TagCategory.GENRE),
-    ("Film and TV", TagCategory.GENRE),
-    ("Finance", TagCategory.GENRE),
-    ("Gardening", TagCategory.GENRE),
-    ("Geography", TagCategory.GENRE),
-    ("Health and Fitness", TagCategory.GENRE),
-    ("History", TagCategory.GENRE),
-    ("Journalism", TagCategory.GENRE),
-    ("Language", TagCategory.GENRE),
-    ("Law", TagCategory.GENRE),
-    ("Linguistics", TagCategory.GENRE),
-    ("Mathematics", TagCategory.GENRE),
-    ("Medicine", TagCategory.GENRE),
-    ("Memoir", TagCategory.GENRE),
-    ("Music", TagCategory.GENRE),
-    ("Nature", TagCategory.GENRE),
-    ("Parenting", TagCategory.GENRE),
-    ("Philosophy", TagCategory.GENRE),
-    ("Photography", TagCategory.GENRE),
-    ("Physics", TagCategory.GENRE),
-    ("Politics", TagCategory.GENRE),
-    ("Popular Science", TagCategory.GENRE),
-    ("Psychology", TagCategory.GENRE),
-    ("Religion", TagCategory.GENRE),
-    ("Science", TagCategory.GENRE),
-    ("Self-Help", TagCategory.GENRE),
-    ("Sociology", TagCategory.GENRE),
-    ("Sports", TagCategory.GENRE),
-    ("Technology", TagCategory.GENRE),
-    ("Theatre", TagCategory.GENRE),
-    ("Travel", TagCategory.GENRE),
-    ("True Crime", TagCategory.GENRE),
-    ("Urbanism", TagCategory.GENRE),
-    ("Wine and Drink", TagCategory.GENRE),
+    PredefinedTag(TagKey.ANTHROPOLOGY, "Anthropology", TagCategory.GENRE),
+    PredefinedTag(TagKey.ARCHAEOLOGY, "Archaeology", TagCategory.GENRE),
+    PredefinedTag(TagKey.ARCHITECTURE, "Architecture", TagCategory.GENRE),
+    PredefinedTag(TagKey.ART, "Art", TagCategory.GENRE),
+    PredefinedTag(TagKey.ASTRONOMY, "Astronomy", TagCategory.GENRE),
+    PredefinedTag(TagKey.AUTOBIOGRAPHY, "Autobiography", TagCategory.GENRE),
+    PredefinedTag(TagKey.BIOGRAPHY, "Biography", TagCategory.GENRE),
+    PredefinedTag(TagKey.BIOLOGY, "Biology", TagCategory.GENRE),
+    PredefinedTag(TagKey.BUSINESS, "Business", TagCategory.GENRE),
+    PredefinedTag(TagKey.CHEMISTRY, "Chemistry", TagCategory.GENRE),
+    PredefinedTag(TagKey.COMPUTING, "Computing", TagCategory.GENRE),
+    PredefinedTag(TagKey.COOKING, "Cooking", TagCategory.GENRE),
+    PredefinedTag(TagKey.DESIGN, "Design", TagCategory.GENRE),
+    PredefinedTag(TagKey.DIARIES_AND_LETTERS, "Diaries and Letters", TagCategory.GENRE),
+    PredefinedTag(TagKey.ECONOMICS, "Economics", TagCategory.GENRE),
+    PredefinedTag(TagKey.EDUCATION, "Education", TagCategory.GENRE),
+    PredefinedTag(TagKey.ENVIRONMENT, "Environment", TagCategory.GENRE),
+    PredefinedTag(TagKey.ETHICS, "Ethics", TagCategory.GENRE),
+    PredefinedTag(TagKey.FEMINISM, "Feminism", TagCategory.GENRE),
+    PredefinedTag(TagKey.FILM_AND_TV, "Film and TV", TagCategory.GENRE),
+    PredefinedTag(TagKey.FINANCE, "Finance", TagCategory.GENRE),
+    PredefinedTag(TagKey.GARDENING, "Gardening", TagCategory.GENRE),
+    PredefinedTag(TagKey.GEOGRAPHY, "Geography", TagCategory.GENRE),
+    PredefinedTag(TagKey.HEALTH_AND_FITNESS, "Health and Fitness", TagCategory.GENRE),
+    PredefinedTag(TagKey.HISTORY, "History", TagCategory.GENRE),
+    PredefinedTag(TagKey.JOURNALISM, "Journalism", TagCategory.GENRE),
+    PredefinedTag(TagKey.LANGUAGE, "Language", TagCategory.GENRE),
+    PredefinedTag(TagKey.LAW, "Law", TagCategory.GENRE),
+    PredefinedTag(TagKey.LINGUISTICS, "Linguistics", TagCategory.GENRE),
+    PredefinedTag(TagKey.MATHEMATICS, "Mathematics", TagCategory.GENRE),
+    PredefinedTag(TagKey.MEDICINE, "Medicine", TagCategory.GENRE),
+    PredefinedTag(TagKey.MEMOIR, "Memoir", TagCategory.GENRE),
+    PredefinedTag(TagKey.MUSIC, "Music", TagCategory.GENRE),
+    PredefinedTag(TagKey.NATURE, "Nature", TagCategory.GENRE),
+    PredefinedTag(TagKey.PARENTING, "Parenting", TagCategory.GENRE),
+    PredefinedTag(TagKey.PHILOSOPHY, "Philosophy", TagCategory.GENRE),
+    PredefinedTag(TagKey.PHOTOGRAPHY, "Photography", TagCategory.GENRE),
+    PredefinedTag(TagKey.PHYSICS, "Physics", TagCategory.GENRE),
+    PredefinedTag(TagKey.POLITICS, "Politics", TagCategory.GENRE),
+    PredefinedTag(TagKey.POPULAR_SCIENCE, "Popular Science", TagCategory.GENRE),
+    PredefinedTag(TagKey.PSYCHOLOGY, "Psychology", TagCategory.GENRE),
+    PredefinedTag(TagKey.RELIGION, "Religion", TagCategory.GENRE),
+    PredefinedTag(TagKey.SCIENCE, "Science", TagCategory.GENRE),
+    PredefinedTag(TagKey.SELF_HELP, "Self-Help", TagCategory.GENRE),
+    PredefinedTag(TagKey.SOCIOLOGY, "Sociology", TagCategory.GENRE),
+    PredefinedTag(TagKey.SPORTS, "Sports", TagCategory.GENRE),
+    PredefinedTag(TagKey.TECHNOLOGY, "Technology", TagCategory.GENRE),
+    PredefinedTag(TagKey.THEATRE, "Theatre", TagCategory.GENRE),
+    PredefinedTag(TagKey.TRAVEL, "Travel", TagCategory.GENRE),
+    PredefinedTag(TagKey.TRUE_CRIME, "True Crime", TagCategory.GENRE),
+    PredefinedTag(TagKey.URBANISM, "Urbanism", TagCategory.GENRE),
+    PredefinedTag(TagKey.WINE_AND_DRINK, "Wine and Drink", TagCategory.GENRE),
 
     # ── Age: who it is for ──────────────────────────────────────────────────
-    ("Baby and Toddler (0-3)", TagCategory.AGE),
-    ("Children (0-8)", TagCategory.AGE),
-    ("Early Reader (5-8)", TagCategory.AGE),
-    ("Middle Grade (8-12)", TagCategory.AGE),
-    ("Young Adult (13-18)", TagCategory.AGE),
-    ("New Adult (18-25)", TagCategory.AGE),
-    ("Adult", TagCategory.AGE),
+    PredefinedTag(TagKey.BABY_AND_TODDLER, "Baby and Toddler (0-3)", TagCategory.AGE),
+    PredefinedTag(TagKey.CHILDREN, "Children (0-8)", TagCategory.AGE),
+    PredefinedTag(TagKey.EARLY_READER, "Early Reader (5-8)", TagCategory.AGE),
+    PredefinedTag(TagKey.MIDDLE_GRADE, "Middle Grade (8-12)", TagCategory.AGE),
+    PredefinedTag(TagKey.YOUNG_ADULT, "Young Adult (13-18)", TagCategory.AGE),
+    PredefinedTag(TagKey.NEW_ADULT, "New Adult (18-25)", TagCategory.AGE),
+    PredefinedTag(TagKey.ADULT, "Adult", TagCategory.AGE),
 ]
 
 
@@ -200,12 +221,19 @@ def seed_tags() -> None:
     Only these carry `is_predefined`. A tag the library invented is left
     alone here, which is the whole reason the flag exists: without it a
     restart would either delete their tags or adopt them.
+
+    **Still matched on name, not on key**, which is what keeps this idempotent
+    for the library that renamed a seeded tag: that row lost its key in the
+    migration and is theirs now, and matching on key would find the vocabulary
+    short and insert an English second copy beside their own word. The key is
+    written on the rows this inserts, and set on the rows the migration
+    recognised. Nothing here ever writes one onto a row that lacks it.
     """
     with DBSession(engine) as db:
         existing = {name for (name,) in db.query(Tag.name).all()}
-        for name, category in PREDEFINED_TAGS:
+        for key, name, category in PREDEFINED_TAGS:
             if name not in existing:
-                db.add(Tag(name=name, category=category, is_predefined=True))
+                db.add(Tag(key=key, name=name, category=category, is_predefined=True))
         db.commit()
 
 

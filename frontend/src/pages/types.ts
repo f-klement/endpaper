@@ -20,7 +20,7 @@ import {
   TagCategory,
 } from "../api/generated/model";
 import type { Locale, TagOut } from "../api/generated/model";
-import type { MessageKey } from "../i18n";
+import { tagName, type MessageKey } from "../i18n";
 import { sortByName } from "../lib/nameOrder";
 import type { ThemePreference } from "../theme";
 
@@ -202,12 +202,16 @@ export const TAG_CHIP_SELECTED =
  * road to a rendered tag list, so a caller cannot get the grouping without the
  * ordering. The categories themselves keep `TAG_CATEGORY_ORDER`, which is a
  * curated sequence and not alphabetical. See `lib/nameOrder.ts`.
+ *
+ * Ordered by the **printed** name, which for a seeded tag is not the stored
+ * one: a German picker sorted on `name` would file Belletristik under F, in an
+ * order justified by words the reader is not being shown.
  */
 export function groupTagsByCategory(
   tags: TagOut[],
   locale: Locale,
 ): Record<TagCategory, TagOut[]> {
-  const ordered = sortByName(tags, locale);
+  const ordered = sortByName(tags, locale, (tag) => tagName(tag, locale));
   return {
     [TagCategory.type]: ordered.filter(
       (tag) => tag.category === TagCategory.type,

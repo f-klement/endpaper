@@ -293,6 +293,32 @@ def _parse_row(
                 f"{repr(written_name)[:120]}"
             )
         parsed["name_folded"] = fold_collection_name(written_name)
+
+    # The third derived column, and the one that arrives with a unique index on
+    # it. `tags.key` says which seeded tag a row **is**, and it is recomputed
+    # from the name by `_repair_seeded_tags` a few lines after the inserts, so
+    # the archive's own value is never read for anything. Left standing it is
+    # still enforced: an archive holding two rows with the same key raises
+    # `IntegrityError` on the insert, which is not `RestoreError`, so the route
+    # answers 500 rather than the 400 its docstring promises, over a column
+    # nobody can see and whose value was about to be overwritten. Measured on
+    # the real route by putting `"fiction"` on an invented row.
+    #
+    # Blanked rather than validated, which is the difference from
+    # `_refuse_a_colliding_pair` above and turns on whether the value is data.
+    # A collection's *name* is data: it is what the library typed, it cannot be
+    # derived from anything else, and two that collide is a question only a
+    # person can answer, so that pair is refused with both names in the
+    # message. A key is not data. It is derived, this file derives it, and
+    # refusing a restore over a claim we were going to discard would cost a
+    # library its backup to protect a column it does not know exists.
+    #
+    # `table.name == "tags"`, **not** `"key" in table.columns`: `settings.key`
+    # is that table's row identity, `VARCHAR(64) NOT NULL PRIMARY KEY`, and
+    # blanking it would raise "NOT NULL constraint failed: settings.key" and
+    # take down every restore. Measured against the real column.
+    if table.name == "tags":
+        parsed["key"] = None
     return parsed
 
 
@@ -541,33 +567,62 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
 
 
 def _repair_seeded_tags(db: Session) -> None:
-    """Put the seeded flag back on the curated tags.
+    """Put the seeded flag and the key back on the curated tags.
 
-    The one column whose default is wrong for a restored row. An archive taken
-    before `tags.is_predefined` existed carries no value for it, so every tag
-    comes back as `False`, which makes the built-in vocabulary deletable and
-    duplicates it at the next boot when `seed_tags()` finds the names missing
-    its flag.
+    The two columns whose default is wrong for a restored row, and both fail
+    silently. An archive taken before `tags.is_predefined` existed carries no
+    value for it, so every tag comes back as `False`, which makes the built-in
+    vocabulary deletable and duplicates it at the next boot when `seed_tags()`
+    finds the names missing its flag. An archive taken before `tags.key`
+    existed comes back with every key null, and a null key is how a renamed tag
+    is recorded, so the whole curated vocabulary would read as invented and a
+    German library would silently be back in English.
 
-    **It is no longer the only one, and the other is repaired earlier.**
-    `collections.name_folded` is derived too and is NOT NULL, so an archive
-    predating it would not restore at all rather than restore wrongly.
-    `_parse_row` recomputes it per row on the way in, which is where a derived
-    column belongs when it can be derived; this runs afterwards because a
-    seeded flag cannot be, `PREDEFINED_TAGS` being a list only the app has.
+    **The rule for the key is the migration's rule**, and it has to be: keyed
+    where the name matches the English seed name exactly, and left null
+    otherwise, so restoring an archive cannot put the seeded word back over one
+    a household renamed. Neither column is read from the archive at all: the
+    flag is overwritten here, and `_parse_row` blanks the key on the way in so
+    that a hand-edited one cannot collide with the index before this runs.
+
+    **The cost of that, said rather than left to be discovered.** A key this
+    version has never heard of does not survive a restore: the name it belongs
+    to is not in this `PREDEFINED_TAGS`, so the row is repaired to null and
+    stays null, because `seed_tags()` only ever writes a key on a row it
+    inserts. So a backup from a newer image restores into an older one with
+    that tag shown as typed, permanently, which is what `is_predefined` has
+    always done with a tag added after the image was built. `known_key` is
+    about a key already in the database being **read**; this is the write path
+    and it is stricter.
+
+    **`collections.name_folded` is derived on the way in instead**, because it
+    is NOT NULL: an archive predating it would not restore at all rather than
+    restore wrongly, and the fold is computable from the row itself.
+    `is_predefined` and the key are not, `PREDEFINED_TAGS` being a list only
+    the app has, so they are repaired here after every row is in.
 
     `PREDEFINED_TAGS` is imported here rather than at module scope because
     `main` imports the routers, which import this module.
     """
     from main import PREDEFINED_TAGS
 
-    seeded = {name for name, _category in PREDEFINED_TAGS}
+    keys_by_name = {name: key for key, name, _category in PREDEFINED_TAGS}
     changed = 0
     for tag in db.query(Tag).all():
-        should_be = tag.name in seeded
-        if tag.is_predefined != should_be:
+        # **One pass, and that it is safe rests on `_parse_row` blanking the
+        # key.** `uq_tags_key` is unique, so a key moving from one row to
+        # another would need the old holder cleared in an earlier statement,
+        # and the order SQLAlchemy flushes these in is not the order of this
+        # loop. No key can move here: every row arrives null, `tags.name` is
+        # unique, and `PREDEFINED_TAGS` maps 105 distinct names onto 105
+        # distinct keys, so this writes each key at most once. Delete the
+        # `_parse_row` block and this becomes an `IntegrityError` on a restore.
+        seeded_key = keys_by_name.get(tag.name)
+        should_be = seeded_key is not None
+        if tag.is_predefined != should_be or tag.key != seeded_key:
             tag.is_predefined = should_be
+            tag.key = seeded_key
             changed += 1
     if changed:
         db.commit()
-        logger.info("Repaired the seeded flag on %d tags after a restore", changed)
+        logger.info("Repaired the seeded flag and key on %d tags after a restore", changed)

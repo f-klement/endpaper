@@ -144,7 +144,9 @@ whose volume vanished reports unhealthy rather than staying green.
 ## The interface
 
 Seven palettes, light and dark, decorated papers, and a per account choice.
-English and German throughout. Installable as a PWA. Keyboard reachable, and
+English and German throughout, the seeded tag vocabulary included: a predefined
+tag reads in the language you chose, while a tag you invented or renamed is
+shown exactly as you typed it. Installable as a PWA. Keyboard reachable, and
 tested for it.
 
 The book page folds into sections whose defaults follow the book: a loan section

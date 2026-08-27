@@ -192,8 +192,8 @@ def _empty_and_reseed() -> None:
         connection.execute(
             Base.metadata.tables["tags"].insert(),
             [
-                {"name": name, "category": category, "is_predefined": True}
-                for name, category in main.PREDEFINED_TAGS
+                {"key": key, "name": name, "category": category, "is_predefined": True}
+                for key, name, category in main.PREDEFINED_TAGS
             ],
         )
 

@@ -7,8 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   LendingWillingness,
+  Locale,
   OwnershipStatus,
   ReadStatus,
+  TagKey,
   type BookOut,
 } from "../../../src/api/generated/model";
 import BookCard from "../../../src/pages/components/BookCard";
@@ -138,6 +140,28 @@ describe("BookCard", () => {
       expect(screen.getByText("Fantasy")).toBeInTheDocument();
       expect(screen.getByText("Adult")).toBeInTheDocument();
       expect(screen.getByText("Fiction")).toBeInTheDocument();
+    });
+
+    it("prints a seeded tag in the reader's language", () => {
+      // The chip on the card is the most seen tag surface in the app, so it is
+      // pinned here as well as in the picker.
+      renderLocalised(
+        <BookCard
+          book={makeBook({
+            tags: [
+              makeTag({
+                name: "Computing",
+                category: "genre",
+                key: TagKey.computing,
+              }),
+            ],
+          })}
+        />,
+        { locale: Locale.de },
+      );
+
+      expect(screen.getByText("Informatik")).toBeInTheDocument();
+      expect(screen.queryByText("Computing")).not.toBeInTheDocument();
     });
 
     it("prefers a genre tag to whatever the API listed first", () => {

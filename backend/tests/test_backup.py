@@ -656,6 +656,98 @@ class TestRestoringAnOlderArchive:
         db.expire_all()
         invented = db.query(Tag).filter(Tag.name == "Holiday reads").one()
         assert invented.is_predefined is False
+        assert invented.key is None
+
+    def test_the_key_a_pre_key_archive_lacks_is_repaired(
+        self, client, admin, library, db
+    ):
+        """Without this the whole curated vocabulary restores as invented.
+
+        A null key is how a renamed tag is recorded, so an archive that predates
+        the column would leave every seeded tag looking renamed and a German
+        library silently back in English.
+        """
+        from models import Tag
+
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["tags"]:
+            row.pop("key", None)
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        assert db.query(Tag).filter(Tag.name == "Fiction").one().key == "fiction"
+
+    def test_an_archive_claiming_the_same_key_twice_still_restores(
+        self, client, admin, library, db
+    ):
+        """It answered **500** before `_parse_row` blanked the key.
+
+        `uq_tags_key` refused the INSERT before `_repair_seeded_tags` could
+        rewrite anything, and `routers/backup.py` catches only `RestoreError`,
+        so a hand-edited archive took down a restore over a column nobody can
+        see and whose value was about to be overwritten. This is the collections
+        defect of 2026-08-26 in a second table, which is why it ships with a
+        test rather than only a fix.
+        """
+        from models import Tag
+
+        client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        )
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["tags"]:
+            if row["name"] == "Holiday reads":
+                row["key"] = "fiction"
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        db.expire_all()
+        # The key is on the row the **name** says owns it, not the row the
+        # archive claimed it for.
+        assert db.query(Tag).filter(Tag.name == "Fiction").one().key == "fiction"
+        assert db.query(Tag).filter(Tag.name == "Holiday reads").one().key is None
+
+    def test_a_key_on_a_renamed_row_is_cleared(self, client, admin, library, db):
+        """The restore applies the migration's rule, not the archive's claim.
+
+        An archive can carry a key on a row whose name is no longer the seeded
+        one, whether it was hand-edited or written by a version whose seed list
+        differed. Trusting it would put the seeded word back over a name the
+        household chose.
+        """
+        from models import Tag
+
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["tags"]:
+            if row["name"] == "Fiction":
+                row["name"] = "Stories"
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+        db.expire_all()
+        renamed = db.query(Tag).filter(Tag.name == "Stories").one()
+        assert renamed.key is None
+        assert renamed.is_predefined is False
 
 
 class TestRestoringPreHttpsCovers:
@@ -1123,10 +1215,18 @@ class TestRestoringTheCollectionFold:
 
     def test_a_tag_name_is_left_alone(self, client, admin, library, db):
         """`tags` has a `name` too and no fold. Keyed on the column being in
-        the table, not on the row having a name."""
+        the table, not on the row having a name.
+
+        **The two named properties, not the whole row.** This asserted an exact
+        dict and so failed the day `tags.key` was added, for a reason that has
+        nothing to do with a tag's name being left alone: any column added to
+        this table would have broken it, forever, while the thing it is named
+        for still held.
+        """
         row = backup._parse_row({"name": "Fiction"}, {}, Base.metadata.tables["tags"])
 
-        assert row == {"name": "Fiction"}
+        assert row["name"] == "Fiction"
+        assert "name_folded" not in row
 
 
 class TestTheRestoreReportCannotSilentlyDropATable:

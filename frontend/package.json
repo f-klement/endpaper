@@ -15,7 +15,8 @@
     "check:build": "bun run scripts/check-build.ts",
     "api:schema": "uv --directory ../backend run python scripts/dump_openapi.py > openapi.json",
     "api:generate": "bun run api:schema && orval",
-    "format": "prettier --write src tests"
+    "format": "prettier --write src tests",
+    "format:check": "prettier --check src tests"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

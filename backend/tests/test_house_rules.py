@@ -1543,3 +1543,240 @@ class TestNoFixtureLooksLikeACredential:
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
         assert pattern.search("123456789:AAHrealisticlookingsecrethalfhere")
         assert not pattern.search("0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")
+
+
+def _label(path: Path) -> str:
+    """A path to report, whether or not it is inside the backend tree.
+
+    The self-tests below hand these scanners a `tmp_path` file, and
+    `relative_to` raises on one. Reported as a bare name there.
+    """
+    try:
+        return str(path.relative_to(BACKEND))
+    except ValueError:
+        return path.name
+
+
+def _dataclasses_modules(tree: ast.Module) -> set[str]:
+    """Every name in this module that is the `dataclasses` module itself.
+
+    `import dataclasses as dc` is not an evasion, it is an accident: a module
+    that already aliases the import for its own reasons and then writes
+    `dc.replace(record, headings=...)`.
+    """
+    found = {"dataclasses"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "dataclasses"
+            }
+    return found
+
+
+def _replace_aliases(tree: ast.Module) -> set[str]:
+    """Every bare name in this module that is `dataclasses.replace`."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "dataclasses":
+            found |= {
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "replace"
+            }
+    return found
+
+
+def _holds_a_record(tree: ast.Module) -> bool:
+    """Whether this module could have a `catalogue.Record` in hand.
+
+    An approximation, and the one this rule is scoped by: a module that never
+    names `catalogue` cannot construct a `Record`, so forbidding `replace`
+    there would be a rule with a wider reach than its reason.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "catalogue":
+            return True
+        if isinstance(node, ast.Import) and any(
+            alias.name == "catalogue" for alias in node.names
+        ):
+            return True
+    return False
+
+
+class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
+    """`Record._folded` is a rule stated in a comment, and comments do not hold.
+
+    `catalogue.py` says it outright: **a `replace` that changes `subjects` or
+    `headings` passes `_folded=False`**, and `merged_with` is the only one that
+    does. Break it from a distance and nothing raises. Pass `_folded=True` into
+    a constructor and `__post_init__` returns before deduplicating anything, so
+    the record keeps every repeat a catalogue sent: duplicate headings spend a
+    Book's eight classification slots, and the fold nobody skipped now runs on
+    every `replace` again, which is a 31 second event loop stall inside
+    `async def search`. Measured, both directions, in `Record._folded`.
+
+    Both critic seats arrived at this independently and neither found a live
+    offender, which is the point: the tree conforms today, `with_cover()` exists
+    **only** so that it can, and nothing was keeping it that way.
+
+    **Two rules, because there are two ways in**, and one allowlist entry
+    between them:
+
+    1. Nothing outside `catalogue.py` names `_folded`, in either tree. Four node
+       shapes, not one, and the list is the result of somebody attacking the
+       first draft rather than of reasoning about it: the keyword
+       (`Record(_folded=True)`), the attribute (`record._folded`), a **string
+       constant in a call** (`object.__setattr__(record, "_folded", True)`) and
+       a **dict key** (`Record(**{"_folded": True})`). The third is the one that
+       matters most and the one the first draft missed: it is the only way to
+       set the flag on a frozen instance, and it is verbatim the line
+       `__post_init__` uses three times, so it is the line somebody copies.
+    2. A module that could hold a `Record` does not call `dataclasses.replace`.
+       `Record.with_cover()` is what such a caller reaches for instead, and
+       adding a second method is cheaper than auditing a `replace` that looks
+       fine.
+
+    **Rule 1 is constrained to call arguments and dict keys rather than to every
+    string constant**, which was tried first and is wrong: a bare `ast.Constant`
+    test trips on this class's own message strings and on
+    `tests/test_catalogue.py`, which names the field in order to exclude it from
+    `_FILLED`.
+
+    **Blind spots, listed rather than left to be found.** Rule 2 is scoped by
+    whether a module imports `catalogue` at all, so a module handed a `Record`
+    by a caller without importing it escapes: that is a real gap and it is the
+    price of not forbidding `replace` on every unrelated frozen dataclass in the
+    backend. A name bound indirectly (`fn = dataclasses.replace`) escapes both.
+    Neither is the failure this exists for, which is somebody copying the
+    `replace` already in `catalogue.py` to a new site.
+
+    Both spellings of the alias **are** covered, and only because a seat tried
+    them: `from dataclasses import replace as swap` by `_replace_aliases`, and
+    `import dataclasses as dc` by `_dataclasses_modules`. The second was missing
+    from the first draft and is not an evasion but an accident, which is the
+    kind this rule is for.
+    """
+
+    #: Allowed to break both rules, because it owns them. A path rather than a
+    #: basename, matching the sibling guard above: compared as `path.name`, any
+    #: file called `catalogue.py` at any depth would have been exempt.
+    ALLOWED = "catalogue.py"
+
+    def _offenders_naming_the_flag(self, paths: list[Path]) -> list[str]:
+        offenders: list[str] = []
+        for path in paths:
+            if _label(path) == self.ALLOWED:
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                # Two nodes rather than one test, because a `keyword` carries
+                # `arg` and an `Attribute` carries `attr`, and mypy needs each
+                # narrowed before it will believe in `lineno`.
+                if isinstance(node, ast.keyword) and node.arg == "_folded":
+                    offenders.append(f"{_label(path)}:{node.value.lineno}")
+                elif isinstance(node, ast.Attribute) and node.attr == "_folded":
+                    offenders.append(f"{_label(path)}:{node.lineno}")
+                elif isinstance(node, ast.Call):
+                    # `object.__setattr__(record, "_folded", True)` is the only
+                    # way to set it on a frozen instance, and it is the line
+                    # `__post_init__` uses three times, so it is the one most
+                    # likely to be copied. It is a string, not a keyword.
+                    offenders += [
+                        f"{_label(path)}:{argument.lineno}"
+                        for argument in node.args
+                        if isinstance(argument, ast.Constant)
+                        and argument.value == "_folded"
+                    ]
+                elif isinstance(node, ast.Dict):
+                    # `Record(**{"_folded": True})` is a Dict key, not a keyword.
+                    offenders += [
+                        f"{_label(path)}:{key.lineno}"
+                        for key in node.keys
+                        if isinstance(key, ast.Constant) and key.value == "_folded"
+                    ]
+        return offenders
+
+    def test_no_module_outside_the_catalogue_names_the_fold_flag(self) -> None:
+        offenders = self._offenders_naming_the_flag(
+            _python_sources() + _test_sources()
+        )
+        assert not offenders, (
+            "`Record._folded` decides whether `__post_init__` deduplicates. "
+            "Setting it from outside `catalogue.py` ships a record holding "
+            "every repeat its catalogue sent, with no error anywhere. "
+            f"{sorted(offenders)}"
+        )
+
+    def test_no_module_holding_a_record_replaces_a_field_on_one(self) -> None:
+        offenders: list[str] = []
+        for path in _python_sources():
+            if _label(path) == self.ALLOWED:
+                continue
+            tree = ast.parse(path.read_text())
+            if not _holds_a_record(tree):
+                continue
+            aliases = _replace_aliases(tree)
+            modules = _dataclasses_modules(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                function = node.func
+                hit = (
+                    isinstance(function, ast.Attribute)
+                    and function.attr == "replace"
+                    and isinstance(function.value, ast.Name)
+                    and function.value.id in modules
+                ) or (isinstance(function, ast.Name) and function.id in aliases)
+                if hit:
+                    offenders.append(f"{_label(path)}:{node.lineno}")
+
+        assert not offenders, (
+            "A `replace` on a `Record` outside `catalogue.py` keeps `_folded` "
+            "set, so a new `subjects` or `headings` tuple is never folded. Add "
+            "a method on `Record` the way `with_cover()` was added. "
+            f"{sorted(offenders)}"
+        )
+
+    def test_the_rules_report_the_shapes_they_exist_for(self, tmp_path) -> None:
+        """A rule nothing can fail is a rule nobody notices deleting."""
+        offending = tmp_path / "offender.py"
+        offending.write_text(
+            "import dataclasses\n"
+            "from catalogue import Record\n"
+            "def f(record: Record) -> Record:\n"
+            "    return dataclasses.replace(record, subjects=())\n"
+            "def g() -> Record:\n"
+            "    return Record(_folded=True)\n"
+            "def h(record: Record) -> None:\n"
+            "    object.__setattr__(record, \"_folded\", True)\n"
+            "def i() -> Record:\n"
+            "    return Record(**{\"_folded\": True})\n"
+            "def j(record: Record) -> bool:\n"
+            "    return record._folded\n"
+        )
+        tree = ast.parse(offending.read_text())
+        assert _holds_a_record(tree)
+        # Four, one per node shape rule 1 covers: the keyword, the string in a
+        # call, the dict key and the attribute read. A count, because "something
+        # was caught" is what let the first draft pass while missing three of
+        # them. The `dataclasses.replace` in the same file is rule 2's and is
+        # deliberately not among them.
+        assert len(self._offenders_naming_the_flag([offending])) == 4
+
+        aliased = tmp_path / "aliased.py"
+        aliased.write_text("from dataclasses import replace as swap\n")
+        assert _replace_aliases(ast.parse(aliased.read_text())) == {"swap"}
+
+        aliased_module = tmp_path / "aliased_module.py"
+        aliased_module.write_text("import dataclasses as dc\n")
+        assert _dataclasses_modules(ast.parse(aliased_module.read_text())) == {
+            "dataclasses",
+            "dc",
+        }
+
+        innocent = tmp_path / "innocent.py"
+        innocent.write_text("import dataclasses\ndataclasses.replace(thing, a=1)\n")
+        assert not _holds_a_record(ast.parse(innocent.read_text()))
+        assert not self._offenders_naming_the_flag([innocent])

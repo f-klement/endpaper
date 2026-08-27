@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { TagOut } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import { tagName, useTranslation } from "../../../i18n";
 import { TagPicker } from "../../components";
 import { TAG_PILL_CLASSES } from "../../types";
 
@@ -27,7 +27,7 @@ export default function TagEditor({
   isCreating = false,
   onDelete,
 }: TagEditorProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [showPicker, setShowPicker] = useState(false);
 
   // Only offer tags the book does not already carry.
@@ -59,11 +59,11 @@ export default function TagEditor({
             key={tag.id}
             className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${TAG_PILL_CLASSES[tag.category]}`}
           >
-            {tag.name}
+            {tagName(tag, locale)}
             <button
               onClick={() => onRemove(tag.id)}
               className="opacity-60 hover:opacity-100 leading-none"
-              aria-label={t("book.removeTag", { tag: tag.name })}
+              aria-label={t("book.removeTag", { tag: tagName(tag, locale) })}
             >
               ×
             </button>

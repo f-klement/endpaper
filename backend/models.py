@@ -266,9 +266,32 @@ class AuthorAlias(Base):
 class Tag(Base):
     __tablename__ = "tags"
 
+    # Declared here and not as `unique=True` on the column, so that the index
+    # `create_all` builds is the one migration c1f8a7e3d240 creates, by name.
+    # A uniqueness rule that lives only in a revision is absent from every
+    # database built from the metadata and `--autogenerate` proposes dropping
+    # it: `tests/test_custom_fields.py` records that happening to a CHECK.
+    __table_args__ = (Index("uq_tags_key", "key", unique=True),)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     category: Mapped[TagCategory] = mapped_column(String(50), nullable=False)
+
+    # Which seeded tag this row **is**, independent of what it is called, and
+    # the only thing a translated name is looked up by. `TagKey` carries why
+    # that is not `name` and not `is_predefined`.
+    #
+    # Null for a tag the library invented, and null for a seeded row somebody
+    # renamed: migration c1f8a7e3d240 sets it only where the name still matched
+    # the English seed name exactly, so a renamed row is theirs from then on
+    # and is shown as typed. A rename through the ORM clears it, and that is
+    # enforced rather than asked for: `_drop_the_key_on_a_rename` below.
+    #
+    # Typed `str | None` rather than `TagKey | None` on purpose: a row written
+    # by a later version carrying a key this one has never heard of must still
+    # load. `TagOut` is where an unrecognised value is forgotten, so it costs a
+    # translation rather than a 500 on the whole tag list.
+    key: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Whether `seed_tags()` owns this row.
     #
@@ -284,6 +307,47 @@ class Tag(Base):
     is_predefined: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+
+    @validates("name")
+    def _drop_the_key_on_a_rename(self, _key: str, name: str) -> str:
+        """A renamed tag stops being a seeded one, enforced rather than asked for.
+
+        The rule this guards is the whole feature: a row keeps its key only
+        while it still carries the seeded name, so a household that renamed one
+        is shown their word and not the curated one. Migration `c1f8a7e3d240`
+        applies it to a database being upgraded and `backup._repair_seeded_tags`
+        applies it to one being restored. Nothing renames a tag through the ORM
+        today, and this is here so that whoever adds that route does not have to
+        know: `Collection._fold_the_name` is the same shape, for the reason its
+        docstring gives, that a derivation either writer could forget is a
+        derivation that will eventually be forgotten.
+
+        **`self.name is not None` is what makes this safe on an insert, not
+        defensive noise.** SQLAlchemy assigns constructor kwargs in the order
+        given, and `seed_tags()` writes `Tag(key=..., name=...)`, so the key is
+        already set when the name is first assigned. Without that clause this
+        validator would clear the key off every seeded row as it was created,
+        and the vocabulary would ship unkeyed.
+
+        A Core insert never fires this. Both of them (`backup.restore` and the
+        migration) decide the key themselves, which is why that is correct here
+        rather than a gap.
+
+        **Three paths skip it, not one, and the other two have no backstop.**
+        `Query.update()` and `Session.bulk_update_mappings` write straight to
+        the table without instantiating the row, so a bulk rename through either
+        would leave a key describing the name the tag used to have, and the
+        display would put the seeded word back over the one the member chose.
+        `Collection._fold_the_name` has `uq_collections_name_folded` catching
+        what slips past it; this has nothing equivalent, because `uq_tags_key`
+        enforces one row per key and cannot enforce that the key matches the
+        name: that is a fact about `PREDEFINED_TAGS`, which is a list only the
+        app has. Neither caller exists today (grepped). Whoever writes the first
+        one clears the key in the same statement.
+        """
+        if self.key is not None and self.name is not None and name != self.name:
+            self.key = None
+        return name
 
 
 class User(Base):

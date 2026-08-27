@@ -5,9 +5,15 @@ import {
   OwnershipStatus,
   ReadStatus,
   type BookOut,
+  type Locale,
 } from "../../../api/generated/model";
 import { Icon, Skeleton } from "../../../components";
-import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
+import {
+  tagName,
+  useTranslation,
+  type MessageKey,
+  type Translate,
+} from "../../../i18n";
 import { formatMinor } from "../../../lib/money";
 import {
   CONDITION_LABELS,
@@ -38,7 +44,7 @@ interface Column {
   sort: ColumnSort | null;
   /** Right aligned, for the columns that hold a number. */
   numeric?: boolean;
-  render: (book: BookOut, t: Translate, locale: string) => string;
+  render: (book: BookOut, t: Translate, locale: Locale) => string;
 }
 
 function date(iso: string | null | undefined, locale: string): string {
@@ -155,7 +161,8 @@ const COLUMNS: Column[] = [
     key: "tags",
     label: "library.tags",
     sort: null,
-    render: (book) => (book.tags ?? []).map((tag) => tag.name).join(", "),
+    render: (book, _t, locale) =>
+      (book.tags ?? []).map((tag) => tagName(tag, locale)).join(", "),
   },
   {
     key: "ownership",

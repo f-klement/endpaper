@@ -1,6 +1,6 @@
 import { TagCategory } from "../../api/generated/model";
 import { ErrorState, Spinner } from "../../components";
-import { useTranslation, type MessageKey } from "../../i18n";
+import { tagName, useTranslation, type MessageKey } from "../../i18n";
 import { TAG_CATEGORY_ORDER } from "../types";
 import StatSection from "./components/StatSection";
 import { useStats } from "./hooks";
@@ -150,7 +150,9 @@ export default function StatsPage() {
           title={t(CATEGORY_HEADINGS[category])}
           rows={stats.by_tag
             .filter((row) => row.category === category)
-            .map((row) => ({ label: row.name, count: row.count }))}
+            // Through `tagName` like every other tag on screen: these rows
+            // carry the key for exactly that.
+            .map((row) => ({ label: tagName(row, locale), count: row.count }))}
           colorClass="bg-accent-400"
         />
       ))}

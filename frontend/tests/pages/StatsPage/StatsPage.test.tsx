@@ -3,7 +3,7 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { TagCategory } from "../../../src/api/generated/model";
+import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
 import StatsPage, { formatMonth } from "../../../src/pages/StatsPage";
 import { makeStats, resetIds } from "../../factories";
 import { mockApi, renderWithProviders, type MockApi } from "../../utils";
@@ -82,6 +82,29 @@ describe("StatsPage", () => {
     expect(await screen.findByText("By Type")).toBeInTheDocument();
     expect(screen.getByText("By Genre")).toBeInTheDocument();
     expect(screen.getByText("By Age")).toBeInTheDocument();
+  });
+
+  it("prints a seeded tag in the reader's language", async () => {
+    // This page was the last screen naming a tag: it prints the name off its
+    // own stat row rather than off a TagOut, so it needed the key carried
+    // there too.
+    api.on("/api/stats", {
+      body: makeStats({
+        total: 1,
+        by_tag: [
+          {
+            name: "Computing",
+            category: TagCategory.genre,
+            key: TagKey.computing,
+            count: 1,
+          },
+        ],
+      }),
+    });
+    renderWithProviders(<StatsPage />, { locale: Locale.de });
+
+    expect(await screen.findByText("Informatik")).toBeInTheDocument();
+    expect(screen.queryByText("Computing")).not.toBeInTheDocument();
   });
 
   it("omits a section with no rows", async () => {

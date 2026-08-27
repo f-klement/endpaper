@@ -195,6 +195,44 @@ class TestSeeding:
         assert fiction["is_predefined"] is True
 
 
+class TestTheKeyTheClientTranslatesBy:
+    """The name is English; the key is what a German name is looked up by.
+
+    Sent on every tag, because the client has no other way to tell a seeded row
+    from one the library invented and named the same thing.
+    """
+
+    def test_a_seeded_tag_carries_its_key(self, client, admin):
+        tags = client.get("/api/books/tags", headers=admin["headers"]).json()
+        computing = next(tag for tag in tags if tag["name"] == "Computing")
+        assert computing["key"] == "computing"
+
+    def test_an_invented_tag_carries_none(self, client, admin):
+        created = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        )
+
+        assert created.json()["key"] is None
+
+    def test_a_key_this_version_does_not_know_is_forgotten(self, client, admin, db):
+        """Not a 500, which is what refusing the row would cost.
+
+        A library moved back to an older image holds keys that version never
+        had. The tag list is one response for the whole vocabulary and is
+        fetched on nearly every page, so one unrecognised row would take every
+        one of them down.
+        """
+        stored = db.query(Tag).filter(Tag.name == "Computing").one()
+        stored.key = "quantum_gardening"
+        db.commit()
+
+        res = client.get("/api/books/tags", headers=admin["headers"])
+
+        assert res.status_code == 200
+        computing = next(tag for tag in res.json() if tag["name"] == "Computing")
+        assert computing["key"] is None
+
+
 class TestWhoMayDelete:
     """Creating a tag is additive and undoable; deleting one is neither."""
 

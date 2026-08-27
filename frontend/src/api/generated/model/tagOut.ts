@@ -6,11 +6,13 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { TagCategory } from "./tagCategory.ts";
+import type { TagKey } from "./tagKey.ts";
 
 export interface TagOut {
   book_count?: number;
   category: TagCategory;
   id: number;
   is_predefined?: boolean;
+  key?: TagKey | null;
   name: string;
 }

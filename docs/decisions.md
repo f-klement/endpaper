@@ -1108,8 +1108,9 @@ exists to hold the half that does not move, so the scheme that has one is kept f
 **Half of that ordering fires today and half does not**, which is worth stating rather than
 leaving to be discovered. DDC and LCC ahead of LCSH is live: a Library of Congress record can
 carry 14 subject headings against two classifications. That ordering decides what survives
-on a **merged book**, not what a search row shows: `_as_match` slices before `_headings`
-sorts, which is what the comment on that slice and its test exist to say. GND against LCSH is not reachable through any flow the app itself drives, because the
+on a **merged book**, not what a search row shows: `Record.match_headings` slices before
+`_headings` sorts, which is what the comment on that slice and its test exist to say. GND
+against LCSH is not reachable through any flow the app itself drives, because the
 DNB supplies one and the Library of Congress the other. `POST /merge` **does** bring both
 onto one book, and the conclusion survives for a different reason than "no path concatenates
 them": `_repoint_relations` orders keeper first then losers by id and never consults
@@ -1119,9 +1120,15 @@ them": `_repoint_relations` orders keeper first then losers by id and never cons
 
 `_merge_matches` filled a field only where the leading row's value `is None`. Every scalar a
 catalogue omits arrives as None, so that was the whole rule until `classifications` became
-the one **list valued** key `_as_match` writes. It always writes a list, so a source that
-found no heading wrote `[]`, and `[]` is not None, so an empty list beat a populated one and
-a Library of Congress row folded into another lost every heading.
+the one **list valued** key a search row carried. That row builder always wrote a list, so a
+source that found no heading wrote `[]`, and `[]` is not None, so an empty list beat a
+populated one and a Library of Congress row folded into another lost every heading.
+
+**The rule now lives in `catalogue.Record.filled_from`, and it is no longer one condition
+holding two kinds of field apart.** A `Record` has scalars and it has two collections, they
+are separate fields, and they are tested separately: `is None` for a scalar and emptiness for
+a collection. The reasoning below is why the condition was written, and it is kept because it
+is why the shape is what it is; what it describes is a dictionary that no longer exists.
 
 **The first draft of this entry recorded that as a merge design question and declined to
 fix it.** That was wrong, and the measurement is what showed it. Over 30 live title searches
@@ -1131,8 +1138,9 @@ all of them `bnf+loc`, the BnF emitting no classification at all. There was neve
 perform.
 
 **Open Library never lost a heading, and the reason is worth knowing**, because the obvious
-example was the wrong one. Its *search* row builder omits `classifications` entirely where
-`_as_match` writes `[]`: 290 of 1,629 measured rows carry no such key. So `existing.get()`
+example was the wrong one. Its *search* row builder omitted `classifications` entirely where
+the shared row builder wrote `[]`: 290 of 1,629 measured rows carried no such key. So
+`existing.get()`
 returned None there and the fill always happened. Only a source that writes an empty list
 could trigger this, which is why every measured loss paired the BnF with the Library of
 Congress. Unioning two populated lists would indeed be a change to how every field merges;
@@ -1248,7 +1256,8 @@ reason (nothing here can read the notation).
 ### Open Library subjects are bounded at twelve, and the bound is what makes them usable
 
 `subjects` is not stored, but it feeds two things that are: `suggested_tag_ids`, which the
-web client pre-selects, and `_as_match`, which joins the list into the `categories` column.
+web client pre-selects, and `catalogue.Record.as_match`, which joins the list into the
+`categories` column.
 
 Open Library's work subjects are long. Measured over nine live works on 2026-08-24 the
 lists ran 0, 0, 3, 36, 65, 82, 101, 122 and 137 entries. Unioned with the edition's own and
@@ -1871,8 +1880,8 @@ it is already served: the import lands, the result links into the library, and t
 `set_collection` files the selection in one press. A second path to the same state would be
 a second thing to keep in step with the first.
 
-**Peer sync does not carry it.** A collection is shelf taxonomy, which `archive/implementation_plan.md`
-§9 already refuses to send for `location`, and a collection named after a member would leak
+**Peer sync does not carry it.** A collection is shelf taxonomy, which the peer sync design
+already refuses to send for `location`, and a collection named after a member would leak
 a member's name besides. It is also not a *scope* for a grant: scopes come from
 the stored grant and there are exactly two, and a third keyed on a library wide label that
 any member can rename or delete would silently widen or narrow what a peer sees through an
@@ -2504,7 +2513,7 @@ about the shelf, and any other answer confirms a book is on it.
 
 ### Author aliases never cross to a peer
 
-`archive/implementation_plan.md` A6. The peer payload carries `author` as the string on the book, and
+The peer payload carries `author` as the string on the book, and
 that does not change: a peer receives the credit line as printed and applies its own
 library's decisions to it, if it has any. An alias is shelf taxonomy in the same class as
 `location` and a collection name, and it is one library's reading of its own shelf.
@@ -2811,6 +2820,119 @@ Each run now extracts into `/work/repo-$POD` and removes it in the exit trap.
 The dependency caches stay shared at `/work/cache`, which is the reason the
 hostPath exists. This matters more than it did: the runner serving this project
 is at `concurrent: 2`, so two real CI jobs can now land together.
+
+### A seeded tag is identified by a key, not by its name
+
+Predefined tag names are shown in the member's language, and the row a
+translation belongs to is found by `tags.key`, never by matching the name.
+
+Matching on name at display time repeats the bug the seeding migration
+`95b6a61d6668` exists to fix: it breaks the moment a household renames a tag,
+and it makes the English name load bearing in two places. A boolean
+`is_predefined` records that a row was seeded without saying which seeded tag
+it is, so it cannot pick a translation. The key survives a rename in either
+direction, and a renamed row simply has no key: it is an ordinary invented tag
+from then on, shown as typed.
+
+English is not in the translation table. The name in the database is the
+English name, so `TAG_NAMES` covers every locale except English by type
+(`Exclude<Locale, "en">`), and a language added later has to supply a full
+table or the build fails. That is the same property `de.ts` has, obtained the
+same way.
+
+Only display changed. `ddc.tag_names` still projects a classification number
+onto an English seed name and `match_subjects_to_tags` still reads the caption,
+because the suggestion travels as a tag **id**.
+
+**A rename drops the key, and that is enforced rather than asked for.**
+`Tag._drop_the_key_on_a_rename` is a `@validates` hook on `name`, so a rename
+through the ORM clears the key in the same write. Three paths skip it and are
+named where it is defined: Core inserts, `Query.update()` and
+`bulk_update_mappings`. Unlike `Collection._fold_the_name` there is no unique
+index behind this one, because `uq_tags_key` enforces one row per key and
+cannot enforce that the key still matches the name: that is a fact about
+`PREDEFINED_TAGS`, which only the app has.
+
+**An unknown key is forgotten, not refused.** `KnownTagKey` is a
+`BeforeValidator` on `TagOut.key` and `TagStat.key`, so a row carrying a key a
+later version dropped loads as an ordinary tag instead of 500ing the whole tag
+list. A guard in `tests/test_schemas.py` requires that annotation on any third
+model growing a `key`, and it checks the validator **is** `known_key` rather
+than that some before validator exists: written the loose way it passed clean
+against a model with its own validator, which is the shape it will actually
+meet.
+
+### The Catalogue record is a type, and the two dialects are gone
+
+Six source adapters used to hand their answer across the seam as
+`dict[str, Any]`, in **two** shapes. A lookup record carried `isbn` and a list
+of `subjects`; a search match carried `isbn13`, a `source`, a `google_books_id`
+and `categories`, the same subjects joined into one string. Two functions
+existed only to cross between them, and one of them lived in a route handler.
+
+`catalogue.Record` replaces both. What moved behind it, and each of these was
+previously a rule somebody had to remember:
+
+* Folding a heading a record repeats. One live K10plus record's 082 `$a` values
+  read `100`, `610`, `610`. Three sites deduplicated: `metadata._dnb_subjects`,
+  `_as_match` and `_merge`. Now one, at construction.
+* Filling a caption from whichever source has one, never overwriting.
+* That an **empty collection is an absence where an empty string is a value**.
+  This was a live defect: `classifications` was the one list valued key a match
+  carried, a source finding no heading wrote `[]`, and `[]` is not `None`, so it
+  beat a populated list from the next source. Measured over 30 live title
+  searches, 6 of 10 merged rows whose Library of Congress half carried LCSH lost
+  every heading. The scalars and the collections are now separate fields with
+  separate rules, so the two conditions cannot be confused again.
+* Which fields score `completeness`.
+* That several catalogues answering for one book are one row naming all of them.
+
+**Two folding rules, named separately rather than one function with a flag.**
+`merged_with` is the lookup path and unions the collections, because every
+record it folds was found by the same verified ISBN and so describes the same
+printing. `filled_from` is the search path and does not, because two rows meet
+there on a title and a year, which is a guess, and because a search row is
+bounded at `MAX_CLASSIFICATIONS_PER_BOOK` before it becomes a `BookMatch`:
+unioning two full rows would cost the row rather than the heading.
+
+**ADR 0006 is now held by the type.** `as_lookup()` and `as_match()` return the
+scalar facts and no Classifications. Automatic enrichment and Refresh Metadata
+write from those dictionaries, so an unattended writer has nothing to write even
+by mistake, where before it was two route handlers remembering not to.
+
+**A record folds its collections once, and the flag that says so is load
+bearing.** `Record._folded` is checked first in `__post_init__`, and
+`merged_with` is the only `replace` that resets it, because it is the only one
+that concatenates. Without it the fold re-ran on every `replace`, and
+`_merge_matches` folds every row sharing a title, an author and a year onto one
+slot, so the cost became the **product** of the row count and the surviving
+record's width. Measured on a four core worker, one process: 8,176 rows against
+a record carrying 22,784 subjects and 11,392 headings, which is the worst shape
+fitting inside `fetch.MAX_RESPONSE_BYTES`, took 125.970s without the flag and
+0.227s with it. `_merge_matches` is synchronous inside `async def search`, so
+that is the event loop stopped for every member at once, and
+`SEARCH_DEADLINE_SECONDS` does not bound it: that bounds `_within_deadline`,
+which has already returned.
+
+**Two rules keep it, in `tests/test_house_rules.py`, because a comment does
+not.** Nothing outside `catalogue.py` names `_folded`, and a module that could
+hold a `Record` does not call `dataclasses.replace`: `Record.with_cover()`
+exists so that the one caller which needed to has a method instead. Both critic
+seats reached this independently and neither found a live offender, which is the
+point. The second rule is scoped to modules importing `catalogue` rather than to
+every backend module, because seven others define frozen dataclasses that have
+nothing to do with this; the gap that leaves is listed in the guard's docstring.
+
+**The severity was recorded wrong twice, in opposite directions, and how is
+worth keeping.** The comment first claimed over 120 seconds against a shape of
+8,001 rows and 1,913,056 wire bytes. A reviewer re-derived it from those inputs,
+got 0.854s, and refused to sign off: the shape was wrong. It was then corrected
+to say the figure did not reproduce, and **that correction was wrong too**, as
+the next round showed by measuring the actual worst case at 125.970s. The
+original timing was real and taken at a shape nobody wrote down. Both errors
+have the same cause and the rule that a stated number says what it was measured
+against catches both, including when the statement is a retraction.
+
 
 ## Frontend
 
@@ -3942,7 +4064,7 @@ metadata that no screen reads; neither is published to a registry that consumes 
 
 **The frontend is built inside a Docker stage with no `.git` and no CI variables**, so the
 tag cannot be discovered there and is handed in as `--build-arg APP_VERSION`
-(`Dockerfile`, `.gitlab-ci.yml` `release:build`). Without that the release image would
+(`Dockerfile`, and the release build stage of the pipeline). Without that the release image would
 show `unknown`, which is exactly why the fallback is that word rather than a number
 that looks real. It is one token deliberately: a version never contains a space, so a
 test can assert the shape of one.
@@ -3955,7 +4077,7 @@ trim are the two a reader needs: what it pays for, and that no capability sits b
 Every feature stays available to somebody who runs their own relay, and if that ever stops
 being true it is a different project. Publishing what the relay costs and what came in was
 promised in an earlier draft of these texts and is promised in none of them now; it is
-unshipped work in `archive/implementation_plan.md` A0, waiting on a relay to have a cost.
+unshipped work, waiting on a relay to have a cost.
 
 ### The About card's badges are drawn, never fetched
 
@@ -4358,7 +4480,7 @@ departure is argued in the author entries above rather than assumed.
 
 **Two features had no useful reference.** Collections and multiple copies are
 shaped by this codebase rather than by the field: what decides them is
-`visible_to()`, the sync payload in `archive/implementation_plan.md`, and `books.isbn`
+`visible_to()`, the shape of the peer sync payload, and `books.isbn`
 being unique. Reading a competitor will not tell you what breaking that
 constraint costs here.
 

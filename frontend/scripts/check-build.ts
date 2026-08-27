@@ -16,7 +16,7 @@
  * transformed, so a test could only ever see an artefact built before the suite
  * started. Reading it any other way means `node:fs`, and this project has no
  * `@types/node` on purpose (see `tests/houseRules.test.ts`). Building an
- * artefact and scanning it is what `ci/make-public-tree.sh` does, and this
+ * artefact and scanning it is what the publish gate does, and this
  * follows it: produce the bytes, inspect the bytes, exit non-zero.
  *
  * Nothing here is type checked. `tsconfig.json` includes `src`, `tests` and

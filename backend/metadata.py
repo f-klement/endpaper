@@ -24,6 +24,7 @@ The sources are ordered per ISBN rather than fixed: see `_sources_for`.
 """
 
 import asyncio
+import functools
 import logging
 import re
 import time
@@ -41,10 +42,10 @@ import covers
 import ddc
 import fetch
 import google_books
+from catalogue import Heading, Record
 from enums import ClassificationScheme
 from isbn import parse as parse_isbn
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
-from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
 
@@ -70,7 +71,10 @@ class Lookup:
     """What the chain came back with, and from where."""
 
     outcome: Outcome
-    data: dict[str, Any] | None = None
+    #: The typed draft, or None where nothing was found. `catalogue.Record`
+    #: rather than a dictionary since 2026-08-27: every source used to invent
+    #: its own keys here and every consumer used to guess which were present.
+    record: Record | None = None
     #: Which source answered, for the log line and the cache entry.
     source: str = ""
     #: Every source that was tried, in order, with its own outcome. Kept so a
@@ -79,7 +83,7 @@ class Lookup:
 
     @property
     def found(self) -> bool:
-        return self.outcome is Outcome.FOUND and self.data is not None
+        return self.outcome is Outcome.FOUND and self.record is not None
 
 
 # ── Open Library ──────────────────────────────────────────────────────────────
@@ -180,7 +184,7 @@ _OPEN_LIBRARY_SUBJECT_KEYS: Final = (
 #: over nine live works on 2026-08-24 the lists ran 0, 0, 3, 36, 65, 82, 101,
 #: 122 and 137 entries. `subjects` is not stored, but it feeds two things that
 #: are: `suggested_tag_ids`, which the web client pre-selects, and
-#: `_as_match`, which joins them into the `categories` column.
+#: `Record.as_match`, which joins them into the `categories` column.
 #:
 #: Uncapped, the union of the edition's and the work's subjects pre-selects up
 #: to **16** of the 105 seeded tags on one book (1984: Fiction, Play, Essays,
@@ -220,7 +224,7 @@ def _open_library_subjects(*records: dict[str, Any]) -> list[str]:
     return list(found)[:_OPEN_LIBRARY_MAX_SUBJECTS]
 
 
-def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]]:
+def _open_library_classifications(record: dict[str, Any]) -> list[Heading]:
     """`dewey_decimal_class` and `lc_classifications`, which are the controlled half.
 
     **This is the whole of what Open Library asserts from a published scheme,
@@ -244,7 +248,7 @@ def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]
     Dewey goes through `ddc.parse_heading` like every other source path, which
     is what strips the segmentation prime and refuses `[Fic]`.
     """
-    found: list[dict[str, Any]] = []
+    found: list[Heading] = []
     dewey = record.get("dewey_decimal_class")
     if isinstance(dewey, list):
         for value in dewey:
@@ -254,9 +258,7 @@ def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]
             if heading is None:
                 continue
             number, label = heading
-            found.append(
-                {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
-            )
+            found.append(Heading(ClassificationScheme.DDC, number, label))
     call_numbers = record.get("lc_classifications")
     if isinstance(call_numbers, list) and call_numbers:
         # No normaliser for LCC, the same as the Library of Congress path: a
@@ -267,9 +269,7 @@ def _open_library_classifications(record: dict[str, Any]) -> list[dict[str, Any]
         first = call_numbers[0]
         number = " ".join(first.split()) if isinstance(first, str) else ""
         if number:
-            found.append(
-                {"scheme": ClassificationScheme.LCC, "number": number, "label": None}
-            )
+            found.append(Heading(ClassificationScheme.LCC, number))
     return found
 
 
@@ -472,29 +472,30 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
     return Lookup(
         Outcome.FOUND,
         source="open_library",
-        data={
-            "isbn": isbn,
-            "title": data.get("title", ""),
-            "subtitle": data.get("subtitle"),
-            "author": author,
-            "publisher": publishers[0] if publishers else None,
-            "year": _open_library_year(data.get("publish_date")),
-            "description": _open_library_description(data.get("description")),
-            "cover_url": covers.open_library_url(isbn),
+        record=Record(
+            source="open_library",
+            isbn=isbn,
+            title=data.get("title", ""),
+            subtitle=data.get("subtitle"),
+            author=author,
+            publisher=publishers[0] if publishers else None,
+            year=_open_library_year(data.get("publish_date")),
+            description=_open_library_description(data.get("description")),
+            cover_url=covers.open_library_url(isbn),
             # Both were missing entirely until 2026-08-24, so a fallback lookup
-            # answered without two of the seven fields `_completeness` scores
-            # and `_merge` had nothing to fill them from.
-            "page_count": _open_library_pages(data.get("number_of_pages")),
-            "language": _open_library_language(data.get("languages")),
-            "subjects": _open_library_subjects(data, work),
+            # answered without two of the seven fields `Record.completeness`
+            # scores and `_merge` had nothing to fill them from.
+            page_count=_open_library_pages(data.get("number_of_pages")),
+            language=_open_library_language(data.get("languages")),
+            subjects=tuple(_open_library_subjects(data, work)),
             # The edition record's own, not the cluster's. 24 of 129 live
             # sibling editions carry a Dewey number where the edition asked
             # for carries none, so harvesting the cluster here would find
             # more; it would also cost a fourth request on every fallback
             # lookup, and the cluster is already fetched where somebody is
             # choosing an edition. Left as the cheaper half deliberately.
-            "classifications": _open_library_classifications(data),
-        },
+            headings=tuple(_open_library_classifications(data)),
+        ),
     )
 
 
@@ -526,21 +527,40 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
         return Lookup(Outcome.NOT_FOUND, source="google_books")
 
     return Lookup(
-        Outcome.FOUND,
+        Outcome.FOUND, source="google_books", record=_google_record(fields, isbn)
+    )
+
+
+def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
+    """A Google volume as a Catalogue record. The adapter for that source.
+
+    `google_books.py` stays the HTTP client for Google and knows nothing about
+    this type, exactly as `fetch.py` stays the door outwards. The mapping lives
+    here beside the other five, so a reader comparing what the sources supply
+    has one file to read.
+
+    `google_books_id` is carried because it is the one field only Google has and
+    `google_books.merge_into` writes it onto the Book. The categories are split
+    back into subjects here and joined again by `Record.as_match`, which looks
+    like a round trip and is the price of there being exactly two functions in
+    this repository that know the separator is a semicolon.
+    """
+    return Record(
         source="google_books",
-        data={
-            "isbn": fields.get("isbn13") or isbn,
-            "title": fields.get("title") or "",
-            "subtitle": fields.get("subtitle"),
-            "author": fields.get("author"),
-            "publisher": fields.get("publisher"),
-            "year": fields.get("year"),
-            "description": fields.get("description"),
-            "cover_url": fields.get("cover_url"),
-            "series_name": fields.get("series_name"),
-            "series_index": fields.get("series_index"),
-            "subjects": google_books.split_categories(fields.get("categories")),
-        },
+        isbn=fields.get("isbn13") or isbn,
+        title=fields.get("title") or "",
+        subtitle=fields.get("subtitle"),
+        author=fields.get("author"),
+        publisher=fields.get("publisher"),
+        year=fields.get("year"),
+        description=fields.get("description"),
+        cover_url=fields.get("cover_url"),
+        page_count=fields.get("page_count"),
+        language=fields.get("language"),
+        google_books_id=fields.get("google_books_id"),
+        series_name=fields.get("series_name"),
+        series_index=fields.get("series_index"),
+        subjects=tuple(google_books.split_categories(fields.get("categories"))),
     )
 
 
@@ -725,8 +745,8 @@ def _gnd_identifier(entry: _Subfields) -> str | None:
 # grepped over the same 85 records, the German captions appear in the Dublin
 # Core responses and in none of the MARC ones. Filling it in from
 # `ddc.DIVISION_TAGS` would put our word in a column that records theirs, so
-# the caption stays absent and `_union_classifications` takes one from another
-# source if any has it.
+# the caption stays absent and `Record`'s union takes one from another source
+# if any has it.
 #
 # What it buys, over 85 live records fetched 2026-08-24: 187 GND identified
 # subject headings where Dublin Core carried none, a title and subtitle already
@@ -848,12 +868,14 @@ def _is_placeholder_title(title: str) -> bool:
 #: are read.
 #:
 #: **689 is the RSWK chain and restates what the others said**, so reading all
-#: five double counts by design and `_dnb_subjects` deduplicates rather than
-#: choosing between them. Choosing would lose headings either way: measured over
-#: 85 live records on 2026-08-24, 10 of the 13 600 fields carry a GND number and
-#: only 3 of those 10 appear in 689 as well, 5 being on records with no 689 at
-#: all. Dropping 689 loses the chains no other field holds; dropping 600 loses
-#: seven personal name subjects in ten.
+#: five double counts by design and the repeats are folded rather than chosen
+#: between. That folding is `catalogue.Record`'s since 2026-08-27 and was
+#: `_dnb_subjects`'s before it, which is why that function now hands its repeats
+#: on rather than resolving them. Choosing would lose headings either way:
+#: measured over 85 live records on 2026-08-24, 10 of the 13 600 fields carry a
+#: GND number and only 3 of those 10 appear in 689 as well, 5 being on records
+#: with no 689 at all. Dropping 689 loses the chains no other field holds;
+#: dropping 600 loses seven personal name subjects in ten.
 #:
 #: 600 is the one beyond the four the round was specified with, and it is the
 #: same kind of assertion as the rest. A person named here is the *subject*, not
@@ -880,7 +902,9 @@ def _is_placeholder_title(title: str) -> bool:
 _DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
 
 
-def _dnb_subjects(fields: dict[str, list[_Subfields]]) -> dict[str, Any]:
+def _dnb_subjects(
+    fields: dict[str, list[_Subfields]],
+) -> tuple[list[str], list[Heading]]:
     """The controlled subject headings, as plain subjects and as GND rows.
 
     **A subject heading never enters the DDC path**, and that is load bearing
@@ -897,36 +921,31 @@ def _dnb_subjects(fields: dict[str, list[_Subfields]]) -> dict[str, Any]:
     only supplier and every caption German. It is stored bare, under its own
     scheme, with the heading text as the caption.
 
-    Deduplicated here rather than downstream, because a single record repeats
-    itself: 689 restates the 600, 650 and 651 headings it was built from, so
-    the reference record 9783446249974 names Stevenson, Samoainseln and Schatz
-    twice each. The lookup path would fold the classifications in `_merge` and
-    `_as_match` folds them on the search path, but neither deduplicates
-    `subjects`, so without this the same three words reach `categories` twice.
+    **Repeats are not folded here, and they used to be.** A record restates
+    itself: 689 repeats the 600, 650 and 651 headings it was built from, so the
+    reference record 9783446249974 names Stevenson, Samoainseln and Schatz
+    twice each. `Record` folds both collections at construction, keeping the
+    first of each, which is what this function used to do with two dictionaries
+    of its own. Deleting them is the point of the seam being typed: the rule has
+    one owner, and the next source added inherits it rather than copying it.
     """
-    subjects: dict[str, None] = {}
-    headings: dict[str, str] = {}
+    subjects: list[str] = []
+    headings: list[Heading] = []
     for tag in _DNB_SUBJECT_TAGS:
         for entry in fields.get(tag, []):
             heading = _strip_marc_punctuation(entry.get("a", ""))
             if not heading:
                 continue
-            subjects.setdefault(heading, None)
+            subjects.append(heading)
             number = _gnd_identifier(entry)
             if number is not None:
-                headings.setdefault(number, heading)
-    return {
-        "subjects": list(subjects),
-        "classifications": [
-            {"scheme": ClassificationScheme.GND, "number": number, "label": heading}
-            for number, heading in headings.items()
-        ],
-    }
+                headings.append(Heading(ClassificationScheme.GND, number, heading))
+    return subjects, headings
 
 
 def _dnb_record(
     fields: dict[str, list[_Subfields]], isbn: str | None
-) -> dict[str, Any] | None:
+) -> Record | None:
     """One MARC record as book fields, or None if it is not a book.
 
     Shared by the lookup and the search paths. `isbn` is what the lookup
@@ -954,7 +973,7 @@ def _dnb_record(
     live records carry a disc extent, so this costs nothing measurable and
     stops a scanned ISBN that names a DVD becoming a book.
 
-    **The Dewey number is first in `classifications`**, which costs nothing and
+    **The Dewey number is first in `headings`**, which costs nothing and
     is not what makes it survive the per book ceiling: `routers/books._headings`
     sorts by scheme before it slices, because by the time a list reaches there
     `_merge` has concatenated up to four catalogues and no parser can order
@@ -975,37 +994,38 @@ def _dnb_record(
         return None
 
     isbn = isbn or _marc_isbn(fields)
-    subjects = _dnb_subjects(fields)
+    subjects, gnd = _dnb_subjects(fields)
 
-    return {
-        "isbn": isbn,
-        "title": title,
-        "subtitle": subtitle,
-        "author": _marc_authors(fields) or _marc_credited_names(fields),
-        "publisher": _marc_publisher(fields),
-        "year": _marc_year(fields),
+    return Record(
+        source="dnb",
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_marc_authors(fields) or _marc_credited_names(fields),
+        publisher=_marc_publisher(fields),
+        year=_marc_year(fields),
         # Through the shared reader rather than hardcoded to None, which is
         # what this was under Dublin Core. The DNB catalogues books rather than
         # blurbs and it shows: 520 appears on 1 of 85 live records measured
         # 2026-08-24. Reading it costs a function call and stops being a
         # special case that has to be remembered.
-        "description": _marc_description(fields),
-        "language": _marc_language(fields),
-        "page_count": _pages_from_extent(_marc_extent(fields)),
+        description=_marc_description(fields),
+        language=_marc_language(fields),
+        page_count=_pages_from_extent(_marc_extent(fields)),
         # No cover in a MARC record. Open Library serves one by ISBN for a good
         # number of German books even where it has no edition record, so it is
         # worth the guess. Built by covers.py, which is the only module allowed
         # to know an image host: see COVER_HOSTS, which the CSP is derived from.
-        "cover_url": covers.open_library_url(isbn) if isbn else None,
+        cover_url=covers.open_library_url(isbn) if isbn else None,
         # 245 `$n` and `$p`, the same volume statement K10plus is read for. The
         # Dublin Core parser had no series at all: the part designation was
         # inside the title statement and there was no honest way to tell it
         # from a subtitle.
-        "series_name": series_name,
-        "series_index": series_index,
-        "subjects": subjects["subjects"],
-        "classifications": _marc_ddc(fields) + subjects["classifications"],
-    }
+        series_name=series_name,
+        series_index=series_index,
+        subjects=tuple(subjects),
+        headings=tuple(_marc_ddc(fields) + gnd),
+    )
 
 
 #: How many records the lookup asks for, where it asked for one until
@@ -1068,12 +1088,12 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
         books,
         key=lambda pair: (
             _marc_claims_isbn(pair[0], isbn),
-            _is_physical_book(_marc_extent(pair[0]), pair[1]["title"]),
-            _completeness(pair[1]),
+            _is_physical_book(_marc_extent(pair[0]), pair[1].title),
+            pair[1].completeness,
         ),
         reverse=True,
     )
-    return Lookup(Outcome.FOUND, source="dnb", data=ranked[0][1])
+    return Lookup(Outcome.FOUND, source="dnb", record=ranked[0][1])
 
 
 # ── K10plus ───────────────────────────────────────────────────────────────────
@@ -1325,9 +1345,11 @@ async def _k10plus(isbn: str, api_key: str) -> Lookup:
     if not candidates:
         return Lookup(Outcome.NOT_FOUND, source="k10plus")
 
-    data = [_k10plus_record(fields, isbn) for fields in candidates]
+    records = [_k10plus_record(fields, isbn) for fields in candidates]
     return Lookup(
-        Outcome.FOUND, source="k10plus", data=max(data, key=_completeness)
+        Outcome.FOUND,
+        source="k10plus",
+        record=max(records, key=lambda record: record.completeness),
     )
 
 
@@ -1368,7 +1390,7 @@ def _marc_description(fields: dict[str, list[_Subfields]]) -> str | None:
     return next((entry["a"] for entry in fields.get("520", []) if entry.get("a")), None)
 
 
-def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[dict[str, Any]]:
+def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[Heading]:
     """082 as Dewey headings, and the one field this module hands to `ddc`.
 
     082 is the Dewey number and normally nothing else: MARC carries the
@@ -1391,7 +1413,7 @@ def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[dict[str, Any]]:
     instead on whichever of the two came second.
     """
     return [
-        {"scheme": ClassificationScheme.DDC, "number": number, "label": label}
+        Heading(ClassificationScheme.DDC, number, label)
         for entry in fields.get("082", [])
         for value in entry.all("a")
         for heading in [ddc.parse_heading(value)]
@@ -1413,7 +1435,7 @@ def _marc_isbn(fields: dict[str, list[_Subfields]]) -> str | None:
 
 def _k10plus_record(
     fields: dict[str, list[_Subfields]], isbn: str | None = None
-) -> dict[str, Any]:
+) -> Record:
     """One MARC record as book fields.
 
     `isbn` is passed by the lookup path, where it is already known and already
@@ -1429,29 +1451,30 @@ def _k10plus_record(
         if entry.get("a")
     ]
 
-    return {
-        "isbn": isbn,
-        "title": title,
-        "subtitle": subtitle,
-        "author": _marc_authors(fields),
-        "publisher": _marc_publisher(fields),
-        "year": _marc_year(fields),
-        "description": _marc_description(fields),
-        "language": _marc_language(fields),
-        "page_count": _pages_from_extent(_marc_extent(fields)),
-        "series_name": series_name,
-        "series_index": series_index,
+    return Record(
+        source="k10plus",
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_marc_authors(fields),
+        publisher=_marc_publisher(fields),
+        year=_marc_year(fields),
+        description=_marc_description(fields),
+        language=_marc_language(fields),
+        page_count=_pages_from_extent(_marc_extent(fields)),
+        series_name=series_name,
+        series_index=series_index,
         # No cover in a MARC record. The Open Library cover service answers by
         # ISBN for a good number of these anyway. A record with no ISBN at all,
         # which is most pre-1970 printings, gets none.
-        "cover_url": covers.open_library_url(isbn) if isbn else None,
-        "subjects": subjects,
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        subjects=tuple(subjects),
         # K10plus is not read for GND identifiers, though its records carry
         # them in the same `$0`. Doing that is a second catalogue's worth of
         # live comparison and belongs in its own round, not as a side effect of
         # the DNB's.
-        "classifications": _marc_ddc(fields),
-    }
+        headings=tuple(_marc_ddc(fields)),
+    )
 
 
 # ── The chain ─────────────────────────────────────────────────────────────────
@@ -1512,90 +1535,26 @@ def _preferred_source(isbn: str) -> str:
     return "dnb" if isbn.startswith(_GERMAN_PREFIX) else "k10plus"
 
 
-#: Fields worth having, and therefore worth scoring a record on.
-_SCORED_FIELDS: Final = (
-    "author",
-    "year",
-    "publisher",
-    "page_count",
-    "language",
-    "description",
-    "series_name",
-)
-
-
-def _completeness(data: dict[str, Any]) -> int:
-    """How much of a record is actually filled in.
-
-    Used twice: to choose between several printings of one ISBN within a single
-    catalogue, and to decide which catalogue leads the merge when both answer.
-    """
-    score = sum(1 for name in _SCORED_FIELDS if data.get(name))
-    return score + (1 if data.get("subjects") else 0)
-
-
-def _merge(results: list[Lookup], isbn: str) -> dict[str, Any]:
+def _merge(records: list[Record], isbn: str) -> Record:
     """Fold several catalogues' answers into one record.
 
     Taking the first hit and stopping is what the chain used to do, and it left
     fields empty that the next source down would have filled: K10plus carries
     page counts and series numbering, the DNB carries subject headings, and
-    neither reliably carries a blurb. Nothing is overwritten, only filled in,
-    so the leading source stays the one describing the book.
+    neither reliably carries a blurb. `Record.merged_with` holds the rule:
+    nothing is overwritten, only filled in, so the leading source stays the one
+    describing the book, and both catalogues' subjects and headings are kept.
 
-    Subjects are unioned rather than replaced. They feed the tag suggestion,
-    where a heading from either catalogue is equally good evidence.
-    Classifications are unioned the same way; see `_union_classifications` for
-    the one rule that differs.
+    What is decided **here** is only which record leads, because that is the one
+    thing that depends on the ISBN rather than on the records.
     """
     preferred = _preferred_source(isbn)
     ordered = sorted(
-        results,
-        key=lambda result: (result.source == preferred, _completeness(result.data or {})),
+        records,
+        key=lambda record: (record.source == preferred, record.completeness),
         reverse=True,
     )
-
-    merged: dict[str, Any] = dict(ordered[0].data or {})
-    subjects: list[str] = list(merged.get("subjects") or [])
-    classifications: list[dict[str, Any]] = list(merged.get("classifications") or [])
-
-    for result in ordered[1:]:
-        for name, value in (result.data or {}).items():
-            if name == "subjects":
-                subjects.extend(value or [])
-            elif name == "classifications":
-                classifications.extend(value or [])
-            elif merged.get(name) is None and value is not None:
-                merged[name] = value
-
-    seen: dict[str, None] = {}
-    for subject in subjects:
-        seen.setdefault(subject, None)
-    merged["subjects"] = list(seen)
-    merged["classifications"] = _union_classifications(classifications)
-    return merged
-
-
-def _union_classifications(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per scheme and number, keeping the caption if any source had one.
-
-    The captions are what differ. **No source supplies a Dewey caption today**:
-    the DNB returned `830 Deutsche Literatur` until it moved to MARC21 on
-    2026-08-24, and MARC 082 carries the number alone everywhere. The rule is
-    kept because it is the schemes that will, and because the same rule runs in
-    `_write_classifications` against a heading already stored, which is the live
-    path: the number decides identity, the caption is filled in from wherever it
-    exists, and a later source never overwrites a caption already found.
-    """
-    kept: dict[tuple[str, str], dict[str, Any]] = {}
-    for entry in entries:
-        key = (str(entry.get("scheme")), str(entry.get("number")))
-        existing = kept.get(key)
-        if existing is None:
-            kept[key] = dict(entry)
-        elif existing.get("label") is None and entry.get("label") is not None:
-            existing["label"] = entry["label"]
-    return list(kept.values())
+    return functools.reduce(lambda merged, other: merged.merged_with(other), ordered)
 
 
 # ── Title search ──────────────────────────────────────────────────────────────
@@ -1658,7 +1617,7 @@ def _first_isbn13(candidates: list[str]) -> str | None:
     return None
 
 
-async def _open_library_search(query: str, limit: int) -> list[dict[str, Any]]:
+async def _open_library_search(query: str, limit: int) -> list[Record]:
     params = {
         "q": query,
         "limit": str(limit),
@@ -1674,35 +1633,30 @@ async def _open_library_search(query: str, limit: int) -> list[dict[str, Any]]:
         logger.warning("Open Library search failed for %r", query, exc_info=True)
         return []
 
-    results: list[dict[str, Any]] = []
+    results: list[Record] = []
     for doc in payload.get("docs", [])[:limit]:
         cover_id = doc.get("cover_i")
         results.append(
-            {
-                "google_books_id": None,
-                "title": doc.get("title"),
-                "subtitle": doc.get("subtitle"),
+            Record(
+                source="open_library",
+                title=doc.get("title"),
+                subtitle=doc.get("subtitle"),
                 # Every credited name, in order. Joined the same way the DNB
                 # and K10plus parsers join theirs, so one book looks the same
                 # whichever source found it.
-                "author": ", ".join(doc.get("author_name") or []) or None,
-                "publisher": (doc.get("publisher") or [None])[0],
-                "year": doc.get("first_publish_year"),
+                author=", ".join(doc.get("author_name") or []) or None,
+                publisher=(doc.get("publisher") or [None])[0],
+                year=doc.get("first_publish_year"),
                 # The search index carries no blurb. Enrichment fills it in.
-                "description": None,
-                "page_count": doc.get("number_of_pages_median"),
-                "language": _LANGUAGES.get((doc.get("language") or [""])[0].lower()),
-                "categories": None,
+                page_count=doc.get("number_of_pages_median"),
+                language=_LANGUAGES.get((doc.get("language") or [""])[0].lower()),
                 # By Open Library's own cover id, which the search index
                 # carries and which resolves where an ISBN lookup does not.
-                "cover_url": (
+                cover_url=(
                     covers.open_library_id_url(cover_id) if cover_id else None
                 ),
-                "isbn13": _first_isbn13(doc.get("isbn") or []),
-                "series_name": None,
-                "series_index": None,
-                "source": "open_library",
-            }
+                isbn=_first_isbn13(doc.get("isbn") or []),
+            )
         )
     return results
 
@@ -1754,14 +1708,19 @@ _NOT_A_BOOK: Final = re.compile(f"{_ONLINE_FORMS}|{_DISC_FORMS}", re.IGNORECASE)
 _IS_A_DISC: Final = re.compile(_DISC_FORMS, re.IGNORECASE)
 
 
-def _is_physical_book(extent: str | None, title: str) -> bool:
-    """Whether a record describes something that can sit on a shelf."""
+def _is_physical_book(extent: str | None, title: str | None) -> bool:
+    """Whether a record describes something that can sit on a shelf.
+
+    Both arguments are optional because a `Record`'s are: an untitled record is
+    one a catalogue answered thinly, not one naming a volume slot, so it fails
+    the placeholder test rather than passing it.
+    """
     if extent and _NOT_A_BOOK.search(extent):
         return False
-    return not _is_placeholder_title(title)
+    return not _is_placeholder_title(title or "")
 
 
-async def _k10plus_search(query: str, limit: int) -> list[dict[str, Any]]:
+async def _k10plus_search(query: str, limit: int) -> list[Record]:
     """K10plus, one ANDed term per word.
 
     `pica.all=zauberberg mann` is **not** the same query: the catch-all index
@@ -1792,18 +1751,18 @@ async def _k10plus_search(query: str, limit: int) -> list[dict[str, Any]]:
         logger.warning("K10plus search failed for %r", query, exc_info=True)
         return []
 
-    results: list[dict[str, Any]] = []
+    results: list[Record] = []
     for node in root.iter(f"{_MARC}record"):
         fields = _marc_fields(node)
         record = _k10plus_record(fields)
         extent = _marc_extent(fields)
-        if not record["title"] or not _is_physical_book(extent, record["title"]):
+        if not record.title or not _is_physical_book(extent, record.title):
             continue
-        results.append(_as_match(record, "k10plus"))
+        results.append(record)
     return results
 
 
-async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
+async def _dnb_search(query: str, limit: int) -> list[Record]:
     """The DNB, through its word-sequence index.
 
     `WOE` is the index that takes several words and requires all of them, which
@@ -1840,7 +1799,7 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
         logger.warning("DNB search failed for %r", query, exc_info=True)
         return []
 
-    results: list[dict[str, Any]] = []
+    results: list[Record] = []
     for node in root.iter(f"{_MARC}record"):
         fields = _marc_fields(node)
         record = _dnb_record(fields, isbn=None)
@@ -1849,10 +1808,10 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
         # edition of this book from a digitisation of another one, so it is the
         # same refusal `_k10plus_search` makes two functions above.
         if record is None or not _is_physical_book(
-            _marc_extent(fields), record["title"]
+            _marc_extent(fields), record.title
         ):
             continue
-        results.append(_as_match(record, "dnb"))
+        results.append(record)
     return results
 
 
@@ -1884,7 +1843,7 @@ _MODS: Final = "{http://www.loc.gov/mods/v3}"
 _BNF_PRINTED: Final = ("texte imprim", "printed text", "text")
 
 
-async def _bnf_search(query: str, limit: int) -> list[dict[str, Any]]:
+async def _bnf_search(query: str, limit: int) -> list[Record]:
     """The BnF, through its catch-all index.
 
     `bib.anywhere all "..."` requires every word, which is the same contract as
@@ -1910,15 +1869,15 @@ async def _bnf_search(query: str, limit: int) -> list[dict[str, Any]]:
         logger.warning("BnF search failed for %r", query, exc_info=True)
         return []
 
-    results: list[dict[str, Any]] = []
+    results: list[Record] = []
     for node in root.findall(f".//{_DC}title/.."):
         record = _bnf_record(node)
         if record is not None:
-            results.append(_as_match(record, "bnf"))
+            results.append(record)
     return results
 
 
-def _bnf_record(record: ElementTree.Element) -> dict[str, Any] | None:
+def _bnf_record(record: ElementTree.Element) -> Record | None:
     def texts(tag: str) -> list[str]:
         return [
             element.text.strip()
@@ -1963,21 +1922,19 @@ def _bnf_record(record: ElementTree.Element) -> dict[str, Any] | None:
 
     year_match = re.search(r"\d{4}", " ".join(texts("date")))
 
-    return {
-        "isbn": isbn,
-        "title": title,
-        "subtitle": subtitle,
-        "author": _bnf_authors(texts("creator")),
-        "publisher": publisher,
-        "year": int(year_match.group()) if year_match else None,
-        "description": None,
-        "language": _LANGUAGES.get((texts("language") or [""])[0].lower()),
-        "page_count": _pages_from_extent(extent),
-        "cover_url": covers.open_library_url(isbn) if isbn else None,
-        "subjects": texts("subject"),
-        "series_name": None,
-        "series_index": None,
-    }
+    return Record(
+        source="bnf",
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_bnf_authors(texts("creator")),
+        publisher=publisher,
+        year=int(year_match.group()) if year_match else None,
+        language=_LANGUAGES.get((texts("language") or [""])[0].lower()),
+        page_count=_pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        subjects=tuple(texts("subject")),
+    )
 
 
 def _bnf_authors(creators: list[str]) -> str | None:
@@ -1997,7 +1954,7 @@ def _bnf_authors(creators: list[str]) -> str | None:
     return ", ".join(authors) or None
 
 
-async def _loc_search(query: str, limit: int) -> list[dict[str, Any]]:
+async def _loc_search(query: str, limit: int) -> list[Record]:
     """The Library of Congress, restricted to text.
 
     `typeOfResource` is the denoising that makes this usable: without it a
@@ -2024,15 +1981,15 @@ async def _loc_search(query: str, limit: int) -> list[dict[str, Any]]:
         logger.warning("Library of Congress search failed for %r", query, exc_info=True)
         return []
 
-    results: list[dict[str, Any]] = []
+    results: list[Record] = []
     for node in root.iter(f"{_MODS}mods"):
         record = _loc_record(node)
         if record is not None:
-            results.append(_as_match(record, "loc"))
+            results.append(record)
     return results
 
 
-def _loc_record(record: ElementTree.Element) -> dict[str, Any] | None:
+def _loc_record(record: ElementTree.Element) -> Record | None:
     kind = record.find(f"{_MODS}typeOfResource")
     if kind is None or (kind.text or "").strip() != "text":
         return None
@@ -2121,35 +2078,33 @@ def _loc_record(record: ElementTree.Element) -> dict[str, Any] | None:
         else None
     )
 
-    return {
-        "isbn": isbn,
-        "title": title,
-        "subtitle": subtitle,
-        "author": ", ".join(authors) or None,
-        "publisher": publisher,
-        "year": int(year_match.group()) if year_match else None,
-        "description": None,
-        "language": language,
-        "page_count": _pages_from_extent(extent),
-        "cover_url": covers.open_library_url(isbn) if isbn else None,
-        "subjects": [
+    return Record(
+        source="loc",
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=", ".join(authors) or None,
+        publisher=publisher,
+        year=int(year_match.group()) if year_match else None,
+        language=language,
+        page_count=_pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        subjects=tuple(
             element.text.strip()
             for element in record.findall(f"{_MODS}subject/{_MODS}topic")
             if element.text
-        ],
+        ),
         # The shelf classifications first and the subject headings after,
-        # which is load bearing rather than tidy. `_as_match` slices this list
-        # to `MAX_CLASSIFICATIONS_PER_BOOK` and `routers/books._headings`
-        # applies `_SCHEME_ORDER` only afterwards, so on the search path a
-        # record's own order decides what survives. One live record carries 14
-        # LCSH headings (measured over 900 records, 2026-08-24); putting them
-        # in front would cost this record its Dewey number and its call number,
-        # which are the two schemes nothing else in the chain supplies together.
-        "classifications": _loc_classifications(record)
-        + _loc_subject_headings(record),
-        "series_name": None,
-        "series_index": None,
-    }
+        # which is load bearing rather than tidy. `Record.match_headings`
+        # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
+        # `routers/books._headings` applies `_SCHEME_ORDER` only afterwards, so
+        # on the search path a record's own order decides what survives. One
+        # live record carries 14 LCSH headings (measured over 900 records,
+        # 2026-08-24); putting them in front would cost this record its Dewey
+        # number and its call number, which are the two schemes nothing else in
+        # the chain supplies together.
+        headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
+    )
 
 
 #: MODS names the scheme in an attribute, so the two are told apart by the
@@ -2160,7 +2115,7 @@ _LOC_AUTHORITIES: Final[dict[str, ClassificationScheme]] = {
 }
 
 
-def _loc_classifications(record: ElementTree.Element) -> list[dict[str, Any]]:
+def _loc_classifications(record: ElementTree.Element) -> list[Heading]:
     """The `<classification>` elements, which no other source here carries.
 
     The Library of Congress is the only one that returns both a DDC and an LCC
@@ -2172,7 +2127,7 @@ def _loc_classifications(record: ElementTree.Element) -> list[dict[str, Any]]:
     number whose scheme nothing recognises cannot be sorted, matched or shown
     as anything but a string.
     """
-    found: list[dict[str, Any]] = []
+    found: list[Heading] = []
     for element in record.findall(f"{_MODS}classification"):
         scheme = _LOC_AUTHORITIES.get((element.get("authority") or "").lower())
         raw = " ".join((element.text or "").split())
@@ -2192,7 +2147,7 @@ def _loc_classifications(record: ElementTree.Element) -> list[dict[str, Any]]:
             # has no schedule for it. The whitespace collapse above and
             # `ClassificationIn`'s 40 character bound are the whole guard.
             number, label = raw, None
-        found.append({"scheme": scheme, "number": number, "label": label})
+        found.append(Heading(scheme, number, label))
     return found
 
 
@@ -2224,7 +2179,7 @@ _LOC_SUBJECT_AUTHORITY: Final = "lcsh"
 _LCSH_SUBDIVISION: Final = " -- "
 
 
-def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
+def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
     """The `<subject authority="lcsh">` elements, as classification rows.
 
     **A parser extension rather than a new source.** The record this reads is
@@ -2272,11 +2227,12 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
     record supplies no identifier to separate them: see `models.Classification`
     for the measurement and what it costs.
 
-    Not deduplicated here. `_as_match` unions on (scheme, number) **before** it
-    slices, so a record repeating a heading spends one place and not two, and a
-    second dedupe would be the same rule enforced twice.
+    Not deduplicated here. `Record` unions on (scheme, number) at construction,
+    **before** `match_headings` slices, so a record repeating a heading spends
+    one place and not two, and a second dedupe would be the same rule enforced
+    twice.
     """
-    found: list[dict[str, Any]] = []
+    found: list[Heading] = []
     for element in record.findall(f"{_MODS}subject"):
         if (element.get("authority") or "").lower() != _LOC_SUBJECT_AUTHORITY:
             continue
@@ -2296,67 +2252,8 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[dict[str, Any]]:
                 parts.append(" ".join(words))
         if not parts:
             continue
-        found.append(
-            {
-                "scheme": ClassificationScheme.LCSH,
-                "number": _LCSH_SUBDIVISION.join(parts),
-                "label": None,
-            }
-        )
+        found.append(Heading(ClassificationScheme.LCSH, _LCSH_SUBDIVISION.join(parts)))
     return found
-
-
-def _as_match(record: dict[str, Any], source: str) -> dict[str, Any]:
-    """A lookup-shaped record as a search-result-shaped one.
-
-    The two shapes differ in three places and nowhere else: a lookup knows the
-    ISBN it was asked about, a match carries `isbn13` and a `source`, and a
-    match's categories are the joined string the client already understands.
-    """
-    return {
-        "source": source,
-        "google_books_id": None,
-        "title": record.get("title"),
-        "subtitle": record.get("subtitle"),
-        "author": record.get("author"),
-        "publisher": record.get("publisher"),
-        "year": record.get("year"),
-        "description": record.get("description"),
-        "page_count": record.get("page_count"),
-        "language": record.get("language"),
-        "categories": google_books.join_categories(record.get("subjects") or []) or None,
-        "cover_url": record.get("cover_url"),
-        "isbn13": record.get("isbn"),
-        "series_name": record.get("series_name"),
-        "series_index": record.get("series_index"),
-        # Carried whole rather than folded into `categories`, which is the
-        # publisher's uncontrolled list. A picked search result is applied to a
-        # book, so losing them here would mean a heading survives a scan and
-        # not a search.
-        #
-        # Deduplicated, because a single record repeats itself: one live
-        # K10plus record's 082 `$a` values read `['100', '610', '610']`
-        # (measured 2026-08-23). The lookup path gets this from `_merge`; the
-        # search path has no merge, so it is applied here or nowhere, and
-        # without it the repetition spends the payload's budget of eight twice
-        # over on entries that mean nothing.
-        #
-        # **And bounded, because `BookMatch` refuses a ninth entry and nothing
-        # in `main.py` catches a `ValidationError`.** Bounding at each caller
-        # instead is what this round got wrong: the search endpoint was fixed
-        # and `GET /{id}/enrich/candidates`, fed by the same `search`, answered
-        # 500 for the whole response. The bound belongs to the shape this
-        # function builds, so a third caller cannot reintroduce the *count*
-        # half of the hole. It reintroduces the other half: a count bound never
-        # drops an entry the column cannot hold, so a caller skipping
-        # `_match_rows` still 500s on an over-long caption. Measured both ways
-        # while fixing this. `_match_rows` is the layer that stops both.
-        # Measured over four live DNB `WOE=` searches on 2026-08-24: 8 of 189
-        # records carry more than eight headings.
-        "classifications": _union_classifications(
-            record.get("classifications") or []
-        )[:MAX_CLASSIFICATIONS_PER_BOOK],
-    }
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
@@ -2454,13 +2351,13 @@ _COMPLETENESS_FIELDS: Final = (
     "year",
     "publisher",
     "page_count",
-    "isbn13",
+    "isbn",
     "cover_url",
 )
 
 
 def _relevance(
-    match: dict[str, Any], terms: list[str], prefer_language: str | None
+    match: Record, terms: list[str], prefer_language: str | None
 ) -> tuple[int, int, int]:
     """How well one result answers the query, most significant part first.
 
@@ -2485,10 +2382,10 @@ def _relevance(
     # with a subtitle is not a worse answer than one without, and including it
     # in the denominator made "Clean Code: A Handbook of Agile Software
     # Craftsmanship" score three points below a 2025 reprint with no subtitle.
-    title = _normalise_words(match.get("title"))
-    searchable = title | _normalise_words(match.get("subtitle"))
-    author = _normalise_words(match.get("author"))
-    series = _normalise_words(match.get("series_name"))
+    title = _normalise_words(match.title)
+    searchable = title | _normalise_words(match.subtitle)
+    author = _normalise_words(match.author)
+    series = _normalise_words(match.series_name)
 
     score = 0
     in_title = in_author = False
@@ -2513,22 +2410,22 @@ def _relevance(
         covered = sum(1 for word in title if _matches_any(word, wanted))
         score += round(_PRECISION_WEIGHT * covered / len(title))
 
-    if prefer_language and match.get("language") == prefer_language:
+    if prefer_language and match.language == prefer_language:
         score += _LANGUAGE_WEIGHT
 
     # Regional catalogues answer last among equals. The penalty applies only
     # when they are the **only** source for a row: a book a primary catalogue
     # also holds is a primary row, and docking it for having been confirmed by
     # a second catalogue pushed the fuller record below the sparser one.
-    sources = {source for source in match.get("source", "").split("+") if source}
+    sources = match.sources
     if sources and sources <= _SECONDARY_SOURCES:
         score -= _SECONDARY_PENALTY
 
-    completeness = sum(1 for name in _COMPLETENESS_FIELDS if match.get(name))
-    return (score, completeness, match.get("year") or 0)
+    completeness = sum(1 for name in _COMPLETENESS_FIELDS if getattr(match, name))
+    return (score, completeness, match.year or 0)
 
 
-def _match_key(match: dict[str, Any]) -> str:
+def _match_key(match: Record) -> str:
     """What makes two results from different sources the same book.
 
     Deliberately lossy, and it only has to be good enough to stop the picker
@@ -2536,8 +2433,8 @@ def _match_key(match: dict[str, Any]) -> str:
     same job for stored books and does it more carefully, because a wrong
     answer there merges two records rather than hiding one row.
     """
-    title = re.sub(r"[^\w\s]", "", (match.get("title") or "").casefold()).strip()
-    author = (match.get("author") or "").casefold().split(",")[0].strip()
+    title = re.sub(r"[^\w\s]", "", (match.title or "").casefold()).strip()
+    author = (match.author or "").casefold().split(",")[0].strip()
     return f"{title}|{author}"
 
 
@@ -2546,7 +2443,7 @@ async def search(
     api_key: str = "",
     limit: int = 10,
     prefer_language: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[Record]:
     """Find a book by title and author, across every catalogue available.
 
     Three tiers, and the tiering is what keeps this both broad and quick.
@@ -2583,7 +2480,7 @@ async def search(
     if not terms:
         return []
 
-    async def _google() -> list[dict[str, Any]]:
+    async def _google() -> list[Record]:
         if not api_key:
             return []
         try:
@@ -2591,7 +2488,7 @@ async def search(
         except (google_books.GoogleBooksError, httpx.HTTPError, ValueError):
             logger.info("Google Books search unavailable for %r", trimmed, exc_info=True)
             return []
-        return [dict(item, source="google_books") for item in found]
+        return [_google_record(item) for item in found]
 
     tiers = await _within_deadline(
         [
@@ -2625,8 +2522,8 @@ SEARCH_DEADLINE_SECONDS: Final = 4.0
 
 
 async def _within_deadline(
-    searches: list[Coroutine[Any, Any, list[dict[str, Any]]]],
-) -> list[list[dict[str, Any]]]:
+    searches: list[Coroutine[Any, Any, list[Record]]],
+) -> list[list[Record]]:
     """Run every search, keep what answers in time, drop the rest."""
     tasks = [asyncio.ensure_future(search) for search in searches]
     done, pending = await asyncio.wait(tasks, timeout=SEARCH_DEADLINE_SECONDS)
@@ -2657,7 +2554,7 @@ _MATCH_PRECEDENCE: Final = (
 )
 
 
-def _merge_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_matches(matches: list[Record]) -> list[Record]:
     """One row per book, whichever catalogues found it.
 
     Two indexes rather than one key, because the catalogues disagree about
@@ -2671,86 +2568,75 @@ def _merge_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     enough. The work key carries the **year**, which is what actually
     distinguishes two printings: without it, choosing between editions, which
     is the whole point of the picker, becomes impossible.
+
+    **The indexes hold slots rather than rows**, because a `Record` is frozen:
+    folding two of them produces a third, which then has to replace the first in
+    the list. The dictionaries this replaced were rewritten in place with
+    `clear()` and `update()` for exactly that reason, and the slot is the honest
+    version of the same trick. `is None` and not falsiness on every lookup
+    below, because slot 0 is a row.
+
+    **What is not here any more is the fill rule.** `Record.filled_from` holds
+    it, along with the reason an empty collection counts as absent where an
+    empty string does not: that was a live defect here, where a source finding
+    no heading wrote `[]`, `[]` is not `None`, and the empty list beat a
+    populated one from the next source.
     """
     order = {source: index for index, source in enumerate(_MATCH_PRECEDENCE)}
-    rows: list[dict[str, Any]] = []
-    by_isbn: dict[str, dict[str, Any]] = {}
-    by_work: dict[str, dict[str, Any]] = {}
+    rows: list[Record] = []
+    by_isbn: dict[str, int] = {}
+    by_work: dict[str, int] = {}
 
-    def register(row: dict[str, Any]) -> None:
-        isbn = row.get("isbn13")
-        if isbn:
-            by_isbn[isbn] = row
-        by_work[f"{_match_key(row)}:{row.get('year') or ''}"] = row
+    def work_of(row: Record) -> str:
+        return f"{_match_key(row)}:{row.year or ''}"
+
+    def register(slot: int) -> None:
+        row = rows[slot]
+        if row.isbn:
+            by_isbn[row.isbn] = slot
+        by_work[work_of(row)] = slot
+
+    def rank(row: Record) -> int:
+        """How trusted the most trusted catalogue behind this row is."""
+        return min(
+            (order.get(source, len(order)) for source in row.sources),
+            default=len(order),
+        )
 
     for match in matches:
-        if not match.get("title"):
+        if not match.title:
             continue
 
-        isbn = match.get("isbn13")
-        work = f"{_match_key(match)}:{match.get('year') or ''}"
-        existing = (by_isbn.get(isbn) if isbn else None) or by_work.get(work)
+        slot = by_isbn.get(match.isbn) if match.isbn else None
+        if slot is None:
+            slot = by_work.get(work_of(match))
 
         # A translation is not the same book. Two rows sharing a title, an
         # author and a year but naming **different** languages are a German
         # printing and an English one, and folding them together hides the one
         # somebody wants. Only refused when both actually say: an unknown
         # language is not evidence of disagreement.
-        if existing is not None:
-            languages = {existing.get("language"), match.get("language")}
+        if slot is not None:
+            languages = {rows[slot].language, match.language}
             if None not in languages and len(languages) > 1:
-                existing = None
+                slot = None
 
-        if existing is None:
-            row = dict(match)
-            rows.append(row)
-            register(row)
+        if slot is None:
+            rows.append(match)
+            register(len(rows) - 1)
             continue
 
         # The more trusted source leads and the other fills its gaps, so a
-        # Google blurb and a K10plus page count end up on one row.
-        incoming_rank = order.get(match.get("source", ""), len(order))
-        existing_rank = min(
-            (order.get(source, len(order)) for source in existing.get("source", "").split("+")),
-            default=len(order),
-        )
-        if incoming_rank < existing_rank:
-            # The new row leads. Rewrite in place so the list keeps its slot.
-            filler = dict(existing)
-            existing.clear()
-            existing.update(match)
+        # Google blurb and a K10plus page count end up on one row. The winner
+        # keeps the list's slot, and `filled_from` records both catalogues in
+        # `source` so the picker can say where a row came from and a bug report
+        # can name them.
+        existing = rows[slot]
+        if rank(match) < rank(existing):
+            rows[slot] = match.filled_from(existing)
         else:
-            filler = match
-        for name, value in filler.items():
-            if name == "source" or value is None:
-                continue
-            current = existing.get(name)
-            # An **empty list counts as absent**, and that is not pedantry. Every
-            # scalar a catalogue omits arrives as None, so `is None` was the whole
-            # rule until `classifications` became the one list valued key
-            # `_as_match` writes: it always writes a list, so a source that found
-            # no heading wrote `[]`, and `[]` is not None, so it beat a populated
-            # list from the next source. Measured live over 30 title searches: of
-            # 10 merged rows whose LoC half carried LCSH, 6 lost every heading,
-            # and in 6 of 6 the leading row's list was empty. All six were
-            # `bnf+loc`, the BnF emitting no classification at all.
-            # `== []` and not `not current`, deliberately. Falsiness would
-            # reclassify a `page_count` of 0, a `year` of 0, a `series_index` of
-            # 0.0 and any `""` from present to absent, and a later source would
-            # overwrite them. Measured over 1,629 live rows, 1,216 carry an int
-            # and 2 a float. `0 == []` is False, so this is the minimal
-            # condition that treats an empty list as missing and nothing else.
-            if current is None or current == []:
-                existing[name] = value
-
-        # Every catalogue that found it, so the picker can say where a row came
-        # from and a bug report can name the source.
-        sources = {
-            *filler.get("source", "").split("+"),
-            *existing.get("source", "").split("+"),
-        }
-        existing["source"] = "+".join(sorted(part for part in sources if part))
-        register(existing)
+            rows[slot] = existing.filled_from(match)
+        register(slot)
 
     return rows
 
@@ -2820,14 +2706,12 @@ async def _open_library_author_names(
     return names
 
 
-def _open_library_edition(
-    entry: dict[str, Any], names: dict[str, str]
-) -> dict[str, Any]:
-    """One entry of an editions listing, in the shape `_as_match` reads.
+def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Record:
+    """One entry of an editions listing, as a Catalogue record.
 
-    Lookup-shaped rather than match-shaped on purpose: `_as_match` is where the
-    classification dedupe and the per book ceiling live, so a row built here
-    inherits both instead of carrying its own copy.
+    The same type every other adapter produces, so a cluster row inherits the
+    heading dedupe, the completeness score and both wire shapes rather than
+    carrying its own copy of any of them.
     """
     identifiers = [
         value
@@ -2843,39 +2727,38 @@ def _open_library_edition(
     author_key = _open_library_author_key(entry.get("authors"))
     publishers = entry.get("publishers")
     title = entry.get("title")
-    return {
-        "isbn": isbn13,
-        "title": title if isinstance(title, str) else None,
-        "subtitle": entry.get("subtitle"),
-        "author": names.get(author_key) if author_key else None,
-        "publisher": (
+    return Record(
+        source="open_library",
+        isbn=isbn13,
+        title=title if isinstance(title, str) else None,
+        subtitle=entry.get("subtitle"),
+        author=names.get(author_key) if author_key else None,
+        publisher=(
             publishers[0] if isinstance(publishers, list) and publishers else None
         ),
-        "year": _open_library_year(entry.get("publish_date")),
-        "description": _open_library_description(entry.get("description")),
-        "page_count": _open_library_pages(entry.get("number_of_pages")),
-        "language": _open_library_language(entry.get("languages")),
+        year=_open_library_year(entry.get("publish_date")),
+        description=_open_library_description(entry.get("description")),
+        page_count=_open_library_pages(entry.get("number_of_pages")),
+        language=_open_library_language(entry.get("languages")),
         # By Open Library's own cover id where the entry has one, which resolves
         # for a printing whose ISBN the cover service does not know. 75 of 129
         # live entries carry a cover id and 69 carry an ISBN, and they are not
         # the same 69.
-        "cover_url": (
+        cover_url=(
             covers.open_library_id_url(cover_id)
             if isinstance(cover_id, int)
             else covers.open_library_url(isbn13)
             if isbn13
             else None
         ),
-        "series_name": None,
-        "series_index": None,
-        "subjects": _open_library_subjects(entry),
-        "classifications": _open_library_classifications(entry),
-    }
+        subjects=tuple(_open_library_subjects(entry)),
+        headings=tuple(_open_library_classifications(entry)),
+    )
 
 
 async def editions(
     isbn: str, limit: int, prefer_language: str | None = None
-) -> list[dict[str, Any]]:
+) -> list[Record]:
     """Every other printing of this work Open Library has merged.
 
     **Two requests, plus at most three author lookups.** The ISBN gives the
@@ -2917,7 +2800,7 @@ async def editions(
     thing that answers that book, which is why the cluster is capped one row
     short of the page.
 
-    **Then `_completeness`, not catalogue order**, which is the same function
+    **Then `Record.completeness`, not catalogue order**, which is the same score
     and the same reason `_merge` uses it to choose between printings: an entry
     with a publisher, a year, a page count and a language is one somebody can
     recognise their copy from, and Open Library returns the cluster in no
@@ -2965,9 +2848,7 @@ async def editions(
     ]
     if prefer_language:
         records = [
-            record
-            for record in records
-            if record["language"] in (prefer_language, None)
+            record for record in records if record.language in (prefer_language, None)
         ]
     records.sort(
         key=lambda record: (
@@ -2975,13 +2856,13 @@ async def editions(
             # language beats one that says nothing, and 22% to 33% of live
             # entries say nothing. Without this, King's Es showed four
             # unlabelled foreign printings and never the German one.
-            bool(prefer_language) and record["language"] == prefer_language,
-            _completeness(record),
-            record.get("year") or 0,
+            bool(prefer_language) and record.language == prefer_language,
+            record.completeness,
+            record.year or 0,
         ),
         reverse=True,
     )
-    return [_as_match(record, "open_library") for record in records[:limit]]
+    return records[:limit]
 
 
 async def candidates(
@@ -2990,7 +2871,7 @@ async def candidates(
     isbn: str | None = None,
     limit: int = 10,
     prefer_language: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[Record]:
     """Editions to choose between for a book that already exists, cluster first.
 
     Two answers to one question, and they fail on opposite books. Open
@@ -3020,9 +2901,9 @@ async def candidates(
     # five row answer to one, live, because five printings of one book are
     # five rows the picker exists to show. A row with no ISBN is always kept,
     # for the same reason.
-    seen = {row["isbn13"] for row in rows if row.get("isbn13")}
+    seen = {row.isbn for row in rows if row.isbn}
     for row in searched:
-        found = row.get("isbn13")
+        found = row.isbn
         if found and found in seen:
             continue
         if found:
@@ -3033,7 +2914,7 @@ async def candidates(
 
 async def _work_cluster(
     isbn: str | None, limit: int, prefer_language: str | None
-) -> list[dict[str, Any]]:
+) -> list[Record]:
     """`editions`, bounded by the search deadline and never fatal.
 
     **The same 4.0s the search is held to**, so the endpoint's worst case does
@@ -3155,36 +3036,39 @@ async def lookup(raw_isbn: str, api_key: str = "") -> Lookup:
         for name, result in zip(_FAST_SOURCES, fast, strict=True)
     )
 
-    hits = [result for result in fast if result.found]
+    hits = [result.record for result in fast if result.found and result.record]
     if hits:
-        sources = "+".join(sorted(result.source for result in hits))
         merged = _merge(hits, isbn)
         # Neither of the fast pair carries an image: they are bibliographic
         # catalogues returning MARC and Dublin Core. The cover is resolved
         # against the image services and **checked**, because storing an
         # unverified guess is how a book ends up with a permanently broken
         # cover. See covers.py.
-        merged["cover_url"] = await covers.resolve(isbn, merged.get("cover_url"))
+        merged = merged.with_cover(await covers.resolve(isbn, merged.cover_url))
+        # `merged.source` rather than a second join of the same names: folding
+        # two records already names both catalogues, and it is the same string
+        # the search path builds and the one the cache and the log carry.
         found = Lookup(
-            Outcome.FOUND, data=merged, source=sources, attempts=attempts
+            Outcome.FOUND, record=merged, source=merged.source, attempts=attempts
         )
         async with _cache_lock:
             _remember(isbn, found)
-        logger.info("Resolved %s from %s", isbn, sources)
+        logger.info("Resolved %s from %s", isbn, merged.source)
         return found
 
     for name in _FALLBACK_SOURCES:
         result = await _SOURCES[name](isbn, api_key)
         attempts.append((name, result.outcome))
-        if result.found:
-            data = dict(result.data or {})
+        if result.found and result.record is not None:
             # Open Library's own record carries a cover URL and Google's
             # carries a thumbnail from the volume record. Both are checked
             # here too: an Open Library edition record does not guarantee the
             # cover service has an image for it.
-            data["cover_url"] = await covers.resolve(isbn, data.get("cover_url"))
+            record = result.record.with_cover(
+                await covers.resolve(isbn, result.record.cover_url)
+            )
             found = Lookup(
-                Outcome.FOUND, data=data, source=name, attempts=attempts
+                Outcome.FOUND, record=record, source=name, attempts=attempts
             )
             async with _cache_lock:
                 _remember(isbn, found)

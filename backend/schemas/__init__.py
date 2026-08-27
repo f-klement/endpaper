@@ -74,7 +74,7 @@ from schemas.settings import (
     SettingsUpdate,
 )
 from schemas.stats import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
-from schemas.tag import TagCreate, TagOut
+from schemas.tag import KnownTagKey, TagCreate, TagOut, known_key
 from schemas.user import (
     AppearanceOut,
     AppearanceUpdate,
@@ -163,4 +163,9 @@ __all__ = [
     "Token",
     "UserCreate",
     "UserOut",
+    # The tag key rule, as a type and as the function inside it. Exported
+    # because `schemas/stats.py` annotates with the first, and because a test
+    # exercises the second directly.
+    "KnownTagKey",
+    "known_key",
 ]

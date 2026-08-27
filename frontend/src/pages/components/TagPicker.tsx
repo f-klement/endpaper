@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 
 import type { TagOut } from "../../api/generated/model";
 import { Icon } from "../../components";
-import { useTranslation } from "../../i18n";
+import { tagName, useTranslation } from "../../i18n";
 import {
   TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
@@ -145,13 +145,15 @@ export default function TagPicker({
                         aria-pressed={selected}
                         className={`px-2.5 py-1 ${removable ? "pr-1" : ""}`}
                       >
-                        {tag.name}
+                        {tagName(tag, locale)}
                       </button>
                       {removable && (
                         <button
                           type="button"
                           onClick={() => onDelete?.(tag)}
-                          aria-label={t("tags.delete", { name: tag.name })}
+                          aria-label={t("tags.delete", {
+                            name: tagName(tag, locale),
+                          })}
                           className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
                         >
                           <Icon name="close" className="h-3 w-3" />

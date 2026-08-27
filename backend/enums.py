@@ -149,6 +149,144 @@ class TagCategory(StrEnum):
     CUSTOM = "custom"
 
 
+class TagKey(StrEnum):
+    """The stable identity of a seeded tag, independent of what it is called.
+
+    A predefined tag is shown in the member's language, and the row a
+    translation belongs to is found through this, never by matching the name.
+    Matching the name is the bug migration `95b6a61d6668` exists to fix,
+    repeated at display time: it breaks the moment a household renames a tag.
+
+    Only seeded rows carry one. `tags.key` is nullable and a tag the library
+    invented has none, so it is shown as typed, and so is a seeded row somebody
+    has renamed: the migration sets a key only where the name still matches the
+    English seed name exactly, and a row without one has stopped tracking the
+    curated vocabulary.
+
+    **A member is exactly the value of the key**, not derived from the name.
+    The English name can be corrected without every German library's tags
+    silently changing which translation they get.
+
+    Declared as an enum rather than left a plain string for one downstream
+    reason: FastAPI emits it into the OpenAPI schema, Orval generates a union
+    from it, and `frontend/src/i18n/tagNames.ts` types its German table as
+    `Record<TagKey, string>`. A tag added to `PREDEFINED_TAGS` with no German
+    name is then a failed frontend build rather than an English word in a
+    German picker, which is the property `de.ts` has and the reason it is typed
+    against `en.ts`.
+
+    Every member appears in `PREDEFINED_TAGS` exactly once and every entry
+    there names one of these:
+    `tests/test_main.py::TestTheSeededVocabularyIsKeyed` pins both directions.
+    """
+
+    FICTION = "fiction"
+    NON_FICTION = "non_fiction"
+    REFERENCE = "reference"
+    TEXTBOOK = "textbook"
+    ANTHOLOGY = "anthology"
+    COMICS = "comics"
+    MANGA = "manga"
+    PLAY = "play"
+    ESSAYS = "essays"
+    PICTURE_BOOK = "picture_book"
+    ADVENTURE = "adventure"
+    CLASSIC = "classic"
+    CONTEMPORARY_FICTION = "contemporary_fiction"
+    CRIME = "crime"
+    DETECTIVE = "detective"
+    DYSTOPIAN = "dystopian"
+    EPIC_FANTASY = "epic_fantasy"
+    FAIRY_TALES = "fairy_tales"
+    FANTASY = "fantasy"
+    FOLKLORE = "folklore"
+    GOTHIC = "gothic"
+    GRAPHIC_NOVEL = "graphic_novel"
+    HISTORICAL_FICTION = "historical_fiction"
+    HORROR = "horror"
+    HUMOUR = "humour"
+    LITERARY_FICTION = "literary_fiction"
+    MAGICAL_REALISM = "magical_realism"
+    MYSTERY = "mystery"
+    MYTHOLOGY = "mythology"
+    NOIR = "noir"
+    PARANORMAL = "paranormal"
+    POETRY = "poetry"
+    POST_APOCALYPTIC = "post_apocalyptic"
+    ROMANCE = "romance"
+    SATIRE = "satire"
+    SCIENCE_FICTION = "science_fiction"
+    SHORT_STORIES = "short_stories"
+    SPACE_OPERA = "space_opera"
+    SPECULATIVE_FICTION = "speculative_fiction"
+    SPY_FICTION = "spy_fiction"
+    STEAMPUNK = "steampunk"
+    SUSPENSE = "suspense"
+    THRILLER = "thriller"
+    URBAN_FANTASY = "urban_fantasy"
+    WAR = "war"
+    WESTERN = "western"
+    ANTHROPOLOGY = "anthropology"
+    ARCHAEOLOGY = "archaeology"
+    ARCHITECTURE = "architecture"
+    ART = "art"
+    ASTRONOMY = "astronomy"
+    AUTOBIOGRAPHY = "autobiography"
+    BIOGRAPHY = "biography"
+    BIOLOGY = "biology"
+    BUSINESS = "business"
+    CHEMISTRY = "chemistry"
+    COMPUTING = "computing"
+    COOKING = "cooking"
+    DESIGN = "design"
+    DIARIES_AND_LETTERS = "diaries_and_letters"
+    ECONOMICS = "economics"
+    EDUCATION = "education"
+    ENVIRONMENT = "environment"
+    ETHICS = "ethics"
+    FEMINISM = "feminism"
+    FILM_AND_TV = "film_and_tv"
+    FINANCE = "finance"
+    GARDENING = "gardening"
+    GEOGRAPHY = "geography"
+    HEALTH_AND_FITNESS = "health_and_fitness"
+    HISTORY = "history"
+    JOURNALISM = "journalism"
+    LANGUAGE = "language"
+    LAW = "law"
+    LINGUISTICS = "linguistics"
+    MATHEMATICS = "mathematics"
+    MEDICINE = "medicine"
+    MEMOIR = "memoir"
+    MUSIC = "music"
+    NATURE = "nature"
+    PARENTING = "parenting"
+    PHILOSOPHY = "philosophy"
+    PHOTOGRAPHY = "photography"
+    PHYSICS = "physics"
+    POLITICS = "politics"
+    POPULAR_SCIENCE = "popular_science"
+    PSYCHOLOGY = "psychology"
+    RELIGION = "religion"
+    SCIENCE = "science"
+    SELF_HELP = "self_help"
+    SOCIOLOGY = "sociology"
+    SPORTS = "sports"
+    TECHNOLOGY = "technology"
+    THEATRE = "theatre"
+    TRAVEL = "travel"
+    TRUE_CRIME = "true_crime"
+    URBANISM = "urbanism"
+    WINE_AND_DRINK = "wine_and_drink"
+    BABY_AND_TODDLER = "baby_and_toddler"
+    CHILDREN = "children"
+    EARLY_READER = "early_reader"
+    MIDDLE_GRADE = "middle_grade"
+    YOUNG_ADULT = "young_adult"
+    NEW_ADULT = "new_adult"
+    ADULT = "adult"
+
+
 class ClassificationScheme(StrEnum):
     """Published schemes a `classifications` row may quote.
 

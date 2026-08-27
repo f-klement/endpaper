@@ -407,6 +407,82 @@ class TestCollection:
         assert db.query(Book).filter(visible_to(user.id)).count() == 1
 
 
+class TestARenamedTagStopsBeingASeededOne:
+    """The rule the whole bilingual vocabulary rests on, at the ORM.
+
+    A row keeps `key` only while it still carries the seeded name, so a
+    household that renamed one is shown their word rather than the curated one.
+    The migration applies it to a database being upgraded and
+    `backup._repair_seeded_tags` to one being restored; this is the third
+    writer, and it exists so that whoever adds a rename route does not have to
+    know the rule.
+
+    These run against the **seeded rows the fixture already holds** rather than
+    against tags of their own: `uq_tags_key` is unique and the whole vocabulary
+    is present, so an invented `Tag(key="fiction", ...)` collides with the real
+    Fiction row rather than testing anything. The two insert-order tests delete
+    the row first, which is the state `seed_tags()` finds after somebody deletes
+    a tag by hand.
+    """
+
+    def test_renaming_clears_the_key(self, db):
+        tag = db.query(Tag).filter(Tag.name == "Fiction").one()
+        assert tag.key == "fiction"
+
+        tag.name = "Stories"
+        db.commit()
+
+        assert tag.key is None
+
+    def test_seeding_keeps_the_key_it_was_given(self, db):
+        """The insert order this has to survive, measured rather than assumed.
+
+        SQLAlchemy assigns constructor kwargs in the order given and
+        `seed_tags()` writes `Tag(key=..., name=...)`, so the key is already
+        set when the name is first assigned. A validator without its
+        `self.name is not None` clause reads that as a rename and ships the
+        whole vocabulary unkeyed.
+        """
+        db.query(Tag).filter(Tag.name == "Computing").delete()
+        db.commit()
+
+        tag = Tag(key="computing", name="Computing", category="genre", is_predefined=True)
+        db.add(tag)
+        db.commit()
+
+        assert tag.key == "computing"
+
+    def test_the_other_kwarg_order_keeps_it_too(self, db):
+        db.query(Tag).filter(Tag.name == "Physics").delete()
+        db.commit()
+
+        tag = Tag(name="Physics", category="genre", key="physics", is_predefined=True)
+        db.add(tag)
+        db.commit()
+
+        assert tag.key == "physics"
+
+    def test_writing_the_same_name_again_is_not_a_rename(self, db):
+        """A no-op write must not cost a tag its translation."""
+        tag = db.query(Tag).filter(Tag.name == "Fantasy").one()
+
+        tag.name = "Fantasy"
+        db.commit()
+
+        assert tag.key == "fantasy"
+
+    def test_renaming_a_tag_the_library_invented_changes_nothing(self, db):
+        tag = Tag(name="Holiday reads", category="custom")
+        db.add(tag)
+        db.commit()
+
+        tag.name = "Beach reads"
+        db.commit()
+
+        assert tag.key is None
+        assert tag.name == "Beach reads"
+
+
 class TestTagAssociation:
     def test_a_book_can_carry_several_tags(self, db, book):
         tags = db.query(Tag).limit(2).all()

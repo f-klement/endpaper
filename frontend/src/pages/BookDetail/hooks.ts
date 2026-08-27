@@ -78,7 +78,7 @@ import {
 import { useListUsers } from "../../api/generated/endpoints/users/users";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
-import { useSortedByName, useTranslation } from "../../i18n";
+import { tagName, useSortedByName, useTranslation } from "../../i18n";
 import type {
   BookMatch,
   BookDetailsUpdate,
@@ -179,7 +179,7 @@ export function useBookActions(
   const mutation = { onSuccess: invalidateBook };
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   const status = useUpdateStatus({ mutation });
   const privacy = useSetPrivacy({ mutation });
@@ -284,7 +284,10 @@ export function useBookActions(
       if (
         confirm(
           t("tags.deleteConfirm", {
-            name: tag.name,
+            // Only an invented tag can be deleted, so this is the name they
+            // typed. Through `tagName` all the same, because the rule is that
+            // no tag reaches a reader by any other road.
+            name: tagName(tag, locale),
             count: tag.book_count ?? 0,
           }),
         )
