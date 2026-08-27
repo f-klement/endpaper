@@ -69,10 +69,23 @@ function stubLoad({
   users = [OWNER, OTHER],
   googleBooks = false,
   goodreads = false,
+  customFields = [] as { id: number; name: string; kind: string }[],
+  customFieldValues = [] as {
+    field_id: number;
+    name: string;
+    kind: string;
+    value: string;
+    href: string | null;
+  }[],
 } = {}) {
   api.on("/api/books/1/notes", { body: notes });
   api.on("/api/books/1/quotes", { body: quotes });
   api.on("/api/books/1/progress", { body: progress });
+  // The custom fields panel asks for both. Two requests rather than one: the
+  // definitions are library wide and shared across every book page, the values
+  // are this book's.
+  api.on("/api/books/custom-fields", { body: customFields });
+  api.on("/api/books/1/custom-fields", { body: customFieldValues });
   // One element rather than none: a book with one copy is a copy, it is just
   // the only one, and that is what the endpoint answers.
   api.on("/api/books/1/copies", { body: [book] });
@@ -328,6 +341,42 @@ describe("BookDetail", () => {
     });
   });
 
+  describe("custom fields", () => {
+    it("draws nothing until the library has defined one", async () => {
+      // A household that never uses the feature never sees a handle for it.
+      stubLoad();
+      renderDetail();
+      await screen.findByRole("heading", { name: "Dune" });
+
+      expect(screen.queryByText("Custom fields")).not.toBeInTheDocument();
+    });
+
+    it("shows a filled field inside the filing section", async () => {
+      // The panel is in `filing` rather than a section of its own: a custom
+      // field is this library's own filing of a fact about the book, beside
+      // its tags, its shelf and its collection.
+      stubLoad({
+        customFields: [{ id: 1, name: "Calibre-web", kind: "url" }],
+        customFieldValues: [
+          {
+            field_id: 1,
+            name: "Calibre-web",
+            kind: "url",
+            value: "https://calibre.example/book/12",
+            href: "https://calibre.example/book/12",
+          },
+        ],
+      });
+      renderDetail();
+
+      expect(
+        await screen.findByRole("link", {
+          name: "https://calibre.example/book/12",
+        }),
+      ).toHaveAttribute("href", "https://calibre.example/book/12");
+    });
+  });
+
   describe("loans", () => {
     it("offers the other members as borrowers", async () => {
       stubLoad();
@@ -434,7 +483,9 @@ describe("BookDetail", () => {
 
       const user = userEvent.setup();
       await user.click(await screen.findByLabelText("Someone else"));
-      fireEvent.change(screen.getByLabelText("Borrower's name"), { target: { value: "   " } });
+      fireEvent.change(screen.getByLabelText("Borrower's name"), {
+        target: { value: "   " },
+      });
 
       expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
     });
@@ -599,9 +650,7 @@ describe("BookDetail", () => {
         screen.getByLabelText("Page the quote is on"),
         "214",
       );
-      await userEvent.click(
-        screen.getByRole("button", { name: "Add quote" }),
-      );
+      await userEvent.click(screen.getByRole("button", { name: "Add quote" }));
 
       expect(api.lastCall("/api/books/1/quotes", "POST")?.body).toEqual({
         text: "A passage",
@@ -637,7 +686,9 @@ describe("BookDetail", () => {
       await openSection("Notes and quotes");
 
       const user = userEvent.setup();
-      fireEvent.change(await screen.findByLabelText("Add a note"), { target: { value: "  padded  " } });
+      fireEvent.change(await screen.findByLabelText("Add a note"), {
+        target: { value: "  padded  " },
+      });
       await user.click(screen.getByRole("button", { name: "Add" }));
 
       await waitFor(() =>
@@ -1063,7 +1114,9 @@ describe("BookDetail lending with a due date", () => {
       await screen.findByLabelText("Loan to"),
       String(OTHER.id),
     );
-    fireEvent.change(screen.getByLabelText("Due back"), { target: { value: "2026-09-01" } });
+    fireEvent.change(screen.getByLabelText("Due back"), {
+      target: { value: "2026-09-01" },
+    });
     await user.click(screen.getByRole("button", { name: "Loan" }));
 
     await waitFor(() =>
@@ -1227,9 +1280,9 @@ describe("BookDetail sections", () => {
     renderDetail();
     await screen.findByRole("heading", { name: "Dune" });
 
-    const handles = [
-      ...document.querySelectorAll("button[id$='-handle']"),
-    ].map((handle) => handle.id);
+    const handles = [...document.querySelectorAll("button[id$='-handle']")].map(
+      (handle) => handle.id,
+    );
     expect(handles).toEqual(BOOK_SECTIONS.map((id) => `${id}-handle`));
   });
 
@@ -1269,7 +1322,8 @@ describe("BookDetail sections", () => {
     ];
     for (const id of BOOK_SECTIONS) {
       const panel = document.getElementById(`${id}-panel`)!;
-      for (const element of outside) expect(panel).not.toContainElement(element);
+      for (const element of outside)
+        expect(panel).not.toContainElement(element);
     }
   });
 
@@ -1369,7 +1423,9 @@ describe("BookDetail sections", () => {
       await screen.findByRole("button", { name: "Lending this copy" }),
     ).toHaveAttribute("aria-expanded", "true");
 
-    await userEvent.setup().click(await screen.findByRole("link", { name: "Open" }));
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("link", { name: "Open" }));
 
     await waitFor(() =>
       expect(

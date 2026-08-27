@@ -720,6 +720,53 @@ because that test would silently reclassify a tag the moment somebody renamed
 one in the seed list, and renaming a seeded tag has already happened once here
 (migration `95b6a61d6668`).
 
+### Custom fields
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/books/custom-fields` | member | Every field the library has defined, in the order it defined them |
+| POST | `/api/books/custom-fields` | member | 201; a name that already exists returns that field; 409 past 25 |
+| PATCH | `/api/books/custom-fields/{id}` | member | Rename. Every value under it is kept. 409 on a collision |
+| DELETE | `/api/books/custom-fields/{id}` | **admin** | 204, and the values go with it |
+| GET | `/api/books/{book_id}/custom-fields` | member | Only the fields this book has something in |
+| PUT | `/api/books/{book_id}/custom-fields/{field_id}` | member | An empty value clears it. Returns the book's whole list |
+
+A fact the library keeps about a book that this schema has no column for. The
+definition is library wide, like a tag, and the value is per book. The first
+concrete use, and the reason it exists, is a link to the same book in a
+calibre-web instance.
+
+**Defining is open to any member and deleting is admin only**, the same split
+`DELETE /api/books/tags/{id}` makes and the sharper case of it: deleting a field
+destroys, in one request with no undo, content every member typed by hand, on
+books the caller may not see.
+
+**No usage count is published**, unlike `TagOut.book_count`. A count of the books
+carrying a field is drawn across books the caller may not see, so it would have to
+be scoped to the viewer, and a viewer-scoped number in a delete confirmation would
+understate what is about to be destroyed.
+
+**A field's `kind` is chosen once and never changed.** Changing it would
+reinterpret every value already under it in both directions. Delete and redefine
+is the honest version, and it says out loud that the values go.
+
+**One verb for setting and clearing.** Emptying the box and saving is what a
+person does, and a separate DELETE would leave a client deciding which of two
+verbs an empty box means. Clearing deletes the row rather than storing an empty
+one, which is what makes "a book with no value shows nothing" a property of the
+schema.
+
+`CustomFieldValueOut.href` is what a client points an `<a>` at, and it is decided
+on **this read** rather than trusted from storage: a `url` field whose value is
+not an `http` or `https` URL with a real host comes back with `href` null and is
+rendered as text. A write that fails the same test answers **422** rather than
+degrading silently, because a field somebody declared a link and cannot click,
+with nothing saying why, is worse than an error. See [security.md](security.md).
+
+These are served here rather than on `BookOut`, like notes and quotes and unlike
+tags: a page of 25 book cards has nowhere to render them, and `books_to_out` is a
+7 statement budget that a test reads out of its own docstring.
+
 ### Importing a library
 
 | Method | Path | Access | Notes |
@@ -831,18 +878,31 @@ it was reworded. The flag is **not stored**, and the book still says it is never
 afterwards: it answers one request rather than changing the library's mind. `in_use` and
 `happy` are not checked at all. The reasoning is in [decisions.md](decisions.md).
 
-**Overdue reminders** go out as one JSON digest POSTed to an admin-configured webhook,
-hourly from a task started with the app. `POST /api/loans/overdue/notify` runs the same
-pass immediately, which is what makes the feature testable by a person and what an
-external cron would call instead. It answers
-`{sent, loans, skipped_private, reason, detail}` rather than a bare 204, because "nothing
-is overdue" and "the receiver refused it" both look like silence otherwise.
+**Overdue reminders** go out as one digest on every channel switched on, hourly from a
+task started with the app. There are three: a **webhook** (the JSON below, POSTed to an
+admin-configured URL), **email** over SMTP, and a **Telegram** chat. Each is toggled by
+itself and they all carry the same digest, rendered as JSON for the webhook and as plain
+text for the two a person reads. `POST /api/loans/overdue/notify` runs the same pass
+immediately, which is what makes the feature testable by a person and what an external
+cron would call instead. It answers
+`{sent, loans, skipped_private, reason, detail, senders}` rather than a bare 204, because
+"nothing is overdue" and "the receiver refused it" both look like silence otherwise.
 
-`reason` is `disabled`, `no_url`, `nothing_due` or `unreachable`, and is **null exactly
-when `sent` is true**. It is a closed set because a client has to render the difference and
-cannot branch on prose; `detail` is the same outcome as a sentence, for a log or a caller
-with no message catalogue. A 200 with `sent: false` is the ordinary answer for all four:
-none of them is an error in the request.
+`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable` or `misconfigured`, and is
+**null exactly when `sent` is true**. It is a closed set because a client has to render the
+difference and cannot branch on prose; `detail` is the same outcome as a sentence, for a
+log or a caller with no message catalogue. A 200 with `sent: false` is the ordinary answer
+for all five: none of them is an error in the request.
+
+`senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel
+that was tried, in webhook, email, Telegram order, and is empty when nothing was attempted
+at all. **`sent` at the top is true when any one of them delivered**, which is also the
+condition `notified_at` is stamped on: the loan was chased. Stamping only on a clean sweep
+would turn one broken receiver into an hourly repeat of the same list on the channels that
+work, so a failed channel is reported here rather than compensated for. **The withheld
+count is per sender as well as at the top**: all three exclude the same private books
+today, because all three go to a channel rather than to a person, and a single figure
+would be a lie on two of three the moment that stops being true.
 
 ```json
 {
@@ -856,13 +916,24 @@ none of them is an error in the request.
 }
 ```
 
-Three properties of the request are load bearing. **Private books are excluded**, in the
-query rather than afterwards: a webhook has no member identity and lands in a channel the
-whole library reads. `skipped_private` counts what was held back, never names it. The
-body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a secret is
-set, over the raw bytes, so a receiver verifying a re-serialised payload will fail. And
-**redirects are not followed**, unlike the metadata lookups: this is the one request in
-the app whose payload is catalogue content going somewhere unauthenticated.
+Three properties of the request are load bearing. **Private books are excluded, on every
+channel**, in the query rather than afterwards: none of the three has a member identity
+behind it, and each lands where the whole household reads. `skipped_private` counts what
+was held back, never names it. The webhook body is signed with HMAC-SHA256 in
+`X-Endpaper-Signature: sha256=<hex>` when a secret is set, over the raw bytes, so a
+receiver verifying a re-serialised payload will fail. And **redirects are not followed**,
+unlike the metadata lookups: these are the requests whose payload is catalogue content
+going somewhere unauthenticated.
+
+Two properties belong to the added channels. **Telegram's host is a constant, not a
+setting**: `api.telegram.org`, so the app rather than the configuration chooses where the
+titles go, which is the one thing this channel has that an arbitrary webhook URL does not.
+The message is sent with **no `parse_mode`**, because with one set a book called
+`Kiss & Tell` or `a_b` makes Telegram reject the send and the reminder stops for everyone.
+**SMTP always verifies**: the TLS context is built in `mailer.send` and there is no
+setting, parameter or environment variable that relaxes certificate or hostname checking. A
+mail password configured with neither STARTTLS nor implicit TLS is refused before a socket
+is opened, rather than sent in the clear.
 
 A loan is chased again only once `overdue_reminder_days` have passed since its last
 reminder. `notified_at` is stamped after a delivery that succeeded, so a failure retries
@@ -963,14 +1034,25 @@ switch target. That is presentation: `POST /auth/switch` refuses one regardless.
 accounts do appear in `/api/users` like any other account, because the loan picker is a
 list of everybody who could hold a book.
 
-`PUT /api/settings` also carries the four overdue-reminder fields.
-`overdue_webhook_url` is returned **in full**, unlike the Google Books key: a destination
-nobody can read back is a destination nobody can proofread, and an admin who can read it
-is an admin who can change it. A URL whose scheme is not `http` or `https` is a **422**,
-checked again in `notifications.py` before any send because a restore writes the settings
-table through Core. `overdue_webhook_secret` follows the API key exactly: masked on the way
-out, absent means "leave alone", an empty string clears.
-`overdue_reminder_days` is 1 to 365; zero would mean resending the same list on every tick.
+`PUT /api/settings` also carries the reminder fields, for all three channels.
+`overdue_webhook_url` and `telegram_chat_id` are returned **in full**, unlike the Google
+Books key: a destination nobody can read back is a destination nobody can proofread, and an
+admin who can read it is an admin who can change it. A URL whose scheme is not `http` or
+`https` is a **422**, checked again in `notifications.py` before any send because a restore
+writes the settings table through Core. `overdue_webhook_secret`, `mail_password` and
+`telegram_bot_token` follow the API key exactly: masked on the way out, absent means "leave
+alone", an empty string clears. `overdue_reminder_days` is 1 to 365; zero would mean
+resending the same list on every tick.
+
+**Ten of these settings may be pinned by the deployment**, through `GOOGLE_BOOKS_API_KEY`,
+the seven standard `MAIL_*` variables, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Where
+one is set it **wins over the stored value**, `GET /api/settings` reports the value in
+force rather than the row, and `PUT` answers **409** naming the variable rather than
+storing something nothing will read. `mail_from_env` lists which of the mail settings that
+applies to, so a client can disable a field instead of offering an edit that can only fail.
+Reporting where a value comes from is not reporting the value: a pinned secret is still
+masked. The eighth standard mail name, `MAIL_DEBUG`, is deliberately **not** honoured,
+because smtplib's debug output writes the AUTH exchange to stderr.
 
 `StatsOut.pages_by_month` is the pages the requesting member read, by month, computed from
 the positive deltas between their consecutive page-unit entries per book. **Page-tracked

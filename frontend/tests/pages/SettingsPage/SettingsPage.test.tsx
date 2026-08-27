@@ -75,6 +75,9 @@ beforeEach(() => {
   // unstubbed request throws, and every test that reaches the admin block
   // would fail for a reason that has nothing to do with what it asserts.
   api.on("/api/users/test-accounts", { body: [] });
+  // The custom fields card asks for this one, and it is outside the admin
+  // block, so every test on this page reaches it.
+  api.on("/api/books/custom-fields", { body: [] });
 });
 
 describe("SettingsPage", () => {

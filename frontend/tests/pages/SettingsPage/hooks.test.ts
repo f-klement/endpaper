@@ -26,6 +26,7 @@ const MEMBER_SECTIONS = [
   "appearance",
   "import",
   "covers",
+  "customFields",
   "about",
 ] as const;
 
@@ -38,10 +39,12 @@ describe("SETTINGS_SECTION_DEFAULTS", () => {
       appearance: true,
       import: false,
       covers: false,
+      customFields: false,
       googleBooks: true,
       goodreads: true,
       defaultLanguage: true,
       overdue: false,
+      reminderSenders: false,
       testAccounts: false,
       backup: false,
       about: true,
@@ -60,8 +63,8 @@ describe("SETTINGS_SECTION_DEFAULTS", () => {
   });
 
   it("leaves a member who is not an admin something to read", () => {
-    // Five cards reach a member, and folding the language switch as well would
-    // leave four closed handles and nothing else.
+    // Six cards reach a member, and folding the language switch as well would
+    // leave five closed handles and nothing else.
     const open = MEMBER_SECTIONS.filter(
       (section) => SETTINGS_SECTION_DEFAULTS[section],
     );

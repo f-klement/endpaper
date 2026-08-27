@@ -8,6 +8,7 @@ import {
   Locale,
   OverdueNotifyReason,
   type OverdueNotifyResult,
+  OverdueSender,
   type SettingsOut,
 } from "../../../../src/api/generated/model";
 import OverdueSection from "../../../../src/pages/SettingsPage/components/OverdueSection";
@@ -61,13 +62,13 @@ describe("OverdueSection", () => {
     ).toBeInTheDocument();
   });
 
-  it("switches reminders on", async () => {
+  it("switches the webhook on", async () => {
     const user = userEvent.setup();
     const { onSave } = renderSection();
 
     await user.click(
       screen.getByRole("checkbox", {
-        name: "Send a reminder when a book is overdue",
+        name: "Send the reminder to a webhook",
       }),
     );
 
@@ -217,9 +218,10 @@ describe("OverdueSection", () => {
     expect(screen.getByRole("status")).toHaveTextContent(fragment);
   });
 
-  it("gives four distinct sentences, not one repeated", () => {
-    // A Record keyed off the generated union is only worth having if the four
-    // values it maps to actually differ.
+  it("gives five distinct sentences, not one repeated", () => {
+    // A Record keyed off the generated union is only worth having if the five
+    // values it maps to actually differ. It read "four" until `misconfigured`
+    // arrived with the mail and Telegram channels.
     const seen = new Set<string>();
     for (const reason of Object.values(OverdueNotifyReason)) {
       const { unmount } = renderSection(
@@ -229,7 +231,7 @@ describe("OverdueSection", () => {
       seen.add(screen.getByRole("status").textContent ?? "");
       unmount();
     }
-    expect(seen.size).toBe(4);
+    expect(seen.size).toBe(5);
   });
 
   it("names how many private books were held back", () => {
@@ -240,5 +242,133 @@ describe("OverdueSection", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "1 private books were left out.",
     );
+  });
+});
+
+describe("the per channel rows", () => {
+  // `sent` at the top is true when **any** channel delivered, and the loans are
+  // stamped on that, so a run that reached the chat and not the webhook reads
+  // as a clean send unless these rows say otherwise. There was no test here at
+  // all on the one render surface this feature adds.
+  function withSenders(senders: OverdueNotifyResult["senders"]) {
+    return renderSection(
+      {},
+      {
+        sendResult: {
+          sent: senders?.some((entry) => entry.sent) ?? false,
+          loans: 1,
+          skipped_private: 0,
+          reason: null,
+          senders,
+        },
+      },
+    );
+  }
+
+  it("names every channel that was tried", () => {
+    withSenders([
+      { sender: OverdueSender.webhook, sent: true, loans: 1, skipped_private: 0 },
+      { sender: OverdueSender.email, sent: true, loans: 1, skipped_private: 0 },
+      {
+        sender: OverdueSender.telegram,
+        sent: true,
+        loans: 1,
+        skipped_private: 0,
+      },
+    ]);
+
+    expect(screen.getByText("Webhook: sent.")).toBeInTheDocument();
+    expect(screen.getByText("Email: sent.")).toBeInTheDocument();
+    expect(screen.getByText("Telegram: sent.")).toBeInTheDocument();
+  });
+
+  it("shows the one that failed beside the ones that did not", () => {
+    withSenders([
+      {
+        sender: OverdueSender.webhook,
+        sent: false,
+        loans: 1,
+        skipped_private: 0,
+        reason: OverdueNotifyReason.unreachable,
+      },
+      { sender: OverdueSender.telegram, sent: true, loans: 1, skipped_private: 0 },
+    ]);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Sent, covering 1");
+    expect(
+      screen.getByText(/Webhook: could not be reached/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not name the webhook in another channel's row", () => {
+    // The whole-run sentence reads "The webhook could not be reached", and
+    // printing it here made the email row blame the wrong channel.
+    withSenders([
+      {
+        sender: OverdueSender.email,
+        sent: false,
+        loans: 1,
+        skipped_private: 0,
+        reason: OverdueNotifyReason.unreachable,
+      },
+    ]);
+
+    const row = screen.getByText(/^Email:/);
+    expect(row).toHaveTextContent("Email: could not be reached.");
+    expect(row.textContent).not.toMatch(/webhook/i);
+  });
+
+  it("does not point a row at itself", () => {
+    // The `misconfigured` sentence ends "The message below says which", and
+    // this row is the message below.
+    withSenders([
+      {
+        sender: OverdueSender.telegram,
+        sent: false,
+        loans: 1,
+        skipped_private: 0,
+        reason: OverdueNotifyReason.misconfigured,
+      },
+    ]);
+
+    const row = screen.getByText(/^Telegram:/);
+    expect(row).toHaveTextContent("Telegram: its settings cannot be used.");
+    expect(row.textContent).not.toMatch(/below/i);
+  });
+
+  it("renders no list when nothing was attempted", () => {
+    renderSection(
+      {},
+      {
+        sendResult: {
+          sent: false,
+          loans: 0,
+          skipped_private: 0,
+          reason: OverdueNotifyReason.nothing_due,
+          senders: [],
+        },
+      },
+    );
+
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("gives a distinct fragment per reason", () => {
+    // A Record over the union is only worth having if its values differ.
+    const seen = new Set<string>();
+    for (const reason of Object.values(OverdueNotifyReason)) {
+      const { unmount } = withSenders([
+        {
+          sender: OverdueSender.webhook,
+          sent: false,
+          loans: 1,
+          skipped_private: 0,
+          reason,
+        },
+      ]);
+      seen.add(screen.getByRole("listitem").textContent ?? "");
+      unmount();
+    }
+    expect(seen.size).toBe(5);
   });
 });

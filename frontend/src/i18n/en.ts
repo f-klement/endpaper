@@ -199,8 +199,10 @@ export const en = {
   "scan.startScanning": "Start scanning",
   "scan.stopScanning": "Stop scanning",
   "scan.cameraIdle": "The camera is off",
-  "scan.cameraIdleHint": "Nothing is recorded and the camera stays closed until you start it.",
-  "scan.notABook": "Read {code}, which is not a book barcode. Look for the one above the ISBN.",
+  "scan.cameraIdleHint":
+    "Nothing is recorded and the camera stays closed until you start it.",
+  "scan.notABook":
+    "Read {code}, which is not a book barcode. Look for the one above the ISBN.",
   "scan.tryAgain": "Try again",
   "scan.cameraUnavailable": "Camera unavailable",
   "scan.orEnterManually": "Or enter ISBN manually:",
@@ -270,6 +272,33 @@ export const en = {
   "notes.placeholder": "Add a note...",
   "notes.addLabel": "Add a note",
   "notes.editLabel": "Edit note",
+
+  // ── Custom fields ───────────────────────────────────────────────────────
+  // A fact the household keeps that the schema does not know about. The first
+  // one, and the reason the feature exists, is a link to the same book in a
+  // calibre-web instance.
+  "customFields.title": "Custom fields",
+  "customFields.explain":
+    "Facts this library keeps about a book that Endpaper has no place for, like a link to the same book in another app.",
+  "customFields.none": "No custom fields yet",
+  "customFields.nameLabel": "Field name",
+  "customFields.namePlaceholder": "Calibre-web",
+  "customFields.kindLabel": "What it holds",
+  "customFields.kindText": "Text",
+  "customFields.kindUrl": "A web link",
+  "customFields.addButton": "Add field",
+  "customFields.renameLabel": "New name for {name}",
+  // Named rather than "This will remove 12 values". A count of the books
+  // carrying a field would have to be counted across books the reader may not
+  // see, so the sentence says every book instead of a number that would be
+  // wrong in the reader's favour.
+  "customFields.deleteConfirm":
+    "Delete {name}? Its value is removed from every book, and this cannot be undone.",
+  "customFields.bookNone": "Nothing filled in yet",
+  "customFields.editButton": "Edit details",
+  "customFields.valuePlaceholder": "Leave empty to clear",
+  // The link opens away from this app, so it says so before it is pressed.
+  "customFields.opensElsewhere": "Opens in a new tab",
 
   // ── Quotes ──────────────────────────────────────────────────────────────
   "quotes.title": "Quotes",
@@ -437,11 +466,11 @@ export const en = {
   // A generic webhook rather than one chat service, so the strings name the
   // shape rather than a brand.
   "settings.overdue": "Overdue reminders",
-  "settings.overdueEnable": "Send a reminder when a book is overdue",
+  "settings.overdueEnable": "Send the reminder to a webhook",
   "settings.overdueHint":
-    "Endpaper looks every hour and posts one message naming the loans it is chasing. An hour with nothing to chase sends nothing.",
+    "Endpaper looks every hour and sends one message naming the loans it is chasing, on every channel switched on. An hour with nothing to chase sends nothing.",
   "settings.overduePrivacyNote":
-    "Private books are never included. A webhook goes to a channel with no account behind it, so a private title would be readable by everyone there. Overdue private books are still shown to their owner in the loans list.",
+    "Private books are never included, on any channel. Every channel here goes to a place with no single account behind it, so a private title would be readable by everyone who reads it. Overdue private books are still shown to their owner in the loans list.",
   "settings.overdueUrl": "Webhook address",
   "settings.overdueUrlPlaceholder": "https://example.org/hooks/books",
   "settings.overdueSecret": "Signing secret",
@@ -474,6 +503,91 @@ export const en = {
   "settings.overdueNotSentUnreachable":
     "The webhook could not be reached, so nothing was sent. The loans will be chased again on the next attempt.",
   "settings.overdueSkippedPrivate": "{count} private books were left out.",
+  "settings.overdueNotSentMisconfigured":
+    "Nothing was sent: a channel is switched on and its settings cannot be used. The message below says which.",
+  // One line per channel that was tried, because "sent" over three channels
+  // hides the one that failed, and the loans were still stamped.
+  "settings.overdueSenderWebhook": "Webhook",
+  "settings.overdueSenderEmail": "Email",
+  "settings.overdueSenderTelegram": "Telegram",
+  "settings.overdueSenderSent": "{sender}: sent.",
+  "settings.overdueSenderFailed": "{sender}: {detail}",
+  // Fragments, not sentences. The whole-run wording above named the webhook in
+  // every row, and pointed at "the message below" from inside it.
+  "settings.overdueRowDisabled": "switched off.",
+  "settings.overdueRowNoUrl": "no address is stored.",
+  "settings.overdueRowNothingDue": "nothing to send.",
+  "settings.overdueRowUnreachable":
+    "could not be reached. It will be tried again.",
+  "settings.overdueRowMisconfigured": "its settings cannot be used.",
+  "settings.overdueRowNothingSent": "nothing was sent.",
+
+  // ── Mail and chat reminders ─────────────────────────────────────────────
+  //
+  // The two channels a household has without building anything: a mailbox and
+  // a group chat. The webhook is the third and stays where it was.
+  "settings.senders": "Mail and chat reminders",
+  "settings.sendersHint":
+    "The same reminder, on channels a household already has. Each one is switched on by itself, and every one that is on gets the same message.",
+  "settings.sendersPrivacyNote":
+    "Both of these go to a mailbox or a chat that more than one person reads, so private books are left out of them exactly as they are left out of the webhook.",
+
+  "settings.mail": "Email",
+  "settings.mailEnable": "Send the reminder by email",
+  "settings.mailHint":
+    "One message to the household's own mailbox, listing the same loans.",
+  "settings.mailServer": "Mail server",
+  "settings.mailServerPlaceholder": "smtp.example.org",
+  "settings.mailPort": "Port",
+  "settings.mailUsername": "Mail username",
+  "settings.mailUsernamePlaceholder":
+    "Leave empty if the server needs no login",
+  "settings.mailPassword": "Mail password",
+  "settings.mailPasswordPlaceholder":
+    "Paste a new password to replace the stored one",
+  "settings.mailPasswordShow": "Show the mail password",
+  "settings.mailPasswordHide": "Hide the mail password",
+  "settings.mailPasswordSet": "A password is stored ({preview}).",
+  "settings.mailPasswordMissing": "No password stored.",
+  "settings.mailPasswordSave": "Save password",
+  "settings.mailPasswordClear": "Remove stored password",
+  "settings.mailSecurity": "Encryption",
+  "settings.mailSecurityStartTls": "STARTTLS",
+  "settings.mailSecurityTls": "TLS",
+  "settings.mailSecurityNone": "None",
+  "settings.mailSecurityHint":
+    "Certificates and host names are always checked, and nothing here can switch that off. A password with no encryption is refused, because it would cross the network in the clear.",
+  "settings.mailFrom": "From address",
+  "settings.mailFromPlaceholder": "library@example.org",
+  "settings.mailTo": "Send reminders to",
+  "settings.mailToPlaceholder": "house@example.org",
+  "settings.mailToHint":
+    "One address, or several separated by commas. At most ten.",
+  "settings.mailSave": "Save mail settings",
+  "settings.mailFromEnv":
+    "This deployment sets {fields} in its environment, so those fields are fixed here.",
+
+  "settings.telegram": "Telegram",
+  "settings.telegramEnable": "Send the reminder to a Telegram chat",
+  "settings.telegramHint":
+    "One message to one chat, not to each person. A bot cannot write to somebody who has never written to it first, so per person delivery would fail silently for anyone who skipped that step.",
+  "settings.telegramToken": "Bot token",
+  "settings.telegramTokenPlaceholder":
+    "Paste a new token to replace the stored one",
+  "settings.telegramTokenShow": "Show the bot token",
+  "settings.telegramTokenHide": "Hide the bot token",
+  "settings.telegramTokenSet": "A token is stored ({preview}).",
+  "settings.telegramTokenMissing":
+    "No token stored. Create a bot with @BotFather and paste the token it gives you.",
+  "settings.telegramTokenSave": "Save token",
+  "settings.telegramTokenClear": "Remove stored token",
+  "settings.telegramChat": "Chat id",
+  "settings.telegramChatPlaceholder": "-1001234567890",
+  "settings.telegramChatHint":
+    "The number of the group the bot was added to, or an @name for a public channel.",
+  "settings.telegramChatSave": "Save chat id",
+  "settings.telegramFromEnv":
+    "This deployment sets this in its environment, so it is fixed here.",
 
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Show Goodreads lookup links",
@@ -683,7 +797,8 @@ export const en = {
   // ── More than one copy of the same book ─────────────────────────────────
   "copies.title": "Copies",
   "copies.count": "{count} copies of this book",
-  "copies.hint": "A second copy is a second object: its own shelf, its own condition, its own loan.",
+  "copies.hint":
+    "A second copy is a second object: its own shelf, its own condition, its own loan.",
   "copies.thisOne": "This one",
   "copies.open": "Open",
   "copies.noShelf": "No shelf recorded",
@@ -769,7 +884,8 @@ export const en = {
     "Looked at {examined} books and stored {stored} covers. No image service has one for {missing}.",
   "covers.unreachable":
     "{count} of them have a cover somewhere that could not be downloaded from here. They keep their link and are tried again on the next pass through the library.",
-  "covers.remaining": "{remaining} books still to go. Run it again to carry on.",
+  "covers.remaining":
+    "{remaining} books still to go. Run it again to carry on.",
   "covers.allDone": "Every book that could have a cover has one.",
 
   // ── About ───────────────────────────────────────────────────────────────────

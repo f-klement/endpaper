@@ -13,16 +13,60 @@ code. It exists because the same review that produced two new seams also propose
 line count. A deep module has a small door and a lot of room behind it. A shallow one costs
 a reader an import and a name and gives back a line they could have written.
 
-Measured over the three this ADR names, plus the two the refactor added and the one added after it:
+Measured over the three this ADR names, plus the two the refactor added and the two added
+after it:
 
-| Module | Lines | Public surface | Private |
-|---|---|---|---|
-| `metadata.py` | 3,217 | 5 functions, 2 classes | 74 functions |
-| `covers.py` | 832 | 25 functions, 1 class | 2 |
-| `dependencies.py` | 211 | 5 functions, 1 class | 1 |
-| `shelf.py` | 533 | 3 functions, 3 classes | 0 |
-| `authorship.py` | 382 | 2 classes | 0 |
-| `reading.py` | 575 | 2 functions, 2 classes | 3 |
+| Module | Lines | Statements | Public surface | Per public name | Private |
+|---|---|---|---|---|---|
+| `metadata.py` | 3,202 | 926 | 5 functions, 2 classes | **132.3** | 74 functions |
+| `covers.py` | 893 | 278 | 25 functions, 1 class | 10.7 | 2 |
+| `dependencies.py` | 211 | 50 | 5 functions, 1 class | 8.3 | 1 |
+| `shelf.py` | 533 | 114 | 3 functions, 3 classes | 19.0 | 0 |
+| `authorship.py` | 382 | 80 | 2 classes | **40.0** | 0 |
+| `reading.py` | 575 | 117 | 2 functions, 2 classes | 29.2 | 3 |
+| `custom_fields.py` | 696 | 106 | 8 functions, 2 classes | 10.6 | 2 |
+| `mailer.py` | 248 | 88 | 2 functions, 2 classes | 22.0 | 3 |
+
+**The statement column was added because the line column hides the thing this ADR is about.**
+Counted 2026-08-27 with `ast`, statements being every `ast.stmt` that is not a bare string, so
+a docstring and a comment weigh nothing. At 696 lines against `shelf.py`'s 533,
+`custom_fields.py` reads **larger**; at 10.6 statements per public name against 19.0 it is
+half as deep per name, and the ADR's own claim is that line count is not the test.
+
+**Statements is the figure to compare, and Lines is the one that rots fastest**, which is the
+second reason for adding it: this table's `custom_fields.py` row was wrong by fourteen lines
+within a day of being written, because a paragraph was added to a docstring.
+
+**Statements is steadier than Lines and is not stable.** It moves with prose not at all and
+with development freely: that same row's Statements went 94 to 105 inside one review round,
+while its module was being fixed. So **every column here is a snapshot on the date in the
+header**, and a figure that `ast` does not reproduce today means the module moved, not that
+the tool disagrees. Re-measure before citing a row in an argument. Public names are top
+level: a class counts once, its methods are behind its door.
+
+**But the ratio separates two module shapes, not two depths, and `dependencies.py` is the
+proof.** It sits at 8.3, lower than every other row including `custom_fields.py`, and this
+document already argues at length that it is deep. The modules at the top of the column put a
+**scoped object** behind one name (`Shelf`, `Reading`, `Authorship`), so their operations are
+methods and do not count; the modules at the bottom are functions over a value the caller
+already holds. `custom_fields.py` is the second kind on purpose: the scope is the `Book`
+handed in, so there is no object to construct, and every operation takes it. Read the column
+as "how much is behind each name a caller must learn", and then read it beside what the caller
+stops having to know.
+
+`custom_fields.py` is in the table because it is the first module written **against** this
+rule rather than measured after the fact, and it is the widest door of the four the rule has
+produced. It stays one module for the reason `covers.py` does: the depth is a fact held in one
+place, which here is "who may read a custom field value", answered by every reader taking a
+`Book` rather than a book id, and by `link_target` deciding on every read rather than once at
+the write. Splitting the definitions from the values would publish the same ten names across
+two files and let no caller stop knowing anything.
+
+What the ratio **did** buy, and it is why the column is worth keeping: it is what retired the
+batching class this module shipped with. `Values.of(db, books)` loaded a page of Books in one
+statement, and three of the ten names existed to serve a caller the design refuses to have,
+since these are served by their own route rather than on `BookOut`. A batch reader whose batch
+caller is refused by design is three public names and a test measuring a path nothing runs.
 
 `reading.py` is the fourth concept found the same way, added here rather than left to
 the next reviewer to re-derive. Counted 2026-08-27: 575 lines behind two classes and two
@@ -33,7 +77,25 @@ reading dates are derived from the status transition. It takes the same shape as
 two the refactor added: two named functions read past a member rather than one general
 escape hatch.
 
-`metadata.py` is the clearest case and the one most often mistaken for a problem: **3,217
+`mailer.py` is the narrowest row and the one whose boundary carries the most. Counted
+2026-08-27: 248 lines behind `checked_config` and `send`, which puts it between
+`dependencies.py` and `authorship.py` on this table's own ratio. The question it exists to
+be the only answer to is "may this mail be attempted at all", and the refusals are what a
+caller stops knowing: that a password with no encryption would cross the network in the
+clear, that STARTTLS and implicit TLS are two protocols rather than two switches, that a
+newline in an address is header injection, that the TLS context takes no parameter so
+verification cannot be relaxed.
+
+**The boundary is load bearing rather than tidy**, which is the reason this is a module and
+not a function that moved. It is where blocking crosses into `asyncio.to_thread`: `smtplib`
+has no async form, every FastAPI handler that reaches it is `async def`, and calling it
+inline would stop the event loop for the length of an SMTP conversation.
+`notifications.py` therefore holds the three senders and the digest, and knows about SMTP
+only that it is not awaited directly. Folding the two together would put a blocking
+protocol inside the module that also speaks HTTP, and would make `fetch.py`'s httpx shaped
+guard look like it covers something it cannot.
+
+`metadata.py` is the clearest case and the one most often mistaken for a problem: **3,202
 lines behind five public functions, and one importer.** Nothing outside it knows that a MARC
 record has non-sorting delimiters, that Open Library subjects are not classifications, or how
 sources are ranked. A reviewer proposing to split it is proposing to publish 74 private

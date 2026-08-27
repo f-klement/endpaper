@@ -1487,12 +1487,43 @@ indistinguishable from here, and crediting the lower page in full would let a ty
 followed by its correction to 40 report 440 pages read. Missing a re-read's first sitting
 is the better of the two errors, because the other one invents reading that never happened.
 
-### Overdue reminders are a generic webhook, not email and not one chat service
+### Overdue reminders go out on three channels: a webhook, email, and Telegram
 
-A self-hosted app that other libraries run should not carry an integration with a service
-nobody else runs, and email means SMTP credentials, deliverability and a second failure
-mode. A webhook is the shape every receiver already speaks: a chat bridge, a home
-automation flow, or a five-line script.
+**This reverses an earlier decision, and the earlier reasoning is kept because it is what
+the reversal answers.** It read: a self-hosted app that other libraries run should not carry
+an integration with a service nobody else runs, and email means SMTP credentials,
+deliverability and a second failure mode; a webhook is the shape every receiver already
+speaks, a chat bridge, a home automation flow, or a five-line script.
+
+What that missed is who does the building. A webhook makes the **household** write the
+receiver, and most have none and no intention of writing one, so the feature was off for
+them in practice rather than in theory. The two additions are chosen against exactly that
+objection: **SMTP is universal**, carried by every household with a mailbox, and **Telegram
+is one fixed host**, so "an integration with something nobody else runs" costs one constant
+rather than a service. The webhook is unchanged and nothing that already sends to one is
+broken. Issue #8.
+
+The costs the old argument named are real and are paid here rather than dismissed.
+Credentials: both join `settings_store.SECRET_KEYS`, both may instead be pinned by the
+deployment, and `MailConfig.password` is `repr=False` so a frozen dataclass cannot print it
+into a log. Deliverability: the message carries `Date` and `Message-ID`, and a mail server
+that accepts everything cannot be detected, so what is refused is the **configuration**, a
+password with no encryption, both TLS flags at once, an address carrying a newline. A
+second failure mode: reported per channel in `senders` rather than folded into one answer.
+
+**Telegram's host is a constant, not a setting**, and that absence is the control: the
+webhook posts wherever an admin typed, this posts where the app chose. Making it
+configurable would give that property away and buy nothing, since a different host would not
+be Telegram. The message is sent with **no `parse_mode`**, because with one set a book
+called `Kiss & Tell` or `a_b` makes Telegram reject the send, which is member-supplied
+catalogue content silently stopping every reminder. The same input is why the message is
+truncated in **UTF-16 code units** rather than characters: a code point outside the BMP is
+two units, so counting characters under-counts exactly where a title carries an emoji, and
+2,100 grinning faces are 2,100 characters and 4,200 units against a limit of 4,096.
+
+**`MAIL_DEBUG` is the one of the eight standard `MAIL_*` names not honoured.** Python's
+smtplib writes the AUTH exchange to stderr under it, so supporting it would be a supported
+way to print the household's mail password into the container log.
 
 Handy Library's named differentiator in this space is **configurable reminder timing**, and
 that is the part worth copying: a week is nagging in one house and silence in another, so
@@ -1504,10 +1535,10 @@ days, so a run that is missed sends nothing at all, ever, for those loans. State
 loan (`notified_at`) plus an interval is robust to a skipped tick, which matters here
 because the ticker lives in the web process and dies with a restart.
 
-### The overdue digest excludes private books
+### The overdue digest excludes private books, on every channel
 
-A webhook has no member identity behind it and lands in a channel everyone here
-reads, so shipping a private book's title through it defeats the single promise the data
+None of the three has a member identity behind it, and each lands where everyone here
+reads, so shipping a private book's title through one defeats the single promise the data
 model makes. The exclusion is in the query, not a filter afterwards, so a counting mistake
 downstream cannot put one in the payload.
 
@@ -1516,26 +1547,59 @@ digest reports `skipped_private` as a count so a library that expects five entri
 receives four can see why, and the settings screen says so in words rather than leaving it
 to the docs.
 
-### `notified_at` is a timestamp on the loan, stamped after a delivery that succeeded
+**The count is reported per channel as well as once at the top.** All three withhold the
+same rows today and so all three report the same number, which is exactly why the shape
+matters: a reader has no way to tell a shared number from a coincidence, and a single
+figure would become a lie on two channels of three the moment one audience differs.
+
+**A per borrower mail is the one audience that could carry a private book, and it is not
+built.** Being reminded of a book *you* borrowed is not a disclosure, and withholding it
+means nobody ever chases the one book least likely to be chased by anyone else. The reason
+it is absent is a missing fact rather than a judgement: **no member here has an email
+address.** `models.User` carries none and the LDAP backend requests only the username
+attribute and `memberOf`. Reaching it needs a `users.email` column, somewhere to set it
+including for accounts that never type a password here, and a decision about who may read
+another member's address, since `UserOut` is served inside book payloads. Until then mail
+goes to the household's own mailbox, which is a channel like the other two and excludes
+private books like the other two. Recorded so the absence reads as a blocked item rather
+than an oversight.
+
+### `notified_at` is a timestamp on the loan, stamped when at least one channel delivered
 
 Without any state the digest has two behaviours and both are wrong: send once and forget a
 book that is still out, or repeat the same list into the channel every hour.
 
-Stamped after the POST rather than before it, so a failure leaves the loans to be retried
-on the next run. That is why it is a timestamp rather than a "sent" flag: the interval
-question ("has this been chased recently") and the retry question ("did the last attempt
-land") are the same question, and one column answers both.
+Stamped after a send that succeeded rather than before it, so a run where nothing was
+delivered leaves the loans to be retried on the next tick. That is why it is a timestamp
+rather than a "sent" flag: the interval question ("has this been chased recently") and the
+retry question ("did the last attempt land") are the same question, and one column answers
+both.
+
+**With three channels, "at least one" rather than "all of them", and the choice has a
+cost.** A broken webhook beside a working Telegram chat means that batch never reaches the
+webhook. The alternative repeats the identical list hourly on the channels that work, which
+is the behaviour people switch off, and the only way to have neither is per loan per sender
+state, which is a table this feature does not warrant. The column records that the loan
+**was chased**, and it was; a channel that is down is an operator problem, reported in
+`senders` rather than compensated for.
+
+**What compensates for it is reporting, and the reporting has a gap worth knowing.** The
+hourly ticker discards the result, so once a tick has stamped `notified_at` on any one
+success, a manual "Send now" inside the reminder window answers `nothing_due` with an empty
+`senders`. The per channel failure is visible on the run that failed and in the log
+afterwards, not on a later button press. Named here rather than left to be discovered.
 
 ### The digest result carries a `reason`, and it is null exactly when it sent
 
-`sent: false` on its own made four different outcomes one answer on the screen: switched
-off, no address stored, nothing overdue, and a webhook that refused the request. A person
+`sent: false` on its own made five different outcomes one answer on the screen: switched
+off, no address stored, nothing overdue, a receiver that refused the request, and a channel
+whose settings cannot be used. A person
 pressing "Send now" to check their configuration was told "nothing was sent" by a broken
 setup and by a quiet week alike, which is the whole thing the button exists to tell apart.
 
 `detail` was already there and is not enough. It is a sentence, and a client cannot branch
 on a sentence or translate one. `reason` is the closed set beside it, so the frontend keys a
-`Record` off the generated union and adding a fifth reason on the server is a compile error
+`Record` off the generated union and adding a sixth reason on the server is a compile error
 in the catalogue rather than a silent fall through.
 
 **Nullable rather than total.** A `sent` member would make `reason` and `sent: bool` two
@@ -4164,6 +4228,51 @@ the signed in member.
 
 **A keyless `invalidateQueries()` is now confined to that module** by
 `houseRules.test.ts`. Its blind spot is stated in the test: it counts a spelling.
+
+### A custom field renders as a link because the Library said so, and only if the value still is one
+
+Two mechanisms, and the second is the one that matters.
+
+`CustomFieldKind.URL` is declared per field. Detection on the value would read a Member
+typing prose that begins with `http` as a link, and would make every field a link surface for
+a feature that needs one.
+
+**The declaration is not the permission.** `custom_fields.link_target` re-reads the stored
+value on every serialisation and hands back a target only for `http` or `https` with a real
+host, no credentials and a parseable port. So a row that reached the table without passing
+the write check is served as text. There is such a path: `backup.restore` inserts through
+Core, where neither a Pydantic model nor `@validates` fires. Same trap `Book.cover_url`
+records, answered at the read end rather than by asking one more writer to remember.
+
+`covers.is_renderable` is not reused. It keeps an `<img src>` inside `COVER_HOSTS`, and a
+custom field is a link to a system this app has never heard of, so a host allowlist would
+refuse the calibre-web URL the feature exists for. What is shared is one hard-won line:
+`urlsplit(...).port` **raises** on a port past 65535, so a single stored `https://h:99999/x`
+would be a poisoned row that 500s every read of that Book.
+
+`http` is allowed as well as `https`, unlike a cover: a link is a navigation rather than a
+subresource, so no browser blocks it as mixed content, and the calibre-web instance this is
+for is on a LAN with no certificate.
+
+**The stored value for a URL field is the parsed form.** `urlsplit` strips tabs, newlines and
+leading control characters exactly as a browser does, so storing the raw text would leave the
+server and the browser reading two different URLs, which is the gap scheme smuggling lives
+in.
+
+### Deleting a custom field is admin only, defining one is not
+
+The same split `delete_tag` makes, and the sharper case of it. Defining is additive and
+reversible by deleting; deleting destroys, in one request with no undo, content every Member
+typed by hand, on Books the caller cannot necessarily see. A `CustomField` records nobody as
+its author, so there is no owner to ask. Deleting a Tag takes a label off a Book; deleting a
+field takes the words.
+
+### `MAX_CUSTOM_FIELDS` is the only ceiling the feature needs
+
+A Book holds at most one value per definition (`uq_custom_field_values_book_field`), so
+bounding the definitions at 25 bounds every Book's payload, every rename's blast radius and
+every row this feature can add. It is also what makes `define` cheap enough to fold a name by
+scanning the whole table in Python, which is what `create_tag` does and why.
 
 ## Tooling
 

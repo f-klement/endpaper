@@ -27,4 +27,5 @@ export const OverdueNotifyReason = {
   no_url: "no_url",
   nothing_due: "nothing_due",
   unreachable: "unreachable",
+  misconfigured: "misconfigured",
 } as const;

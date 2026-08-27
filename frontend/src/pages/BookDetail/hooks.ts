@@ -22,6 +22,7 @@ import {
 } from "../../lib/sectionState";
 
 import {
+  getGetCustomFieldsQueryKey,
   getGetNotesQueryKey,
   getGetQuotesQueryKey,
   getListQuotesQueryKey,
@@ -42,6 +43,7 @@ import {
   useEditQuote,
   useEnrichmentCandidates,
   useGetBook,
+  useGetCustomFields,
   useGetNotes,
   useGetQuotes,
   useListLocations,
@@ -52,7 +54,9 @@ import {
   useRefreshMetadata,
   useRestoreBook,
   useRemoveBookTag,
+  useListCustomFields,
   useSetCollection,
+  useSetCustomField,
   useSetDiscuss,
   useSetOwnership,
   useSetPrivacy,
@@ -79,6 +83,8 @@ import type {
   BookMatch,
   BookDetailsUpdate,
   CollectionOut,
+  CustomFieldOut,
+  CustomFieldValueOut,
   LocationOut,
   BookEnrichmentOut,
   BookOut,
@@ -356,6 +362,71 @@ export function useBookNotes(bookId: number): UseBookNotesResult {
     remove: (noteId) => remove.mutate({ bookId, noteId }),
     isAdding: add.isPending,
     error: notes.error ?? add.error ?? edit.error ?? remove.error,
+  };
+}
+
+/**
+ * What one write reports back, so the editor can stay open on a refusal.
+ *
+ * `mutate` with per-call callbacks rather than `mutateAsync`: the house rule
+ * against the latter is that it rejects and leaves an unhandled rejection on
+ * every failure, and these are handled by react-query rather than by a caller
+ * remembering to catch.
+ */
+export interface SaveCallbacks {
+  onSuccess: () => void;
+  onError: () => void;
+}
+
+export interface UseBookCustomFieldsResult {
+  /** Every field the library has defined, filled in on this book or not. */
+  definitions: CustomFieldOut[];
+  /** Only the ones this book has something in. */
+  values: CustomFieldValueOut[];
+  save: (fieldId: number, value: string, callbacks: SaveCallbacks) => void;
+  isSaving: boolean;
+  error: unknown;
+}
+
+/**
+ * The library's own facts about this book.
+ *
+ * **Two requests, not one.** The definitions are library wide and are the same
+ * on every book, so they are their own cache entry and a second book page
+ * costs nothing for them. The values are per book and are served by their own
+ * route rather than on `BookOut`, for the reason recorded in
+ * `routers/books.py`: a page of 25 book cards has nowhere to render them, and
+ * putting them on the listing payload would cost every listing in the app a
+ * query for something nothing displays.
+ *
+ * An empty value is a clear, so there is one write and no delete: see
+ * `CustomFieldValueUpdate`.
+ *
+ * `save` reports per call, because the server refuses a url field that does not
+ * hold a URL with a 422 and the panel has to keep what was typed when it does.
+ */
+export function useBookCustomFields(bookId: number): UseBookCustomFieldsResult {
+  const queryClient = useQueryClient();
+  const definitions = useListCustomFields();
+  const values = useGetCustomFields(bookId);
+
+  const save = useSetCustomField({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: getGetCustomFieldsQueryKey(bookId),
+        });
+      },
+    },
+  });
+
+  return {
+    definitions: definitions.data ?? [],
+    values: values.data ?? [],
+    save: (fieldId, value, callbacks) =>
+      save.mutate({ bookId, fieldId, data: { value } }, callbacks),
+    isSaving: save.isPending,
+    error: definitions.error ?? values.error ?? save.error,
   };
 }
 

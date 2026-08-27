@@ -1148,3 +1148,134 @@ class TestFoldingCollectionNamesOutsideAscii:
         assert any("lower(name)" in definition for definition in definitions)
         assert not any("name_folded" in definition for definition in definitions)
         assert [name for _id, name in self.names_only()] == ["Fiction", self.UPPER]
+
+
+class TestCustomFieldsOnABook:
+    """Migration `f4a10c92b7d6`, checked as schema rather than as data.
+
+    The suite creates its tables from `Base.metadata`, so nothing else here
+    exercises this revision. What is worth pinning is the part of it that is
+    not simply "two tables appeared": the uniqueness rule the feature is shaped
+    around, and the two CHECKs that are the only thing enforcing a bound on a
+    path that never sees a Pydantic model.
+    """
+
+    PREVIOUS = "e7b3d02a5c94"
+
+    def _at_head(self) -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+
+    def test_both_tables_arrive(self):
+        self._at_head()
+
+        assert {"custom_fields", "custom_field_values"} <= table_names()
+
+    def test_a_book_holds_one_value_per_field(self):
+        """The shape of the feature, not an optimisation: without it a second
+        row renders twice and no writer knows which one it is updating."""
+        self._at_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
+            connection.execute(
+                text(
+                    "INSERT INTO custom_field_values (book_id, field_id, value) "
+                    "VALUES (1, 1, 'https://a.example/1')"
+                )
+            )
+            connection.commit()
+
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        "INSERT INTO custom_field_values (book_id, field_id, value) "
+                        "VALUES (1, 1, 'https://b.example/2')"
+                    )
+                )
+
+    def test_an_empty_value_is_refused_by_the_database(self):
+        """A cleared field is an absent row, and this is what keeps that true
+        on the one path with no Pydantic model in front of it: `backup.restore`
+        inserts through Core."""
+        self._at_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
+            connection.commit()
+
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        "INSERT INTO custom_field_values (book_id, field_id, value) "
+                        "VALUES (1, 1, '')"
+                    )
+                )
+
+    def test_a_value_past_the_bound_is_refused_by_the_database(self):
+        """SQLite ignores a VARCHAR width: measured, a Core insert of 50,000
+        characters into a `String(500)` stores 50,000. The CHECK is the bound."""
+        self._at_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Solaris')"))
+            connection.commit()
+
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        "INSERT INTO custom_field_values (book_id, field_id, value) "
+                        "VALUES (1, 1, :value)"
+                    ),
+                    {"value": "x" * 501},
+                )
+
+    def test_a_kind_nobody_recognises_is_refused_by_the_database(self):
+        """The one CHECK here that guards a 500 rather than a bad row.
+
+        `CustomFieldOut.kind` is typed, so a row carrying anything else makes
+        Pydantic raise while serialising the library wide definitions route:
+        one restored row, and every member's settings page answers 500 for
+        good. `backup.restore` inserts through Core and sees no Pydantic model,
+        so this is the only place that can refuse it.
+        """
+        self._at_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text("INSERT INTO custom_fields (name, kind) VALUES ('X', 'link')")
+            )
+
+    def test_two_fields_cannot_share_a_name(self):
+        self._at_head()
+
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'url')")
+            )
+            connection.commit()
+
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text("INSERT INTO custom_fields (name, kind) VALUES ('Calibre', 'text')")
+                )
+
+    def test_the_downgrade_drops_both_tables(self):
+        """Honest rather than clever: the values live nowhere else, so a
+        downgrade destroys them."""
+        from alembic import command
+
+        self._at_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert not ({"custom_fields", "custom_field_values"} & table_names())

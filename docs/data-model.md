@@ -275,9 +275,39 @@ reading progress. Both choices are argued in [decisions.md](decisions.md).
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the
-default language, and the four that configure overdue reminders (the toggle, the webhook
-URL, its signing secret, and the days between reminders). Values are strings; `backend/settings_store.py` handles typing. This
-exists so turning a feature on does not require an environment change and a restart.
+default language, the days between reminders, and one group per reminder channel: the
+webhook (its toggle, URL and signing secret), mail (its toggle, the seven standard `MAIL_*`
+settings and the recipient list) and Telegram (its toggle, bot token and chat id). Values
+are strings; `backend/settings_store.py` handles typing. This exists so turning a feature
+on does not require an environment change and a restart.
+
+**A settings row is not always the value in force.** Ten of these may be pinned by the
+deployment through an environment variable, and where one is, it wins and the app refuses
+to store a different value beside it. `settings_store.in_force` is the reader that applies
+that rule, and every consumer goes through it rather than through `get_raw`.
+
+**`custom_fields` and `custom_field_values`.** A fact this library keeps about a book that
+the schema does not know about. The definition is library wide (a `name`, unique
+case-insensitively, and a `kind` of `text` or `url`); the value is per book, one row per
+`(book_id, field_id)`, and **exists only when there is something in it**. The first concrete
+use, and the reason the pair exists, is a link to the same book in a calibre-web instance.
+
+Two tables rather than a JSON column on `books`, because a rename has to keep every value
+under it: a value references the definition by id and never carries its name, so renaming is
+one UPDATE of one row. A JSON blob would be a rewrite of every row that mentions the old
+name.
+
+`MAX_CUSTOM_FIELDS` is 25 and is **the only ceiling the feature needs**: a book holds at most
+one value per definition, so bounding the definitions bounds every book's payload and every
+rename's blast radius. `ck_custom_field_values_bounds` refuses a zero-length value, which is
+what makes "a book with no value shows nothing" a property of the schema rather than a filter
+somebody has to remember, and it caps the value at 500 characters, which SQLite's VARCHAR
+width does not.
+
+Whether a value renders as a **link** is decided on every read, not stored:
+`custom_fields.link_target` hands back a target only for `http` or `https` with a real host,
+no credentials and a parseable port. A `url` field whose value does not survive that is
+served as text. See [security.md](security.md).
 
 ## What `user_books` carries beyond a status
 
@@ -615,7 +645,11 @@ scanned the barcode on its back cover.
 
 ## Cascades
 
-Deleting a book removes its `user_books`, `loans`, `notes` and `book_tags` rows. Books,
+Deleting a book removes its `user_books`, `loans`, `notes`, `book_tags` and
+`custom_field_values` rows. Deleting a custom field definition removes its values, and
+`custom_fields.remove` does that itself rather than trusting the cascade, for the reason
+`delete_tag` clears its association rows: SQLite enforces a foreign key only while
+`PRAGMA foreign_keys` is on, and a migration's connection does not have it. Books,
 tags, collections and users are never cascade-deleted by anything else: deleting a
 collection sets `books.collection_id` to null and leaves every book where it was. There is no delete-account
 endpoint, test accounts included: removing a member means deciding what happens to the
@@ -664,6 +698,14 @@ Three details worth keeping:
   That also makes it the one query that sees trashed rows, which is why re-adding a book
   the caller trashed purges that row rather than reporting a conflict about a book nobody
   can see.
+
+**A custom field value obeys this rule without carrying a copy of it.** Every reader and
+writer in `custom_fields.py` takes `Book` objects rather than book ids, and a `Book` can only
+have been fetched, which means it has already been through the Shelf or through
+`dependencies.py`. So there is no second predicate to apply and nothing to forget: a caller
+that reaches for a value with an id off a URL gets a type error at the call site.
+`CustomField` deliberately carries no `values` relationship, so a definition cannot be walked
+to every book's value for it.
 
 Privacy can be changed by the book's owner or by an admin. Admins can also delete anyone's
 note. There is no other privilege difference, and admin does not bypass the visibility

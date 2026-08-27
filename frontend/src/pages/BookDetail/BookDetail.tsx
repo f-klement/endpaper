@@ -22,6 +22,7 @@ import QuoteList from "./components/QuoteList";
 import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
+import CustomFieldsPanel from "./components/CustomFieldsPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
 import StatusPicker from "./components/StatusPicker";
@@ -34,6 +35,7 @@ import {
   useBook,
   useBookActions,
   useBookCopies,
+  useBookCustomFields,
   useBookEnrichment,
   useBookLoan,
   useBookNotes,
@@ -76,8 +78,16 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const { t } = useTranslation();
   const bookId = Number(id);
 
-  const { book, tags, users, locations, collections, isLoading, error, refetch } =
-    useBook(bookId);
+  const {
+    book,
+    tags,
+    users,
+    locations,
+    collections,
+    isLoading,
+    error,
+    refetch,
+  } = useBook(bookId);
   const actions = useBookActions(bookId, () => navigate("/"));
   const notes = useBookNotes(bookId);
   const quotes = useBookQuotes(bookId);
@@ -85,6 +95,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const progress = useBookProgress(bookId);
   const enrichment = useBookEnrichment(bookId);
   const copies = useBookCopies(bookId);
+  const customFields = useBookCustomFields(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   const [showEnrichHelp, setShowEnrichHelp] = useState(false);
   // Above the early returns, because hooks are. Null until the book lands, and
@@ -109,7 +120,11 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const isOwner = book.added_by?.id === currentUser.id;
   const otherMembers = users.filter((member) => member.id !== currentUser.id);
   const pageError =
-    actions.error ?? notes.error ?? quotes.error ?? loan.error ?? progress.error;
+    actions.error ??
+    notes.error ??
+    quotes.error ??
+    loan.error ??
+    progress.error;
 
   return (
     <div className="max-w-lg mx-auto">
@@ -223,6 +238,20 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               isSaving={actions.isFiling}
               onChange={actions.setCollection}
               onCreate={actions.createCollection}
+            />
+
+            {/* Last in the group, and in this group rather than a sixth
+                section, because a custom field is this library's own filing of
+                a fact about the book, beside its tags, its shelf and its
+                collection. It draws nothing at all until somebody defines a
+                field in Settings, so a household that never uses the feature
+                never sees a handle for it. */}
+            <CustomFieldsPanel
+              definitions={customFields.definitions}
+              values={customFields.values}
+              isSaving={customFields.isSaving}
+              error={customFields.error}
+              onSave={customFields.save}
             />
           </CollapsibleSection>
 

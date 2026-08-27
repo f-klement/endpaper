@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -22,6 +22,52 @@ from uploads import read_image_upload, replace_image
 LOGIN_BG_BASE = covers.LOGIN_BG_BASE
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+#: The reminder sender settings whose write is uniform: trim it, store it,
+#: refuse it when the deployment pinned it.
+#:
+#: **A table rather than twelve `if payload.x is not None` blocks**, which is
+#: what the four settings above this feature are. The older ones each carry a
+#: rule of their own (the Google key's 409, the webhook URL's scheme note) and
+#: are left as they are; these twelve carry the same rule as each other, and
+#: writing it twelve times is twelve places to forget the environment check.
+_SENDER_TEXT: Final[dict[str, SettingKey]] = {
+    "overdue_mail_to": SettingKey.OVERDUE_MAIL_TO,
+    "mail_server": SettingKey.MAIL_SERVER,
+    "mail_port": SettingKey.MAIL_PORT,
+    "mail_username": SettingKey.MAIL_USERNAME,
+    "mail_password": SettingKey.MAIL_PASSWORD,
+    "mail_default_sender": SettingKey.MAIL_DEFAULT_SENDER,
+    "telegram_bot_token": SettingKey.TELEGRAM_BOT_TOKEN,
+    "telegram_chat_id": SettingKey.TELEGRAM_CHAT_ID,
+}
+
+_SENDER_BOOL: Final[dict[str, SettingKey]] = {
+    "overdue_mail_enabled": SettingKey.OVERDUE_MAIL_ENABLED,
+    "mail_use_tls": SettingKey.MAIL_USE_TLS,
+    "mail_use_ssl": SettingKey.MAIL_USE_SSL,
+    "overdue_telegram_enabled": SettingKey.OVERDUE_TELEGRAM_ENABLED,
+}
+
+
+def _refuse_if_pinned(key: SettingKey) -> None:
+    """409 rather than a write nothing will read.
+
+    Same rule as the Google Books key, and the same reason: a value the
+    environment supplies wins, so storing a different one produces a settings
+    screen that disagrees with what the next send actually uses. The message
+    names the variable, because "the environment" alone sends an operator
+    hunting through a compose file.
+    """
+    variable = config.env_variable_name(key) if settings_store.is_from_env(key) else ""
+    if variable:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{variable} is supplied by this deployment's environment and "
+                "cannot be changed here. Change it where the app is configured."
+            ),
+        )
 
 
 def _find_login_bg() -> Path | None:
@@ -66,6 +112,11 @@ def _read_settings(db: DbSession) -> SettingsOut:
     # be worse than showing nothing.
     key = from_env or settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY)
     webhook_secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
+    # The one in force for both, for the reason the Google key's preview is:
+    # showing a preview of a secret that is not the one being used is worse
+    # than showing none at all.
+    mail_password = settings_store.in_force(db, SettingKey.MAIL_PASSWORD)
+    telegram_token = settings_store.in_force(db, SettingKey.TELEGRAM_BOT_TOKEN)
 
     return SettingsOut(
         google_books_enabled=settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED),
@@ -86,6 +137,37 @@ def _read_settings(db: DbSession) -> SettingsOut:
         overdue_webhook_secret_preview=settings_store.mask(webhook_secret),
         has_overdue_webhook_secret=bool(webhook_secret),
         overdue_reminder_days=notifications.reminder_days(db),
+        # Mail. Every field reports the value **in force**, which is the
+        # environment's where it supplied one, for the reason the Google key's
+        # preview does: a screen showing a value that is not the one the next
+        # send will use is worse than one showing nothing. `mail_from_env` names
+        # which of the seven that applies to, so the UI can disable the field
+        # rather than offering an edit `_refuse_if_pinned` would 409.
+        overdue_mail_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_MAIL_ENABLED),
+        overdue_mail_to=settings_store.get_raw(db, SettingKey.OVERDUE_MAIL_TO),
+        mail_server=settings_store.in_force(db, SettingKey.MAIL_SERVER),
+        mail_port=settings_store.in_force(db, SettingKey.MAIL_PORT),
+        mail_username=settings_store.in_force(db, SettingKey.MAIL_USERNAME),
+        mail_password_preview=settings_store.mask(mail_password),
+        has_mail_password=bool(mail_password),
+        mail_use_tls=settings_store.bool_in_force(db, SettingKey.MAIL_USE_TLS),
+        mail_use_ssl=settings_store.bool_in_force(db, SettingKey.MAIL_USE_SSL),
+        mail_default_sender=settings_store.in_force(db, SettingKey.MAIL_DEFAULT_SENDER),
+        mail_from_env=[
+            pinned.value
+            for pinned in settings_store.MAIL_KEYS
+            if settings_store.is_from_env(pinned)
+        ],
+        overdue_telegram_enabled=settings_store.get_bool(
+            db, SettingKey.OVERDUE_TELEGRAM_ENABLED
+        ),
+        telegram_bot_token_preview=settings_store.mask(telegram_token),
+        has_telegram_bot_token=bool(telegram_token),
+        telegram_bot_token_from_env=settings_store.is_from_env(
+            SettingKey.TELEGRAM_BOT_TOKEN
+        ),
+        telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
+        telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
     )
 
 
@@ -187,5 +269,21 @@ def update_settings(
         settings_store.set_value(
             db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days)
         )
+
+    for field, key in _SENDER_TEXT.items():
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        _refuse_if_pinned(key)
+        # An empty string is a deliberate clear, like the Google key and the
+        # webhook secret. `None` never reaches here.
+        settings_store.set_value(db, key, value.strip())
+
+    for field, key in _SENDER_BOOL.items():
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        _refuse_if_pinned(key)
+        settings_store.set_value(db, key, "true" if value else "false")
 
     return _read_settings(db)

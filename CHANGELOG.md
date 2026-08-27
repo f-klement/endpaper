@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+**Added: a library can define its own fields on a book.** Name a field once, say
+whether it holds text or a web link, and every book can carry a value for it. A link
+field renders as a link out to another system, which is what this was built for: a
+book's page in a calibre-web instance. Renaming a field keeps every value under it.
+Deleting one takes them all and is admin only.
+
+A link is only ever offered when the address stored is the address a browser will
+visit. Some characters look like a full stop to a reader and are read as one by a
+browser without being one: an address using them is rewritten so the words and the
+destination match, and one that cannot be reconciled is shown as plain text rather
+than as something clickable that goes somewhere else.
+
+**Added: overdue reminders can now be sent by email and to a Telegram chat.** Until now
+they went to a webhook only, which meant somebody in the household had to build a receiver
+before the feature did anything, and most had none. Email works for anybody with a mailbox,
+and Telegram needs a bot and a chat rather than a service of your own. The webhook is
+unchanged and keeps working. Switch on as many of the three as you like: they all carry the
+same list, and any one of them getting through counts as the loan having been chased.
+Private books are left out of all three, exactly as they always were on the webhook, and
+the count of what was held back is now reported for each channel rather than once for the
+run. "Send now" reports one line per channel, so a run that reached the chat and not the
+webhook no longer reads as a clean send.
+
+Mail and Telegram are configured in Settings, under Mail and chat reminders. The
+credentials can instead come from the deployment, through the seven standard `MAIL_*`
+variables plus `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`; where one is set it wins, the
+field is fixed in Settings, and the app refuses to store a value beside it that nothing
+would read. Neither secret is ever sent back to a browser in full. Certificates are always
+checked and there is no setting that relaxes that; a mail password configured with no
+encryption is refused rather than sent in the clear. `MAIL_DEBUG` is deliberately not
+honoured, because Python writes the password exchange to the log under it.
+
 **Fixed: a catalogue could stop a search working, or use this server to reach somewhere
 else.** Records are fetched from six third party catalogues. A reply that was much larger
 than any real record could exhaust the server's memory, one that redirected could send it to

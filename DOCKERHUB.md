@@ -72,8 +72,33 @@ volumes:
 |---|---|---|
 | `ENABLE_OVERDUE_TICKER` | `true` | The hourly digest runs in-process. **Set it `false` if you run more than one web process**, and drive `POST /api/loans/overdue/notify` from cron instead: the ticker assumes exactly one process, which the shipped image guarantees and a scaled deployment does not. |
 
-Where the digest is posted, how often a loan is chased, and whether the feature is
-on at all are settings in the app rather than environment variables.
+Where the digest is posted, how often a loan is chased, and whether each channel is on at
+all are settings in the app rather than environment variables. The digest goes out on every
+channel switched on: a webhook, email over SMTP, and a Telegram chat.
+
+The mail and Telegram **credentials** may come from the environment instead, which is what
+a secret manager or a compose file is for. Where one is set it wins over anything stored,
+the field in Settings is greyed out, and the app refuses to overwrite it.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MAIL_SERVER` | none | SMTP host |
+| `MAIL_PORT` | `587` | |
+| `MAIL_USERNAME` | none | Leave empty for a relay that needs no login |
+| `MAIL_PASSWORD` | none | Refused unless STARTTLS or TLS is on: it would otherwise cross the network in the clear |
+| `MAIL_USE_TLS` | `true` | STARTTLS on a plain connection |
+| `MAIL_USE_SSL` | `false` | Implicit TLS. Setting both is refused: they are two protocols |
+| `MAIL_DEFAULT_SENDER` | none | The `From` address |
+| `TELEGRAM_BOT_TOKEN` | none | From @BotFather |
+| `TELEGRAM_CHAT_ID` | none | The group the bot was added to, or an `@name` |
+
+`MAIL_DEBUG` is **not** honoured, though it is the eighth of the standard `MAIL_*` names.
+Python's smtplib writes the AUTH exchange to stderr under it, so supporting it would be a
+supported way of printing your mail password into the container log.
+
+Certificates and host names are always verified, and nothing here can switch that off. The
+recipient list lives in Settings rather than the environment, because it is the household's
+to change.
 
 ### Authentication
 

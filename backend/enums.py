@@ -270,6 +270,42 @@ class SettingKey(StrEnum):
     OVERDUE_WEBHOOK_SECRET = "overdue_webhook_secret"
     OVERDUE_REMINDER_DAYS = "overdue_reminder_days"
 
+    # Mail. The seven names match the standard `MAIL_*` environment variables a
+    # deployment already carries, lowercased, so an operator setting
+    # `MAIL_SERVER` and an admin filling in the same field are naming one fact.
+    # The eighth standard name, `MAIL_DEBUG`, is deliberately absent: smtplib's
+    # debug output writes the AUTH exchange to stderr, so a toggle for it is a
+    # switch that puts the mail password in the container log.
+    OVERDUE_MAIL_ENABLED = "overdue_mail_enabled"
+    OVERDUE_MAIL_TO = "overdue_mail_to"
+    MAIL_SERVER = "mail_server"
+    MAIL_PORT = "mail_port"
+    MAIL_USERNAME = "mail_username"
+    MAIL_PASSWORD = "mail_password"
+    MAIL_USE_TLS = "mail_use_tls"
+    MAIL_USE_SSL = "mail_use_ssl"
+    MAIL_DEFAULT_SENDER = "mail_default_sender"
+
+    # Telegram. No host key, and that absence is the control: see
+    # `notifications.TELEGRAM_API` for why making it configurable would give
+    # away the one property this sender has that the webhook does not.
+    OVERDUE_TELEGRAM_ENABLED = "overdue_telegram_enabled"
+    TELEGRAM_BOT_TOKEN = "telegram_bot_token"
+    TELEGRAM_CHAT_ID = "telegram_chat_id"
+
+
+class OverdueSender(StrEnum):
+    """Which channel a reminder went out on.
+
+    A closed set because the result reports one outcome per sender and the
+    client renders each: a string would let a new sender arrive on screen with
+    no label and no test noticing.
+    """
+
+    WEBHOOK = "webhook"
+    EMAIL = "email"
+    TELEGRAM = "telegram"
+
 
 class OverdueNotifyReason(StrEnum):
     """Why the overdue digest sent nothing.
@@ -293,6 +329,13 @@ class OverdueNotifyReason(StrEnum):
     NOTHING_DUE = "nothing_due"
     #: The request was made and failed. The loans are left to be retried.
     UNREACHABLE = "unreachable"
+    #: The sender is switched on and its configuration cannot be used. Distinct
+    #: from `NO_URL`, which is the webhook's own empty-destination case: this
+    #: one covers a mail server with no host, credentials that would cross the
+    #: wire in the clear, and a Telegram chat id that is not a chat id. A
+    #: refusal an operator can act on reads differently from a receiver that
+    #: was tried and did not answer.
+    MISCONFIGURED = "misconfigured"
 
 
 class Locale(StrEnum):
@@ -331,3 +374,27 @@ class BulkAction(StrEnum):
     # it, the same way SET_LOCATION's empty string unpacks a box.
     SET_COLLECTION = "set_collection"
     DELETE = "delete"
+
+
+class CustomFieldKind(StrEnum):
+    """What a Library said one of its own fields holds.
+
+    **Declared per field, never detected from the value**, and the difference
+    matters at exactly one place: whether the Book page renders the value as a
+    link. Detection reads a member typing prose that happens to start with
+    `http` as a URL, and it reads a URL somebody meant as text the same way.
+    The Library already has to name the field, so it can say what goes in it.
+
+    TEXT is the default and the safe one: nothing is ever linked from a TEXT
+    field, whatever the value looks like.
+
+    URL is a link out to another system, which is the requirement this feature
+    exists for: a Book's page in a calibre-web instance. **The declaration is
+    not the permission.** `custom_fields.link_target` re-reads the value on
+    every serialisation and returns a target only for `http` and `https`, so a
+    row that reached the table without passing the write check (a restore, a
+    hand edit) is served as text rather than as a link.
+    """
+
+    TEXT = "text"
+    URL = "url"

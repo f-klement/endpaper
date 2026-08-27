@@ -46,6 +46,11 @@ import type {
   CollectionAssign,
   CopyCreate,
   CoverBackfillOut,
+  CustomFieldCreate,
+  CustomFieldOut,
+  CustomFieldRename,
+  CustomFieldValueOut,
+  CustomFieldValueUpdate,
   DuplicateGroup,
   EnrichBookParams,
   ExportBooksParams,
@@ -1263,6 +1268,458 @@ export const useBackfillCovers = <
   TContext
 > => {
   return useMutation(getBackfillCoversMutationOptions(options), queryClient);
+};
+export const getListCustomFieldsUrl = () => {
+  return `/api/books/custom-fields`;
+};
+
+/**
+ * Every field this library keeps, in the order it defined them.
+ *
+ * **No usage count**, unlike `GET /api/books/tags`. A count of the books
+ * carrying a field is a disclosure: it is drawn from books the caller may not
+ * see, so it would have to be scoped to the viewer, and a viewer scoped
+ * number in a confirmation dialog would then understate what deleting the
+ * field is about to destroy. Neither number is worth having, so the
+ * confirmation says "every book" instead. `docs/security.md` records it.
+ * @summary List Custom Fields
+ */
+export const listCustomFields = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CustomFieldOut[]> => {
+  return customFetch<CustomFieldOut[]>(getListCustomFieldsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCustomFieldsQueryKey = () => {
+  return [`/api/books/custom-fields`] as const;
+};
+
+export const getListCustomFieldsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCustomFields>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listCustomFields>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListCustomFieldsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCustomFields>>
+  > = ({ signal }) => listCustomFields({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCustomFields>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListCustomFieldsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCustomFields>>
+>;
+export type ListCustomFieldsQueryError = unknown;
+
+export function useListCustomFields<
+  TData = Awaited<ReturnType<typeof listCustomFields>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCustomFields>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCustomFields>>,
+          TError,
+          Awaited<ReturnType<typeof listCustomFields>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListCustomFields<
+  TData = Awaited<ReturnType<typeof listCustomFields>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCustomFields>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCustomFields>>,
+          TError,
+          Awaited<ReturnType<typeof listCustomFields>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListCustomFields<
+  TData = Awaited<ReturnType<typeof listCustomFields>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCustomFields>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Custom Fields
+ */
+
+export function useListCustomFields<
+  TData = Awaited<ReturnType<typeof listCustomFields>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCustomFields>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListCustomFieldsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDefineCustomFieldUrl = () => {
+  return `/api/books/custom-fields`;
+};
+
+/**
+ * Define a field for the whole library.
+ *
+ * Any member, like `create_tag` and for the same reason: public books are a
+ * shared shelf that anyone may curate, and a vocabulary only an admin can
+ * extend is a vocabulary nobody uses. Defining one is additive and changes no
+ * book.
+ *
+ * A name that already exists, in any capitalisation, returns that field
+ * rather than a 409: somebody typing a name that is already there wants that
+ * field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+ * @summary Define Custom Field
+ */
+export const defineCustomField = async (
+  customFieldCreate: CustomFieldCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CustomFieldOut> => {
+  return customFetch<CustomFieldOut>(getDefineCustomFieldUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(customFieldCreate),
+  });
+};
+
+export const getDefineCustomFieldMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof defineCustomField>>,
+    TError,
+    { data: CustomFieldCreate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof defineCustomField>>,
+  TError,
+  { data: CustomFieldCreate },
+  TContext
+> => {
+  const mutationKey = ["defineCustomField"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof defineCustomField>>,
+    { data: CustomFieldCreate }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return defineCustomField(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DefineCustomFieldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof defineCustomField>>
+>;
+export type DefineCustomFieldMutationBody = CustomFieldCreate;
+export type DefineCustomFieldMutationError = HTTPValidationError;
+
+/**
+ * @summary Define Custom Field
+ */
+export const useDefineCustomField = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof defineCustomField>>,
+      TError,
+      { data: CustomFieldCreate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof defineCustomField>>,
+  TError,
+  { data: CustomFieldCreate },
+  TContext
+> => {
+  return useMutation(getDefineCustomFieldMutationOptions(options), queryClient);
+};
+export const getDeleteCustomFieldUrl = (fieldId: number) => {
+  return `/api/books/custom-fields/${fieldId}`;
+};
+
+/**
+ * Remove a field, and its value on every book.
+ *
+ * **Admin only, and deliberately asymmetric with defining one**, which is the
+ * same split `delete_tag` makes. Defining a field is additive and reversible
+ * by deleting it. Deleting one destroys, in one request and with no undo,
+ * something every member of the house typed by hand, on books the caller
+ * cannot necessarily see. A `CustomField` records nobody as its author, so
+ * there is no owner to ask.
+ *
+ * It is the sharper case of the two: deleting a tag takes a label off a book,
+ * and deleting a field takes the **content** a member wrote.
+ *
+ * 204, like `delete_tag`, and the number of values removed goes to the log
+ * rather than to the caller. See `list_custom_fields` for why no count is
+ * published.
+ * @summary Delete Custom Field
+ */
+export const deleteCustomField = async (
+  fieldId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteCustomFieldUrl(fieldId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteCustomFieldMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteCustomField>>,
+    TError,
+    { fieldId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteCustomField>>,
+  TError,
+  { fieldId: number },
+  TContext
+> => {
+  const mutationKey = ["deleteCustomField"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteCustomField>>,
+    { fieldId: number }
+  > = (props) => {
+    const { fieldId } = props ?? {};
+
+    return deleteCustomField(fieldId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteCustomFieldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteCustomField>>
+>;
+
+export type DeleteCustomFieldMutationError = HTTPValidationError;
+
+/**
+ * @summary Delete Custom Field
+ */
+export const useDeleteCustomField = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteCustomField>>,
+      TError,
+      { fieldId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteCustomField>>,
+  TError,
+  { fieldId: number },
+  TContext
+> => {
+  return useMutation(getDeleteCustomFieldMutationOptions(options), queryClient);
+};
+export const getRenameCustomFieldUrl = (fieldId: number) => {
+  return `/api/books/custom-fields/${fieldId}`;
+};
+
+/**
+ * Rename a field. Every value under it is kept.
+ *
+ * That is the schema rather than this handler: values reference the
+ * definition by id, so nothing about them mentions the name. `custom_fields.rename`
+ * records why renaming onto an existing name is refused instead of merged.
+ * @summary Rename Custom Field
+ */
+export const renameCustomField = async (
+  fieldId: number,
+  customFieldRename: CustomFieldRename,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CustomFieldOut> => {
+  return customFetch<CustomFieldOut>(getRenameCustomFieldUrl(fieldId), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(customFieldRename),
+  });
+};
+
+export const getRenameCustomFieldMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renameCustomField>>,
+    TError,
+    { fieldId: number; data: CustomFieldRename },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof renameCustomField>>,
+  TError,
+  { fieldId: number; data: CustomFieldRename },
+  TContext
+> => {
+  const mutationKey = ["renameCustomField"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof renameCustomField>>,
+    { fieldId: number; data: CustomFieldRename }
+  > = (props) => {
+    const { fieldId, data } = props ?? {};
+
+    return renameCustomField(fieldId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RenameCustomFieldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof renameCustomField>>
+>;
+export type RenameCustomFieldMutationBody = CustomFieldRename;
+export type RenameCustomFieldMutationError = HTTPValidationError;
+
+/**
+ * @summary Rename Custom Field
+ */
+export const useRenameCustomField = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof renameCustomField>>,
+      TError,
+      { fieldId: number; data: CustomFieldRename },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof renameCustomField>>,
+  TError,
+  { fieldId: number; data: CustomFieldRename },
+  TContext
+> => {
+  return useMutation(getRenameCustomFieldMutationOptions(options), queryClient);
 };
 export const getListDuplicatesUrl = () => {
   return `/api/books/duplicates`;
@@ -3912,6 +4369,285 @@ export const useUploadCover = <
   TContext
 > => {
   return useMutation(getUploadCoverMutationOptions(options), queryClient);
+};
+export const getGetCustomFieldsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/custom-fields`;
+};
+
+/**
+ * What this book holds in the library's own fields.
+ *
+ * Only the fields it has something in: a book with no value for a field is
+ * absent from this list rather than present and empty, because clearing a
+ * value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+ * could be filled in.
+ * @summary Get Custom Fields
+ */
+export const getCustomFields = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CustomFieldValueOut[]> => {
+  return customFetch<CustomFieldValueOut[]>(getGetCustomFieldsUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCustomFieldsQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/custom-fields`] as const;
+};
+
+export const getGetCustomFieldsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCustomFields>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCustomFields>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCustomFieldsQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getCustomFields>>> = ({
+    signal,
+  }) => getCustomFields(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCustomFields>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetCustomFieldsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCustomFields>>
+>;
+export type GetCustomFieldsQueryError = HTTPValidationError;
+
+export function useGetCustomFields<
+  TData = Awaited<ReturnType<typeof getCustomFields>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCustomFields>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCustomFields>>,
+          TError,
+          Awaited<ReturnType<typeof getCustomFields>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCustomFields<
+  TData = Awaited<ReturnType<typeof getCustomFields>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCustomFields>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCustomFields>>,
+          TError,
+          Awaited<ReturnType<typeof getCustomFields>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCustomFields<
+  TData = Awaited<ReturnType<typeof getCustomFields>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCustomFields>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Custom Fields
+ */
+
+export function useGetCustomFields<
+  TData = Awaited<ReturnType<typeof getCustomFields>>,
+  TError = HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCustomFields>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetCustomFieldsQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getSetCustomFieldUrl = (bookId: number, fieldId: number) => {
+  return `/api/books/${bookId}/custom-fields/${fieldId}`;
+};
+
+/**
+ * Fill in a field on this book, or clear it with an empty value.
+ *
+ * One verb for both, because emptying the box and saving is what a person
+ * does and a client should not have to decide which of two verbs that means.
+ *
+ * Returns the book's whole list rather than the one value, so a client that
+ * has just written one is holding the same thing `GET` would give it.
+ *
+ * 422 when the field holds a link and the value is not one: an address with
+ * no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
+ * `custom_fields.link_target` for the whole list and why it is re-checked on
+ * every read as well as here.
+ * @summary Set Custom Field
+ */
+export const setCustomField = async (
+  bookId: number,
+  fieldId: number,
+  customFieldValueUpdate: CustomFieldValueUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CustomFieldValueOut[]> => {
+  return customFetch<CustomFieldValueOut[]>(
+    getSetCustomFieldUrl(bookId, fieldId),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(customFieldValueUpdate),
+    },
+  );
+};
+
+export const getSetCustomFieldMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setCustomField>>,
+    TError,
+    { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setCustomField>>,
+  TError,
+  { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+  TContext
+> => {
+  const mutationKey = ["setCustomField"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setCustomField>>,
+    { bookId: number; fieldId: number; data: CustomFieldValueUpdate }
+  > = (props) => {
+    const { bookId, fieldId, data } = props ?? {};
+
+    return setCustomField(bookId, fieldId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetCustomFieldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setCustomField>>
+>;
+export type SetCustomFieldMutationBody = CustomFieldValueUpdate;
+export type SetCustomFieldMutationError = HTTPValidationError;
+
+/**
+ * @summary Set Custom Field
+ */
+export const useSetCustomField = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setCustomField>>,
+      TError,
+      { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setCustomField>>,
+  TError,
+  { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+  TContext
+> => {
+  return useMutation(getSetCustomFieldMutationOptions(options), queryClient);
 };
 export const getSetDiscussUrl = (bookId: number) => {
   return `/api/books/${bookId}/discuss`;

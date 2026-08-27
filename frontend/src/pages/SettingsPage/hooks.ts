@@ -40,11 +40,20 @@ import {
   useImportCsv,
   usePreviewImport,
 } from "../../api/generated/endpoints/imports/imports";
-import { useBackfillCovers } from "../../api/generated/endpoints/books/books";
+import {
+  getListCustomFieldsQueryKey,
+  useBackfillCovers,
+  useDefineCustomField,
+  useDeleteCustomField,
+  useListCustomFields,
+  useRenameCustomField,
+} from "../../api/generated/endpoints/books/books";
 import { useInvalidate } from "../../api/invalidate";
 import { useNotifyOverdue } from "../../api/generated/endpoints/loans/loans";
 import type {
   CoverBackfillOut,
+  CustomFieldKind,
+  CustomFieldOut,
   ImportResultOut,
   ImportPreviewOut,
   OverdueNotifyResult,
@@ -375,10 +384,12 @@ export const SETTINGS_SECTIONS = [
   "appearance",
   "import",
   "covers",
+  "customFields",
   "googleBooks",
   "goodreads",
   "defaultLanguage",
   "overdue",
+  "reminderSenders",
   "testAccounts",
   "backup",
   "about",
@@ -394,7 +405,9 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
  * setting is the whole of it and reading it is why you are here, closed when it
  * starts a job or holds a form.** Language, appearance, the Goodreads toggle
  * and the default language answer "what is this set to" in one glance; import,
- * the cover backfill, the webhook form, test accounts and backup are errands
+ * the cover backfill, the webhook form, the mail and chat form, the custom
+ * field list, test accounts
+ * and backup are errands
  * somebody arrives at deliberately, and a deliberate arrival is what a fold
  * costs least.
  *
@@ -410,13 +423,15 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
  * `about` is open under the same rule, and its openness is also the reason it
  * is not the only thing open. It carries a donation link, and a settings page
  * whose one expanded card asks for money is a donation prompt wearing a
- * settings page. Six open of eleven is what keeps it one card among many for an
- * admin.
+ * settings page. Six open of thirteen is what keeps it one card among many for
+ * an admin.
  *
- * **A member who is not an admin sees five cards** (language, appearance,
- * import, covers, about), of which three are open, so the split matters most
- * there: folding `language` as well would leave that reader four closed handles
- * and nothing to read. It is also why About's own height is capped rather than
+ * **A member who is not an admin sees six cards** (language, appearance,
+ * import, covers, custom fields, about), of which three are open, so the split
+ * matters most there: folding `language` as well would leave that reader five
+ * closed handles and nothing to read. Custom fields is the sixth and is closed,
+ * because defining one is an errand: what a non-admin reads on arrival is
+ * unchanged at three. It is also why About's own height is capped rather than
  * balanced against other cards: on that page there are no other cards to
  * balance it against, and every one of the extra open cards is admin only.
  *
@@ -428,14 +443,79 @@ export const SETTINGS_SECTION_DEFAULTS: Record<SettingsSectionId, boolean> = {
   appearance: true,
   import: false,
   covers: false,
+  customFields: false,
   googleBooks: true,
   goodreads: true,
   defaultLanguage: true,
   overdue: false,
+  reminderSenders: false,
   testAccounts: false,
   backup: false,
   about: true,
 };
+
+export interface UseCustomFieldsResult {
+  fields: CustomFieldOut[];
+  define: (name: string, kind: CustomFieldKind) => void;
+  rename: (fieldId: number, name: string) => void;
+  remove: (fieldId: number) => void;
+  isBusy: boolean;
+  error: unknown;
+}
+
+/**
+ * The path of one book's custom field values, as a pattern.
+ *
+ * A pattern rather than a key because the book id is **inside the path**, so
+ * there is no prefix a key filter could match and no id to hand here anyway: a
+ * rename changes the label every book draws and a delete removes rows from
+ * every book. Same shape and same reason as `BOOK_RECORD` in
+ * `api/invalidate.ts`.
+ *
+ * Deliberately not part of the `catalogue()` vocabulary there: these rows are
+ * not derived from the books table, they change only when written, and
+ * `tests/api/invalidate.test.ts` is where that classification is recorded.
+ */
+const BOOK_CUSTOM_FIELDS = /^\/api\/books\/\d+\/custom-fields$/;
+
+/**
+ * The library's own field definitions.
+ *
+ * Every write drops the list and every book's values with it: a renamed field
+ * is the label a book draws, and a deleted one takes its values off every
+ * book, so leaving those cached would show a name nobody uses any more.
+ */
+export function useCustomFields(): UseCustomFieldsResult {
+  const queryClient = useQueryClient();
+  const fields = useListCustomFields();
+
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListCustomFieldsQueryKey(),
+      });
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          const path = query.queryKey[0];
+          return typeof path === "string" && BOOK_CUSTOM_FIELDS.test(path);
+        },
+      });
+    },
+  };
+
+  const define = useDefineCustomField({ mutation });
+  const rename = useRenameCustomField({ mutation });
+  const remove = useDeleteCustomField({ mutation });
+
+  return {
+    fields: fields.data ?? [],
+    define: (name, kind) => define.mutate({ data: { name, kind } }),
+    rename: (fieldId, name) => rename.mutate({ fieldId, data: { name } }),
+    remove: (fieldId) => remove.mutate({ fieldId }),
+    isBusy: define.isPending || rename.isPending || remove.isPending,
+    error: fields.error ?? define.error ?? rename.error ?? remove.error,
+  };
+}
 
 export interface UseSettingsSectionsResult {
   isOpen: (section: SettingsSectionId) => boolean;

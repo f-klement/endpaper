@@ -3,6 +3,8 @@ import { useState } from "react";
 import {
   OverdueNotifyReason,
   type OverdueNotifyResult,
+  OverdueSender,
+  type SenderOutcome,
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../api/generated/model";
@@ -23,6 +25,39 @@ const REASON_LABELS: Record<OverdueNotifyReason, MessageKey> = {
   [OverdueNotifyReason.no_url]: "settings.overdueNotSentNoUrl",
   [OverdueNotifyReason.nothing_due]: "settings.overdueNotSentNothingDue",
   [OverdueNotifyReason.unreachable]: "settings.overdueNotSentUnreachable",
+  [OverdueNotifyReason.misconfigured]: "settings.overdueNotSentMisconfigured",
+};
+
+/**
+ * One name per channel, as a `Record` for the same reason as above: a sender
+ * added on the server is a compile error here rather than a blank line.
+ */
+const SENDER_LABELS: Record<OverdueSender, MessageKey> = {
+  [OverdueSender.webhook]: "settings.overdueSenderWebhook",
+  [OverdueSender.email]: "settings.overdueSenderEmail",
+  [OverdueSender.telegram]: "settings.overdueSenderTelegram",
+};
+
+/**
+ * The same five reasons again, as a fragment that reads after a channel's name.
+ *
+ * **A second table rather than reusing `REASON_LABELS`, because those are whole
+ * sentences about the run.** Printed in a per-channel row they were wrong twice
+ * over: the email row read "Email: The **webhook** could not be reached, so
+ * nothing was sent", and the Telegram row read "Telegram: Nothing was sent. The
+ * message below says which", where that row *is* the message below.
+ *
+ * `disabled` and `nothing_due` cannot appear here, because `senders` holds only
+ * channels that were switched on and only for a run that had loans to send.
+ * They are given a fragment anyway: the `Record` is exhaustive over the union,
+ * which is what makes a sixth reason a compile error.
+ */
+const SENDER_ROW_REASONS: Record<OverdueNotifyReason, MessageKey> = {
+  [OverdueNotifyReason.disabled]: "settings.overdueRowDisabled",
+  [OverdueNotifyReason.no_url]: "settings.overdueRowNoUrl",
+  [OverdueNotifyReason.nothing_due]: "settings.overdueRowNothingDue",
+  [OverdueNotifyReason.unreachable]: "settings.overdueRowUnreachable",
+  [OverdueNotifyReason.misconfigured]: "settings.overdueRowMisconfigured",
 };
 
 interface OverdueSectionProps {
@@ -41,11 +76,13 @@ interface OverdueSectionProps {
 }
 
 /**
- * Where overdue reminders go, and how often.
+ * The reminder itself: how often it goes out, when it last did, and the webhook.
  *
- * A generic webhook rather than an integration with one chat service, because
- * a self-hosted app other libraries run should not carry an integration with
- * something nobody else runs.
+ * The webhook is here rather than beside the other two channels because it is
+ * the one that was here first, and because the interval and the send button
+ * belong to the feature rather than to any one channel. Mail and Telegram are
+ * in `ReminderSendersSection`, added on the argument that a webhook makes the
+ * household build the receiver.
  *
  * The URL is a plain field and the secret is a write-only one. That asymmetry
  * is deliberate: a destination nobody can read back is a destination nobody
@@ -279,6 +316,30 @@ export default function OverdueSection({
                 count: sendResult.skipped_private ?? 0,
               })}`}
           </p>
+        )}
+        {/* One line per channel that was tried. `sent` at the top is true when
+            any channel delivered, and the loans are stamped on that, so a run
+            that reached the chat and not the webhook would otherwise read as a
+            clean send with the failure nowhere on the screen. */}
+        {sendResult && (sendResult.senders?.length ?? 0) > 0 && (
+          <ul className="text-xs text-paper-600 dark:text-paper-400 space-y-0.5">
+            {(sendResult.senders ?? []).map((entry: SenderOutcome) => (
+              <li key={entry.sender}>
+                {entry.sent
+                  ? t("settings.overdueSenderSent", {
+                      sender: t(SENDER_LABELS[entry.sender]),
+                    })
+                  : t("settings.overdueSenderFailed", {
+                      sender: t(SENDER_LABELS[entry.sender]),
+                      detail: t(
+                        entry.reason
+                          ? SENDER_ROW_REASONS[entry.reason]
+                          : "settings.overdueRowNothingSent",
+                      ),
+                    })}
+              </li>
+            ))}
+          </ul>
         )}
         {sendError != null && (
           <ErrorState

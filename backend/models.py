@@ -32,6 +32,7 @@ from enums import (
     BookCondition,
     BookFormat,
     ClassificationScheme,
+    CustomFieldKind,
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
@@ -585,6 +586,15 @@ class Book(Base):
         cascade="all, delete-orphan",
         order_by="Classification.id",
     )
+    # Cascaded like the notes and the quotes, and ordered by the definition
+    # rather than by this row: a Book reads its fields in the order the Library
+    # defined them, so two Books list the same fields the same way.
+    custom_field_values: Mapped[list[CustomFieldValue]] = relationship(
+        "CustomFieldValue",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="CustomFieldValue.field_id",
+    )
 
     @validates("cover_url")
     def _store_covers_over_https(self, _key: str, url: str | None) -> str | None:
@@ -1075,6 +1085,179 @@ class Classification(Base):
     )
 
     book: Mapped[Book] = relationship("Book", back_populates="classifications")
+
+
+#: The longest name a Library may give one of its own fields.
+#:
+#: Shorter than a Tag's 100 because this one is a **label read beside a value**
+#: rather than a word in a picker: "Calibre-web" and "Bought from" are the
+#: shape, and a name that wraps has already stopped being a label.
+CUSTOM_FIELD_NAME_MAX = 60
+
+#: The longest value one may hold.
+#:
+#: The same 500 `books.cover_url` takes, and for the same reason: the value
+#: this feature exists to store is a URL into another system, and a URL is the
+#: longest thing anybody puts in a one-line field. It is a **stored denial of
+#: service bound** as much as a display one, which is why the column is not
+#: `Text`: see `ck_custom_field_values_bounds`.
+CUSTOM_FIELD_VALUE_MAX = 500
+
+#: How many fields the Library may define at all.
+#:
+#: **This is the only ceiling the feature needs**, and that is worth stating
+#: rather than leaving to be re-derived. A Book holds at most one value per
+#: definition (`uq_custom_field_values_book_field`), so bounding the
+#: definitions bounds every Book's payload, every rename's blast radius and
+#: every row this feature can add. Without it a Library could define ten
+#: thousand fields and make one Book's page ten thousand rows.
+#:
+#: 25 rather than a rounder number because it is past what §24 describes (one
+#: link to another system, plus whatever else a Household turns out to keep)
+#: and small enough that `custom_fields.definitions` can scan the whole table
+#: in Python to fold a name, which is what `create_tag` does and why.
+MAX_CUSTOM_FIELDS = 25
+
+
+class CustomField(Base):
+    """A fact this Library keeps about Books that the schema does not know.
+
+    The first concrete one, and the reason this table exists: a link to the
+    Book in a calibre-web instance. There is nowhere to put that, and a column
+    per Household opinion is a schema nobody can migrate.
+
+    **Library wide, like a Tag and unlike a reading record.** Defining one is
+    additive and says nothing about any Book; filling it in is the per Book
+    half and lives in `CustomFieldValue`.
+
+    **Two tables rather than a JSON column on `books`.** A JSON blob cannot be
+    renamed without rewriting every row that mentions the old name, which is
+    exactly what user story 5 forbids: the values must survive a rename. Here
+    a rename is one UPDATE of one row and no value moves at all.
+
+    **Never a privacy boundary**, the same promise `Collection` makes. A field
+    is a shape, not an access rule: what may be read is decided by
+    `visible_to()` on the Book the value hangs off, and nothing here is
+    consulted by that decision.
+
+    Ordered by `id` wherever it is listed, which is the order the Library
+    defined them in. No `position` column: reordering is a feature nobody asked
+    for, and insertion order is stable, which is the property a reader needs.
+    """
+
+    __tablename__ = "custom_fields"
+
+    # SQLite ignores a VARCHAR width, so the width below documents the column
+    # and this enforces it. Measured on `quotes`, not assumed: a Core insert of
+    # 50,000 characters into a `String(2000)` stores 50,000. `backup.restore`
+    # is the one path that reaches this table without a Pydantic model.
+    __table_args__ = (
+        CheckConstraint(
+            f"length(name) > 0 AND length(name) <= {CUSTOM_FIELD_NAME_MAX}",
+            name="ck_custom_fields_name_bounds",
+        ),
+        # **The enum is a plain VARCHAR, so this is what makes it closed.**
+        # `CustomFieldOut.kind` is typed, so a row holding anything else makes
+        # Pydantic raise while serialising the Library wide definitions route:
+        # one bad row, a 500 on every read of the list, for good. That is the
+        # poisoned row shape `custom_fields.link_target` is written against,
+        # and the write path cannot close it, because `backup.restore` inserts
+        # through Core and sees no Pydantic model and no validator. Refusing
+        # the insert here makes a corrupt archive fail loudly at the restore
+        # instead of quietly afterwards.
+        #
+        # **Declared here and not only in the migration**, which is where it
+        # spent one round: `Base.metadata.create_all` builds the table from
+        # this tuple, so a constraint living only in a revision is absent from
+        # every database built that way and `--autogenerate` proposes dropping
+        # it. `tests/test_custom_fields.py::
+        # test_the_model_carries_the_kind_constraint_the_migration_declares`
+        # is what caught it, twice.
+        #
+        # Interpolated from the enum rather than written out, so adding a kind
+        # cannot leave the constraint behind. Sorted, so the DDL is stable
+        # across runs and a migration diff means something.
+        CheckConstraint(
+            "kind IN ({})".format(
+                ", ".join(f"'{kind.value}'" for kind in sorted(CustomFieldKind))
+            ),
+            name="ck_custom_fields_kind",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Unique **binary**, which is the backstop rather than the rule anybody
+    # meets: `custom_fields.define` folds in Python and answers the existing
+    # row, because SQLite's `lower()` is ASCII only and would let `Ähnliches`
+    # and `ähnliches` both exist. Same pair of mechanisms as `tags.name`, and
+    # the same reason, recorded in `docs/decisions.md` under "SQLite folds case
+    # in ASCII and Python does not".
+    name: Mapped[str] = mapped_column(
+        String(CUSTOM_FIELD_NAME_MAX), unique=True, nullable=False
+    )
+    kind: Mapped[CustomFieldKind] = mapped_column(String(20), nullable=False)
+
+    # **No `values` relationship, deliberately.** It would be a way to read
+    # every Book's value for a field from a definition nobody had to be allowed
+    # to see, which is the one shape this feature has to not offer, and a lazy
+    # relationship is invisible to any rule that reads query shapes. Deleting a
+    # definition does not need it: `custom_fields.remove` deletes the rows
+    # itself, for the reason `delete_tag` clears its association rows rather
+    # than trusting a cascade SQLite only enforces while a pragma is on.
+
+
+class CustomFieldValue(Base):
+    """What one Book holds in one of those fields.
+
+    **A row exists only when there is something in it.** Clearing a value
+    deletes the row rather than storing an empty string, which is what makes
+    user story 4 structural: a Book with nothing to say about a field has no
+    row, so there is nothing to render and nothing to filter out. The CHECK
+    below is what keeps an empty string from arriving by another door.
+
+    **Reachable only from a Book somebody already resolved.** `custom_fields.py`
+    is the only module that queries this table and every one of its readers
+    takes `Book` objects rather than ids, so a caller cannot ask for the values
+    on a Book it could not fetch. That is the whole answer to user story 7, and
+    it is structural: `visible_to()` is applied where it always was, on the way
+    to the Book, and this table needs no second copy of the rule to forget.
+    """
+
+    __tablename__ = "custom_field_values"
+
+    __table_args__ = (
+        # One value per field per Book. A second row would render twice and
+        # make "the value" ambiguous for every writer.
+        Index(
+            "uq_custom_field_values_book_field",
+            "book_id",
+            "field_id",
+            unique=True,
+        ),
+        CheckConstraint(
+            f"length(value) > 0 AND length(value) <= {CUSTOM_FIELD_VALUE_MAX}",
+            name="ck_custom_field_values_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # No standalone index on either column: the composite unique above leads
+    # with `book_id`, which is the only lookup this table has, and `field_id`
+    # is read only to delete a definition's rows, which is rare and admin only.
+    # The same reasoning `quotes.book_id` records.
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False
+    )
+    field_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("custom_fields.id", ondelete="CASCADE"), nullable=False
+    )
+    value: Mapped[str] = mapped_column(String(CUSTOM_FIELD_VALUE_MAX), nullable=False)
+
+    # `book` and nothing else. The relationship exists so that purging a Book
+    # from the trash takes its values with it through the ORM cascade, the same
+    # way it takes the notes and the quotes. There is deliberately no `field`
+    # to walk in the other direction: see `CustomField`.
+    book: Mapped[Book] = relationship("Book", back_populates="custom_field_values")
 
 
 class Setting(Base):

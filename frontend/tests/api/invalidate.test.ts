@@ -48,6 +48,8 @@ const KEYS: Record<string, readonly unknown[]> = {
   getBook: books.getGetBookQueryKey(7),
   listCopies: books.getListCopiesQueryKey(7),
   getNotes: books.getGetNotesQueryKey(7),
+  getCustomFields: books.getGetCustomFieldsQueryKey(7),
+  listCustomFields: books.getListCustomFieldsQueryKey(),
   getQuotes: books.getGetQuotesQueryKey(7),
   listProgress: books.getListProgressQueryKey(7),
   enrichmentCandidates: books.getEnrichmentCandidatesQueryKey(7),
@@ -143,9 +145,9 @@ describe("the inventory is complete", () => {
   it("is reading the generated tree at all", () => {
     // A glob that matched nothing would make the assertion above pass for
     // ever, by comparing an empty list against an empty list. Measured
-    // 2026-08-27: 11 modules, 34 getters.
+    // 2026-08-27: 11 modules, 36 getters.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(34);
+    expect(Object.keys(KEYS).length).toBe(36);
   });
 });
 
@@ -182,16 +184,29 @@ describe("the catalogue is everything derived from the books table", () => {
   });
 
   it("leaves a book's children to the hooks that write them", () => {
-    // Notes, quotes, progress and enrichment candidates change only through
-    // their own mutations, each of which invalidates its own key.
+    // Notes, quotes, progress, enrichment candidates and the custom field
+    // values change only through their own mutations, each of which
+    // invalidates its own key.
     for (const name of [
       "getNotes",
       "getQuotes",
       "listProgress",
       "enrichmentCandidates",
+      "getCustomFields",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }
+  });
+
+  it("leaves the custom field definitions alone", () => {
+    // The one library-wide list under `/api/books` that is **not** derived
+    // from the books table. Adding, deleting or editing a book changes nothing
+    // about which fields the household has defined, so it does not belong to
+    // any catalogue write; it changes only when a definition is written, and
+    // `useCustomFields` invalidates it there. `TagOut` is the contrast and is
+    // in `LIBRARY_WIDE` precisely because it carries a `book_count`, which
+    // `CustomFieldOut` deliberately does not.
+    expect(isCatalogueQuery(query(KEYS["listCustomFields"]!))).toBe(false);
   });
 
   it("leaves the accounts and the settings alone", () => {

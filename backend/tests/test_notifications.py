@@ -11,6 +11,8 @@ import hashlib
 import hmac
 import json
 import logging
+import smtplib
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -18,9 +20,10 @@ import httpx
 import pytest
 import respx
 
+import mailer
 import notifications
 import settings_store
-from enums import OverdueNotifyReason, SettingKey
+from enums import OverdueNotifyReason, OverdueSender, SettingKey
 from models import Book, Loan, User
 
 HOOK = "https://hooks.example.org/t/abcdef"
@@ -28,6 +31,18 @@ HOOK = "https://hooks.example.org/t/abcdef"
 
 def now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def units(text: str) -> int:
+    """What Telegram measures a message in.
+
+    Derived from the code points rather than re-encoding. Not calling
+    `notifications._utf16_units` is not independence: the codec string is the
+    part that can be wrong, and a copy of the expression carries the same one.
+    `utf-16` would prepend a BOM and `utf-8` is a different count entirely, and
+    a byte-for-byte copy agrees with either mistake.
+    """
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in text)
 
 
 @pytest.fixture
@@ -466,3 +481,422 @@ def test_the_borrower_is_always_named(db, lend, admin):
     digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
     assert digest["loans"][0]["borrower"]
     assert db.query(User).count() >= 1
+
+
+# ── The two senders added beside the webhook ─────────────────────────────────
+
+#: Shaped like a real bot token, which `_TELEGRAM_TOKEN` insists on before the
+#: value is put in a URL path.
+BOT_TOKEN = "123456:AAaaBBbbCCccDDddEEeeFFffGGgg1234567"
+CHAT_ID = "-1001234567890"
+TELEGRAM_SEND = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+
+@pytest.fixture
+def telegram_on(db):
+    settings_store.set_value(db, SettingKey.OVERDUE_TELEGRAM_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, BOT_TOKEN)
+    settings_store.set_value(db, SettingKey.TELEGRAM_CHAT_ID, CHAT_ID)
+    return db
+
+
+@pytest.fixture
+def mail_on(db):
+    settings_store.set_value(db, SettingKey.OVERDUE_MAIL_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
+    settings_store.set_value(db, SettingKey.MAIL_DEFAULT_SENDER, "library@example.org")
+    settings_store.set_value(db, SettingKey.OVERDUE_MAIL_TO, "house@example.org")
+    return db
+
+
+@pytest.fixture
+def sent_mail(monkeypatch):
+    """`mailer.send` recorded rather than run. `checked_config` still runs."""
+    calls: list[tuple] = []
+
+    def record(config, subject, body):
+        calls.append((config, subject, body, threading.current_thread().name))
+
+    monkeypatch.setattr(mailer, "send", record)
+    return calls
+
+
+class TestRenderText:
+    def test_it_names_every_book_and_borrower(self, db, lend):
+        lend(title="Dune", days=4, borrower="Kim")
+        text = notifications.render_text(
+            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
+        )
+        assert "1 overdue book." in text
+        assert "Dune" in text
+        assert "Kim" in text
+        assert "4 days overdue" in text
+
+    def test_it_pluralises_the_count(self, db, lend):
+        lend(title="One")
+        lend(title="Two")
+        text = notifications.render_text(
+            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
+        )
+        assert text.startswith("2 overdue books.")
+
+    def test_a_limit_drops_entries_and_says_how_many(self, db, lend):
+        for index in range(20):
+            lend(title=f"Book {index}")
+        digest = notifications.build_digest(
+            notifications.due_for_reminder(db, now(), 7), now()
+        )
+        text = notifications.render_text(digest, limit=200)
+
+        assert units(text) <= 200
+        assert "more." in text
+
+    def test_the_limit_counts_the_units_telegram_counts(self, db, lend):
+        """Telegram's 4096 is **UTF-16 code units**, and a code point outside
+        the BMP is two of them, so `len()` under-counts exactly where a title
+        carries an emoji: measured, `"\U0001f600" * 2100` is 2100 characters
+        and 4200 units. Counting characters accepts a message the API rejects
+        with a 400, and member-supplied catalogue content then silently stops
+        every household reminder.
+
+        50 titles of 100 emoji each is 5,000 characters and 10,000 units, so a
+        renderer counting characters keeps far more of them than fits.
+        """
+        for _index in range(50):
+            lend(title="\U0001f600" * 100)
+        digest = notifications.build_digest(
+            notifications.due_for_reminder(db, now(), 7), now()
+        )
+        text = notifications.render_text(digest, limit=notifications.TELEGRAM_MAX_UNITS)
+
+        assert units(text) <= notifications.TELEGRAM_MAX_UNITS
+        # The assertion above is the one that matters; this one says the test
+        # would have failed before the fix rather than passing by accident.
+        assert len(text) < units(text)
+
+    def test_a_hard_cut_never_splits_a_surrogate_pair(self, db, lend):
+        """The cut fires only when the header alone exceeds the limit. Dropping
+        a code point at a time cannot land between the halves of a pair, which
+        a slice counted in units could."""
+        lend(title="\U0001f600" * 40)
+        digest = notifications.build_digest(
+            notifications.due_for_reminder(db, now(), 7), now()
+        )
+        text = notifications.render_text(digest, limit=5)
+
+        assert units(text) <= 5
+        # Re-encoding is the check: a lone surrogate cannot round trip.
+        assert text.encode("utf-16-le").decode("utf-16-le") == text
+
+    def test_it_leaves_a_short_list_whole(self, db, lend):
+        lend(title="Dune")
+        digest = notifications.build_digest(
+            notifications.due_for_reminder(db, now(), 7), now()
+        )
+        assert "more." not in notifications.render_text(digest, limit=4096)
+
+    def test_the_dropped_count_matches_what_was_dropped(self, db, lend):
+        for index in range(20):
+            lend(title=f"Book {index}")
+        digest = notifications.build_digest(
+            notifications.due_for_reminder(db, now(), 7), now()
+        )
+        text = notifications.render_text(digest, limit=300)
+
+        kept = sum(1 for line in text.splitlines() if "days overdue" in line)
+        dropped = int(text.rsplit("and ", 1)[1].split(" ", 1)[0])
+        assert kept + dropped == 20
+
+
+class TestTelegram:
+    def test_the_host_is_a_constant_no_setting_can_reach(self):
+        """Making it configurable would give away the one property this sender
+        has that the webhook does not: the app chose the destination."""
+        assert notifications.TELEGRAM_API == "https://api.telegram.org"
+        assert not [key for key in SettingKey if "telegram_api" in key.value]
+        assert notifications.telegram_url(BOT_TOKEN).startswith(
+            "https://api.telegram.org/bot"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "token",
+        ["", "nonsense", "../../evil", "123456:short", "123456:AA/../BBbbCCccDDddEEeeFF"],
+    )
+    async def test_a_token_that_is_not_a_token_is_refused(self, db, token):
+        """It becomes a URL **path segment**, so a `/` or a `..` would choose
+        the method being called or walk out of `/bot<token>/` entirely."""
+        settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, token)
+        settings_store.set_value(db, SettingKey.TELEGRAM_CHAT_ID, CHAT_ID)
+        with pytest.raises(notifications.TelegramRefused):
+            await notifications.send_telegram(db, "hello")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chat", ["", "not a chat", "@a", "12 34"])
+    async def test_a_chat_id_that_is_not_one_is_refused(self, db, chat):
+        settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, BOT_TOKEN)
+        settings_store.set_value(db, SettingKey.TELEGRAM_CHAT_ID, chat)
+        with pytest.raises(notifications.TelegramRefused):
+            await notifications.send_telegram(db, "hello")
+
+    @pytest.mark.asyncio
+    async def test_it_sends_plain_text_with_no_parse_mode(self, telegram_on):
+        """With a parse mode set, a book called `Kiss & Tell` or `a_b` makes
+        Telegram reject the whole send, and the reminder stops for everyone."""
+        with respx.mock as mock:
+            route = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            await notifications.send_telegram(telegram_on, "Kiss & Tell <b> a_b")
+
+        body = json.loads(route.calls[0].request.content)
+        assert "parse_mode" not in body
+        assert body["text"] == "Kiss & Tell <b> a_b"
+        assert body["chat_id"] == CHAT_ID
+
+    @pytest.mark.asyncio
+    async def test_it_disables_the_link_preview(self, telegram_on):
+        with respx.mock as mock:
+            route = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            await notifications.send_telegram(telegram_on, "http://example.org/book")
+
+        assert json.loads(route.calls[0].request.content)["disable_web_page_preview"]
+
+    @pytest.mark.asyncio
+    async def test_a_failure_never_logs_the_token(self, telegram_on, lend, caplog):
+        """Telegram takes the token in the URL **path**, so a log line naming
+        the request URL is a log line naming the credential."""
+        lend()
+        with caplog.at_level(logging.WARNING), respx.mock as mock:
+            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(500))
+            await notifications.run_digest(telegram_on)
+
+        assert BOT_TOKEN not in caplog.text
+        assert "AAaaBBbb" not in caplog.text
+        assert "api.telegram.org" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_never_names_the_token(self, db, lend):
+        lend()
+        settings_store.set_value(db, SettingKey.OVERDUE_TELEGRAM_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, "sekrit-not-a-token")
+        result = await notifications.run_digest(db)
+
+        assert result["reason"] is OverdueNotifyReason.MISCONFIGURED
+        assert "sekrit" not in result["detail"]
+
+    @pytest.mark.asyncio
+    async def test_a_private_book_never_reaches_the_chat(self, telegram_on, lend):
+        lend(title="Public")
+        lend(title="Secret", private=True)
+        with respx.mock as mock:
+            route = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(telegram_on)
+
+        assert "Secret" not in route.calls[0].request.content.decode()
+        assert result["senders"][0]["skipped_private"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_long_digest_is_one_message_telegram_will_accept(
+        self, telegram_on, lend
+    ):
+        """One message rather than several: two sends is a run that can half
+        succeed, and `run_digest` would then have to decide what that means."""
+        for index in range(400):
+            lend(title=f"A rather long book title number {index}")
+        with respx.mock as mock:
+            route = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            await notifications.run_digest(telegram_on)
+
+        assert len(route.calls) == 1
+        text = json.loads(route.calls[0].request.content)["text"]
+        assert units(text) <= notifications.TELEGRAM_MAX_UNITS
+
+
+class TestMailSender:
+    @pytest.mark.asyncio
+    async def test_it_runs_off_the_event_loop(self, mail_on, lend, sent_mail):
+        """`smtplib` is blocking and every handler that reaches here is
+        `async def`, so calling it inline would stop the event loop for the
+        length of an SMTP conversation."""
+        lend()
+        await notifications.run_digest(mail_on)
+
+        assert sent_mail[0][3] != threading.main_thread().name
+
+    @pytest.mark.asyncio
+    async def test_the_body_is_the_same_digest(self, mail_on, lend, sent_mail):
+        lend(title="Dune", borrower="Kim", days=4)
+        await notifications.run_digest(mail_on)
+
+        _, subject, body, _ = sent_mail[0]
+        assert subject == "1 overdue book"
+        assert "Dune" in body
+        assert "Kim" in body
+
+    @pytest.mark.asyncio
+    async def test_a_private_book_never_reaches_the_mailbox(
+        self, mail_on, lend, sent_mail
+    ):
+        lend(title="Public")
+        lend(title="Secret", private=True)
+        result = await notifications.run_digest(mail_on)
+
+        assert "Secret" not in sent_mail[0][2]
+        assert result["senders"][0]["skipped_private"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_refused_configuration_is_recorded_not_silently_accepted(
+        self, db, lend
+    ):
+        settings_store.set_value(db, SettingKey.OVERDUE_MAIL_ENABLED, "true")
+        lend()
+        result = await notifications.run_digest(db)
+
+        assert result["sent"] is False
+        assert result["reason"] is OverdueNotifyReason.MISCONFIGURED
+        assert result["senders"][0]["sender"] is OverdueSender.EMAIL
+
+    @pytest.mark.asyncio
+    async def test_a_refused_send_leaves_the_loan_to_retry(
+        self, mail_on, lend, monkeypatch
+    ):
+        loan = lend()
+
+        def refuse(config, subject, body):
+            raise smtplib.SMTPRecipientsRefused({"a@example.org": (550, b"no")})
+
+        monkeypatch.setattr(mailer, "send", refuse)
+        result = await notifications.run_digest(mail_on)
+
+        mail_on.refresh(loan)
+        assert result["reason"] is OverdueNotifyReason.UNREACHABLE
+        assert loan.notified_at is None
+
+    @pytest.mark.asyncio
+    async def test_a_mail_server_that_stops_answering_does_not_hold_the_ticker(
+        self, mail_on, lend, monkeypatch
+    ):
+        """`asyncio.to_thread` cannot be cancelled, so the deadline bounds this
+        coroutine and not the thread. That is the property that matters: the
+        hourly run is never held by a server that went quiet."""
+        lend()
+        monkeypatch.setattr(notifications, "MAIL_DEADLINE_SECONDS", 0.05)
+        monkeypatch.setattr(mailer, "send", lambda *_: time.sleep(1.0))
+
+        started = time.monotonic()
+        result = await notifications.run_digest(mail_on)
+        spent = time.monotonic() - started
+
+        assert result["reason"] is OverdueNotifyReason.UNREACHABLE
+        assert spent < 0.9
+
+
+class TestThreeSendersOneDigest:
+    @pytest.mark.asyncio
+    async def test_every_sender_is_handed_the_same_books(
+        self, configured, telegram_on, mail_on, lend, sent_mail
+    ):
+        """`build_digest` is the single source of what a reminder says. Three
+        formats that decided for themselves is how the channels drift into
+        describing different libraries."""
+        lend(title="Dune", borrower="Kim")
+        with respx.mock as mock:
+            hook = mock.post(HOOK).mock(return_value=httpx.Response(200))
+            chat = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(configured)
+
+        webhook_body = json.loads(hook.calls[0].request.content)
+        chat_text = json.loads(chat.calls[0].request.content)["text"]
+
+        assert [entry["title"] for entry in webhook_body["loans"]] == ["Dune"]
+        assert "Dune" in chat_text
+        assert "Dune" in sent_mail[0][2]
+        assert {entry["sender"] for entry in result["senders"]} == set(OverdueSender)
+
+    @pytest.mark.asyncio
+    async def test_the_withheld_count_is_reported_per_sender(
+        self, configured, telegram_on, mail_on, lend, sent_mail
+    ):
+        """Every entry's number is what that sender actually withheld. They
+        agree today because all three go to a channel; a single figure at the
+        top would be a lie the moment one audience differs."""
+        lend(title="Public")
+        lend(title="Secret", private=True)
+        with respx.mock as mock:
+            mock.post(HOOK).mock(return_value=httpx.Response(200))
+            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(configured)
+
+        assert [entry["skipped_private"] for entry in result["senders"]] == [1, 1, 1]
+
+    @pytest.mark.asyncio
+    async def test_one_broken_sender_does_not_stop_the_others(
+        self, configured, telegram_on, mail_on, lend, sent_mail
+    ):
+        lend()
+        with respx.mock as mock:
+            mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
+            chat = mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(configured)
+
+        assert chat.call_count == 1
+        assert len(sent_mail) == 1
+        assert result["sent"] is True
+        failed = [entry for entry in result["senders"] if not entry["sent"]]
+        assert [entry["sender"] for entry in failed] == [OverdueSender.WEBHOOK]
+
+    @pytest.mark.asyncio
+    async def test_one_delivery_is_enough_to_stamp_the_loan(
+        self, configured, telegram_on, lend
+    ):
+        """The column records that the loan was chased, and it was. Stamping
+        only on a clean sweep would make one broken receiver repeat the same
+        list hourly on the channels that work."""
+        loan = lend()
+        with respx.mock as mock:
+            mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
+            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(200))
+            await notifications.run_digest(configured)
+
+        configured.refresh(loan)
+        assert loan.notified_at is not None
+
+    @pytest.mark.asyncio
+    async def test_nothing_delivered_leaves_every_loan_to_retry(
+        self, configured, telegram_on, lend
+    ):
+        loan = lend()
+        with respx.mock as mock:
+            mock.post(HOOK).mock(side_effect=httpx.ConnectError("refused"))
+            mock.post(TELEGRAM_SEND).mock(return_value=httpx.Response(500))
+            result = await notifications.run_digest(configured)
+
+        configured.refresh(loan)
+        assert result["sent"] is False
+        assert loan.notified_at is None
+        assert all(not entry["sent"] for entry in result["senders"])
+
+    @pytest.mark.asyncio
+    async def test_only_the_senders_that_are_on_are_reported(self, configured, lend):
+        lend()
+        with respx.mock as mock:
+            mock.post(HOOK).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(configured)
+
+        assert [entry["sender"] for entry in result["senders"]] == [
+            OverdueSender.WEBHOOK
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_sender_at_all_is_still_a_single_disabled_answer(self, db, lend):
+        lend()
+        result = await notifications.run_digest(db)
+
+        assert result["reason"] is OverdueNotifyReason.DISABLED
+        assert result["senders"] == []
+
+    @pytest.mark.asyncio
+    async def test_nothing_overdue_attempts_no_sender(self, configured, telegram_on):
+        result = await notifications.run_digest(configured)
+
+        assert result["reason"] is OverdueNotifyReason.NOTHING_DUE
+        assert result["senders"] == []

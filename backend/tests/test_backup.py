@@ -81,7 +81,20 @@ def library(client, admin, member, make_book, db, covers_dir):
         json={"text": "Fear is the mind-killer", "page": 214},
         headers=admin["headers"],
     )
-    return {"book": book, "private": private, "tag_id": tag.id}
+    # Both custom field tables, definition and value. A definition that
+    # restored with every value missing is the shape `author_aliases` failed
+    # in: the books look intact and what somebody typed is gone.
+    field = client.post(
+        "/api/books/custom-fields",
+        json={"name": "Calibre-web", "kind": "url"},
+        headers=admin["headers"],
+    ).json()
+    client.put(
+        f"/api/books/{book['id']}/custom-fields/{field['id']}",
+        json={"value": "https://calibre.example/book/12"},
+        headers=admin["headers"],
+    )
+    return {"book": book, "private": private, "tag_id": tag.id, "field": field}
 
 
 
@@ -147,6 +160,22 @@ class TestTheArchive:
 
         aliases = read_manifest(data)["tables"]["author_aliases"]
         assert [row["canonical_name"] for row in aliases] == ["F. Herbert"]
+
+    def test_holds_the_custom_field_values_and_not_only_the_definitions(
+        self, client, admin, library
+    ):
+        """Two tables, and only one of them looks wrong when the other is
+        missing. An archive carrying the definitions alone restores a library
+        where every field is defined and every one of them is empty, which is
+        exactly how `author_aliases` failed."""
+        tables = read_manifest(client.get("/api/backup", headers=admin["headers"]).content)[
+            "tables"
+        ]
+
+        assert [row["name"] for row in tables["custom_fields"]] == ["Calibre-web"]
+        assert [row["value"] for row in tables["custom_field_values"]] == [
+            "https://calibre.example/book/12"
+        ]
 
     def test_holds_the_cover_files(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content

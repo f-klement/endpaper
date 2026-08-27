@@ -88,8 +88,9 @@ optional page and your own remark beside it, kept separate so one is not
 mistaken for the other.
 
 **Loans** record who has a book and when it is due, including people who are not
-members. Overdue loans are chased on a schedule you set, and the digest is
-posted to a webhook of your choosing.
+members. Overdue loans are chased on a schedule you set, and the digest goes out
+on every channel switched on: **email** over SMTP, a **Telegram** chat, and a
+**webhook** of your choosing. Private books are left out of all three.
 
 **Willingness to lend** is a property of a book, so somebody can see what you
 would part with before asking.
@@ -108,6 +109,12 @@ lending state. The ISBN uniqueness rule applies to single copies only.
 
 **Bulk edits** tag, re-shelve, set a status or delete a whole selection at once,
 so a shelf reorganised in life does not take an evening to reorganise here.
+
+**Custom fields**: a fact the library keeps about a book that Endpaper has no
+column for, defined once and filled in per book. A field can be declared to hold
+a web link, and then renders as one, which is what makes a book's page in a
+calibre-web instance one tap away. Renaming a field keeps every value under it;
+deleting one takes them all, and is admin only.
 
 ## People and privacy
 

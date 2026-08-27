@@ -68,9 +68,11 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   changes nothing about who can see it: that is still up to whether it is private
 - **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
   The borrower does not need an account: lend to a neighbour by typing their name
-- **Overdue reminders**: Endpaper can POST a digest of every overdue loan to a webhook you
-  choose, on a schedule you set, signed so the receiver can check it came from here.
-  Private books are never included: a webhook goes to a channel with no account behind it
+- **Overdue reminders**: Endpaper can send a digest of every overdue loan on a schedule
+  you set, by email, to a Telegram chat, or to a webhook you choose (signed, so the
+  receiver can check it came from here). Switch on as many as you like; they all carry the
+  same list. Private books are never included: every one of those goes to a place with no
+  single account behind it
 - **Three ways to look at it**: a grid of covers whose cards fold out for the details, a
   dense list of one line per book, or a table of twenty one metadata columns. Your choice
   is remembered in your browser
@@ -181,14 +183,17 @@ Environment variables:
 | `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
 | `AUTH_MODE` | `local` | `local`, `ldap` or `proxy`. See below. |
 | `GOOGLE_BOOKS_API_KEY` | none | Supplies the key from the deployment instead of the settings screen |
+| `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_USE_TLS`, `MAIL_USE_SSL`, `MAIL_DEFAULT_SENDER` | none, `587`, none, none, `true`, `false`, none | The seven standard mail names, for reminders sent by email. `MAIL_DEBUG` is deliberately not honoured: smtplib writes the AUTH exchange to stderr under it |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | none | For reminders sent to a Telegram chat |
 | `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
 | `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
 
-**Where the Google Books key lives.** By default an admin pastes it into Settings and it is
-stored in the database. Setting `GOOGLE_BOOKS_API_KEY` instead hands that job to the
+**Where a credential lives.** By default an admin pastes it into Settings and it is stored
+in the database. Setting the matching environment variable instead hands that job to the
 deployment: the environment value **wins**, the field in Settings is greyed out, and the
-app refuses to overwrite it rather than accepting a change that would be undone at the
-next restart. Either way the key is never shown again once set.
+app refuses to overwrite it rather than accepting a change that would be undone at the next
+restart. Either way it is never shown again once set. This holds for
+`GOOGLE_BOOKS_API_KEY`, the seven `MAIL_*` names and the two `TELEGRAM_*` ones alike.
 
 **Directory sign-in.** `AUTH_MODE=ldap` checks credentials against a directory instead of
 this app's own table. Accounts are created here on first sign-in, so books and notes still

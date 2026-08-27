@@ -201,8 +201,10 @@ export const de: Messages = {
   "scan.startScanning": "Scannen starten",
   "scan.stopScanning": "Scannen beenden",
   "scan.cameraIdle": "Die Kamera ist aus",
-  "scan.cameraIdleHint": "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis du sie startest.",
-  "scan.notABook": "{code} gelesen, das ist kein Buch-Barcode. Suche den Code ueber der ISBN.",
+  "scan.cameraIdleHint":
+    "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis du sie startest.",
+  "scan.notABook":
+    "{code} gelesen, das ist kein Buch-Barcode. Suche den Code ueber der ISBN.",
   "scan.tryAgain": "Erneut versuchen",
   "scan.cameraUnavailable": "Kamera nicht verfügbar",
   "scan.orEnterManually": "Oder ISBN von Hand eingeben:",
@@ -272,6 +274,25 @@ export const de: Messages = {
   "notes.addLabel": "Notiz hinzufügen",
   "notes.editLabel": "Notiz bearbeiten",
 
+  // ── Custom fields ───────────────────────────────────────────────────────
+  "customFields.title": "Eigene Felder",
+  "customFields.explain":
+    "Angaben zu einem Buch, für die Endpaper keinen Platz hat, zum Beispiel ein Link auf dasselbe Buch in einer anderen App.",
+  "customFields.none": "Noch keine eigenen Felder",
+  "customFields.nameLabel": "Feldname",
+  "customFields.namePlaceholder": "Calibre-web",
+  "customFields.kindLabel": "Was darin steht",
+  "customFields.kindText": "Text",
+  "customFields.kindUrl": "Ein Weblink",
+  "customFields.addButton": "Feld hinzufügen",
+  "customFields.renameLabel": "Neuer Name für {name}",
+  "customFields.deleteConfirm":
+    "{name} löschen? Der Eintrag wird bei jedem Buch entfernt und lässt sich nicht wiederherstellen.",
+  "customFields.bookNone": "Noch nichts eingetragen",
+  "customFields.editButton": "Angaben bearbeiten",
+  "customFields.valuePlaceholder": "Leer lassen, um zu löschen",
+  "customFields.opensElsewhere": "Öffnet in einem neuen Tab",
+
   // ── Zitate ──────────────────────────────────────────────────────────────
   "quotes.title": "Zitate",
   "quotes.none": "Noch keine Zitate",
@@ -287,7 +308,8 @@ export const de: Messages = {
   "quotes.notePlaceholder": "Warum gerade dieses (optional)",
   "quotes.onPage": "S. {page}",
   "quotes.empty": "Noch keine Zitate gespeichert",
-  "quotes.emptyHint": "Öffne ein Buch und schreibe eine Stelle ab, die bleiben soll.",
+  "quotes.emptyHint":
+    "Öffne ein Buch und schreibe eine Stelle ab, die bleiben soll.",
   "quotes.couldNotLoad": "Die Zitate konnten nicht geladen werden.",
   "quotes.pagination": "Zitatseiten",
   "quotes.pageOf": "Seite {page} von {of}",
@@ -427,7 +449,8 @@ export const de: Messages = {
     "Zum Zurückkehren melde dich wieder mit deinem eigenen Konto an.",
   "settings.testAccountsEmpty": "Noch keine Testkonten.",
   "settings.testAccountsCreate": "Testkonto anlegen",
-  "settings.testAccountsCreateFailed": "Das Konto konnte nicht angelegt werden.",
+  "settings.testAccountsCreateFailed":
+    "Das Konto konnte nicht angelegt werden.",
   "settings.testAccountsPasswordPlaceholder": "Passwort, mindestens 8 Zeichen",
   "settings.testAccountsSwitch": "Wechseln",
   "settings.testAccountsSwitchTo": "Zu {name} wechseln",
@@ -437,11 +460,11 @@ export const de: Messages = {
 
   // ── Erinnerungen an überfällige Bücher ──────────────────────────────────
   "settings.overdue": "Erinnerungen an überfällige Bücher",
-  "settings.overdueEnable": "Erinnerung senden, wenn ein Buch überfällig ist",
+  "settings.overdueEnable": "Erinnerung an einen Webhook senden",
   "settings.overdueHint":
-    "Endpaper schaut stündlich nach und sendet eine Nachricht mit den Ausleihen, die angemahnt werden. Gibt es nichts anzumahnen, wird nichts gesendet.",
+    "Endpaper schaut stündlich nach und sendet über jeden eingeschalteten Kanal eine Nachricht mit den Ausleihen, die angemahnt werden. Gibt es nichts anzumahnen, wird nichts gesendet.",
   "settings.overduePrivacyNote":
-    "Private Bücher werden nie mitgesendet. Ein Webhook landet in einem Kanal ohne Konto dahinter, dort wäre ein privater Titel für alle lesbar. Überfällige private Bücher erscheinen weiterhin in der Ausleihliste ihrer Besitzerin oder ihres Besitzers.",
+    "Private Bücher werden über keinen Kanal mitgesendet. Jeder Kanal hier landet an einem Ort ohne ein einzelnes Konto dahinter, dort wäre ein privater Titel für alle lesbar, die mitlesen. Überfällige private Bücher erscheinen weiterhin in der Ausleihliste ihrer Besitzerin oder ihres Besitzers.",
   "settings.overdueUrl": "Webhook Adresse",
   "settings.overdueUrlPlaceholder": "https://example.org/hooks/books",
   "settings.overdueSecret": "Signaturgeheimnis",
@@ -473,6 +496,84 @@ export const de: Messages = {
     "Der Webhook war nicht erreichbar, es wurde nichts gesendet. Die Ausleihen werden beim nächsten Versuch erneut angemahnt.",
   "settings.overdueSkippedPrivate":
     "{count} private Bücher wurden ausgelassen.",
+  "settings.overdueNotSentMisconfigured":
+    "Es wurde nichts gesendet: Ein Kanal ist eingeschaltet und seine Einstellungen sind unbrauchbar. Welcher, steht unten.",
+  "settings.overdueSenderWebhook": "Webhook",
+  "settings.overdueSenderEmail": "E-Mail",
+  "settings.overdueSenderTelegram": "Telegram",
+  "settings.overdueSenderSent": "{sender}: gesendet.",
+  "settings.overdueSenderFailed": "{sender}: {detail}",
+  "settings.overdueRowDisabled": "ausgeschaltet.",
+  "settings.overdueRowNoUrl": "keine Adresse gespeichert.",
+  "settings.overdueRowNothingDue": "nichts zu senden.",
+  "settings.overdueRowUnreachable":
+    "nicht erreichbar. Es wird erneut versucht.",
+  "settings.overdueRowMisconfigured": "die Einstellungen sind unbrauchbar.",
+  "settings.overdueRowNothingSent": "nichts gesendet.",
+
+  // ── Erinnerungen per Mail und Chat ──────────────────────────────────────
+  "settings.senders": "Erinnerungen per Mail und Chat",
+  "settings.sendersHint":
+    "Dieselbe Erinnerung über Kanäle, die ein Haushalt ohnehin hat. Jeder wird einzeln eingeschaltet, und jeder eingeschaltete bekommt dieselbe Nachricht.",
+  "settings.sendersPrivacyNote":
+    "Beide landen in einem Postfach oder einem Chat, den mehrere Menschen lesen. Private Bücher bleiben dort genauso außen vor wie beim Webhook.",
+
+  "settings.mail": "E-Mail",
+  "settings.mailEnable": "Erinnerung per E-Mail senden",
+  "settings.mailHint":
+    "Eine Nachricht an das Postfach des Haushalts, mit denselben Ausleihen.",
+  "settings.mailServer": "Mailserver",
+  "settings.mailServerPlaceholder": "smtp.example.org",
+  "settings.mailPort": "Port",
+  "settings.mailUsername": "Mail Benutzername",
+  "settings.mailUsernamePlaceholder":
+    "Leer lassen, wenn der Server keine Anmeldung braucht",
+  "settings.mailPassword": "Mail Passwort",
+  "settings.mailPasswordPlaceholder":
+    "Neues Passwort einfügen, um das gespeicherte zu ersetzen",
+  "settings.mailPasswordShow": "Mailpasswort anzeigen",
+  "settings.mailPasswordHide": "Mailpasswort verbergen",
+  "settings.mailPasswordSet": "Ein Passwort ist gespeichert ({preview}).",
+  "settings.mailPasswordMissing": "Kein Passwort gespeichert.",
+  "settings.mailPasswordSave": "Passwort speichern",
+  "settings.mailPasswordClear": "Gespeichertes Passwort entfernen",
+  "settings.mailSecurity": "Verschlüsselung",
+  "settings.mailSecurityStartTls": "STARTTLS",
+  "settings.mailSecurityTls": "TLS",
+  "settings.mailSecurityNone": "Keine",
+  "settings.mailSecurityHint":
+    "Zertifikate und Hostnamen werden immer geprüft, und nichts hier kann das abschalten. Ein Passwort ohne Verschlüsselung wird abgelehnt, denn es ginge im Klartext über das Netz.",
+  "settings.mailFrom": "Absenderadresse",
+  "settings.mailFromPlaceholder": "library@example.org",
+  "settings.mailTo": "Erinnerungen senden an",
+  "settings.mailToPlaceholder": "house@example.org",
+  "settings.mailToHint":
+    "Eine Adresse, oder mehrere durch Kommas getrennt. Höchstens zehn.",
+  "settings.mailSave": "Mail Einstellungen speichern",
+  "settings.mailFromEnv":
+    "Diese Installation setzt {fields} in ihrer Umgebung, diese Felder sind hier deshalb fest.",
+
+  "settings.telegram": "Telegram",
+  "settings.telegramEnable": "Erinnerung an einen Telegram Chat senden",
+  "settings.telegramHint":
+    "Eine Nachricht an einen Chat, nicht an jede Person einzeln. Ein Bot kann niemandem schreiben, der ihm nicht zuerst geschrieben hat, deshalb würde ein Versand pro Person für alle stillschweigend fehlschlagen, die diesen Schritt auslassen.",
+  "settings.telegramToken": "Bot Token",
+  "settings.telegramTokenPlaceholder":
+    "Neues Token einfügen, um das gespeicherte zu ersetzen",
+  "settings.telegramTokenShow": "Bot Token anzeigen",
+  "settings.telegramTokenHide": "Bot Token verbergen",
+  "settings.telegramTokenSet": "Ein Token ist gespeichert ({preview}).",
+  "settings.telegramTokenMissing":
+    "Kein Token gespeichert. Mit @BotFather einen Bot anlegen und das Token einfügen, das er nennt.",
+  "settings.telegramTokenSave": "Token speichern",
+  "settings.telegramTokenClear": "Gespeichertes Token entfernen",
+  "settings.telegramChat": "Chat Id",
+  "settings.telegramChatPlaceholder": "-1001234567890",
+  "settings.telegramChatHint":
+    "Die Nummer der Gruppe, in die der Bot aufgenommen wurde, oder ein @Name für einen öffentlichen Kanal.",
+  "settings.telegramChatSave": "Chat Id speichern",
+  "settings.telegramFromEnv":
+    "Diese Installation setzt das in ihrer Umgebung, hier ist es deshalb fest.",
 
   "settings.goodreads": "Goodreads",
   "settings.goodreadsEnable": "Goodreads Links anzeigen",
@@ -639,8 +740,7 @@ export const de: Messages = {
   "rapid.addAll": "Alle hinzufügen",
   "rapid.adding": "Wird hinzugefügt...",
   "rapid.discard": "Verwerfen",
-  "rapid.added":
-    "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
+  "rapid.added": "{count} hinzugefügt. {failed} stehen unten, mit dem Grund.",
   "rapid.removeFromQueue": "{isbn} aus der Liste entfernen",
   "rapid.nothingScanned": "Noch nichts gescannt",
 
@@ -672,7 +772,8 @@ export const de: Messages = {
   "copy.condition.poor": "Stark gebraucht",
   "copy.condition.ex_library": "Aus einer Bibliothek",
   "copy.price": "Bezahlter Preis",
-  "copy.priceInvalid": "Schreibe einen Preis wie 12,99, oder lass das Feld leer.",
+  "copy.priceInvalid":
+    "Schreibe einen Preis wie 12,99, oder lass das Feld leer.",
   "copy.currency": "Währung",
   "copy.purchasedAt": "Gekauft am",
   "copy.purchaseSource": "Gekauft bei",
@@ -682,7 +783,8 @@ export const de: Messages = {
   // ── Mehrere Exemplare desselben Buchs ───────────────────────────────────
   "copies.title": "Exemplare",
   "copies.count": "{count} Exemplare dieses Buchs",
-  "copies.hint": "Ein zweites Exemplar ist ein zweiter Gegenstand: eigenes Regal, eigener Zustand, eigene Ausleihe.",
+  "copies.hint":
+    "Ein zweites Exemplar ist ein zweiter Gegenstand: eigenes Regal, eigener Zustand, eigene Ausleihe.",
   "copies.thisOne": "Dieses hier",
   "copies.open": "Öffnen",
   "copies.noShelf": "Kein Regal erfasst",
@@ -692,7 +794,8 @@ export const de: Messages = {
   "copies.fromScanHint":
     "Ein Exemplar übernimmt Schlagwörter, Titelbild und die Sichtbarkeit von dem Buch, das schon da ist.",
   "copies.addFailed": "Dieses Exemplar konnte nicht hinzugefügt werden.",
-  "copies.loadFailed": "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
+  "copies.loadFailed":
+    "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
   "copies.badge": "{count} Exemplare",
   "format.filterAll": "Jede Ausgabe",
 
@@ -703,7 +806,8 @@ export const de: Messages = {
   "lending.happy": "Borge ich gern her",
   "lending.in_use": "Brauche ich gerade selbst",
   "lending.never": "Wird nicht hergeborgt",
-  "lending.neverWarning": "Dieses Buch ist als \"wird nicht hergeborgt\" markiert.",
+  "lending.neverWarning":
+    'Dieses Buch ist als "wird nicht hergeborgt" markiert.',
   "lending.lendAnyway": "Trotzdem herborgen",
   "discuss.toggle": "Über dieses Buch rede ich gern, frag mich einfach danach",
   "discuss.label": "Ansprechpartner",
@@ -739,7 +843,8 @@ export const de: Messages = {
     "Diese Datei enthält {count} verschiedene Schlagwörter. Sie werden hier für alle angelegt, unter Eure Schlagwörter, und lassen sich nur einzeln wieder entfernen.",
   "import.result":
     "{rowsRead} Zeilen gelesen, {matched} zugeordnet, {created} angelegt, {statusesUpdated} Lesestände aktualisiert.",
-  "import.skipped": "{count} Zeilen hatten keinen Titel und wurden übersprungen.",
+  "import.skipped":
+    "{count} Zeilen hatten keinen Titel und wurden übersprungen.",
   "import.unmatched": "Nicht im Katalog gefunden:",
 
   // ── Sicherung ───────────────────────────────────────────────────────────
@@ -755,7 +860,8 @@ export const de: Messages = {
   "backup.restoreAction": "Aus {name} wiederherstellen",
   "backup.restoreConfirm":
     "Alle Bücher, Konten und Cover dieser Bibliothek durch die Sicherung ersetzen? Das lässt sich nicht rückgängig machen.",
-  "backup.restoreFailed": "Diese Sicherung konnte nicht wiederhergestellt werden.",
+  "backup.restoreFailed":
+    "Diese Sicherung konnte nicht wiederhergestellt werden.",
   "backup.restored": "{books} Bücher und {covers} Cover wiederhergestellt.",
 
   // ── Cover ───────────────────────────────────────────────────────────────
@@ -768,7 +874,8 @@ export const de: Messages = {
     "{examined} Bücher geprüft und {stored} Cover gespeichert. Für {missing} hat kein Bilddienst eines.",
   "covers.unreachable":
     "Für {count} davon gibt es irgendwo ein Cover, das von hier aus nicht geladen werden konnte. Sie behalten ihren Link und werden beim nächsten Durchlauf durch die Bibliothek erneut versucht.",
-  "covers.remaining": "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
+  "covers.remaining":
+    "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
   "covers.allDone": "Jedes Buch, das ein Cover haben kann, hat eines.",
 
   // ── Über ──────────────────────────────────────────────────────────────────
@@ -792,8 +899,7 @@ export const de: Messages = {
   "trash.explain":
     "Gelöschte Bücher warten hier, bis du den Papierkorb leerst. Von allein wird nichts entfernt.",
   "trash.empty": "Der Papierkorb ist leer",
-  "trash.emptyHint":
-    "Was du löschst, landet hier, mit allem, was daran hängt.",
+  "trash.emptyHint": "Was du löschst, landet hier, mit allem, was daran hängt.",
   "trash.deletedOn": "Gelöscht am {date}",
   "trash.restore": "Zurücklegen",
   "trash.restored": "Wieder im Regal.",

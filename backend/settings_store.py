@@ -46,11 +46,48 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # differentiator Handy Library is known for: the timing is the library's
     # to set, not the app's to assume.
     SettingKey.OVERDUE_REMINDER_DAYS: "7",
+    # Mail. Off by default for the reason the webhook is: it sends catalogue
+    # content outward. The port and the two transport flags default to
+    # submission over STARTTLS, which is what a household mail provider offers
+    # and what `checked_mail` refuses to be talked out of once a password is set.
+    SettingKey.OVERDUE_MAIL_ENABLED: "false",
+    SettingKey.OVERDUE_MAIL_TO: "",
+    SettingKey.MAIL_SERVER: "",
+    SettingKey.MAIL_PORT: "587",
+    SettingKey.MAIL_USERNAME: "",
+    SettingKey.MAIL_PASSWORD: "",
+    SettingKey.MAIL_USE_TLS: "true",
+    SettingKey.MAIL_USE_SSL: "false",
+    SettingKey.MAIL_DEFAULT_SENDER: "",
+    # Telegram. Off by default, same reason.
+    SettingKey.OVERDUE_TELEGRAM_ENABLED: "false",
+    SettingKey.TELEGRAM_BOT_TOKEN: "",
+    SettingKey.TELEGRAM_CHAT_ID: "",
 }
 
 # Settings whose value must never be sent back to a browser in full.
 SECRET_KEYS: Final[frozenset[SettingKey]] = frozenset(
-    {SettingKey.GOOGLE_BOOKS_API_KEY, SettingKey.OVERDUE_WEBHOOK_SECRET}
+    {
+        SettingKey.GOOGLE_BOOKS_API_KEY,
+        SettingKey.OVERDUE_WEBHOOK_SECRET,
+        SettingKey.MAIL_PASSWORD,
+        # In the **URL path** of every Telegram call, so a log line that prints
+        # a request URL prints the token. See `notifications._telegram_url`.
+        SettingKey.TELEGRAM_BOT_TOKEN,
+    }
+)
+
+#: The seven standard mail settings, in the order the settings screen shows
+#: them. One list, so `SettingsOut.mail_from_env` and any future consumer agree
+#: about what "the mail settings" means.
+MAIL_KEYS: Final[tuple[SettingKey, ...]] = (
+    SettingKey.MAIL_SERVER,
+    SettingKey.MAIL_PORT,
+    SettingKey.MAIL_USERNAME,
+    SettingKey.MAIL_PASSWORD,
+    SettingKey.MAIL_USE_TLS,
+    SettingKey.MAIL_USE_SSL,
+    SettingKey.MAIL_DEFAULT_SENDER,
 )
 
 _TRUE_VALUES: Final = frozenset({"true", "1", "yes", "on"})
@@ -121,18 +158,41 @@ def mask(value: str) -> str:
     return f"{'•' * 8}{value[-4:]}"
 
 
-def google_books_api_key(db: Session) -> str:
-    """The key actually in force: the environment's if it has one, else the stored one.
+def in_force(db: Session, key: SettingKey) -> str:
+    """The value actually used: the environment's if it supplied one, else the stored one.
 
-    Every caller that needs the key goes through here rather than reading the
-    setting directly, so the precedence is decided once. Reading the row
-    directly would use the stored key while the settings screen showed the
-    environment one, which is the kind of disagreement nobody finds until a
-    lookup fails for a reason the UI denies.
+    **Every consumer of a settable value goes through here rather than
+    `get_raw`, and the two are not interchangeable.** `get_raw` answers "what is
+    in the table", which is what the settings screen needs in order to show what
+    an admin may edit; this answers "what will the next send use". Reading the
+    row directly is how a lookup fails for a reason the settings screen denies,
+    which is the defect `google_books_api_key` was written to prevent and which
+    every mail and Telegram setting can now reproduce.
     """
-    return config.google_books_api_key_from_env() or get_raw(
-        db, SettingKey.GOOGLE_BOOKS_API_KEY
-    )
+    return config.env_override(key) or get_raw(db, key)
+
+
+def bool_in_force(db: Session, key: SettingKey) -> bool:
+    """`in_force`, parsed the way `get_bool` parses the stored value.
+
+    One parser for both sources, so `MAIL_USE_TLS=off` in the environment and
+    `off` in the table cannot mean different things.
+    """
+    return in_force(db, key).strip().lower() in _TRUE_VALUES
+
+
+def is_from_env(key: SettingKey) -> bool:
+    """Whether the deployment pinned this setting, so the app must not offer an edit.
+
+    Reporting *where* a value comes from is not reporting the value, which is
+    what lets this be true for a secret.
+    """
+    return bool(config.env_override(key))
+
+
+def google_books_api_key(db: Session) -> str:
+    """The key actually in force. See `in_force`; this name has its own callers."""
+    return in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
 
 
 def token_epoch(db: Session) -> str:

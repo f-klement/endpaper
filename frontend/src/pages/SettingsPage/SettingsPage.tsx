@@ -21,13 +21,16 @@ import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import AboutSection from "./components/AboutSection";
 import BackupSection from "./components/BackupSection";
 import CoversSection from "./components/CoversSection";
+import CustomFieldsSection from "./components/CustomFieldsSection";
 import LibraryImport from "./components/LibraryImport";
 import OverdueSection from "./components/OverdueSection";
+import ReminderSendersSection from "./components/ReminderSendersSection";
 import TestAccounts from "./components/TestAccounts";
 import ToggleField from "./components/ToggleField";
 import {
   useBackup,
   useCoverBackfill,
+  useCustomFields,
   useLibraryImport,
   useOverdueDigest,
   useSettings,
@@ -96,6 +99,7 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
   // that would only refuse them.
   const isAdmin = settings !== undefined;
   const testAccounts = useTestAccounts(isAdmin);
+  const customFields = useCustomFields();
   const switching = useSwitchToTestAccount(onSignIn);
   const sections = useSettingsSections();
 
@@ -243,6 +247,24 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
           isRunning={coverBackfill.isRunning}
           error={coverBackfill.error}
           onRun={coverBackfill.run}
+        />
+
+        {/* Outside the admin block, like the import and the backfill above it,
+            and for the same kind of reason: defining a field is additive and
+            changes no book, so it is open to any member exactly as inventing a
+            tag is. Only the delete is admin only, and the section is passed
+            `isAdmin` so that control is drawn where it would work rather than
+            answering 403 when it is pressed. */}
+        <CustomFieldsSection
+          isOpen={sections.isOpen("customFields")}
+          onToggle={() => sections.toggle("customFields")}
+          fields={customFields.fields}
+          isAdmin={isAdmin}
+          isBusy={customFields.isBusy}
+          error={customFields.error}
+          onDefine={customFields.define}
+          onRename={customFields.rename}
+          onRemove={customFields.remove}
         />
 
         {isLoading && <Spinner label={t("common.loading")} />}
@@ -432,6 +454,14 @@ export default function SettingsPage({ mode, onSignIn }: SettingsPageProps) {
               isSending={overdue.isSending}
               sendResult={overdue.result}
               sendError={overdue.error}
+            />
+
+            <ReminderSendersSection
+              isOpen={sections.isOpen("reminderSenders")}
+              onToggle={() => sections.toggle("reminderSenders")}
+              settings={settings}
+              isSaving={isSaving}
+              onSave={update}
             />
 
             {/* Admin only, and inside this block for that reason. Under a

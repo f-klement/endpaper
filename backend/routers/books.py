@@ -15,6 +15,7 @@ from sqlalchemy import func, nullslast
 from sqlalchemy.orm import Session, joinedload
 
 import covers
+import custom_fields
 import google_books
 import isbn as isbn_utils
 import metadata
@@ -50,6 +51,7 @@ from models import (
     Book,
     Classification,
     Collection,
+    CustomField,
     Loan,
     Note,
     Quote,
@@ -82,6 +84,11 @@ from schemas import (
     CollectionAssign,
     CopyCreate,
     CoverBackfillOut,
+    CustomFieldCreate,
+    CustomFieldOut,
+    CustomFieldRename,
+    CustomFieldValueOut,
+    CustomFieldValueUpdate,
     DuplicateGroup,
     LocationOut,
     MergeRequest,
@@ -235,6 +242,121 @@ def delete_tag(
     db.execute(book_tags.delete().where(book_tags.c.tag_id == tag_id))
     db.delete(tag)
     db.commit()
+
+
+# ── Custom fields ─────────────────────────────────────────────────────────────
+#
+# The Library's own facts about a Book, defined once here and filled in per Book
+# at `/{book_id}/custom-fields` further down. Declared **before** `/{book_id}`,
+# like the tag routes above and for the same reason: FastAPI matches in
+# declaration order, and reversing them makes the first of these a request for
+# the book with id "custom-fields".
+#
+# Under `/api/books` rather than under `/api/settings`, because that is where
+# `/tags` already is and this is the same kind of thing: a Library wide
+# vocabulary that only means anything on a Book.
+
+
+def _custom_field(field_id: int, db: Session) -> CustomField:
+    """The definition at this id, or a 404.
+
+    Not a privacy question: a definition is Library wide, exactly like a Tag,
+    and says nothing about any Book. The 404 is only for an id that is not one.
+    """
+    field = db.get(CustomField, field_id)
+    if field is None:
+        raise HTTPException(status_code=404, detail="Custom field not found")
+    return field
+
+
+@router.get("/custom-fields", response_model=list[CustomFieldOut])
+def list_custom_fields(db: DbSession, current_user: CurrentUser) -> list[CustomField]:
+    """Every field this library keeps, in the order it defined them.
+
+    **No usage count**, unlike `GET /api/books/tags`. A count of the books
+    carrying a field is a disclosure: it is drawn from books the caller may not
+    see, so it would have to be scoped to the viewer, and a viewer scoped
+    number in a confirmation dialog would then understate what deleting the
+    field is about to destroy. Neither number is worth having, so the
+    confirmation says "every book" instead. `docs/security.md` records it.
+    """
+    return custom_fields.definitions(db)
+
+
+@router.post("/custom-fields", response_model=CustomFieldOut, status_code=status.HTTP_201_CREATED)
+def define_custom_field(
+    payload: CustomFieldCreate, db: DbSession, current_user: CurrentUser
+) -> CustomField:
+    """Define a field for the whole library.
+
+    Any member, like `create_tag` and for the same reason: public books are a
+    shared shelf that anyone may curate, and a vocabulary only an admin can
+    extend is a vocabulary nobody uses. Defining one is additive and changes no
+    book.
+
+    A name that already exists, in any capitalisation, returns that field
+    rather than a 409: somebody typing a name that is already there wants that
+    field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+    """
+    try:
+        field = custom_fields.define(db, payload.name, payload.kind)
+    except custom_fields.Refused as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
+    db.commit()
+    db.refresh(field)
+    return field
+
+
+@router.patch("/custom-fields/{field_id}", response_model=CustomFieldOut)
+def rename_custom_field(
+    field_id: RowId,
+    payload: CustomFieldRename,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> CustomField:
+    """Rename a field. Every value under it is kept.
+
+    That is the schema rather than this handler: values reference the
+    definition by id, so nothing about them mentions the name. `custom_fields.rename`
+    records why renaming onto an existing name is refused instead of merged.
+    """
+    field = _custom_field(field_id, db)
+    try:
+        custom_fields.rename(db, field, payload.name)
+    except custom_fields.Refused as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
+    db.commit()
+    db.refresh(field)
+    return field
+
+
+@router.delete("/custom-fields/{field_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_custom_field(
+    field_id: RowId,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> None:
+    """Remove a field, and its value on every book.
+
+    **Admin only, and deliberately asymmetric with defining one**, which is the
+    same split `delete_tag` makes. Defining a field is additive and reversible
+    by deleting it. Deleting one destroys, in one request and with no undo,
+    something every member of the house typed by hand, on books the caller
+    cannot necessarily see. A `CustomField` records nobody as its author, so
+    there is no owner to ask.
+
+    It is the sharper case of the two: deleting a tag takes a label off a book,
+    and deleting a field takes the **content** a member wrote.
+
+    204, like `delete_tag`, and the number of values removed goes to the log
+    rather than to the caller. See `list_custom_fields` for why no count is
+    published.
+    """
+    field = _custom_field(field_id, db)
+    name = field.name
+    removed = custom_fields.remove(db, field)
+    db.commit()
+    logger.info("Deleted custom field %r and %d value(s) under it", name, removed)
 
 
 @router.get("/lookup", response_model=BookLookup)
@@ -1817,6 +1939,12 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     # `reading.resolve_merge`, which owns why they cannot simply move.
     resolve_merge(db, keeper.id, loser_ids)
 
+    # The library's own fields, for the reason the quotes above move: left out,
+    # the cascade on the loser's deletion would take a calibre-web link
+    # somebody typed by hand, silently. `custom_fields.resolve_merge` owns the
+    # collision rule, which is the keeper's own value winning.
+    custom_fields.resolve_merge(db, keeper.id, loser_ids)
+
 
 # ── Covers ────────────────────────────────────────────────────────────────────
 
@@ -2560,6 +2688,85 @@ def remove_book_tag(
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
+
+
+# ── Custom field values, per book ─────────────────────────────────────────────
+#
+# **The privacy rule for these is `BookForRead` and `BookForWrite`**, which is
+# the app's ordinary book access control and not a second copy of it. A value
+# hangs off a book, so who may read it is decided by who may read that book, and
+# both handlers below receive a `Book` the dependency has already resolved
+# through the Shelf. `custom_fields.values_on` takes a `Book` rather than an id
+# precisely so that this is the only way to reach one.
+#
+# Served here rather than on `BookOut`, like notes and quotes and unlike tags.
+# Two reasons and the second is the load bearing one. A page of 25 book cards
+# has no room to render them, so putting them on every listing payload would buy
+# nothing; and `books_to_out` is a **7 statement** budget that a test reads out
+# of its own docstring, so a field nobody displays would cost every listing in
+# the app one more query.
+
+
+def _custom_fields_out(book: Book, db: Session) -> list[CustomFieldValueOut]:
+    """This book's filled-in fields, links resolved.
+
+    `href` is computed here on every read rather than stored, so a value that
+    reached the table without passing the write check is served as text. See
+    `custom_fields.link_target`.
+    """
+    return [
+        CustomFieldValueOut(
+            field_id=filled.field.id,
+            name=filled.field.name,
+            kind=filled.kind,
+            value=filled.value,
+            href=filled.href,
+        )
+        for filled in custom_fields.values_on(db, book)
+    ]
+
+
+@router.get("/{book_id}/custom-fields", response_model=list[CustomFieldValueOut])
+def get_custom_fields(book: BookForRead, db: DbSession) -> list[CustomFieldValueOut]:
+    """What this book holds in the library's own fields.
+
+    Only the fields it has something in: a book with no value for a field is
+    absent from this list rather than present and empty, because clearing a
+    value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+    could be filled in.
+    """
+    return _custom_fields_out(book, db)
+
+
+@router.put("/{book_id}/custom-fields/{field_id}", response_model=list[CustomFieldValueOut])
+def set_custom_field(
+    field_id: RowId,
+    payload: CustomFieldValueUpdate,
+    book: BookForWrite,
+    db: DbSession,
+) -> list[CustomFieldValueOut]:
+    """Fill in a field on this book, or clear it with an empty value.
+
+    One verb for both, because emptying the box and saving is what a person
+    does and a client should not have to decide which of two verbs that means.
+
+    Returns the book's whole list rather than the one value, so a client that
+    has just written one is holding the same thing `GET` would give it.
+
+    422 when the field holds a link and the value is not one: an address with
+    no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
+    `custom_fields.link_target` for the whole list and why it is re-checked on
+    every read as well as here.
+    """
+    field = _custom_field(field_id, db)
+    try:
+        custom_fields.write(db, book, field, payload.value)
+    except custom_fields.Refused as refusal:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refusal)
+        ) from refusal
+    db.commit()
+    return _custom_fields_out(book, db)
 
 
 # ── Cover upload ──────────────────────────────────────────────────────────────

@@ -80,6 +80,177 @@ module already on the list cannot appear quietly. That import check is a proxy f
 over the table and its blind spots are listed in the file's docstring, the sharpest being
 that a lazy read of the `book.user_books` relationship is invisible to it.
 
+### A custom field value carries no privacy rule of its own, by construction
+
+A value hangs off a book, so who may read it is decided entirely by who may read that book.
+There is deliberately no second predicate, and no third table's worth of rule to forget.
+
+What makes that structural rather than remembered is one signature choice: **every reader and
+writer in `backend/custom_fields.py` takes `Book` objects, never book ids.** A `Book` can only
+have been fetched, `shelf.py` owns every many-book query and `dependencies.py` owns the
+single-book one, so a caller holding one has already passed `visible_to()`. A caller holding
+an id off a URL has not, and the module gives it nothing it can do with one: mypy refuses
+`int` where `Book` is declared, at the call site, before anything runs.
+
+`Values.of(db, books)` therefore cannot be handed somebody else's private book, because
+getting one is the thing that is impossible. A `values_of(db, book_ids)` beside it would
+compile, run and answer with the values on every id passed.
+
+`CustomField` carries no `values` relationship, so a definition cannot be walked to every
+book's value for it, and the endpoint that lists definitions publishes **no usage count**:
+a count is drawn across books the caller may not see, so it would have to be scoped to the
+viewer, and a viewer-scoped number in a delete confirmation would understate what is about to
+be destroyed. The confirmation says "every book" instead.
+
+`backend/tests/test_custom_fields.py::TestOnlyABookReachesAValue` holds it in three passes. An
+**import** pass, so no module but `custom_fields.py`, `models.py` and `backup.py` may hold
+`CustomFieldValue`. A **touch** pass over the module's own AST, reporting any public function
+whose body names the table and that takes no `Book`. And a **name** pass, so a parameter that
+mentions a book is annotated with `Book`.
+
+The touch pass is written that way because the version it replaced was not enforcement: it
+enumerated the two functions that existed by hand, so adding `values_of(db, book_ids)` passed
+it, and the module docstring named that exact function as the thing being prevented.
+
+Two names are exempt and they are two different rules rather than one hatch. `remove` deletes
+every value under one definition across the whole library, which is what deleting a field
+means and cannot be scoped to a viewer, and is admin only for that reason. `resolve_merge`
+rewrites rows for books nobody is holding, or a merge silently destroys them. Their call sites
+are counted, so a third cannot appear inside a module already on the list.
+
+The blind spots are listed in that file's docstring, the sharpest being that a lazy read of
+`book.custom_field_values` is invisible to all three, which is the safe case because the book
+it hangs off has already been through the Shelf.
+
+### A custom field that holds a link is re-checked on every read
+
+`<a href>` is one of the two places a browser turns a string into code, and a custom field
+value is member supplied. Two mechanisms guard it, and the second is the one that matters.
+
+**The kind is declared, never detected.** Only a field the library defined as `url` can
+produce a link, so a member typing prose that begins with `http` into a text field gets text.
+
+**The declaration is not the permission.** `custom_fields.link_target` re-reads the stored
+value on every serialisation and returns a target only for `http` or `https` with a real host,
+no credentials, and a port `urlsplit` can parse. **Seven** things a person can type are
+refused, counted against that function:
+
+1. whitespace or a backslash anywhere in the value
+2. a value `urlsplit` cannot parse at all, which raises rather than returning
+3. any scheme that is not `http` or `https`: `javascript:`, `data:`, `vbscript:`, and a
+   scheme relative `//host`, which parses to no scheme at all
+4. a username or password, which reads as the first host and navigates to the second
+5. port zero, which is a link no browser will follow
+6. a percent escape in the **host**
+7. no host, or one with an empty label
+
+So a row that reached the table without passing the write check is served as text, and there
+is such a path: `backup.restore` inserts through Core, where neither a Pydantic model nor an
+ORM validator fires. That is the same trap `Book.cover_url` records, answered at the read end
+rather than by asking one more writer to remember.
+
+### A link can name one host and go to another, and that is the sharpest thing here
+
+The library is shared, so a member can store a link another member clicks. Python's `urlsplit`
+and a browser's WHATWG parser read a **different host** out of some of the same strings, and
+every such string is a phishing link that reads as somewhere this household trusts.
+
+Three separators, measured 2026-08-27 against `new URL(...).host`. WHATWG maps U+3002
+IDEOGRAPHIC FULL STOP, U+FF0E FULLWIDTH FULL STOP and U+FF61 HALFWIDTH IDEOGRAPHIC FULL STOP
+onto `.` before splitting labels; Python does not. `https://calibre.example。evil.example/x`
+is one host label here and a registrable domain of `evil.example` there.
+
+These are **rewritten, not refused**. The value stored becomes
+`https://calibre.example.evil.example/x`, so the link resolves where the browser was always
+going to send it **and says so**, which is strictly better than a 422 that hides the trick
+from the member who typed it.
+
+**Percent escapes in the host are refused instead**, and refusing them is what makes the
+mapping above worth anything. WHATWG percent-decodes the host *before* it runs IDNA, so `%2e`
+is the same divergence one step earlier and the separator table never sees it. Measured, all
+three resolving to `evil.example`:
+
+    calibre.example%2eevil.example        -> calibre.example.evil.example
+    calibre.example%2Eevil.example        -> calibre.example.evil.example
+    calibre.example%ef%bc%8eevil.example  -> calibre.example.evil.example
+
+It cannot be repaired the way a literal separator can, because decoding is recursive
+(`%252e`) and encodes more than separators: `%00` and `%2f` in a host both stored as links a
+browser then throws on. The path and the query are untouched, so `/book/12%20a` is a link.
+
+**Whitespace and a backslash are refused for the same reason and cannot be rewritten at all.**
+A browser ends the authority at a backslash and Python does not, so
+`http://good.example\.evil.example/x` is one host here and `good.example` with a path of
+`/.evil.example/x` there. `new URL()` throws outright on whitespace, so an href built from it
+is a link nothing can follow. `schemas/custom_field.py` removes control characters before the
+seam sees them, which is why a **tab** in a host is stored clean rather than refused; a
+literal space survives that tidy and is refused here.
+
+**The rewrite is what creates the sharpest case, and the read end is where it is closed.** The
+anchor's text is the stored `value` and its destination is `href`, so serving a rewritten
+target beside an unrewritten value names one registrable domain and resolves another: exactly
+the deception, produced by the repair. `custom_fields.values_on` therefore serves `href` **only
+when it equals `value`**, so a row this app wrote keeps its link and a row it did not write is
+served as text. That is free rather than a trade, because `link_target` is idempotent: measured
+over twelve accepted inputs, including a case folded scheme and a dropped empty query,
+`link_target(link_target(x)) == link_target(x)` every time.
+
+`frontend/src/lib/safeHref.ts` repeats both tests before handing a string to an `<a>`: the
+value and the href must be one string, and the authority must carry none of the four
+characters. Not belt and braces for its own sake. React 19 renders `href="javascript:..."` with
+no warning and no error, so a component that interpolates a server value straight into `href`
+is trusting the server for something the framework will not check, and this module exists for
+the row the server never wrote.
+
+**Its authority test reads the raw string, and getting that substring right is where two holes
+have been**, both a step earlier than the pattern looked. WHATWG strips leading C0-or-space and
+removes every tab and newline **before** parsing, so `^` is not the start of the URL; and after
+a special scheme it consumes any run of `/` or `\`, so `https:/host`, `https:///host` and
+`https:\\host` all have an authority. Measured against `new URL(...).host` rather than reasoned
+from the spec, over seventeen refusals and eight acceptances. C0-or-space rather than `trim()`,
+which leaves `\u0001`, `\u0007` and `\u001f` where a browser strips them.
+
+It tests those characters rather than comparing `parsed.href` to its input, because the two
+parsers normalise legitimately different things and a stored `https://a.example` compares
+unequal to the browser's `https://a.example/`, which would break a working link on the first
+trailing slash.
+
+**One divergence is named and deliberately not closed.** UTS-46 **deletes** ignored code
+points, so a host carrying a soft hyphen, a zero width space or a byte order mark stores as
+typed and resolves without them. Deletion can only shorten a host, so it cannot reach a domain
+the text does not already name, and the characters are invisible in the link text as well as
+absent from the destination. That is the whole difference from `%2e` and U+3002, which
+**lengthen** the host and put a different registrable domain behind the same text.
+
+**A third piece of the declaration is guarded in the schema rather than at the read end.**
+`custom_fields.kind` is a plain VARCHAR holding an enum, and `CustomFieldOut.kind` is typed,
+so one row carrying anything else makes Pydantic raise while serialising the library wide
+definitions route: one restored row, and every member's settings page answers 500 for good.
+`ck_custom_fields_kind` refuses the insert, which is the only place it can be refused, since
+`backup.restore` writes through Core. `custom_fields._kind_of` degrades an unrecognised kind
+to text at the per book read end, for a database restored from an archive older than the
+constraint, and it degrades in the safe direction: a text field never links whatever it holds.
+
+`covers.is_renderable` is deliberately not reused. It exists to keep an `<img src>` inside
+`COVER_HOSTS`, because a cover is fetched by the page; a custom field is a link a reader
+chooses to follow, to a system this app has never heard of, so a host allowlist would refuse
+the one URL the feature was built for. What is shared is one hard-won line: `urlsplit(...).port`
+**raises** on a port past 65535, so a single stored `https://host:99999/x` would be a poisoned
+row that 500s every read of that book, for good.
+
+`http` is allowed as well as `https`, unlike a cover: a link is a navigation rather than a
+subresource, so no browser blocks it as mixed content, and the calibre-web instance this
+exists for is on a LAN with no certificate. **This is an outbound link and not a fetch**: the
+server never requests the URL, so it is not an SSRF surface, and nothing about it reaches the
+CSP.
+
+### Deleting a custom field is admin only
+
+The same split `delete_tag` makes, and the sharper case of it. Defining a field is additive,
+changes no book and is open to any member, exactly as inventing a tag is. Deleting one
+destroys, in one request with no undo, content every member typed by hand, on books the caller
+cannot necessarily see, and a `CustomField` records nobody as its author.
+
 ## Authentication
 
 Stateless JWT, HS256, seven-day expiry. There is no refresh token and no server-side
@@ -212,24 +383,67 @@ value directly. The 400 raised when the key is missing does not echo it either.
 ### The overdue digest is the one path that sends catalogue content out unauthenticated
 
 Everything else in this app answers a request that carried a session. The overdue digest
-POSTs to a webhook, on a timer, with no member behind it and no session on the receiving
-end. Two things bound it.
+goes out on a timer with no member behind it and no session on the receiving end, on any
+of three channels: a webhook, mail over SMTP, and a Telegram chat. Two things bound all
+three.
 
-**Private books are excluded**, in the query rather than by a filter afterwards. A webhook
-lands in a channel everyone here reads, so a private title there is readable by
-everyone in it, which is exactly what `is_private` exists to prevent. The digest reports
-`skipped_private` as a count and never names one. The owner is still chased in the app,
-where the overdue view is per member and already scoped.
+**Private books are excluded, on every channel**, in the query rather than by a filter
+afterwards. Each of the three lands where everyone here reads, so a private title on one
+is readable by everyone in it, which is exactly what `is_private` exists to prevent. The
+digest reports `skipped_private` as a count and never names one, per channel as well as
+once at the top. The owner is still chased in the app, where the overdue view is per member
+and already scoped.
+
+**A per borrower mail is the one audience that could carry a private book**, because being
+reminded of a book you borrowed is not a disclosure. It is not built, and the reason is a
+missing fact rather than a decision: no member here has an address. `models.User` carries
+none and the LDAP backend requests none. Mail therefore goes to the household's own
+mailbox, which is a channel like the other two.
 
 **Nothing else is in the payload.** One entry per loan: the book's title, the borrower's
 username or free-text name, the due date and the days overdue. No ISBNs, no notes, no
-member ids beyond the borrower's name, no private books at any privacy setting.
+member ids beyond the borrower's name, no private books at any privacy setting. The mail
+**subject** carries a count and no title, because a subject line is stored unencrypted by
+every hop and shows in a notification on a locked phone.
 
-The body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a secret
-is set, over the raw bytes that go on the wire. That authenticates the sender to the
+The webhook body is signed with HMAC-SHA256 in `X-Endpaper-Signature: sha256=<hex>` when a
+secret is set, over the raw bytes that go on the wire. That authenticates the sender to the
 receiver; it is not confidentiality, and an `http://` destination sends book titles in
 clear. **Redirects are not followed**, unlike the metadata lookups, because a 302 from the
 configured host would send the library's book titles somewhere nobody approved.
+
+### Telegram's host is a constant, and SMTP always verifies
+
+**`api.telegram.org` is not configurable**, and that absence is the control. The webhook
+posts wherever an admin typed; this posts where the app chose. A host setting would give
+that property away and buy nothing, since a different host would not be Telegram.
+
+The **bot token is a path segment** in every Telegram call, which makes the request URL a
+secret and makes a token containing `/` or `..` a way to choose the method being called.
+It is matched against `<digits>:<secret>` before it reaches a URL, and the failure log
+names `api.telegram.org` rather than the URL. Nothing logs the exception's own message
+either: `httpx.HTTPStatusError` renders the request URL.
+
+**The SMTP TLS context is built in `mailer.send` and takes no parameter.** There is no
+setting, no environment variable and no request field that relaxes certificate or hostname
+checking, which is what makes "verification cannot be switched off" a property rather than
+a default. Three configurations are refused before a socket is opened: a password with
+neither STARTTLS nor implicit TLS, which would put a household's mail credential on the
+wire in the clear; both TLS flags at once, which is two protocols on one socket; and an
+address carrying a newline, which is header injection into `From` or `To`. A server that
+does not offer STARTTLS when STARTTLS was asked for fails rather than continuing in the
+clear.
+
+**Both new credentials join the masked set.** `MAIL_PASSWORD` and `TELEGRAM_BOT_TOKEN` sit
+beside the Google Books key and the webhook secret in `settings_store.SECRET_KEYS`, and a
+test walks that set rather than naming fields, so a fifth is covered the moment it is
+added. `MailConfig.password` is `repr=False` for the same reason: a frozen dataclass prints
+every field, so one `logger.exception` would put the mail password in a log.
+
+**`MAIL_DEBUG` is deliberately not honoured**, though it is one of the eight standard
+`MAIL_*` names this app reuses. smtplib's debug output writes the AUTH exchange to stderr,
+so supporting it would be a supported way to print the mail password into the container
+log.
 
 ### The webhook URL is an admin-to-admin capability, and a blocklist would not fix it
 
@@ -574,11 +788,45 @@ Worth knowing before exposing this beyond a private network:
   `/auth/login` has always had.
 - **No audit log.** Deleting a book leaves no trace of who did it, and on a shared shelf
   any member can.
-- **The overdue webhook is not retried with a backoff.** A failed delivery leaves
-  `notified_at` alone and the next hourly tick tries again, so a receiver that is down for
-  a day sees one attempt an hour and no queue. There is no dead-letter and no alert: a
-  webhook that has never worked is silent in exactly the way one that has nothing to send
-  is. `POST /api/loans/overdue/notify` reports the outcome, which is the way to tell.
+- **Any member can exhaust the custom field allowance, and only an admin can undo it.**
+  Defining a field is additive and open to everyone, deleting one is admin only, and there
+  are 25 of them: 25 requests deny the whole feature library wide, the 26th answers 409, and
+  the member who made them gets 403 on the delete. Renaming has the same shape without the
+  ceiling, since any member may rename any field. That is **denial, not disclosure**, and it
+  is a different question from the define/delete asymmetry argued above, which is about who
+  may destroy content. Anybody who would do it can also delete every book on the shelf, which
+  is the bullet above; it is here because a reader auditing the asymmetry will ask.
+- **The overdue reminder is not retried with a backoff.** A run where nothing delivered
+  leaves `notified_at` alone and the next hourly tick tries again, so a receiver that is
+  down for a day sees one attempt an hour and no queue. There is no dead-letter and no
+  alert: a channel that has never worked is silent in exactly the way one that has nothing
+  to send is. `POST /api/loans/overdue/notify` reports the outcome per channel on the run it
+  makes, which is the way to tell.
+- **One channel delivering stamps the loan for all of them.** `notified_at` records that
+  the loan was chased, and it was, so a broken webhook beside a working Telegram chat means
+  that batch never reaches the webhook. The alternative, stamping only on a clean sweep,
+  repeats the identical list hourly on the channels that work, which is the behaviour
+  people switch off. The failed channel is named in `senders`.
+- **A failure is named in `senders` on the run that failed, and the standing record is the
+  log.** `ticker()` discards `run_digest`'s result, so once an hourly tick has stamped
+  `notified_at` on any one success, "Send now" inside the reminder window answers
+  `nothing_due` with an empty `senders` and shows nothing about the channel that is broken.
+  Pressing the button before the ticker gets there shows it; afterwards, the
+  `endpaper.notifications` warning line is where it lives. There is no stored per channel
+  status, and adding one is a table this feature does not warrant.
+- **The backup carries every stored secret in plaintext.** `backup._TABLES` includes
+  `settings`, so `endpaper.json` holds `mail_password`, `telegram_bot_token`,
+  `overdue_webhook_secret` and `google_books_api_key` in full, unmasked. That is not an
+  escalation: a backup is admin only and an admin already sets those values. It matters
+  because of what they are rather than who can read them, and a household mail account is
+  usually the same account as everything else that household owns, so the archive deserves
+  the handling a password file gets. A deployment that would rather not carry them can pin
+  them through the environment instead, where they are never written to a settings row and
+  so never reach the archive.
+- **A hung mail server costs a worker thread, not the ticker.** `asyncio.to_thread` cannot
+  be cancelled, so `MAIL_DEADLINE_SECONDS` bounds the coroutine and leaves the thread to
+  expire on its own socket timeout. What it guarantees is that the hourly run and
+  `POST /api/loans/overdue/notify` are never held by it.
 - **Reading progress is not hidden by a private book's owner from themselves.** The log is
   personal and filtered on `user_id`, so nobody sees anybody else's, but a member's own
   entries on a book they later lose access to (a book somebody else made private) are

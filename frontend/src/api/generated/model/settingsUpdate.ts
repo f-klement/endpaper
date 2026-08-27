@@ -19,8 +19,20 @@ export interface SettingsUpdate {
   goodreads_lookup_enabled?: boolean | null;
   google_books_api_key?: string | null;
   google_books_enabled?: boolean | null;
+  mail_default_sender?: string | null;
+  mail_password?: string | null;
+  mail_port?: string | null;
+  mail_server?: string | null;
+  mail_use_ssl?: boolean | null;
+  mail_use_tls?: boolean | null;
+  mail_username?: string | null;
+  overdue_mail_enabled?: boolean | null;
+  overdue_mail_to?: string | null;
   overdue_reminder_days?: number | null;
+  overdue_telegram_enabled?: boolean | null;
   overdue_webhook_enabled?: boolean | null;
   overdue_webhook_secret?: string | null;
   overdue_webhook_url?: string | null;
+  telegram_bot_token?: string | null;
+  telegram_chat_id?: string | null;
 }

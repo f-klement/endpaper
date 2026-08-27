@@ -44,6 +44,8 @@ from models import (
     Book,
     Classification,
     Collection,
+    CustomField,
+    CustomFieldValue,
     Loan,
     Note,
     Quote,
@@ -84,6 +86,12 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
     for name, model in (
         ("users", User),
         ("tags", Tag),
+        # The library's own field definitions. No foreign key of its own, so it
+        # could sit anywhere before the values that reference it; here beside
+        # `tags`, which is the other library wide vocabulary. Deliberately
+        # absent from `_REQUIRED_TABLES`: an archive taken before custom fields
+        # existed restores with none, which is the state it was written in.
+        ("custom_fields", CustomField),
         # Before books, which carry a foreign key into it. Absent from
         # `_REQUIRED_TABLES` on purpose: an archive taken before collections
         # existed restores with none, which is exactly the state it was
@@ -94,6 +102,13 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # `_REQUIRED_TABLES`: an archive taken before classifications existed
         # restores with none, which is the state it was written in.
         ("classifications", Classification),
+        # After both parents, `books` above and `custom_fields` further up. The
+        # values are the half of the feature a member typed by hand, so an
+        # archive that carried the definitions and not these would restore a
+        # library with every field defined and every one of them empty, which
+        # is the shape of failure `author_aliases` had. Absent from
+        # `_REQUIRED_TABLES` for the same reason as the definitions.
+        ("custom_field_values", CustomFieldValue),
         ("user_books", UserBook),
         # After user_books, which is the other per-member table, and before
         # loans purely to keep the reading rows together. Both parents

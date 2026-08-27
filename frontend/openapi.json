@@ -1977,6 +1977,128 @@
         "title": "CoverBackfillOut",
         "type": "object"
       },
+      "CustomFieldCreate": {
+        "description": "A field the Library is defining.\n\nThe kind is chosen here and never afterwards. Changing it would reinterpret\nevery value already under it: a TEXT field turned URL would start linking\nstrings nobody wrote as links, and the other direction would silently\nunmake links people are using. Delete and redefine is the honest version of\nthat, and it says out loud that the values go.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CustomFieldKind",
+            "default": "text"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CustomFieldCreate",
+        "type": "object"
+      },
+      "CustomFieldKind": {
+        "description": "What a Library said one of its own fields holds.\n\n**Declared per field, never detected from the value**, and the difference\nmatters at exactly one place: whether the Book page renders the value as a\nlink. Detection reads a member typing prose that happens to start with\n`http` as a URL, and it reads a URL somebody meant as text the same way.\nThe Library already has to name the field, so it can say what goes in it.\n\nTEXT is the default and the safe one: nothing is ever linked from a TEXT\nfield, whatever the value looks like.\n\nURL is a link out to another system, which is the requirement this feature\nexists for: a Book's page in a calibre-web instance. **The declaration is\nnot the permission.** `custom_fields.link_target` re-reads the value on\nevery serialisation and returns a target only for `http` and `https`, so a\nrow that reached the table without passing the write check (a restore, a\nhand edit) is served as text rather than as a link.",
+        "enum": [
+          "text",
+          "url"
+        ],
+        "title": "CustomFieldKind",
+        "type": "string"
+      },
+      "CustomFieldOut": {
+        "description": "A field this Library has defined.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CustomFieldKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "title": "CustomFieldOut",
+        "type": "object"
+      },
+      "CustomFieldRename": {
+        "description": "A new name for a field. The kind is deliberately absent: see\n`CustomFieldCreate`.",
+        "properties": {
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CustomFieldRename",
+        "type": "object"
+      },
+      "CustomFieldValueOut": {
+        "description": "One field a Book has something in.\n\n`href` is set only where the value is a link the browser may be pointed at,\nand it is decided on **this read** rather than trusted from storage:\n`custom_fields.link_target` owns why. A client renders `value` as text\nwhenever `href` is null, so a value that was stored before a definition\nchanged, or through a restore, degrades to text rather than to a link\nnobody checked.",
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "integer"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CustomFieldKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_id",
+          "name",
+          "kind",
+          "value"
+        ],
+        "title": "CustomFieldValueOut",
+        "type": "object"
+      },
+      "CustomFieldValueUpdate": {
+        "description": "What one Book holds in one field.\n\n**An empty string clears it**, which is the whole of the delete half of the\nAPI: emptying the box and saving is what a person does, and a separate\nDELETE route would leave a client to decide which of the two verbs an empty\nbox means. `custom_fields.write` deletes the row rather than storing an\nempty one, so a cleared field is absent rather than blank.\n\n`min_length` is therefore deliberately unset while `max_length` is not.",
+        "properties": {
+          "value": {
+            "maxLength": 500,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CustomFieldValueUpdate",
+        "type": "object"
+      },
       "DuplicateGroup": {
         "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.",
         "properties": {
@@ -2574,7 +2696,8 @@
           "disabled",
           "no_url",
           "nothing_due",
-          "unreachable"
+          "unreachable",
+          "misconfigured"
         ],
         "title": "OverdueNotifyReason",
         "type": "string"
@@ -2609,6 +2732,13 @@
               }
             ]
           },
+          "senders": {
+            "items": {
+              "$ref": "#/components/schemas/SenderOutcome"
+            },
+            "title": "Senders",
+            "type": "array"
+          },
           "sent": {
             "default": false,
             "title": "Sent",
@@ -2623,6 +2753,16 @@
         },
         "title": "OverdueNotifyResult",
         "type": "object"
+      },
+      "OverdueSender": {
+        "description": "Which channel a reminder went out on.\n\nA closed set because the result reports one outcome per sender and the\nclient renders each: a string would let a new sender arrive on screen with\nno label and no test noticing.",
+        "enum": [
+          "webhook",
+          "email",
+          "telegram"
+        ],
+        "title": "OverdueSender",
+        "type": "string"
       },
       "OwnershipStatus": {
         "description": "Whether a book is physically on the shelf.\n\nDeliberately separate from ReadStatus, which is about a person, not an\nobject. \"I have read this\" and \"we own a copy of this\" are independent\nclaims: a library borrowing is read but not owned, and an unread gift is\nowned but not read. Conflating them is what makes an imported reading\nhistory look like a catalogue of possessions.\n\nUNKNOWN exists because a Goodreads export cannot answer the question at\nall. Defaulting those rows to OWNED would assert something nobody checked;\ndefaulting them to NOT_OWNED would be an equally unfounded guess. So they\narrive unverified and wait to be confirmed.",
@@ -3197,6 +3337,57 @@
         "title": "RestoreResult",
         "type": "object"
       },
+      "SenderOutcome": {
+        "description": "What one channel did with the digest.\n\n**The withheld count is here rather than only at the top, and that is the\npoint of the shape.** All three senders withhold the same private books\ntoday, because all three go to a channel rather than to a person, so the\nthree numbers agree. They are reported per sender anyway: the moment one\nsender's audience differs, a single figure would be a lie on the other two,\nand a reader has no way to tell a shared number from a coincidence.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "loans": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Loans",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverdueNotifyReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sender": {
+            "$ref": "#/components/schemas/OverdueSender"
+          },
+          "sent": {
+            "default": false,
+            "title": "Sent",
+            "type": "boolean"
+          },
+          "skipped_private": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Skipped Private",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sender"
+        ],
+        "title": "SenderOutcome",
+        "type": "object"
+      },
       "SeriesOut": {
         "description": "One series, as the browse list shows it.",
         "properties": {
@@ -3252,10 +3443,72 @@
             "title": "Has Google Books Api Key",
             "type": "boolean"
           },
+          "has_mail_password": {
+            "default": false,
+            "title": "Has Mail Password",
+            "type": "boolean"
+          },
           "has_overdue_webhook_secret": {
             "default": false,
             "title": "Has Overdue Webhook Secret",
             "type": "boolean"
+          },
+          "has_telegram_bot_token": {
+            "default": false,
+            "title": "Has Telegram Bot Token",
+            "type": "boolean"
+          },
+          "mail_default_sender": {
+            "default": "",
+            "title": "Mail Default Sender",
+            "type": "string"
+          },
+          "mail_from_env": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mail From Env",
+            "type": "array"
+          },
+          "mail_password_preview": {
+            "default": "",
+            "title": "Mail Password Preview",
+            "type": "string"
+          },
+          "mail_port": {
+            "default": "",
+            "title": "Mail Port",
+            "type": "string"
+          },
+          "mail_server": {
+            "default": "",
+            "title": "Mail Server",
+            "type": "string"
+          },
+          "mail_use_ssl": {
+            "default": false,
+            "title": "Mail Use Ssl",
+            "type": "boolean"
+          },
+          "mail_use_tls": {
+            "default": false,
+            "title": "Mail Use Tls",
+            "type": "boolean"
+          },
+          "mail_username": {
+            "default": "",
+            "title": "Mail Username",
+            "type": "string"
+          },
+          "overdue_mail_enabled": {
+            "default": false,
+            "title": "Overdue Mail Enabled",
+            "type": "boolean"
+          },
+          "overdue_mail_to": {
+            "default": "",
+            "title": "Overdue Mail To",
+            "type": "string"
           },
           "overdue_reminder_days": {
             "default": 7,
@@ -3263,6 +3516,11 @@
             "minimum": 1.0,
             "title": "Overdue Reminder Days",
             "type": "integer"
+          },
+          "overdue_telegram_enabled": {
+            "default": false,
+            "title": "Overdue Telegram Enabled",
+            "type": "boolean"
           },
           "overdue_webhook_enabled": {
             "default": false,
@@ -3278,6 +3536,26 @@
             "default": "",
             "title": "Overdue Webhook Url",
             "type": "string"
+          },
+          "telegram_bot_token_from_env": {
+            "default": false,
+            "title": "Telegram Bot Token From Env",
+            "type": "boolean"
+          },
+          "telegram_bot_token_preview": {
+            "default": "",
+            "title": "Telegram Bot Token Preview",
+            "type": "string"
+          },
+          "telegram_chat_id": {
+            "default": "",
+            "title": "Telegram Chat Id",
+            "type": "string"
+          },
+          "telegram_chat_id_from_env": {
+            "default": false,
+            "title": "Telegram Chat Id From Env",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3337,6 +3615,111 @@
             ],
             "title": "Google Books Enabled"
           },
+          "mail_default_sender": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Default Sender"
+          },
+          "mail_password": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Password"
+          },
+          "mail_port": {
+            "anyOf": [
+              {
+                "maxLength": 5,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Port"
+          },
+          "mail_server": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Server"
+          },
+          "mail_use_ssl": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Use Ssl"
+          },
+          "mail_use_tls": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Use Tls"
+          },
+          "mail_username": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mail Username"
+          },
+          "overdue_mail_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Mail Enabled"
+          },
+          "overdue_mail_to": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Mail To"
+          },
           "overdue_reminder_days": {
             "anyOf": [
               {
@@ -3349,6 +3732,17 @@
               }
             ],
             "title": "Overdue Reminder Days"
+          },
+          "overdue_telegram_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Telegram Enabled"
           },
           "overdue_webhook_enabled": {
             "anyOf": [
@@ -3384,6 +3778,30 @@
               }
             ],
             "title": "Overdue Webhook Url"
+          },
+          "telegram_bot_token": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Bot Token"
+          },
+          "telegram_chat_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telegram Chat Id"
           }
         },
         "title": "SettingsUpdate",
@@ -4357,6 +4775,183 @@
           }
         ],
         "summary": "Backfill Covers",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/custom-fields": {
+      "get": {
+        "description": "Every field this library keeps, in the order it defined them.\n\n**No usage count**, unlike `GET /api/books/tags`. A count of the books\ncarrying a field is a disclosure: it is drawn from books the caller may not\nsee, so it would have to be scoped to the viewer, and a viewer scoped\nnumber in a confirmation dialog would then understate what deleting the\nfield is about to destroy. Neither number is worth having, so the\nconfirmation says \"every book\" instead. `docs/security.md` records it.",
+        "operationId": "list_custom_fields",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CustomFieldOut"
+                  },
+                  "title": "Response List Custom Fields",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Custom Fields",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "Define a field for the whole library.\n\nAny member, like `create_tag` and for the same reason: public books are a\nshared shelf that anyone may curate, and a vocabulary only an admin can\nextend is a vocabulary nobody uses. Defining one is additive and changes no\nbook.\n\nA name that already exists, in any capitalisation, returns that field\nrather than a 409: somebody typing a name that is already there wants that\nfield. Past `MAX_CUSTOM_FIELDS` it refuses with 409.",
+        "operationId": "define_custom_field",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Define Custom Field",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/custom-fields/{field_id}": {
+      "delete": {
+        "description": "Remove a field, and its value on every book.\n\n**Admin only, and deliberately asymmetric with defining one**, which is the\nsame split `delete_tag` makes. Defining a field is additive and reversible\nby deleting it. Deleting one destroys, in one request and with no undo,\nsomething every member of the house typed by hand, on books the caller\ncannot necessarily see. A `CustomField` records nobody as its author, so\nthere is no owner to ask.\n\nIt is the sharper case of the two: deleting a tag takes a label off a book,\nand deleting a field takes the **content** a member wrote.\n\n204, like `delete_tag`, and the number of values removed goes to the log\nrather than to the caller. See `list_custom_fields` for why no count is\npublished.",
+        "operationId": "delete_custom_field",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Field Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Custom Field",
+        "tags": [
+          "books"
+        ]
+      },
+      "patch": {
+        "description": "Rename a field. Every value under it is kept.\n\nThat is the schema rather than this handler: values reference the\ndefinition by id, so nothing about them mentions the name. `custom_fields.rename`\nrecords why renaming onto an existing name is refused instead of merged.",
+        "operationId": "rename_custom_field",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Field Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldRename"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Rename Custom Field",
         "tags": [
           "books"
         ]
@@ -5381,6 +5976,135 @@
           }
         ],
         "summary": "Upload Cover",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/custom-fields": {
+      "get": {
+        "description": "What this book holds in the library's own fields.\n\nOnly the fields it has something in: a book with no value for a field is\nabsent from this list rather than present and empty, because clearing a\nvalue deletes the row. Ask `GET /api/books/custom-fields` for the ones that\ncould be filled in.",
+        "operationId": "get_custom_fields",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CustomFieldValueOut"
+                  },
+                  "title": "Response Get Custom Fields",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Custom Fields",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/custom-fields/{field_id}": {
+      "put": {
+        "description": "Fill in a field on this book, or clear it with an empty value.\n\nOne verb for both, because emptying the box and saving is what a person\ndoes and a client should not have to decide which of two verbs that means.\n\nReturns the book's whole list rather than the one value, so a client that\nhas just written one is holding the same thing `GET` would give it.\n\n422 when the field holds a link and the value is not one: an address with\nno scheme, a `javascript:` or `data:` URL, or a host that is missing. See\n`custom_fields.link_target` for the whole list and why it is re-checked on\nevery read as well as here.",
+        "operationId": "set_custom_field",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "field_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Field Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldValueUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CustomFieldValueOut"
+                  },
+                  "title": "Response Set Custom Field",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Custom Field",
         "tags": [
           "books"
         ]

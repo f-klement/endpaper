@@ -17,13 +17,30 @@ export interface SettingsOut {
   google_books_api_key_preview: string;
   google_books_enabled: boolean;
   has_google_books_api_key: boolean;
+  has_mail_password?: boolean;
   has_overdue_webhook_secret?: boolean;
+  has_telegram_bot_token?: boolean;
+  mail_default_sender?: string;
+  mail_from_env?: string[];
+  mail_password_preview?: string;
+  mail_port?: string;
+  mail_server?: string;
+  mail_use_ssl?: boolean;
+  mail_use_tls?: boolean;
+  mail_username?: string;
+  overdue_mail_enabled?: boolean;
+  overdue_mail_to?: string;
   /**
    * @minimum 1
    * @maximum 365
    */
   overdue_reminder_days?: number;
+  overdue_telegram_enabled?: boolean;
   overdue_webhook_enabled?: boolean;
   overdue_webhook_secret_preview?: string;
   overdue_webhook_url?: string;
+  telegram_bot_token_from_env?: boolean;
+  telegram_bot_token_preview?: string;
+  telegram_chat_id?: string;
+  telegram_chat_id_from_env?: boolean;
 }

@@ -78,18 +78,36 @@ os.environ.setdefault("APP_ENV", "dev")
 # depend on how long the run took. `notifications.run_digest` is driven
 # directly instead, and the wiring is pinned in tests/test_main.py.
 os.environ.setdefault("ENABLE_OVERDUE_TICKER", "false")
-# **Removed, not defaulted.** A key in the shell that happens to run the suite
-# wins over the stored one everywhere `google_books_api_key_from_env()` is
-# consulted, so `GET /api/settings` would report the environment's key and any
-# test asserting on the stored one would be asserting about a value it never
-# set. `TestEverySecretSettingIsMasked` passed vacuously for this key that way,
-# and this deployment really does have it set. Every test that wants it sets it
-# for itself with `monkeypatch.setenv`, which is unaffected by this.
-os.environ.pop("GOOGLE_BOOKS_API_KEY", None)
-
 # The backend is imported flat ("from models import Book"), the way uvicorn
 # imports it with backend/ as the working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import config  # noqa: E402
+
+# **Removed, not defaulted, and every one of them.** A value in the shell that
+# happens to run the suite wins over the stored one everywhere `in_force` is
+# consulted, so `GET /api/settings` reports the environment's value and any test
+# asserting on the stored one is asserting about something it never set.
+#
+# **That makes a masking test pass vacuously rather than fail**, which is why
+# this is a loop over the table rather than a list of names. It read
+# `os.environ.pop("GOOGLE_BOOKS_API_KEY", None)` and nothing else, and
+# `TestEverySecretSettingIsMasked` had already passed vacuously for that key
+# once before the pop was added. The mail and Telegram settings reopened it:
+# this deployment's `.env` really does set `MAIL_PASSWORD` and
+# `TELEGRAM_BOT_TOKEN`, so with the token exported the walk stores
+# `secret-value-N-telegram_bot_token`, the response carries a mask of the
+# environment's token instead, and "the stored value is absent" is true whether
+# or not anything is masked at all. It would have passed with `mask()` deleted.
+#
+# Reading `_ENV_OVERRIDES` rather than restating it means a credential added
+# there is disarmed here the moment it is added, which is the only version of
+# this that stays correct.
+for _pinned in config._ENV_OVERRIDES.values():
+    os.environ.pop(_pinned, None)
+
+# Every test that wants one sets it for itself with `monkeypatch.setenv`, which
+# is unaffected by this.
 
 from fastapi.testclient import TestClient  # noqa: E402
 

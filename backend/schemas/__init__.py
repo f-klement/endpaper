@@ -52,6 +52,13 @@ from schemas.collection import (
     CollectionUpdate,
 )
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, Page
+from schemas.custom_field import (
+    CustomFieldCreate,
+    CustomFieldOut,
+    CustomFieldRename,
+    CustomFieldValueOut,
+    CustomFieldValueUpdate,
+)
 from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
 from schemas.loan import LoanCreate, LoanOut
 from schemas.note import NoteCreate, NoteOut
@@ -62,6 +69,7 @@ from schemas.settings import (
     LoginImageOut,
     OverdueNotifyResult,
     RestoreResult,
+    SenderOutcome,
     SettingsOut,
     SettingsUpdate,
 )
@@ -112,6 +120,11 @@ __all__ = [
     "ClassificationOut",
     "CopyCreate",
     "CoverBackfillOut",
+    "CustomFieldCreate",
+    "CustomFieldOut",
+    "CustomFieldRename",
+    "CustomFieldValueOut",
+    "CustomFieldValueUpdate",
     "DuplicateGroup",
     "ImportResultOut",
     "ImportPreviewOut",
@@ -132,6 +145,7 @@ __all__ = [
     "NoteCreate",
     "NoteOut",
     "OverdueNotifyResult",
+    "SenderOutcome",
     "OwnershipUpdate",
     "Page",
     "PerUserStat",

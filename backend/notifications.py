@@ -1,16 +1,40 @@
-"""Chasing overdue loans, by posting a digest to a webhook.
+"""Chasing overdue loans, by sending one digest on every channel that is on.
 
-A generic outbound webhook rather than email or an integration with one chat
-service. A self-hosted app that other libraries run should not carry an
-integration with something nobody else runs, and a webhook is the one shape
-every receiver already speaks: a chat bridge, a home automation flow, or a
-five-line script.
+Three senders, one digest. **A webhook, mail over SMTP, and Telegram**, each
+switched on independently, all carrying the same content.
 
-**Private books are excluded.** A webhook has no member identity behind it and
-lands in a channel everyone here reads, so putting a private book's title
-through it defeats the single promise the data model makes. The in-app overdue
-view is per member and already scoped, so the owner still gets chased there.
-See `docs/decisions.md` and `docs/security.md`.
+**The webhook was once the only one, on an argument this module used to make and
+that is now overruled.** It said a self-hosted app should not ship an
+integration nobody else runs, and that a webhook is the one shape every receiver
+already speaks. What that reasoning missed is that it makes the household build
+the receiver: most have no webhook endpoint and no intention of writing one, so
+the feature was off for them in practice. The two additions are chosen against
+exactly that objection. **SMTP is universal**, carried by every household that
+has a mailbox, and **Telegram is one fixed host**, so "an integration with
+something nobody else runs" costs one constant here rather than a service.
+Recorded so the next reader does not think a decision was quietly reversed:
+issue #8, and `docs/decisions.md`.
+
+**Private books are excluded, on every sender.** A channel has no member
+identity behind it and lands where the whole household reads, so putting a
+private book's title through one defeats the single promise the data model
+makes. The in-app overdue view is per member and already scoped, so the owner
+still gets chased there. See `docs/decisions.md` and `docs/security.md`.
+
+**A per borrower mail would be the one audience that could carry a private
+book**, because being reminded of a book you borrowed is not a disclosure. It is
+not built, and the reason is a missing fact rather than a decision: no member
+here has an address. `models.User` carries none and the LDAP backend requests
+none, so there is nowhere to send it. Mail therefore goes to the household's own
+mailbox, which is a channel like the other two and excludes private books like
+the other two.
+
+`notified_at` is stamped when **at least one** enabled sender delivered, because
+the column records that the loan was chased and it was. The alternative,
+stamping only when every sender delivered, turns one broken receiver into an
+hourly repeat of the same list on the channels that work, which `build_digest`
+calls the behaviour people switch off. A sender that failed is reported in its
+own entry rather than compensated for.
 
 The reminder interval is the library's, not this module's. Handy Library's
 named differentiator in this space is configurable timing, and it is the right
@@ -28,17 +52,20 @@ import hashlib
 import hmac
 import json
 import logging
+import re
+import smtplib
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final, assert_never
 from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
+import mailer
 import settings_store
 from database import SessionLocal
-from enums import OverdueNotifyReason, SettingKey
+from enums import OverdueNotifyReason, OverdueSender, SettingKey
 from models import Book, Loan
 from schemas.settings import MAX_REMINDER_DAYS, MIN_REMINDER_DAYS
 
@@ -64,9 +91,76 @@ TICK_SECONDS = 60 * 60
 EVENT_NAME = "overdue_loans"
 SIGNATURE_HEADER = "X-Endpaper-Signature"
 
+#: How long the whole mail conversation may take, in seconds.
+#:
+#: `mailer.TIMEOUT_SECONDS` bounds each socket operation, and a conversation is
+#: connect, EHLO, STARTTLS, EHLO, AUTH, MAIL, RCPT, DATA. This bounds the lot.
+#:
+#: **It bounds the caller, not the thread**, and that is a real limitation
+#: stated rather than hidden: `asyncio.to_thread` cannot be cancelled, so a
+#: server that stops answering costs one worker thread until its own socket
+#: timeout expires. What it buys is the thing that matters, which is that the
+#: hourly ticker and `POST /api/loans/overdue/notify` are never held by it.
+MAIL_DEADLINE_SECONDS = 30.0
+
+#: Telegram's one host, as a constant and **deliberately not a setting**.
+#:
+#: This is the property that makes Telegram a safer sender than the webhook
+#: rather than a second copy of it: the webhook posts the library's book titles
+#: wherever an admin typed, and this posts them to exactly one place that the
+#: app, not the configuration, chose. Making the host settable would give that
+#: away and buy nothing, since a different host would not be Telegram.
+TELEGRAM_API: Final = "https://api.telegram.org"
+
+#: `<digits>:<secret>`, which is the documented shape of a bot token.
+#:
+#: Matched before the token is put in a URL **path**, which is where Telegram
+#: takes it. A token containing `/` or `..` would otherwise choose the method
+#: being called, or walk up out of `/bot<token>/` entirely, from a settings row
+#: a restore can write without passing any schema.
+_TELEGRAM_TOKEN: Final = re.compile(r"^[0-9]{1,20}:[A-Za-z0-9_-]{20,255}$")
+
+#: A numeric chat id, negative for a group, or an `@public_channel` name.
+#:
+#: In the JSON body rather than the path, so this is not a traversal. It is
+#: refused anyway because a chat id that is not a chat id is a configuration
+#: mistake worth naming on the settings screen, rather than a 400 from Telegram
+#: that reaches nobody.
+_TELEGRAM_CHAT: Final = re.compile(r"^(-?[0-9]{1,32}|@[A-Za-z][A-Za-z0-9_]{4,63})$")
+
+#: Telegram's own limit on one message, in **UTF-16 code units**.
+#:
+#: **Counted in those units, not in characters, and the difference is a live
+#: bug rather than pedantry.** A code point outside the BMP is one character and
+#: *two* UTF-16 units, so `len()` under-counts exactly where a book title
+#: carries an emoji. Measured: 2,100 grinning faces are 2,100 characters and
+#: **4,200** units, which `len()` passes as under 4096 and Telegram rejects with
+#: a 400. That is member-supplied catalogue content silently stopping every
+#: household reminder, which is the same failure class the `parse_mode`
+#: decision exists to avoid, on the same input. `_utf16_units` is the measure.
+#:
+#: **The digest is truncated to one message rather than split across several.**
+#: Two messages are two sends, and a run where the first succeeded and the
+#: second failed is a partial delivery that `run_digest` would have to decide
+#: what to do with. One message is one outcome.
+TELEGRAM_MAX_UNITS: Final = 4096
+
 
 class WebhookRefused(Exception):
     """The destination is not one this app will post to."""
+
+
+class TelegramRefused(Exception):
+    """The bot token or the chat id is not one this app will send with."""
+
+
+#: Every way a sender declines before opening a socket.
+#:
+#: A tuple rather than one base class, because `mailer.MailRefused` lives in the
+#: module that owns SMTP and importing a base from here would be a cycle. The
+#: cost is this line; the benefit is that neither module has to know the other's
+#: hierarchy.
+_REFUSALS: Final = (WebhookRefused, TelegramRefused, mailer.MailRefused)
 
 
 def checked_url(raw: str) -> str:
@@ -164,6 +258,21 @@ def count_private_overdue(db: Session, now: datetime) -> int:
     A count, never a title. Reported so a library that expects five entries
     and receives four can see why without reading the source.
 
+    **This is the number for a sender whose audience is a channel, and every
+    sender has one today**, so all three report it and all three agree. It is
+    carried per sender in `SenderOutcome` rather than only once at the top, and
+    the reason belongs here, at the function that exists to report what was
+    withheld: what one channel withholds is not necessarily what another did.
+    An audience with a member behind it could carry a private book the others
+    may not, and a single figure would then be a lie on two channels of three.
+
+    **A per borrower mail is that audience, and it does not exist yet.** Being
+    reminded of a book you borrowed is not a disclosure, so such a mail could
+    include one. No member here has an address (`models.User` carries none and
+    the LDAP backend requests none), so mail goes to the household's mailbox and
+    is a channel like the other two. When that changes, this function grows a
+    caller that asks for a different number, not a second definition of the rule.
+
     **No reminder interval here, and that is the difference from
     `due_for_reminder`.** A private book is never sent, so nothing in this
     feature ever stamps its `notified_at`; the only way one carries a value is
@@ -214,6 +323,81 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
     }
 
 
+def _utf16_units(text: str) -> int:
+    """How long Telegram thinks this message is.
+
+    Telegram counts a message in UTF-16 code units, which is what its 4096 is
+    denominated in. `len()` counts code points, and the two differ by one for
+    every character outside the BMP: an emoji in a book title, a rarer CJK
+    ideograph, a mathematical alphanumeric. `len()` therefore **under**-counts,
+    which is the wrong direction, because it passes a message the API refuses.
+
+    `utf-16-le` rather than `utf-16`, which prepends a two byte BOM and would
+    make every message read one unit longer than it is.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
+def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
+    """The same digest as plain text, for the two senders a person reads.
+
+    **`build_digest` stays the single source of what a reminder says.** This
+    renders that object and adds nothing to it, so the three senders differ in
+    transport and in audience and never in content. A second place that decided
+    what a reminder mentions is how the webhook and the chat message drift into
+    describing different libraries.
+
+    English, and only English. The app's message catalogues are the frontend's
+    (`frontend/src/i18n/`), and there is no server side one to translate a
+    sentence with; inventing a second catalogue for two lines of text is a
+    larger change than this feature. `default_locale` therefore does not reach
+    here, and pretending it did would be worse than saying so.
+
+    `limit` is in **UTF-16 code units**, and says how many entries were dropped,
+    so a household with two hundred overdue books gets a message Telegram will
+    accept rather than a 400 nobody sees. Only Telegram passes one; mail has no
+    such ceiling. See `TELEGRAM_MAX_UNITS` for why the unit is not characters.
+    """
+    count = digest["count"]
+    header = f"{count} overdue {'book' if count == 1 else 'books'}."
+    lines = [
+        f"{entry['title'] or 'Untitled'}: {entry['borrower']}, "
+        f"{entry['days_overdue']} days overdue"
+        for entry in digest["loans"]
+    ]
+
+    if limit is None:
+        return "\n".join([header, "", *lines])
+
+    kept: list[str] = []
+    # Rebuilt on every candidate rather than measured incrementally: the tail
+    # grows as entries are dropped, so a running total is wrong by the width of
+    # its own sentence exactly when the message is closest to the limit.
+    for line in lines:
+        dropped = len(lines) - len(kept) - 1
+        tail = [] if dropped == 0 else ["", f"and {dropped} more."]
+        candidate = "\n".join([header, "", *kept, line, *tail])
+        if _utf16_units(candidate) > limit:
+            break
+        kept.append(line)
+
+    dropped = len(lines) - len(kept)
+    tail = [] if dropped == 0 else ["", f"and {dropped} more."]
+    rendered = "\n".join([header, "", *kept, *tail])
+    if _utf16_units(rendered) <= limit:
+        return rendered
+
+    # The header alone can exceed a very small limit, and a hard cut is better
+    # than a send this module knows will be refused. Dropped a code point at a
+    # time rather than sliced: a slice counted in units could land between the
+    # halves of a surrogate pair, and a code point is never more than two units,
+    # so this cannot overshoot. `rendered` here is the header and the tail,
+    # because nothing longer than the limit was ever kept.
+    while rendered and _utf16_units(rendered) > limit:
+        rendered = rendered[:-1]
+    return rendered
+
+
 def sign(body: bytes, secret: str) -> str:
     """`sha256=<hex>`, over the **raw body** the receiver will read.
 
@@ -225,15 +409,15 @@ def sign(body: bytes, secret: str) -> str:
     return f"sha256={digest}"
 
 
-async def post_digest(url: str, body: bytes, secret: str) -> None:
-    """POST the digest, or raise.
+async def _post(url: str, body: bytes, headers: dict[str, str]) -> None:
+    """POST a body outward, or raise. The one outbound send in this module.
 
     **Redirects are not followed.** A 302 from the configured host to somewhere
     else would send the library's book titles to a destination nobody
     approved, and this is the one request in the app whose payload is
     catalogue content going somewhere unauthenticated. `fetch.get` refuses a
     redirect that leaves the host; this refuses one at all, because there is no
-    hop a webhook needs and the payload is going out rather than coming in.
+    hop a send needs and the payload is going out rather than coming in.
 
     **The reply is never read**, which is why this streams. `client.post`
     buffers the whole body, and the only thing done with it is
@@ -241,11 +425,11 @@ async def post_digest(url: str, body: bytes, secret: str) -> None:
     hostile reply would otherwise fill the pod on the hourly ticker, with no
     member action involved at all. Streaming and not reading costs nothing: the
     status is on the response before the body is touched.
-    """
-    headers = {"Content-Type": "application/json"}
-    if secret:
-        headers[SIGNATURE_HEADER] = sign(body, secret)
 
+    Telegram uses this too, and gets both properties for free. Not reading the
+    reply also means its error JSON, which quotes the request back, never
+    reaches a log.
+    """
     async with (
         asyncio.timeout(TIMEOUT_SECONDS),
         httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=False) as client,
@@ -254,12 +438,112 @@ async def post_digest(url: str, body: bytes, secret: str) -> None:
         response.raise_for_status()
 
 
+async def post_digest(url: str, body: bytes, secret: str) -> None:
+    """POST the digest to the webhook, signed when a secret is set."""
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers[SIGNATURE_HEADER] = sign(body, secret)
+    await _post(url, body, headers)
+
+
+def telegram_url(token: str) -> str:
+    """The one endpoint this app calls, with the token where Telegram wants it.
+
+    **The token is a path segment, so this string is a secret.** It must never
+    be logged, put in an exception message, or returned from the API. `_host`
+    exists for the log line and answers `api.telegram.org`, which is a constant
+    and therefore discloses nothing.
+    """
+    return f"{TELEGRAM_API}/bot{token}/sendMessage"
+
+
+async def send_telegram(db: Session, text: str) -> None:
+    """Send the digest to the household chat, or raise.
+
+    **No `parse_mode`.** With one set, Telegram parses the message as HTML or as
+    Markdown and rejects the whole send on an unbalanced character: a book
+    titled `Kiss & Tell`, `*Star*` or `a_b` would silently stop every reminder,
+    and the failure is a 400 with the borrower's own catalogue to blame. Plain
+    text has no such character. The same trap, with the same fix, is documented
+    for this household's own pager.
+
+    `disable_web_page_preview` because a title that looks like a URL would
+    otherwise make Telegram fetch it and render a card under the reminder.
+    """
+    token = settings_store.in_force(db, SettingKey.TELEGRAM_BOT_TOKEN).strip()
+    chat = settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID).strip()
+    if not token:
+        raise TelegramRefused("No Telegram bot token is configured.")
+    if not _TELEGRAM_TOKEN.match(token):
+        # The shape, never the value: this sentence reaches an admin and a log.
+        raise TelegramRefused("The Telegram bot token is not a bot token.")
+    if not _TELEGRAM_CHAT.match(chat):
+        raise TelegramRefused("The Telegram chat id is not a chat id.")
+
+    body = json.dumps(
+        {"chat_id": chat, "text": text, "disable_web_page_preview": True}
+    ).encode("utf-8")
+    await _post(telegram_url(token), body, {"Content-Type": "application/json"})
+
+
+async def send_mail(db: Session, subject: str, text: str) -> None:
+    """Send the digest to the household mailbox, or raise.
+
+    **On a worker thread.** `smtplib` is blocking and every FastAPI handler that
+    reaches here is `async def`, so calling it inline would stop the event loop
+    for the length of an SMTP conversation. `routers/imports.py` carries the
+    measurement for the same mistake made the other way round: 7ms against 14.4
+    seconds.
+
+    The deadline bounds this coroutine, not the thread. See
+    `MAIL_DEADLINE_SECONDS`.
+    """
+    config = mailer.checked_config(db)
+    async with asyncio.timeout(MAIL_DEADLINE_SECONDS):
+        await asyncio.to_thread(mailer.send, config, subject, text)
+
+
+#: Which setting switches each sender on. One table, so "is this on" is asked
+#: the same way for all three and adding a fourth is one line.
+_ENABLED_KEY: Final[dict[OverdueSender, SettingKey]] = {
+    OverdueSender.WEBHOOK: SettingKey.OVERDUE_WEBHOOK_ENABLED,
+    OverdueSender.EMAIL: SettingKey.OVERDUE_MAIL_ENABLED,
+    OverdueSender.TELEGRAM: SettingKey.OVERDUE_TELEGRAM_ENABLED,
+}
+
+#: Every transport failure, from three protocols, as one clause.
+#:
+#: `UnicodeError` because a receiver answering 302 with a malformed host in
+#: `Location` raises `idna.IDNAError` from inside `client.stream`, even though
+#: redirects are not followed: httpx builds the redirect request anyway to
+#: populate `response.next_request`. Without it a webhook nobody controls 500s
+#: `POST /api/loans/overdue/notify`. `fetch._walk_hops` carries the full trace.
+#:
+#: `TimeoutError` because both sends bound themselves with `asyncio.timeout`,
+#: which raises the builtin rather than `httpx.TimeoutException`. Without it a
+#: slow receiver 500s the endpoint and stops the hourly ticker, which is a worse
+#: outcome than the hang it replaced.
+#:
+#: `OSError` for SMTP's sockets and TLS, `smtplib.SMTPException` for everything
+#: the server said no to. `TimeoutError` is an `OSError` and is named anyway,
+#: because the reason it is here is the paragraph above rather than the socket.
+_TRANSPORT: Final = (
+    httpx.HTTPError,
+    httpx.InvalidURL,
+    TimeoutError,
+    UnicodeError,
+    smtplib.SMTPException,
+    OSError,
+)
+
+
 def _outcome(
     reason: OverdueNotifyReason,
     detail: str,
     *,
     loans: int = 0,
     skipped_private: int = 0,
+    senders: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """One shape for every exit that sent nothing.
 
@@ -273,27 +557,176 @@ def _outcome(
         "skipped_private": skipped_private,
         "reason": reason,
         "detail": detail,
+        "senders": senders or [],
     }
 
 
-async def run_digest(db: Session) -> dict[str, Any]:
-    """One pass: select, send, stamp. Returns what `OverdueNotifyResult` needs.
+def _sender_entry(
+    sender: OverdueSender,
+    *,
+    loans: int,
+    skipped_private: int,
+    reason: OverdueNotifyReason | None = None,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """One sender's outcome, success or failure, built in one place.
 
-    `notified_at` is stamped **after** a delivery that succeeded, never before.
-    On any failure it is left alone so the next run retries the same loans,
-    which is why the state is a timestamp on the loan rather than a flag set
-    when the request goes out.
+    **`sent` is derived from `reason` rather than passed**, which is what makes
+    "reason is null exactly when sent is true" an invariant instead of a rule
+    two call sites have to remember. It was two: a dict literal for the success
+    and this for the failure, six keys each, and the success one was where the
+    invariant could be broken silently.
+    """
+    return {
+        "sender": sender,
+        "sent": reason is None,
+        "loans": loans,
+        "skipped_private": skipped_private,
+        "reason": reason,
+        "detail": detail,
+    }
+
+
+def _destination(sender: OverdueSender, db: Session) -> str:
+    """A host, for a log line. **Never a URL and never a credential.**
+
+    The webhook's URL may carry a token in its path or query string, and
+    Telegram's carries the bot token as a path segment, so the log gets the host
+    both times. Telegram's is a constant, and the mail server's is a hostname an
+    operator typed; neither is a secret and both are the thing somebody reading
+    a failure actually wants.
+
+    It runs on the failure path, so it is written not to add a second failure to
+    the first: `_host` swallows a URL it cannot parse, and an unset mail server
+    reads "unknown" rather than empty. The one thing it does that can raise is
+    reading the settings row, which every caller has already done before
+    reaching here.
+    """
+    if sender is OverdueSender.WEBHOOK:
+        return _host(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
+    if sender is OverdueSender.TELEGRAM:
+        return _host(TELEGRAM_API)
+    if sender is OverdueSender.EMAIL:
+        return settings_store.in_force(db, SettingKey.MAIL_SERVER).strip() or "unknown"
+    # A fourth sender added to `_ENABLED_KEY` and not here used to fall through
+    # to the mail branch and log the mail server's hostname for it. mypy fails
+    # this line when the chain stops being exhaustive; nothing else does.
+    assert_never(sender)
+
+
+async def _deliver(
+    sender: OverdueSender, db: Session, digest: dict[str, Any], subject: str
+) -> None:
+    """Hand one sender the digest. Raises a refusal or a transport error."""
+    if sender is OverdueSender.WEBHOOK:
+        url = checked_url(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
+        body = json.dumps(digest).encode("utf-8")
+        secret = settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
+        await post_digest(url, body, secret)
+    elif sender is OverdueSender.EMAIL:
+        await send_mail(db, subject, render_text(digest))
+    elif sender is OverdueSender.TELEGRAM:
+        await send_telegram(db, render_text(digest, limit=TELEGRAM_MAX_UNITS))
+    else:
+        # The `else` used to *be* the Telegram branch, so a fourth sender added
+        # to `_ENABLED_KEY` and not here posted the digest to the household's
+        # chat. mypy fails this call when the chain stops being exhaustive.
+        assert_never(sender)
+
+
+async def _run_sender(
+    sender: OverdueSender,
+    db: Session,
+    digest: dict[str, Any],
+    subject: str,
+    *,
+    loans: int,
+    skipped_private: int,
+) -> dict[str, Any]:
+    """One sender's attempt, as the entry that will be reported for it.
+
+    **`skipped_private` is carried per sender, not once for the run.** All three
+    withhold the same rows today, because all three go to a channel rather than
+    to a person, so all three report the same number. The count is attached here
+    anyway: the moment one sender's audience differs, "3 private books withheld"
+    has to mean what it says on the channel it appears on, and a single figure
+    at the top would be a lie on the other two.
+
+    Every failure is caught. One sender that cannot be reached must not stop the
+    ones after it, and must not 500 the endpoint.
+    """
+    try:
+        await _deliver(sender, db, digest, subject)
+    except _REFUSALS as refusal:
+        # `NO_URL` for the webhook keeps the reason the client already renders
+        # for an empty destination. The other two have no URL to be missing.
+        reason = (
+            OverdueNotifyReason.NO_URL
+            if isinstance(refusal, WebhookRefused)
+            else OverdueNotifyReason.MISCONFIGURED
+        )
+        logger.warning(
+            "The %s reminder to %s was refused: %s",
+            sender.value,
+            _destination(sender, db),
+            refusal,
+        )
+        return _sender_entry(
+            sender,
+            loans=loans,
+            skipped_private=skipped_private,
+            reason=reason,
+            detail=str(refusal),
+        )
+    except _TRANSPORT as error:
+        # The type, never the error's own message. `httpx.HTTPStatusError`
+        # renders the request URL, and for Telegram the URL is the bot token.
+        logger.warning(
+            "The %s reminder to %s failed, leaving %d loans to retry: %s",
+            sender.value,
+            _destination(sender, db),
+            loans,
+            type(error).__name__,
+        )
+        return _sender_entry(
+            sender,
+            loans=loans,
+            skipped_private=skipped_private,
+            reason=OverdueNotifyReason.UNREACHABLE,
+            detail="The destination could not be reached.",
+        )
+
+    logger.info(
+        "The %s reminder to %s covered %d loans",
+        sender.value,
+        _destination(sender, db),
+        loans,
+    )
+    return _sender_entry(sender, loans=loans, skipped_private=skipped_private)
+
+
+async def run_digest(db: Session) -> dict[str, Any]:
+    """One pass: select, send on every channel that is on, stamp.
+
+    `notified_at` is stamped **after** at least one delivery that succeeded,
+    never before. With nothing delivered it is left alone so the next run
+    retries the same loans, which is why the state is a timestamp on the loan
+    rather than a flag set when the first request goes out.
+
+    **One selection for all three senders, not one each.** They carry the same
+    content by construction, and re-running `due_for_reminder` between senders
+    would let a loan returned mid run reach one channel and not another.
     """
     now = datetime.now(UTC).replace(tzinfo=None)
     days = reminder_days(db)
 
-    if not settings_store.get_bool(db, SettingKey.OVERDUE_WEBHOOK_ENABLED):
+    enabled = [
+        sender
+        for sender in OverdueSender
+        if settings_store.get_bool(db, _ENABLED_KEY[sender])
+    ]
+    if not enabled:
         return _outcome(OverdueNotifyReason.DISABLED, "Overdue reminders are switched off.")
-
-    try:
-        url = checked_url(settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_URL))
-    except WebhookRefused as refusal:
-        return _outcome(OverdueNotifyReason.NO_URL, str(refusal))
 
     loans = due_for_reminder(db, now, days)
     skipped = count_private_overdue(db, now)
@@ -302,44 +735,31 @@ async def run_digest(db: Session) -> dict[str, Any]:
             OverdueNotifyReason.NOTHING_DUE, "Nothing is overdue.", skipped_private=skipped
         )
 
-    body = json.dumps(build_digest(loans, now)).encode("utf-8")
-    secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
-
-    try:
-        await post_digest(url, body, secret)
-    except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, UnicodeError) as error:
-        # `UnicodeError` because a receiver answering 302 with a malformed host
-        # in `Location` raises `idna.IDNAError` from inside `client.stream`,
-        # even though redirects are not followed: httpx builds the redirect
-        # request anyway to populate `response.next_request`. Without it a
-        # webhook nobody controls 500s `POST /api/loans/overdue/notify`.
-        # `fetch._walk_hops` carries the full trace of that path.
-        #
-        # `TimeoutError` because `post_digest` bounds the whole request with
-        # `asyncio.timeout`, and that raises the builtin rather than
-        # `httpx.TimeoutException`. Without it a slow receiver 500s
-        # `POST /api/loans/overdue/notify` and stops the hourly ticker, which is
-        # a worse outcome than the hang it replaced.
-        #
-        # The host, never the URL. See `_host`.
-        logger.warning(
-            "Overdue digest to %s failed, leaving %d loans to retry: %s",
-            _host(url),
-            len(loans),
-            type(error).__name__,
+    digest = build_digest(loans, now)
+    subject = f"{len(loans)} overdue {'book' if len(loans) == 1 else 'books'}"
+    outcomes = [
+        await _run_sender(
+            sender, db, digest, subject, loans=len(loans), skipped_private=skipped
         )
+        for sender in enabled
+    ]
+
+    if not any(entry["sent"] for entry in outcomes):
+        # The first failure in sender order, so a single sender library reads
+        # exactly as it did before there were three.
+        first = outcomes[0]
         return _outcome(
-            OverdueNotifyReason.UNREACHABLE,
-            "The webhook could not be reached.",
+            first["reason"],
+            first["detail"],
             loans=len(loans),
             skipped_private=skipped,
+            senders=outcomes,
         )
 
     for loan in loans:
         loan.notified_at = now
     db.commit()
 
-    logger.info("Overdue digest to %s covered %d loans", _host(url), len(loans))
     # The one exit with no reason: `reason` is null exactly when `sent` is true.
     return {
         "sent": True,
@@ -347,6 +767,7 @@ async def run_digest(db: Session) -> dict[str, Any]:
         "skipped_private": skipped,
         "reason": None,
         "detail": None,
+        "senders": outcomes,
     }
 
 

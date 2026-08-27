@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { OverdueNotifyReason } from "./overdueNotifyReason.ts";
+import type { SenderOutcome } from "./senderOutcome.ts";
 
 /**
  * What one run of the overdue digest did.
@@ -20,6 +21,7 @@ export interface OverdueNotifyResult {
   /** @minimum 0 */
   loans?: number;
   reason?: OverdueNotifyReason | null;
+  senders?: SenderOutcome[];
   sent?: boolean;
   /** @minimum 0 */
   skipped_private?: number;

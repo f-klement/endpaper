@@ -590,16 +590,54 @@ class TestEverySecretSettingIsMasked:
         body = client.get("/api/settings", headers=admin["headers"]).text
 
         assert [name for name, value in stored.items() if value in body] == []
+        # **And the response is talking about these values**, which absence
+        # alone does not say. `_read_settings` reads through
+        # `settings_store.in_force`, so a variable in the environment beats the
+        # row this test just wrote: the body would then carry a mask of the
+        # environment's secret, the stored one would be absent, and the
+        # assertion above would hold with `mask()` deleted from the line it
+        # guards. `conftest.py` pops every name in `config._ENV_OVERRIDES` for
+        # that reason, and this is the assertion that notices if it stops.
+        assert [
+            name
+            for name, value in stored.items()
+            if settings_store.mask(value) not in body
+        ] == []
+
+    def test_no_pinnable_secret_is_pinned_while_the_suite_runs(self):
+        """The walk above goes vacuous under an environment that supplies one.
+
+        This deployment's own `.env` sets `MAIL_PASSWORD` and
+        `TELEGRAM_BOT_TOKEN`, under exactly the names `_ENV_OVERRIDES` reads, so
+        a shell that exported them would disarm the guard silently rather than
+        failing. `conftest.py` pops the table; this says so out loud, and covers
+        a credential added to that table later.
+        """
+        import os
+
+        import config
+
+        assert [
+            variable
+            for variable in config._ENV_OVERRIDES.values()
+            if os.environ.get(variable)
+        ] == []
 
     def test_the_walk_covers_the_secrets_that_exist(self):
         """A guard that inspects nothing is worse than no guard. These are the
-        two the set holds; a third is what the walk above is for."""
+        four the set holds; a fifth is what the walk above is for.
+
+        It read "the two" until the mail password and the Telegram bot token
+        joined them, which is the whole reason a comment claiming "there are
+        exactly N" is counted rather than trusted here."""
         import settings_store
         from enums import SettingKey
 
         assert set(settings_store.SECRET_KEYS) == {
             SettingKey.GOOGLE_BOOKS_API_KEY,
             SettingKey.OVERDUE_WEBHOOK_SECRET,
+            SettingKey.MAIL_PASSWORD,
+            SettingKey.TELEGRAM_BOT_TOKEN,
         }
 
     def test_a_secret_long_enough_to_be_partly_shown_still_is(self):
@@ -608,3 +646,251 @@ class TestEverySecretSettingIsMasked:
         import settings_store
 
         assert settings_store.mask("secret-value-abcd").endswith("abcd")
+
+
+class TestReminderSenderSettings:
+    """The mail and Telegram configuration, over the API.
+
+    What is worth pinning is the pair of rules that are silent when they break:
+    a secret never leaves in full, and a value the deployment pinned is refused
+    rather than stored where nothing will read it.
+    """
+
+    def test_the_defaults_are_off_and_empty(self, client, admin):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+
+        assert body["overdue_mail_enabled"] is False
+        assert body["overdue_telegram_enabled"] is False
+        assert body["has_mail_password"] is False
+        assert body["has_telegram_bot_token"] is False
+        assert body["mail_from_env"] == []
+
+    def test_it_stores_the_mail_fields(self, client, admin):
+        body = client.put(
+            "/api/settings",
+            json={
+                "overdue_mail_enabled": True,
+                "mail_server": "smtp.example.org",
+                "mail_port": "465",
+                "mail_use_tls": False,
+                "mail_use_ssl": True,
+                "mail_default_sender": "library@example.org",
+                "overdue_mail_to": "house@example.org",
+            },
+            headers=admin["headers"],
+        ).json()
+
+        assert body["overdue_mail_enabled"] is True
+        assert body["mail_server"] == "smtp.example.org"
+        assert body["mail_port"] == "465"
+        assert body["mail_use_ssl"] is True
+        assert body["overdue_mail_to"] == "house@example.org"
+
+    def test_the_mail_password_comes_back_masked_and_never_in_full(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"mail_password": "correct-horse-battery"},
+            headers=admin["headers"],
+        )
+        response = client.get("/api/settings", headers=admin["headers"])
+
+        assert "correct-horse-battery" not in response.text
+        assert response.json()["has_mail_password"] is True
+        assert response.json()["mail_password_preview"].endswith("ery")
+
+    def test_the_bot_token_comes_back_masked_and_never_in_full(self, client, admin):
+        token = "123456:AAaaBBbbCCccDDddEEeeFFffGGgg1234567"
+        client.put(
+            "/api/settings",
+            json={"telegram_bot_token": token},
+            headers=admin["headers"],
+        )
+        response = client.get("/api/settings", headers=admin["headers"])
+
+        assert "AAaaBBbb" not in response.text
+        assert response.json()["has_telegram_bot_token"] is True
+        # The preview is of **this** token. Without it, a `TELEGRAM_BOT_TOKEN`
+        # in the environment would win in `in_force`, the body would carry a
+        # mask of that one instead, and both assertions above would hold while
+        # proving nothing. See `TestEverySecretSettingIsMasked`.
+        assert response.json()["telegram_bot_token_preview"].endswith(token[-4:])
+
+    def test_the_chat_id_comes_back_in_full(self, client, admin):
+        """The same asymmetry the webhook URL has: a destination nobody can read
+        back is a destination nobody can proofread."""
+        body = client.put(
+            "/api/settings",
+            json={"telegram_chat_id": "-1001234567890"},
+            headers=admin["headers"],
+        ).json()
+
+        assert body["telegram_chat_id"] == "-1001234567890"
+
+    def test_an_absent_field_leaves_the_secret_alone(self, client, admin):
+        """The browser never received the stored value, so a form saving an
+        unrelated toggle would otherwise blank it."""
+        client.put(
+            "/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"]
+        )
+        body = client.put(
+            "/api/settings", json={"overdue_mail_enabled": True}, headers=admin["headers"]
+        ).json()
+
+        assert body["has_mail_password"] is True
+
+    def test_an_empty_string_clears_it(self, client, admin):
+        client.put(
+            "/api/settings", json={"mail_password": "hunter2222"}, headers=admin["headers"]
+        )
+        body = client.put(
+            "/api/settings", json={"mail_password": ""}, headers=admin["headers"]
+        ).json()
+
+        assert body["has_mail_password"] is False
+
+    def test_it_is_admin_only(self, client, member):
+        assert (
+            client.put(
+                "/api/settings",
+                json={"overdue_mail_enabled": True},
+                headers=member["headers"],
+            ).status_code
+            == 403
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("mail_server", "s" * 256),
+            ("mail_port", "123456"),
+            ("mail_default_sender", "a" * 321),
+            ("overdue_mail_to", "a" * 1001),
+            ("mail_password", "p" * 201),
+            ("telegram_bot_token", "t" * 301),
+            ("telegram_chat_id", "c" * 65),
+        ],
+    )
+    def test_every_field_is_bounded(self, client, admin, field, value):
+        """A settings row a restore writes through Core is a row the hourly
+        ticker reads on every tick."""
+        response = client.put(
+            "/api/settings", json={field: value}, headers=admin["headers"]
+        )
+        assert response.status_code == 422
+
+
+#: Every `SettingsUpdate` field that predates the reminder senders. Named rather
+#: than pattern matched, so the guard below is the complement of a fixed list and
+#: a field added tomorrow lands inside the rule rather than outside it.
+_BEFORE_THE_SENDERS = frozenset(
+    {
+        "google_books_enabled",
+        "google_books_api_key",
+        "goodreads_lookup_enabled",
+        "default_locale",
+        "overdue_webhook_enabled",
+        "overdue_webhook_url",
+        "overdue_webhook_secret",
+        "overdue_reminder_days",
+    }
+)
+
+
+class TestEverySenderFieldIsActuallyWritten:
+    """`_SENDER_TEXT` and `_SENDER_BOOL` are tables, and a table can be short.
+
+    A field added to `SettingsUpdate` and not to one of them is accepted by the
+    schema, answered **200**, and dropped: no error, no log line, and a settings
+    screen that reports the old value back as though the save had worked. Twelve
+    fields against twelve rows today, which is exactly when the guard is worth
+    adding rather than after the thirteenth.
+
+    Only this direction needs a test. A row naming a field that no longer exists
+    raises `AttributeError` on the first `PUT`, which is loud.
+    """
+
+    def test_no_sender_field_is_accepted_and_dropped(self):
+        from routers.settings import _SENDER_BOOL, _SENDER_TEXT
+        from schemas import SettingsUpdate
+
+        written = set(_SENDER_TEXT) | set(_SENDER_BOOL)
+        # The complement, not a prefix match. A prefix list fails **open** on
+        # the field it most wants to catch: `smtp_relay_host` or `ntfy_topic`
+        # starts with none of them, so it falls outside `declared`, the guard
+        # passes, and the field is accepted, 200'd and dropped. Deriving the set
+        # by subtraction makes a new field default to **inside** the rule, which
+        # is the only direction that fails safe.
+        declared = set(SettingsUpdate.model_fields) - _BEFORE_THE_SENDERS
+
+        assert declared - written == set()
+
+    def test_the_two_tables_do_not_overlap(self):
+        """A field in both is written twice, the second write deciding, which is
+        a bug that only shows up as the wrong stored type."""
+        from routers.settings import _SENDER_BOOL, _SENDER_TEXT
+
+        assert set(_SENDER_TEXT) & set(_SENDER_BOOL) == set()
+
+
+class TestTheEnvironmentWinsOverTheStoredValue:
+    """`settings_store.google_books_api_key` set this rule; nine more follow it.
+
+    A lookup that fails for a reason the settings screen denies is the defect,
+    so the screen reports the value in force and refuses an edit that would not
+    be read.
+    """
+
+    def test_the_screen_shows_the_environment_value(self, client, admin, monkeypatch):
+        monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
+        client.put(
+            "/api/settings", json={}, headers=admin["headers"]
+        )
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+
+        assert body["mail_server"] == "smtp.deployment.test"
+        assert "mail_server" in body["mail_from_env"]
+
+    def test_a_pinned_setting_refuses_an_edit_and_names_the_variable(
+        self, client, admin, monkeypatch
+    ):
+        monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
+        response = client.put(
+            "/api/settings", json={"mail_server": "smtp.typed.test"}, headers=admin["headers"]
+        )
+
+        assert response.status_code == 409
+        assert "MAIL_SERVER" in response.json()["detail"]
+
+    def test_a_pinned_secret_is_reported_as_pinned_and_never_shown(
+        self, client, admin, monkeypatch
+    ):
+        monkeypatch.setenv("MAIL_PASSWORD", "from-the-deployment")
+        body = client.get("/api/settings", headers=admin["headers"])
+
+        assert "from-the-deployment" not in body.text
+        assert body.json()["has_mail_password"] is True
+        assert "mail_password" in body.json()["mail_from_env"]
+
+    def test_a_pinned_bot_token_refuses_an_edit(self, client, admin, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:AAaaBBbbCCccDDddEEeeFFffGGgg12")
+        response = client.put(
+            "/api/settings",
+            json={"telegram_bot_token": "999:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},
+            headers=admin["headers"],
+        )
+
+        assert response.status_code == 409
+        assert body_has_no_token(response.text)
+
+    def test_an_unpinned_setting_is_still_editable(self, client, admin, monkeypatch):
+        monkeypatch.setenv("MAIL_SERVER", "smtp.deployment.test")
+        body = client.put(
+            "/api/settings", json={"mail_username": "library"}, headers=admin["headers"]
+        ).json()
+
+        assert body["mail_username"] == "library"
+
+
+def body_has_no_token(text: str) -> bool:
+    """A 409 must not quote the value back. It is a credential either way."""
+    return "AAaaBBbb" not in text and "BBBBBBBB" not in text

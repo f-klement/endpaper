@@ -9,8 +9,9 @@ exist before the app starts serving from it.
 
 import os
 from pathlib import Path
+from typing import Final
 
-from enums import AppEnv, AuthMode
+from enums import AppEnv, AuthMode, SettingKey
 
 # Where the SQLite database and uploaded images live. In the container this is
 # the bind-mounted volume at /app/data; locally it defaults to ./data so the
@@ -251,16 +252,72 @@ def ensure_data_dirs() -> None:
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# ── Settings a deployment may supply instead of the admin ─────────────────────
+
+#: The runtime settings an operator may pin from the environment, and the
+#: variable that pins each.
+#:
+#: **The seven `MAIL_*` names are the standard ones on purpose**, matching what
+#: a household `.env` and the deployment's other services already carry, so the
+#: operator sets one fact once rather than learning a second spelling for it.
+#: The eighth standard name, `MAIL_DEBUG`, is deliberately not here: smtplib's
+#: debug output writes the AUTH exchange to stderr, so honouring it would be a
+#: supported way of printing the mail password into the container log.
+#:
+#: **A table rather than a function per key**, so the precedence rule below has
+#: one definition and adding a sender's credential is one line rather than a
+#: place to forget.
+_ENV_OVERRIDES: Final[dict[SettingKey, str]] = {
+    SettingKey.GOOGLE_BOOKS_API_KEY: "GOOGLE_BOOKS_API_KEY",
+    SettingKey.MAIL_SERVER: "MAIL_SERVER",
+    SettingKey.MAIL_PORT: "MAIL_PORT",
+    SettingKey.MAIL_USERNAME: "MAIL_USERNAME",
+    SettingKey.MAIL_PASSWORD: "MAIL_PASSWORD",
+    SettingKey.MAIL_USE_TLS: "MAIL_USE_TLS",
+    SettingKey.MAIL_USE_SSL: "MAIL_USE_SSL",
+    SettingKey.MAIL_DEFAULT_SENDER: "MAIL_DEFAULT_SENDER",
+    SettingKey.TELEGRAM_BOT_TOKEN: "TELEGRAM_BOT_TOKEN",
+    SettingKey.TELEGRAM_CHAT_ID: "TELEGRAM_CHAT_ID",
+}
+
+
+def env_override(key: SettingKey) -> str:
+    """What the deployment supplied for this setting, or empty.
+
+    **Empty means "the environment said nothing", and that is why every one of
+    these is a string rather than its parsed type.** `MAIL_USE_TLS=false` has to
+    beat a stored `true`, and a `bool` return cannot tell that apart from a
+    variable nobody set. The string is parsed by `settings_store`, which parses
+    the stored value the same way, so the two sources cannot disagree about what
+    "on" means.
+
+    When set, the value **wins over the stored one and cannot be changed through
+    the app**. That is the point of supplying it this way: a value injected from
+    a secret manager or a compose file is managed outside the application, and an
+    admin editing it in a settings form would produce a setting that silently
+    disagrees with the deployment on the next restart.
+
+    A secret supplied here is never revealed through the API either, for the same
+    reason a stored one is not: the app can use a secret without being able to
+    show it.
+    """
+    name = _ENV_OVERRIDES.get(key)
+    return os.getenv(name, "").strip() if name else ""
+
+
+def env_variable_name(key: SettingKey) -> str:
+    """Which environment variable pins this setting, for a message that says so.
+
+    A refusal that names the variable is one an operator can act on; "supplied
+    by the environment" alone sends them looking through a compose file.
+    """
+    return _ENV_OVERRIDES.get(key, "")
+
+
 def google_books_api_key_from_env() -> str:
     """A Google Books key supplied by the deployment, or empty.
 
-    When set this **wins over the stored one and cannot be changed through the
-    app**. That is the point of supplying it this way: a key injected from a
-    secret manager or a compose file is managed outside the application, and an
-    admin editing it in a settings form would produce a value that silently
-    disagrees with the deployment on the next restart.
-
-    It is also never revealed through the API, for the same reason the stored
-    one is not: the app can use a secret without being able to show it.
+    Named rather than left to `env_override` because it predates the table and
+    has callers of its own. One definition, in the table.
     """
-    return os.getenv("GOOGLE_BOOKS_API_KEY", "").strip()
+    return env_override(SettingKey.GOOGLE_BOOKS_API_KEY)
