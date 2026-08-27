@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.10.0
+
+_2026-08-27_
 
 **Added: the Austrian National Library is now one of the catalogues a lookup asks.**
 An ISBN that the German National Library and K10plus both miss is put to the
