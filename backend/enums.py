@@ -325,8 +325,9 @@ class ClassificationScheme(StrEnum):
 
     **A person's identifier is not one of these**, though the DNB writes it in
     the same `$0`: `100 $0` says who wrote the book, and every scheme here says
-    what the book is about. See `docs/decisions.md`, "The author's GND is read
-    by nothing".
+    what the book is about. Those go to `AuthorityScheme` and the
+    `author_identifiers` table, which is a different store keyed on a name
+    rather than on a book.
 
     Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three
     are stored because a catalogue heading is worth keeping whole, not because
@@ -337,6 +338,61 @@ class ClassificationScheme(StrEnum):
     LCC = "lcc"
     GND = "gnd"
     LCSH = "lcsh"
+
+
+class AuthorityScheme(StrEnum):
+    """Authority files a person's identifier may come from.
+
+    Not `ClassificationScheme`, and the split is the point rather than tidiness.
+    Every member of that enum answers "what is this book about"; every member of
+    this one answers "which record in a file of *people* is this author". The
+    DNB writes both in the same MARC `$0`, which is exactly why they need two
+    closed sets: `4203576-4` is a subject heading and `118181505` is a person,
+    and one column holding both would make a heading and an author the same kind
+    of row.
+
+    **One member, and the count is the honest state of the supply rather than a
+    stub.** Counted 2026-08-27: the DNB is the only catalogue this app reads for
+    a person's identifier (`100 $0` and `700 $0`), and it writes GND. K10plus
+    carries the same subfield and is deliberately not read for it, which
+    `_k10plus_record` records. VIAF would be the second member and is not one:
+    nothing in this app queries it, and until something does, an enum member for
+    it would be a value no writer can produce.
+
+    Adding a member costs one line here, one value in
+    `ck_author_identifiers_scheme`, and a migration to widen that constraint.
+    That last one is why the set is closed: a scheme nobody recognises is an
+    identifier with no file to look it up in.
+    """
+
+    GND = "gnd"
+
+
+class AuthorityProvenance(StrEnum):
+    """Who said an author's identifier is that author's.
+
+    **Explicit on both sides, because a null would only be implicit.**
+    `author_aliases.created_by_user_id` is nullable and a null there could mean
+    a catalogue said so or that the member who said so has since been deleted.
+    That ambiguity is affordable for a display name and is not affordable here:
+    the question this column exists to answer is whether a curated list has
+    quietly become a generated one, and it has to be answerable by reading one
+    value rather than by inferring from the absence of another.
+
+    A `CATALOGUE` row never names a person, and `ck_author_identifiers_asserter`
+    enforces it. **The other direction is deliberately left unconstrained**, so
+    that a `MEMBER` row whose author is gone still reads `member` rather than
+    becoming indistinguishable from a machine's. That is slack for a change not
+    yet made rather than a live case: no path deletes an account today, counted
+    2026-08-27 over `backend/routers/` and `backend/*.py`, so the column is
+    never nulled and never dangles.
+    """
+
+    #: A record the server itself fetched for this book's own ISBN asserted it.
+    CATALOGUE = "catalogue"
+    #: A member confirmed a candidate that arrived from a search rather than
+    #: from this book's record.
+    MEMBER = "member"
 
 
 class ExportFormat(StrEnum):

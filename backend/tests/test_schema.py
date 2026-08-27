@@ -1465,3 +1465,208 @@ class TestKeyingTheSeededTags:
         schema.upgrade_to_head()
 
         assert self.keys()["Computing"] == "computing"
+
+
+class TestTheMigrationsAndTheModelsAgree:
+    """What the suite builds and what production runs must be one schema.
+
+    **This class exists because the two diverged and nothing could see it.**
+    `conftest.py` builds with `Base.metadata.create_all`, so every other test in
+    this repository sees the **models**; a deployment only ever sees the
+    **migrations**. `author_identifiers.created_at` shipped as `nullable=True`
+    in revision `a4c73e0b19d5` against a `Mapped[datetime]` that is NOT NULL,
+    and the whole suite was green. It was found by a person reading the two
+    files against each other, which is exactly the thing that does not scale.
+
+    Compared per column on the two properties a migration can get wrong while
+    still applying cleanly: **nullability** and **type**. Not on server defaults,
+    which SQLite reflects as the literal SQL text it was given and which differ
+    harmlessly between `func.now()` and `CURRENT_TIMESTAMP`.
+    """
+
+    @staticmethod
+    def _reflected() -> dict[str, dict[str, tuple[bool, str]]]:
+        """Every table the migrations build, as `{table: {column: (nullable, type)}}`."""
+        drop_everything()
+        schema.upgrade_to_head()
+        inspector = inspect(engine)
+        return {
+            table: {
+                column["name"]: (bool(column["nullable"]), str(column["type"]))
+                for column in inspector.get_columns(table)
+            }
+            for table in inspector.get_table_names()
+            if table != "alembic_version"
+        }
+
+    def test_every_table_has_the_same_columns_in_both(self):
+        """**The likelier half of the class, and the first version was blind to
+        it.** A forgotten `op.add_column` is a much commoner mistake than a
+        forgotten `op.create_table`, and the two property comparisons below
+        skip a column the migration never built, because there is nothing to
+        compare it against. Driven verbatim against a reflected schema with one
+        declared column removed, all three of the original cases passed.
+
+        The `created_at` defect that prompted this class was a **property**
+        mismatch, which is the one variant a `continue` cannot hide, so
+        validating the guard on it alone made it look sound.
+
+        Symmetric on both axes. A column the migration builds and the model does
+        not declare is reported, and so is a **table** in that position: the
+        loops walk `Base.metadata.sorted_tables`, so a migrated table nothing
+        declares would otherwise be invisible from every direction, and
+        `_reflected()` already has the set to compare against.
+        """
+        migrated = self._reflected()
+        wrong: list[str] = []
+        if undeclared := sorted(
+            set(migrated) - {table.name for table in Base.metadata.sorted_tables}
+        ):
+            wrong.append(f"migrated but never declared: {undeclared}")
+        for table in Base.metadata.sorted_tables:
+            built = migrated.get(table.name)
+            if built is None:
+                # Reported by `test_the_migrations_build_every_table_the_models_declare`.
+                continue
+            declared = {column.name for column in table.columns}
+            if missing := sorted(declared - set(built)):
+                wrong.append(f"{table.name}: declared but never migrated: {missing}")
+            if extra := sorted(set(built) - declared):
+                wrong.append(f"{table.name}: migrated but never declared: {extra}")
+
+        assert not wrong, "\n".join(wrong)
+
+    def test_every_column_agrees_on_nullability(self):
+        """A column absent from one side is `test_every_table_has_the_same_columns_in_both`."""
+        migrated = self._reflected()
+        wrong: list[str] = []
+        for table in Base.metadata.sorted_tables:
+            for column in table.columns:
+                built = migrated.get(table.name, {}).get(column.name)
+                if built is None:
+                    continue
+                if built[0] != bool(column.nullable):
+                    wrong.append(
+                        f"{table.name}.{column.name}: migration nullable="
+                        f"{built[0]}, model nullable={bool(column.nullable)}"
+                    )
+
+        assert not wrong, "\n".join(wrong)
+
+    def test_every_column_agrees_on_type(self):
+        migrated = self._reflected()
+        wrong: list[str] = []
+        for table in Base.metadata.sorted_tables:
+            for column in table.columns:
+                built = migrated.get(table.name, {}).get(column.name)
+                if built is None:
+                    continue
+                if built[1] != str(column.type):
+                    wrong.append(
+                        f"{table.name}.{column.name}: migration {built[1]}, "
+                        f"model {column.type}"
+                    )
+
+        assert not wrong, "\n".join(wrong)
+
+    def test_the_migrations_build_every_table_the_models_declare(self):
+        """A model with no migration is the same defect facing the other way:
+        the suite passes and the deployment has no table."""
+        migrated = self._reflected()
+
+        missing = {table.name for table in Base.metadata.sorted_tables} - set(migrated)
+
+        assert not missing, f"declared but never migrated: {sorted(missing)}"
+
+
+class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
+    """The four CHECKs and the unique index, against the schema production runs.
+
+    `tests/test_models.py` asserts the same refusals, and it asserts them
+    against `create_all`, which is the schema **only the suite** ever has:
+    `main.py` boots through `upgrade_to_head()`. The two paths had already
+    drifted on `created_at`, which is the evidence that nothing was comparing
+    them, so the refusals are checked here on the migrated shape as well.
+
+    `TestTheMigrationsAndTheModelsAgree` compares the two structurally. This
+    checks the half that a column comparison cannot see: a CHECK is not a
+    column property, and a migration that dropped one would still match.
+    """
+
+    @staticmethod
+    def _migrated() -> None:
+        drop_everything()
+        schema.upgrade_to_head()
+
+    @staticmethod
+    def _insert(**overrides: object) -> str:
+        row = {
+            "author_key": "'kane sean p'",
+            "scheme": "'gnd'",
+            "identifier": "'1042243212'",
+            "provenance": "'catalogue'",
+            "created_by_user_id": "NULL",
+        } | dict(overrides)
+        return (
+            "INSERT INTO author_identifiers "
+            f"({', '.join(row)}) VALUES ({', '.join(str(v) for v in row.values())})"
+        )
+
+    def test_the_table_exists_at_head(self):
+        self._migrated()
+
+        assert "author_identifiers" in table_names()
+
+    def test_a_scheme_no_authority_file_is_read_for_is_refused(self):
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert(scheme="'viaf'")))
+
+        assert "ck_author_identifiers_scheme" in str(refusal.value)
+
+    def test_a_provenance_that_is_neither_is_refused(self):
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert(provenance="'robot'")))
+
+        assert "ck_author_identifiers_provenance" in str(refusal.value)
+
+    def test_a_machine_assertion_may_not_name_a_person(self):
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert(created_by_user_id="1")))
+
+        assert "ck_author_identifiers_asserter" in str(refusal.value)
+
+    def test_an_empty_identifier_is_refused(self):
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert(identifier="''")))
+
+        assert "ck_author_identifiers_bounds" in str(refusal.value)
+
+    def test_one_spelling_may_not_carry_two_values_under_one_scheme(self):
+        """The invariant the ÖNB `source` column would have deleted: it is what
+        makes "an identifier cannot be retyped" enforceable below the
+        application."""
+        self._migrated()
+
+        with engine.connect() as connection:
+            connection.execute(text(self._insert()))
+            connection.commit()
+            with pytest.raises(IntegrityError) as refusal:
+                connection.execute(text(self._insert(identifier="'9999'")))
+
+        assert "UNIQUE constraint failed" in str(refusal.value)
+
+    def test_created_at_is_not_nullable(self):
+        """The column that shipped as `nullable=True` against a NOT NULL model
+        and that the whole suite was blind to."""
+        self._migrated()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(text(self._insert(created_at="NULL")))

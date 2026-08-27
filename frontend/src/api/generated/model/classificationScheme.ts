@@ -44,8 +44,9 @@
  *
  * **A person's identifier is not one of these**, though the DNB writes it in
  * the same `$0`: `100 $0` says who wrote the book, and every scheme here says
- * what the book is about. See `docs/decisions.md`, "The author's GND is read
- * by nothing".
+ * what the book is about. Those go to `AuthorityScheme` and the
+ * `author_identifiers` table, which is a different store keyed on a name
+ * rather than on a book.
  *
  * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three
  * are stored because a catalogue heading is worth keeping whole, not because

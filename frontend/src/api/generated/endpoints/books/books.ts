@@ -27,9 +27,13 @@ import type {
 
 import type {
   ApplyEnrichmentParams,
+  AuthorAuthorityParams,
+  AuthorIdentifierOut,
+  AuthorIdentifierRequest,
   AuthorMergeRequest,
   AuthorOut,
   AuthorSuggestionOut,
+  AuthorityCandidateOut,
   BackfillCoversParams,
   BodyUploadCover,
   BookCreate,
@@ -770,6 +774,422 @@ export const useUnmergeAuthor = <
   TContext
 > => {
   return useMutation(getUnmergeAuthorMutationOptions(options), queryClient);
+};
+export const getAuthorAuthorityUrl = (params: AuthorAuthorityParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/authors/authority?${stringifiedParams}`
+    : `/api/books/authors/authority`;
+};
+
+/**
+ * What the authority files say about this author.
+ *
+ * **Two routes, and which one ran is on every row as `certain`.** Where a
+ * catalogue record for one of this author's Books already asserted a GND
+ * number, that number is a key: it resolves to exactly one record, and the
+ * spelling on it is the suggestion this feature exists to offer. Where it did
+ * not, the author's name is put to a name search, and a name is not a key.
+ * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ *
+ * **`q` steers that search and forces it.** Without it the query is the
+ * author's own display name, which is exactly wrong when the shelf spells
+ * somebody in a form the GND does not use: the search then answers with the
+ * wrong people and there is no way to retype it. This is the one shape
+ * decision worth making before a client exists, because a client built
+ * against the narrower version would have to change to gain it.
+ *
+ * **Nothing here writes, on either route.** A suggestion is offered and may be
+ * overruled, which was settled on 2026-08-24: suggest the authority's spelling
+ * and let it be overwritten, while storing the reference either way. Taking a
+ * suggested spelling is `POST /authors/merge`, which already accepts a name
+ * typed by hand. Confirming an identifier from a name search is
+ * `POST /authors/identifiers`, which records that a person chose it.
+ *
+ * **Nothing here is stored either**, and most of it has no column to be
+ * stored in. The dates and the one line description are there so somebody can
+ * tell two same named people apart while they decide.
+ * `docs/featurelist.md` refuses author biographies and portraits, and this is
+ * the identity half of that line rather than an exception to it.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * 503 where the authority file could not be reached: nothing in this feature
+ * is blocked by it, so the client can offer "try again" rather than an error
+ * page.
+ * @summary Author Authority
+ */
+export const authorAuthority = async (
+  params: AuthorAuthorityParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorityCandidateOut[]> => {
+  return customFetch<AuthorityCandidateOut[]>(getAuthorAuthorityUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAuthorAuthorityQueryKey = (params?: AuthorAuthorityParams) => {
+  return [`/api/books/authors/authority`, ...(params ? [params] : [])] as const;
+};
+
+export const getAuthorAuthorityQueryOptions = <
+  TData = Awaited<ReturnType<typeof authorAuthority>>,
+  TError = HTTPValidationError,
+>(
+  params: AuthorAuthorityParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorAuthority>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAuthorAuthorityQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof authorAuthority>>> = ({
+    signal,
+  }) => authorAuthority(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof authorAuthority>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type AuthorAuthorityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof authorAuthority>>
+>;
+export type AuthorAuthorityQueryError = HTTPValidationError;
+
+export function useAuthorAuthority<
+  TData = Awaited<ReturnType<typeof authorAuthority>>,
+  TError = HTTPValidationError,
+>(
+  params: AuthorAuthorityParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorAuthority>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof authorAuthority>>,
+          TError,
+          Awaited<ReturnType<typeof authorAuthority>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAuthorAuthority<
+  TData = Awaited<ReturnType<typeof authorAuthority>>,
+  TError = HTTPValidationError,
+>(
+  params: AuthorAuthorityParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorAuthority>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof authorAuthority>>,
+          TError,
+          Awaited<ReturnType<typeof authorAuthority>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAuthorAuthority<
+  TData = Awaited<ReturnType<typeof authorAuthority>>,
+  TError = HTTPValidationError,
+>(
+  params: AuthorAuthorityParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorAuthority>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Author Authority
+ */
+
+export function useAuthorAuthority<
+  TData = Awaited<ReturnType<typeof authorAuthority>>,
+  TError = HTTPValidationError,
+>(
+  params: AuthorAuthorityParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorAuthority>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getAuthorAuthorityQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getConfirmAuthorIdentifierUrl = () => {
+  return `/api/books/authors/identifiers`;
+};
+
+/**
+ * Confirm that a candidate authority identifier is this author's.
+ *
+ * **This endpoint exists because a name is not a key.** An identifier on the
+ * record a catalogue returned for a Book's own ISBN is a cataloguer's
+ * assertion about that Book and is stored without asking, by `refresh` and
+ * `enrich`. One found by searching an authority file by name is a candidate:
+ * two authors share a name and one author has five spellings, so storing it
+ * silently would merge two people behind somebody's back. It reaches the store
+ * only through here, and the row records that a person chose it.
+ *
+ * **409, not 422, where the spelling already carries a different value.** The
+ * request is well formed and the state is what refuses it. Retyping an
+ * identifier is the one operation this store has no verb for: correcting a
+ * wrong one is `DELETE`, and a re-import may put it back.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * @summary Confirm Author Identifier
+ */
+export const confirmAuthorIdentifier = async (
+  authorIdentifierRequest: AuthorIdentifierRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorIdentifierOut> => {
+  return customFetch<AuthorIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(authorIdentifierRequest),
+  });
+};
+
+export const getConfirmAuthorIdentifierMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
+    TError,
+    { data: AuthorIdentifierRequest },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
+  TError,
+  { data: AuthorIdentifierRequest },
+  TContext
+> => {
+  const mutationKey = ["confirmAuthorIdentifier"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
+    { data: AuthorIdentifierRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return confirmAuthorIdentifier(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmAuthorIdentifierMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmAuthorIdentifier>>
+>;
+export type ConfirmAuthorIdentifierMutationBody = AuthorIdentifierRequest;
+export type ConfirmAuthorIdentifierMutationError = HTTPValidationError;
+
+/**
+ * @summary Confirm Author Identifier
+ */
+export const useConfirmAuthorIdentifier = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
+      TError,
+      { data: AuthorIdentifierRequest },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
+  TError,
+  { data: AuthorIdentifierRequest },
+  TContext
+> => {
+  return useMutation(
+    getConfirmAuthorIdentifierMutationOptions(options),
+    queryClient,
+  );
+};
+export const getForgetAuthorIdentifierUrl = (identifierId: number) => {
+  return `/api/books/authors/identifiers/${identifierId}`;
+};
+
+/**
+ * Remove a wrong identifier. A later import may write it again.
+ *
+ * **The only correction there is**, and it is deliberately destructive rather
+ * than an edit: an upstream cluster can be wrong, and a fact that cannot be
+ * corrected is a trap. What is refused is retyping it to a different value,
+ * because that is the operation that turns somebody's guess into something
+ * that reads like a national library's assertion.
+ *
+ * A row whose spelling is on no book this caller can see is **404**, for the
+ * reason `unmerge_author` gives: authority rather than secrecy.
+ *
+ * How that is carried out is `authorship.Authorship.forget_identifier`.
+ * @summary Forget Author Identifier
+ */
+export const forgetAuthorIdentifier = async (
+  identifierId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getForgetAuthorIdentifierUrl(identifierId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetAuthorIdentifierMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
+    TError,
+    { identifierId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
+  TError,
+  { identifierId: number },
+  TContext
+> => {
+  const mutationKey = ["forgetAuthorIdentifier"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
+    { identifierId: number }
+  > = (props) => {
+    const { identifierId } = props ?? {};
+
+    return forgetAuthorIdentifier(identifierId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetAuthorIdentifierMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetAuthorIdentifier>>
+>;
+
+export type ForgetAuthorIdentifierMutationError = HTTPValidationError;
+
+/**
+ * @summary Forget Author Identifier
+ */
+export const useForgetAuthorIdentifier = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
+      TError,
+      { identifierId: number },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
+  TError,
+  { identifierId: number },
+  TContext
+> => {
+  return useMutation(
+    getForgetAuthorIdentifierMutationOptions(options),
+    queryClient,
+  );
 };
 export const getMergeAuthorsUrl = () => {
   return `/api/books/authors/merge`;
@@ -4767,8 +5187,9 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  * Fill in the fields a book is missing, from every catalogue available.
  *
  * Matched by ISBN when there is one, which runs the full merged chain (the
- * DNB and K10plus together, then Open Library, then Google), and by title and
- * author otherwise, which runs the ranked search across all six sources.
+ * DNB and K10plus together, then the Austrian National Library, then Open
+ * Library, then Google), and by title and author otherwise, which runs the
+ * ranked search across all seven sources.
  *
  * **No API key is required.** This was Google-only and refused outright
  * without a key, which made it useless for exactly the books the German and

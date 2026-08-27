@@ -7,13 +7,20 @@ rule reaches a page nobody thought of as a book listing, that a merge writes
 nothing to `books`, and that undoing one really does restore what was there.
 """
 
+from typing import Any
+
+import httpx
+import respx
 from sqlalchemy import event
 
 from authors import author_key
 from database import engine
-from models import AuthorAlias
+from models import AuthorAlias, AuthorIdentifier
+from tests.helpers import DNB, silence_catalogues, sru_response
 
 AUTHORS = "/api/books/authors"
+
+GERMAN_ISBN = "9783960092353"
 
 
 def author_named(body: list[dict], name: str) -> dict:
@@ -23,6 +30,14 @@ def author_named(body: list[dict], name: str) -> dict:
 def merge(client, headers, keys: list[str], keep: str):
     return client.post(
         f"{AUTHORS}/merge", json={"keys": keys, "keep_name": keep}, headers=headers
+    )
+
+
+def confirm(client, headers, author: str, identifier: str, scheme: str = "gnd"):
+    return client.post(
+        f"{AUTHORS}/identifiers",
+        json={"author": author, "scheme": scheme, "identifier": identifier},
+        headers=headers,
     )
 
 
@@ -589,3 +604,712 @@ class TestTheCost:
         )
 
         assert len(filtered) - len(plain) == 2
+
+
+class TestConfirmingAnAuthorityIdentifier:
+    """`POST /authors/identifiers`, the uncertain half of the store.
+
+    An identifier on the record a catalogue returned for a Book's own ISBN is
+    stored without asking, by `refresh` and by `enrich`. This is what a name
+    search produces, and a name is not a key: two authors share one.
+    """
+
+    def test_a_confirmed_identifier_is_marked_as_a_persons(
+        self, client, admin, make_book
+    ):
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+
+        res = confirm(client, admin["headers"], "Sean P. Kane", "1042243212")
+
+        assert res.status_code == 201, res.text
+        assert res.json()["provenance"] == "member"
+
+    def test_it_shows_up_on_the_author(self, client, admin, make_book):
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+        confirm(client, admin["headers"], "Sean P. Kane", "1042243212")
+
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+
+        [row] = author_named(body, "Sean P. Kane")["identifiers"]
+        assert (row["scheme"], row["identifier"]) == ("gnd", "1042243212")
+
+    def test_an_author_nobody_can_see_is_404_not_403(
+        self, client, admin, member, make_book
+    ):
+        """A 403 would confirm that somebody owns a book by that name, which is
+        exactly what privacy withholds."""
+        make_book(
+            admin["headers"], title="Docker", author="Sean P. Kane", is_private=True
+        )
+
+        res = confirm(client, member["headers"], "Sean P. Kane", "1042243212")
+
+        assert res.status_code == 404
+
+    def test_retyping_it_to_another_value_is_409(self, client, admin, make_book):
+        """The refusal asserted through the API, not merely the absence of a
+        PATCH. Retyping is the one operation that can launder a guess into
+        something reading like a national library's assertion."""
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+        confirm(client, admin["headers"], "Sean P. Kane", "1042243212")
+
+        res = confirm(client, admin["headers"], "Sean P. Kane", "9999")
+
+        assert res.status_code == 409
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        [row] = author_named(body, "Sean P. Kane")["identifiers"]
+        assert row["identifier"] == "1042243212"
+
+    def test_a_scheme_no_authority_file_is_read_for_is_422(
+        self, client, admin, make_book
+    ):
+        """A closed set, so an unrecognised scheme is a number with no file to
+        look it up in."""
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+
+        res = client.post(
+            f"{AUTHORS}/identifiers",
+            json={
+                "author": "Sean P. Kane",
+                "scheme": "viaf",
+                "identifier": "95160850",
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
+    def test_an_identifier_of_only_spaces_is_422_not_500(
+        self, client, admin, make_book
+    ):
+        """`min_length` passes it and `ck_author_identifiers_bounds` would then
+        raise at the database, which is a 500."""
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+
+        res = confirm(client, admin["headers"], "Sean P. Kane", "   ")
+
+        assert res.status_code == 422
+
+
+class TestRemovingAnAuthorityIdentifier:
+    def test_a_wrong_one_can_be_removed(self, client, admin, make_book):
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+        identifier_id = confirm(
+            client, admin["headers"], "Sean P. Kane", "1042243212"
+        ).json()["id"]
+
+        res = client.delete(
+            f"{AUTHORS}/identifiers/{identifier_id}", headers=admin["headers"]
+        )
+
+        assert res.status_code == 204
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        assert author_named(body, "Sean P. Kane")["identifiers"] == []
+
+    def test_removing_one_you_cannot_see_the_effect_of_is_404(
+        self, client, admin, member, make_book
+    ):
+        make_book(
+            admin["headers"], title="Docker", author="Sean P. Kane", is_private=True
+        )
+        identifier_id = confirm(
+            client, admin["headers"], "Sean P. Kane", "1042243212"
+        ).json()["id"]
+
+        res = client.delete(
+            f"{AUTHORS}/identifiers/{identifier_id}", headers=member["headers"]
+        )
+
+        assert res.status_code == 404
+
+    def test_there_is_no_verb_that_edits_one(self, client, admin, make_book):
+        """Tried against the running app rather than asserted in prose. The
+        store has `POST` and `DELETE` and deliberately no `PATCH` or `PUT`.
+
+        404 rather than 405 because `main.py`'s API catch-all answers anything
+        under `/api` that matched no route, so an unrouted method never reaches
+        Starlette's method-not-allowed. What is being pinned is that the request
+        changed nothing, which the reread below is the actual evidence for.
+        """
+        make_book(admin["headers"], title="Docker", author="Sean P. Kane")
+        identifier_id = confirm(
+            client, admin["headers"], "Sean P. Kane", "1042243212"
+        ).json()["id"]
+
+        for verb in (client.patch, client.put):
+            res = verb(
+                f"{AUTHORS}/identifiers/{identifier_id}",
+                json={"identifier": "9999"},
+                headers=admin["headers"],
+            )
+            assert res.status_code in (404, 405), res.text
+
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        [row] = author_named(body, "Sean P. Kane")["identifiers"]
+        assert row["identifier"] == "1042243212"
+
+
+class TestTheIdentifierListingKeepsThePrivacyRule:
+    def test_a_row_for_a_spelling_only_on_a_private_book_is_not_shown(
+        self, client, admin, member, make_book
+    ):
+        """The rows are Library wide, like the aliases. Listing one whose
+        spelling survives only on somebody else's Private Book would announce
+        that the Book exists."""
+        make_book(
+            admin["headers"], title="Docker", author="Sean P. Kane", is_private=True
+        )
+        confirm(client, admin["headers"], "Sean P. Kane", "1042243212")
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+
+        body = client.get(AUTHORS, headers=member["headers"]).json()
+
+        assert all(row["identifiers"] == [] for row in body)
+        assert "1042243212" not in str(body)
+
+
+#: A DNB record carrying an author's GND number in `100 $0`.
+#:
+#: Shaped after a live MARC21 response. The identifier is the whole reason the
+#: DNB is read as MARC rather than Dublin Core, which drops every identifier a
+#: record holds.
+DNB_RECORD_WITH_GND = """<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+ <records><record><recordData>
+  <record xmlns="http://www.loc.gov/MARC21/slim">
+   <datafield tag="020" ind1=" " ind2=" ">
+    <subfield code="a">9783960092353</subfield>
+   </datafield>
+   <datafield tag="100" ind1="1" ind2=" ">
+    <subfield code="0">(DE-588)1042243212</subfield>
+    <subfield code="a">Kane, Sean P.</subfield>
+    <subfield code="4">aut</subfield>
+   </datafield>
+   <datafield tag="245" ind1="1" ind2="0">
+    <subfield code="a">Praxiswissen Docker</subfield>
+   </datafield>
+   <datafield tag="300" ind1=" " ind2=" ">
+    <subfield code="a">390 Seiten</subfield>
+   </datafield>
+  </record>
+ </recordData></record></records>
+ <numberOfRecords>1</numberOfRecords>
+</searchRetrieveResponse>"""
+
+
+class TestWhichBranchMayWriteAnIdentifier:
+    """The certain and the uncertain half, exercised against the real handlers.
+
+    This used to be a guard counting call sites in `routers/books.py`, and that
+    guard was worth nothing: aliasing the bound method past it took one line,
+    and the count stayed at two. What decides the question is which branch the
+    handler took, so the branches are driven.
+    """
+
+    def test_a_record_found_by_the_books_own_isbn_asserts_its_author(
+        self, client, admin, make_book, db
+    ):
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="Sean P. Kane")
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            client.post(f"/api/books/{book['id']}/enrich", headers=admin["headers"])
+
+        row = db.query(AuthorIdentifier).one()
+        assert (row.identifier, row.provenance) == ("1042243212", "catalogue")
+
+    def test_a_record_found_by_title_and_author_asserts_nothing(
+        self, client, admin, make_book, db
+    ):
+        """The book has **no ISBN**, so `enrich` falls to the ranked search
+        across every catalogue. A row there is somebody with a similar name,
+        which is a candidate and not a match: storing it would merge two people
+        behind the Member's back.
+
+        The DNB is given exactly the same record. What differs is the branch.
+        """
+        book = make_book(admin["headers"], author="Sean P. Kane")
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["found"] is True, res.text
+        assert db.query(AuthorIdentifier).count() == 0
+
+    def test_a_refresh_asserts_it_too(self, client, admin, make_book, db):
+        """`refresh` is the other handler holding a `Record` the server fetched
+        for a verified ISBN, and it already overwrites the author's name from
+        it."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="Sean P. Kane")
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert db.query(AuthorIdentifier).one().identifier == "1042243212"
+
+    def test_a_member_picking_a_record_writes_no_identifier_from_the_payload(
+        self, client, admin, make_book, db
+    ):
+        """`enrich/apply` takes a `BookMatch` the client posted, so anything in
+        it is a value a Member could have typed. An identifier written from
+        there would carry `CATALOGUE` provenance while being somebody's guess,
+        which is the laundering the whole store is shaped against.
+        """
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN)
+
+        res = client.post(
+            f"/api/books/{book['id']}/enrich/apply",
+            json={
+                "source": "dnb",
+                "title": "Praxiswissen Docker",
+                "author": "Sean P. Kane",
+                "isbn13": GERMAN_ISBN,
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert db.query(AuthorIdentifier).count() == 0
+
+
+LOBID = "https://lobid.org/"
+WIKIDATA = "https://www.wikidata.org/w/api.php"
+
+#: The two people the GND spells `Stevenson, Robert Louis`, trimmed to what this
+#: endpoint renders. `tests/test_authority.py` holds the full capture and the
+#: note on what was removed from it; these are the same two records.
+LOBID_SEARCH: dict[str, Any] = {
+    "totalItems": 60,
+    "member": [
+        {
+            "gndIdentifier": "118753711",
+            "preferredName": "Stevenson, Robert Louis",
+            "dateOfBirth": ["1850-11-13"],
+            "dateOfDeath": ["1894-12-03"],
+            "sameAs": [{"id": "http://www.wikidata.org/entity/Q1512"}],
+        },
+        {
+            "gndIdentifier": "131572873",
+            "preferredName": "Stevenson, Robert Louis",
+            "sameAs": [{"id": "http://viaf.org/viaf/1148462"}],
+        },
+    ],
+}
+LOBID_RECORD = LOBID_SEARCH["member"][0]
+WIKIDATA_ITEM: dict[str, Any] = {"query": {"search": [{"title": "Q1512"}]}}
+WIKIDATA_NO_ITEM: dict[str, Any] = {"query": {"search": []}}
+WIKIDATA_DESCRIPTION = {
+    "entities": {
+        "Q1512": {
+            "descriptions": {
+                "en": {"language": "en", "value": "Scottish novelist and poet"}
+            }
+        }
+    }
+}
+WIKIDATA_VIAF = {
+    "claims": {
+        "P214": [
+            {
+                "mainsnak": {
+                    "snaktype": "value",
+                    "property": "P214",
+                    "datavalue": {"value": "95207986", "type": "string"},
+                }
+            }
+        ]
+    }
+}
+
+
+def _authority_mock(mock, *, lobid):
+    mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(200, json=lobid))
+
+    def wikidata(request: httpx.Request) -> httpx.Response:
+        action = request.url.params.get("action")
+        if action == "query":
+            found = "118753711" in request.url.params.get("srsearch", "")
+            return httpx.Response(
+                200, json=WIKIDATA_ITEM if found else WIKIDATA_NO_ITEM
+            )
+        if action == "wbgetentities":
+            return httpx.Response(200, json=WIKIDATA_DESCRIPTION)
+        return httpx.Response(200, json=WIKIDATA_VIAF)
+
+    mock.get(url__startswith=WIKIDATA).mock(side_effect=wikidata)
+
+
+class TestWhatTheAuthorityFilesSay:
+    """`GET /authors/authority`. Two routes, and `certain` says which one ran."""
+
+    def test_a_stored_identifier_resolves_to_one_certain_record(
+        self, client, admin, make_book
+    ):
+        make_book(admin["headers"], title="Treasure Island", author="R. L. Stevenson")
+        confirm(client, admin["headers"], "R. L. Stevenson", "118753711")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_RECORD)
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "R. L. Stevenson"},
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200, res.text
+        [row] = res.json()
+        assert row["certain"] is True
+        assert row["name"] == "Stevenson, Robert Louis"
+
+    def test_the_suggestion_is_offered_and_nothing_is_renamed(
+        self, client, admin, make_book
+    ):
+        """Settled on 2026-08-24: suggest the authority's spelling and let it be
+        overwritten. Taking it is a separate, deliberate merge."""
+        make_book(admin["headers"], title="Treasure Island", author="R. L. Stevenson")
+        confirm(client, admin["headers"], "R. L. Stevenson", "118753711")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_RECORD)
+            client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "R. L. Stevenson"},
+                headers=admin["headers"],
+            )
+
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        assert [row["name"] for row in body] == ["R. L. Stevenson"]
+
+    def test_an_author_with_no_identifier_gets_candidates(
+        self, client, admin, make_book
+    ):
+        """A name is not a key: two people are spelled this way in the GND, and
+        neither is stored by asking."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_SEARCH)
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            )
+
+        rows = res.json()
+        assert [row["identifier"] for row in rows] == ["118753711", "131572873"]
+        assert not any(row["certain"] for row in rows)
+
+    def test_the_disambiguation_hint_reaches_the_client(
+        self, client, admin, make_book
+    ):
+        """Only one of the two has a Wikidata item. Shown to whoever is
+        confirming, never used to pick for them."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_SEARCH)
+            rows = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            ).json()
+
+        assert [row["wikidata_id"] for row in rows] == ["Q1512", None]
+        assert rows[0]["description"] == "Scottish novelist and poet"
+
+    def test_asking_stores_nothing(self, client, admin, make_book, db):
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_SEARCH)
+            client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            )
+
+        assert db.query(AuthorIdentifier).count() == 0
+
+    def test_an_author_nobody_can_see_is_404_not_403(
+        self, client, admin, member, make_book
+    ):
+        """And nothing is asked of an outside service on their behalf either."""
+        make_book(
+            admin["headers"],
+            title="Kidnapped",
+            author="Robert Louis Stevenson",
+            is_private=True,
+        )
+
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=LOBID).mock(
+                return_value=httpx.Response(200, json=LOBID_SEARCH)
+            )
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=member["headers"],
+            )
+
+        assert res.status_code == 404
+        assert route.call_count == 0
+
+    def test_an_unreachable_authority_file_is_503_not_500(
+        self, client, admin, make_book
+    ):
+        """Nothing in this feature is blocked by it, so the client can offer
+        "try again" rather than an error page."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(502))
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 503
+
+    def test_a_candidate_can_then_be_confirmed(self, client, admin, make_book):
+        """The two halves joined up: a name search offers two people, a person
+        picks one, and the row records that a person picked it."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_SEARCH)
+            rows = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            ).json()
+
+        res = confirm(
+            client, admin["headers"], "Robert Louis Stevenson", rows[0]["identifier"]
+        )
+
+        assert res.status_code == 201
+        assert res.json()["provenance"] == "member"
+
+
+class TestSteeringTheAuthoritySearch:
+    def test_a_retyped_name_is_what_gets_searched(self, client, admin, make_book):
+        """The shelf spells somebody in a form the GND does not use, so the
+        author's own name returns the wrong people and there has to be a way to
+        retype it."""
+        make_book(admin["headers"], title="Kidnapped", author="Bob Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=LOBID).mock(
+                return_value=httpx.Response(200, json=LOBID_SEARCH)
+            )
+            mock.get(url__startswith=WIKIDATA).mock(
+                return_value=httpx.Response(200, json=WIKIDATA_NO_ITEM)
+            )
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Bob Stevenson", "q": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200, res.text
+        assert route.calls[0].request.url.params["q"] == "Robert Louis Stevenson"
+
+    def test_it_forces_the_search_route_even_when_one_is_stored(
+        self, client, admin, make_book
+    ):
+        """A stored identifier would otherwise resolve as a key and ignore the
+        retyped name entirely."""
+        make_book(admin["headers"], title="Treasure Island", author="Bob Stevenson")
+        confirm(client, admin["headers"], "Bob Stevenson", "118753711")
+
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=LOBID).mock(
+                return_value=httpx.Response(200, json=LOBID_SEARCH)
+            )
+            mock.get(url__startswith=WIKIDATA).mock(
+                return_value=httpx.Response(200, json=WIKIDATA_NO_ITEM)
+            )
+            rows = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Bob Stevenson", "q": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            ).json()
+
+        assert "/gnd/search" in str(route.calls[0].request.url)
+        assert not any(row["certain"] for row in rows)
+
+    def test_an_author_nobody_can_see_is_still_404_with_a_query(
+        self, client, admin, member, make_book
+    ):
+        """`q` steers the search; it does not bypass the access check."""
+        make_book(
+            admin["headers"], title="Kidnapped", author="Bob Stevenson", is_private=True
+        )
+
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=LOBID).mock(
+                return_value=httpx.Response(200, json=LOBID_SEARCH)
+            )
+            res = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Bob Stevenson", "q": "Robert Louis Stevenson"},
+                headers=member["headers"],
+            )
+
+        assert res.status_code == 404
+        assert route.call_count == 0
+
+
+class TestACatalogueLosingToAStoredValueIsReported:
+    def test_a_refresh_reports_what_it_could_not_store(
+        self, client, admin, make_book
+    ):
+        """A member's guess outranking a national library used to be a log line.
+        It is now on the response of the request that produced it."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="Sean P. Kane")
+        confirm(client, admin["headers"], "Sean P. Kane", "1111")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.put(
+                f"/api/books/{book['id']}/refresh", headers=admin["headers"]
+            )
+
+        [refused] = res.json()["refused_identifiers"]
+        assert (refused["asserted"], refused["kept"]) == ("1042243212", "1111")
+        assert refused["kept_provenance"] == "member"
+
+    def test_an_ordinary_refresh_reports_nothing(self, client, admin, make_book):
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="Sean P. Kane")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.put(
+                f"/api/books/{book['id']}/refresh", headers=admin["headers"]
+            )
+
+        assert res.json()["refused_identifiers"] == []
+
+    def test_a_plain_read_carries_the_field_empty(self, client, admin, make_book):
+        """It is on `BookOut`, so every response has it; only the two handlers
+        that fetch a catalogue record can ever fill it."""
+        book = make_book(admin["headers"], author="Sean P. Kane")
+
+        res = client.get(f"/api/books/{book['id']}", headers=admin["headers"])
+
+        assert res.json()["refused_identifiers"] == []
+
+
+class TestAnEnrichmentOnlyStoresASpellingTheBookAdopts:
+    """`TestWhichBranchMayWriteAnIdentifier` credits the Book with the
+    catalogue's own spelling, so its keys coincide by accident of the fixture
+    and it cannot see this. These use a Library spelling the catalogue does not
+    share, which is the ordinary case.
+    """
+
+    def test_an_ordinary_enrich_stores_nothing_it_cannot_reach(
+        self, client, admin, make_book, db
+    ):
+        """`merge_into` skips `author` when the Book has one and `overwrite` is
+        false, which is the default, so the catalogue's spelling is never
+        adopted and there is nothing to hang an identifier on."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="S. P. Kane")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["book"]["author"] == "S. P. Kane"
+        assert db.query(AuthorIdentifier).count() == 0
+
+    def test_an_overwriting_enrich_adopts_the_spelling_and_stores(
+        self, client, admin, make_book, db
+    ):
+        """The other side of the same ordering: with the credit line replaced
+        the assertion is evidenced, so it is stored."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="S. P. Kane")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.post(
+                f"/api/books/{book['id']}/enrich",
+                params={"overwrite": "true"},
+                headers=admin["headers"],
+            )
+
+        assert res.json()["book"]["author"] == "Sean P. Kane"
+        assert db.query(AuthorIdentifier).one().author_key == author_key(
+            "Sean P. Kane"
+        )
+
+    def test_whatever_an_enrich_stores_can_be_seen_and_deleted(
+        self, client, admin, make_book
+    ):
+        """The end to end form of the guarantee. A row that is written and then
+        invisible is unreclaimable, and every author listing reads the whole
+        table."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="S. P. Kane")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            client.post(
+                f"/api/books/{book['id']}/enrich",
+                params={"overwrite": "true"},
+                headers=admin["headers"],
+            )
+
+        body = client.get(AUTHORS, headers=admin["headers"]).json()
+        [row] = author_named(body, "Sean P. Kane")["identifiers"]
+        assert (
+            client.delete(
+                f"{AUTHORS}/identifiers/{row['id']}", headers=admin["headers"]
+            ).status_code
+            == 204
+        )
+
+    def test_a_refresh_still_stores_because_it_adopts_the_name(
+        self, client, admin, make_book, db
+    ):
+        """The regression the credit line filter could have caused: `refresh`
+        assigns the catalogue's author unconditionally, and the write happens
+        after that commit, so it still qualifies."""
+        book = make_book(admin["headers"], isbn=GERMAN_ISBN, author="S. P. Kane")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=DNB).mock(
+                return_value=sru_response(DNB_RECORD_WITH_GND)
+            )
+            silence_catalogues(mock)
+            res = client.put(
+                f"/api/books/{book['id']}/refresh", headers=admin["headers"]
+            )
+
+        assert res.json()["author"] == "Sean P. Kane"
+        assert db.query(AuthorIdentifier).one().identifier == "1042243212"

@@ -44,7 +44,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 ## Features
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
 - **Auto metadata**: title, author, publisher, page count, language and cover art, merged
-  from four catalogues (the German National Library, K10plus, Open Library, Google Books).
+  from five catalogues (the German National Library, K10plus, the Austrian National
+  Library, Open Library, Google Books).
   A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
   English one suggest the same one
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
@@ -162,11 +163,13 @@ frontend with Bun, then copies only the built assets into the Python image. Bun 
 
 ```
 Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together, merged)
+                  │                       ↳ Austrian National Library (fallback)
                   │                       ↳ Open Library  (fallback)
                   │                       ↳ Google Books  (needs a key)
                   │
                   │          search a title: Open Library + K10plus + DNB
                   │                       + BnF + Library of Congress
+                  │                       + Austrian National Library
                   │                       + Google Books (needs a key)
                   │                       ranked, denoised and merged here
               SQLite DB (./data/)

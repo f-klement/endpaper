@@ -493,16 +493,33 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **69** models under `schemas/`, **28** of
+    Measured on the tree as it stands: **74** models under `schemas/`, **29** of
     them reachable from a request.
 
-    Those two numbers are read back out of this paragraph by
-    `test_the_stated_model_counts_are_the_measured_ones`, because the previous
+    **What those two numbers count, because a bare number is what rots.** The
+    first is `_schema_models`: every class under `schemas/` that reaches
+    `BaseModel` through any chain of bases, resolved to a fixed point, so a
+    subclass of a model counts and a plain helper class does not. The second is
+    `_body_models`: those of the first that a route handler annotates a
+    parameter with, plus every model reachable from an in-scope model's own
+    field annotations. Neither counts a response model that no handler accepts.
+
+    **To recount them**, change nothing and run
+    `test_the_stated_model_counts_are_the_measured_ones`: it recomputes both and
+    the failure message prints the measured pair. Adding a request body model
+    moves both numbers; adding a response only model moves the first.
+
+    They are read back out of this paragraph by that test, because the previous
     pair (54 and 22) was stale by the time anybody noticed: it had drifted
-    silently through at least two features before a reviewer recomputed it. A
-    number in prose that nothing checks is a number that is eventually wrong,
-    and this file exists precisely to stop a defect being found a third time by
-    a person.
+    silently through at least two features before a reviewer recomputed it. It
+    then drifted again during the author authority feature, twice: 69 and 28 to
+    73 and 29 when four models arrived, and to 74 when a fifth did. The second
+    number did not move the second time, because `RefusedAssertionOut` is served
+    on a response and no handler accepts it, which is the distinction the two
+    counts exist to keep visible. Both drifts were caught by this test rather
+    than by a reader. A number in prose that nothing checks is a number that is eventually
+    wrong, and this file exists precisely to stop a defect being found a third
+    time by a person.
     """
 
     def _model_bases(self, node: ast.ClassDef) -> set[str]:

@@ -41,6 +41,7 @@ from config import COVERS_DIR
 from database import Base
 from models import (
     AuthorAlias,
+    AuthorIdentifier,
     Book,
     Classification,
     Collection,
@@ -143,6 +144,22 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # `classifications` are: an archive written before this restores with
         # no aliases, which is the state it was written in.
         ("author_aliases", AuthorAlias),
+        # Beside the aliases, which it is keyed the same way as and shares its
+        # only foreign key with. A different claim about the same spelling: an
+        # alias says who two names mean and this says which record in an
+        # external file one of them is.
+        #
+        # **Here on the day the table was created**, because the identical
+        # omission for `author_aliases` was silent for months: a restore
+        # produced a library whose books were perfectly intact and whose author
+        # decisions had all vanished. `test_holds_every_table` reads the
+        # manifest against the metadata, so a table left out of this tuple now
+        # fails rather than waiting to be noticed after a restore.
+        #
+        # Absent from `_REQUIRED_TABLES` for the reason `author_aliases` is: an
+        # archive written before this restores with none, which is the state it
+        # was written in.
+        ("author_identifiers", AuthorIdentifier),
         ("settings", Setting),
     )
 )

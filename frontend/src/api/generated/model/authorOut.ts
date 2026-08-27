@@ -5,6 +5,8 @@
  * Catalogue, lend and track a collection of physical books, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { AuthorIdentifierOut } from "./authorIdentifierOut.ts";
+import type { AuthorityScheme } from "./authorityScheme.ts";
 import type { AuthorMergeOut } from "./authorMergeOut.ts";
 
 /**
@@ -23,6 +25,8 @@ import type { AuthorMergeOut } from "./authorMergeOut.ts";
 export interface AuthorOut {
   /** @minimum 0 */
   book_count: number;
+  identifier_conflicts?: AuthorityScheme[];
+  identifiers?: AuthorIdentifierOut[];
   key: string;
   merged?: AuthorMergeOut[];
   name: string;

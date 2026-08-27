@@ -42,8 +42,8 @@ import covers
 import ddc
 import fetch
 import google_books
-from catalogue import Heading, Record
-from enums import ClassificationScheme
+from catalogue import AuthorityAssertion, Heading, Record
+from enums import AuthorityScheme, ClassificationScheme
 from isbn import parse as parse_isbn
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
@@ -580,12 +580,13 @@ def _parsed(body: str) -> ElementTree.Element:
     the response size; this was not.
 
     **No catalogue here sends one.** 225 live DNB and K10plus responses cached
-    2026-08-24 carry none, nor does a live BnF or Library of Congress answer. So
+    2026-08-24 carry none, nor does a live BnF or Library of Congress answer,
+    nor did any of roughly 120 live ÖNB responses on 2026-08-27. So
     refusing costs nothing measurable, and the source that would send one is the
     substituted response `docs/decisions.md` records the Library of Congress as
     reachable for, over plaintext HTTP.
 
-    Raised as `ParseError` because all six callers already catch it: a catalogue
+    Raised as `ParseError` because all eight callers already catch it: a catalogue
     that starts sending a doctype degrades to "this source is unavailable"
     rather than to a 500.
 
@@ -645,7 +646,27 @@ _MARC: Final = "{http://www.loc.gov/MARC21/slim}"
 
 #: MARC's non-sorting delimiters. A record brackets a leading article with
 #: these so a catalogue can file `Die Deutschen und die USA` under D.
-_NON_SORTING: Final = ("\x98", "\x9c")
+#:
+#: **Two spellings of one convention, because the catalogues do not agree on
+#: which characters to use.** The DNB writes U+0098 and U+009C, which is what
+#: MARC21 specifies. ÖNB writes `<<` and `>>`, and writes U+0098 nowhere at
+#: all. Measured over live 245 `$a` values on 2026-08-27: 21 of 189 DNB carry
+#: U+0098 and 0 carry `<<`; 21 of 150 ÖNB carry `<<` and 0 carry U+0098;
+#: K10plus carries neither in 200.
+#:
+#: **Stripped wherever they appear rather than only at the front**, which is
+#: how the MARC characters were already treated and is also what the data
+#: needs: 28 of the 111 bracketed runs in 21,760 live ÖNB subfields are not at
+#: the start, because the same device marks a nobiliary particle inside a
+#: personal name (`Einem, Gottfried <<von>>`). So this reaches `100 $a`, 21
+#: occurrences, as well as `245 $a`, 52.
+#:
+#: **Safe to apply to every source rather than to ÖNB alone**, and that is a
+#: measurement rather than a hope: `<<` and `>>` appear in 0 of 32,038 live DNB
+#: subfields and 0 of 45,710 K10plus subfields. Scoping it to one parser would
+#: mean `_marc_text` doing different things depending on who called it, which
+#: is the invisible kind of rule this function exists to avoid.
+_NON_SORTING: Final = ("\x98", "\x9c", "<<", ">>")
 
 
 def _marc_text(raw: str | None) -> str:
@@ -657,9 +678,10 @@ def _marc_text(raw: str | None) -> str:
     for every subfield rather than field by field where somebody would
     eventually read a diff and see nothing wrong.
 
-    * **The non-sorting delimiters are stripped.** They are a filing device and
-      not part of the title, and they carry through into whatever is stored:
-      28 of 85 live records hold at least one.
+    * **The non-sorting delimiters are stripped**, in both the spellings
+      `_NON_SORTING` lists. They are a filing device and not part of the title,
+      and they carry through into whatever is stored: 28 of 85 live DNB records
+      hold at least one, and one live ÖNB title in seven.
     * **Internal whitespace is collapsed.** MARC pads subfields, which
       `ClassificationIn.tidy_number` already says and already fixes for one
       column. `245 $a` on the reference record 9783446249974 reads
@@ -832,16 +854,50 @@ def _dc_title_statement(raw: str) -> tuple[str, str | None]:
 
 
 def _pages_from_extent(raw: str | None) -> int | None:
-    """`390 Seiten`, `348 S.` and `528 p.` all become a number.
+    r"""`390 Seiten`, `348 S.` and `528 p.` all become a number.
 
     Shared by every MARC-derived source. The unit is required rather than
     optional: an extent statement also carries plate counts and dimensions, and
     a bare first number picks up `23 cm` as a page count.
+
+    **The digit run is bounded, and that is a fix for a 500 rather than a
+    tidy-up.** This read `(\d+)` and called `int()` on whatever it caught.
+    CPython refuses an int/str conversion of more than
+    `sys.get_int_max_str_digits()` digits, 4,300 by default, and raises
+    **`ValueError`**, which is neither `httpx.HTTPError` nor
+    `ElementTree.ParseError`, so none of the eight SRU handlers caught it: one
+    record with 4,301 digits in its `300 $a` turned `GET /api/books/search` and
+    `GET /api/books/lookup` into a 500 for every MARC source at once.
+
+    **`fetch.MAX_RESPONSE_BYTES` cannot reach it, and the percentage is not the
+    sharpest way to say so.** The poisoned envelope measures **4,870 bytes**,
+    0.23% of the cap. The stronger fact is that it is **larger than the smallest
+    honest response this source sends**: the ÖNB lookup floor is **4,585 bytes**,
+    measured across 50 live lookups on 2026-08-27. So no cap that still admits a
+    real lookup could ever have refused this. A transport bound and a parser
+    bound are not substitutes, and that is the measurement which proves it
+    rather than merely suggesting it.
+
+    `_LOC_URL` is plaintext HTTP, so this needed no compromised catalogue,
+    which is the same on-path attacker `fetch.RedirectedOffHost` exists for.
+
+    **The lookbehind is what makes it a refusal rather than a guess.** A bare
+    `\d{1,6}` would match the *last* six digits of a 4,301 digit run and report
+    a page count invented out of the tail of an attack. Requiring that no digit
+    precede the run makes an over-long number no number at all.
+
+    The range is `MAX_PAGE_NUMBER_IN_A_BOOK`, which `_open_library_pages` has
+    always applied to the same field from the other source. This was the only
+    `int()` on catalogue text in this module with no bound on its digits; every
+    other one reads `\d{4}`.
     """
     if not raw:
         return None
-    match = re.search(r"(\d+)\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.)", raw)
-    return int(match.group(1)) if match else None
+    match = re.search(r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.)", raw)
+    if not match:
+        return None
+    pages = int(match.group(1))
+    return pages if 0 < pages <= MAX_PAGE_NUMBER_IN_A_BOOK else None
 
 
 #: Titles that are a position in a multi-volume set rather than a book.
@@ -944,13 +1000,38 @@ def _dnb_subjects(
 
 
 def _dnb_record(
-    fields: dict[str, list[_Subfields]], isbn: str | None
+    fields: dict[str, list[_Subfields]],
+    isbn: str | None,
+    *,
+    source: str = "dnb",
+    read_author_identifiers: bool = True,
 ) -> Record | None:
     """One MARC record as book fields, or None if it is not a book.
 
     Shared by the lookup and the search paths. `isbn` is what the lookup
     already knows and verified; the search path has none, so the record's own
     020 is read instead.
+
+    **`read_author_identifiers` is off for the ÖNB, and that is a decision
+    withheld rather than a mapping gap.** Its `100 $0` is if anything better
+    than the DNB's: measured 2026-08-27 over 209 live `100 $a` fields, 158
+    carry one, 75.6%, and every `$0` on a 100 field is `(DE-588)` with no other
+    authority file appearing at all. What stops it being read is the rule
+    `_k10plus_record` states: a catalogue is not read for a person's identifier
+    until somebody has compared it live, and comparing the *numbers* is not the
+    same as comparing the people they name. Leaving it on would have doubled
+    the input to that path as a side effect of reusing this parser, which is
+    not a thing a mapping should decide. The measurement is here so that
+    turning it on costs an argument and a comparison rather than a fresh probe.
+
+    **Shared by the ÖNB too, which is why the source is a parameter.** Its
+    records are this profile and not K10plus's: measured over 150 live records
+    on 2026-08-27, 360 `(DE-588)` subfields on 600/650/651/655/689, 102 Dewey
+    082 fields on 85 records, and the same 020 `$q` cross references. A second
+    parser would be the two dialects `catalogue.Record` has just finished
+    deleting, in miniature. `Record` is frozen and no module outside
+    `catalogue.py` may `replace` a field on one, so the source has to be known
+    here rather than corrected afterwards.
 
     It reads the same subfields `_k10plus_record` does, through the same
     helpers, and differs in two places. It refuses a title that names a volume
@@ -997,7 +1078,7 @@ def _dnb_record(
     subjects, gnd = _dnb_subjects(fields)
 
     return Record(
-        source="dnb",
+        source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
@@ -1025,6 +1106,13 @@ def _dnb_record(
         series_index=series_index,
         subjects=tuple(subjects),
         headings=tuple(_marc_ddc(fields) + gnd),
+        # The one catalogue here that supplies a person's identifier. K10plus
+        # writes the same subfield and is deliberately not read for it: see
+        # `_k10plus_record`. The ÖNB writes it too and is held to the same
+        # rule: see `read_author_identifiers`.
+        author_identifiers=(
+            tuple(_marc_author_identifiers(fields)) if read_author_identifiers else ()
+        ),
     )
 
 
@@ -1199,22 +1287,66 @@ def _flip_catalogue_name(raw: str) -> str:
     return f"{forenames} {surname}" if surname and forenames else name
 
 
-def _marc_authors(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The 100 main entry plus any 700 that actually wrote something."""
-    names: list[str] = []
+def _marc_author_entries(
+    fields: dict[str, list[_Subfields]],
+) -> list[tuple[str, _Subfields]]:
+    """The 100 main entry plus any 700 that actually wrote something, with its field.
+
+    **The field is returned beside the name so that the credit line and the
+    authority identifiers cannot be built from two different sets of people.**
+    `_marc_authors` joins the names and `_marc_author_identifiers` reads `$0`
+    off the same entries, so every identifier this module produces is filed
+    under a spelling that is in this record's own `author` string. Two loops
+    testing the same three conditions would make that alignment a comment, and a
+    comment is what would drift the day a relator code is added to one of them.
+
+    Order preserved, repeats dropped: 100 and 700 can name the same person, and
+    the first field naming them is the one whose `$0` is read.
+    """
+    entries: list[tuple[str, _Subfields]] = []
     for entry in fields.get("100", []):
         if entry.get("a"):
-            names.append(_flip_catalogue_name(entry["a"]))
+            entries.append((_flip_catalogue_name(entry["a"]), entry))
     for entry in fields.get("700", []):
         # `t` marks an added entry for a *work*, not a person: the row exists
         # to link the original title, and its name is the original author's.
         if entry.get("a") and "t" not in entry and entry.get("4") in _AUTHOR_RELATORS:
-            names.append(_flip_catalogue_name(entry["a"]))
-    # Order preserved, repeats dropped: 100 and 700 can name the same person.
-    seen: dict[str, None] = {}
-    for name in names:
-        seen.setdefault(name, None)
-    return ", ".join(seen) or None
+            entries.append((_flip_catalogue_name(entry["a"]), entry))
+    seen: dict[str, _Subfields] = {}
+    for name, entry in entries:
+        seen.setdefault(name, entry)
+    return list(seen.items())
+
+
+def _marc_authors(fields: dict[str, list[_Subfields]]) -> str | None:
+    """The 100 main entry plus any 700 that actually wrote something."""
+    return ", ".join(name for name, _ in _marc_author_entries(fields)) or None
+
+
+def _marc_author_identifiers(
+    fields: dict[str, list[_Subfields]],
+) -> list[AuthorityAssertion]:
+    """Which GND record each credited author is, where the record says so.
+
+    **The same `$0` `_gnd_identifier` reads for a subject heading, in a field
+    that means something else.** 600 says a person is what the book is *about*
+    and 100 says they wrote it, so the identifier is the same kind of string
+    with a different subject, and the two go to different stores. See
+    `enums.AuthorityScheme`.
+
+    **A record with no `$0` is ordinary rather than broken**: 21 of 73 live 100
+    fields carry no `(DE-588)` at all, measured over 85 records on 2026-08-24,
+    which is the same measurement `_gnd_identifier` records.
+
+    Nothing here decides whether the assertion is trustworthy. That is the
+    path's question and not the parser's, and `catalogue.AuthorityAssertion`
+    says why it cannot be answered here.
+    """
+    return [
+        AuthorityAssertion(name, AuthorityScheme.GND, number)
+        for name, entry in _marc_author_entries(fields)
+        if (number := _gnd_identifier(entry)) is not None
+    ]
 
 
 def _marc_credited_names(fields: dict[str, list[_Subfields]]) -> str | None:
@@ -1472,9 +1604,230 @@ def _k10plus_record(
         # K10plus is not read for GND identifiers, though its records carry
         # them in the same `$0`. Doing that is a second catalogue's worth of
         # live comparison and belongs in its own round, not as a side effect of
-        # the DNB's.
+        # the DNB's. **That covers a person's identifier too**, which is why
+        # this record sets no `author_identifiers`: the same subfield on `100`
+        # would file an author under a GND number nothing here has checked
+        # against a live K10plus record.
         headings=tuple(_marc_ddc(fields)),
     )
+
+
+# ── The Austrian National Library ─────────────────────────────────────────────
+#
+# The Österreichische Nationalbibliothek, through the Alma SRU interface the
+# Austrian library network publishes. CQL in, MARCXML out, no key, metadata
+# under CC0.
+#
+# **This is the catalogue interface and not `api.onb.ac.at`.** That one is the
+# IIIF digital collections API: image tiles, manifests, OCR and files. A reader
+# looking for "the ÖNB API" finds it first and it holds no catalogue records.
+#
+# **Why it is a fallback rather than a fifth fast source.** 50 ISBNs, five each
+# from ten Austrian imprints, taken off live ÖNB records printed after 2005 and
+# put to all three catalogues on 2026-08-27: ÖNB held 50, the DNB 47, K10plus
+# 39, and **3 of the 50 were held by ÖNB and by neither of the German pair**.
+# 6% is worth a request that costs nothing when the fast pair answers, and it
+# is not worth widening the pair everybody pays for. The sample is a floor
+# rather than an estimate: every ISBN came off an ÖNB record that carried one,
+# from ten well known presses, so it is biased towards the books the German
+# catalogues are most likely to hold too.
+#
+# Mean lookup latency over that sample: DNB 0.210s, ÖNB 0.240s, K10plus 0.390s.
+
+_OENB_URL: Final = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+
+#: The CQL index that means "the ISBN", **established by probing rather than by
+#: reading the documentation**, and it is the single fact this source was
+#: blocked on.
+#:
+#: The published examples establish MMS ID, AC number, barcode and title, and
+#: none of them establish this. Guessing it does not fail the way a wrong index
+#: name usually fails. Measured live on 2026-08-27 against the same ISBN:
+#:
+#: | query | numberOfRecords |
+#: |---|---|
+#: | `alma.isbn=9783825354077` | 1 |
+#: | `alma.isbn13=9783825354077` | **7,793,152** |
+#: | `zzz.qqq=9783825354077` | **7,793,152** |
+#:
+#: **An unknown index is not an error.** It is HTTP 200, no diagnostic, and the
+#: entire catalogue in catalogue order, of which `maximumRecords` arbitrary
+#: records come back. So a typo here ships plausible MARC for an unrelated
+#: book rather than an empty result somebody would notice, and the only thing
+#: standing between that and a member's shelf is `_marc_claims_isbn` below.
+#:
+#: Confirmed the only way it can be: an ISBN was read off a live ÖNB record's
+#: own 020 and put back through this index, returning exactly that record.
+_OENB_ISBN_INDEX: Final = "alma.isbn"
+
+#: The CQL index for a title word. `alma.title`, from the same explain record,
+#: and verified live.
+#:
+#: **One term per index reference, ANDed**, which is the shape `_k10plus_search`
+#: already uses and here it is a hard requirement rather than a precision
+#: preference: a bare multi-word term is refused. Measured, `alma.title=wien
+#: geschichte` answers 200 with SRU diagnostic 200812 `Invalid query`, where
+#: `alma.title=wien and alma.title=geschichte` answers with 4,885 records.
+_OENB_TITLE_INDEX: Final = "alma.title"
+
+#: Five, for the same reason `_DNB_RECORDS` and `_K10PLUS_RECORDS` are five:
+#: several printings of one book each carry the ISBN somewhere and the fullest
+#: of them should win rather than whichever the catalogue sorted first.
+_OENB_RECORDS: Final = 5
+
+#: MARC leader/07, the bibliographic level, for a record that is part of
+#: something else rather than a thing on a shelf: `a` is a monographic
+#: component part and `b` a serial component part.
+#:
+#: **These two, because these are the levels the sample actually held.** The 280
+#: records measured on 2026-08-27 carried `a` (155), `m` (122) and `c` (3), so
+#: `b` is here on the MARC definition rather than on evidence and nothing else
+#: is here at all. A later live page turned up one `s`, a serial, which is
+#: neither a component part nor a book: it is **not** refused, because refusing
+#: serials is a decision about what this app catalogues rather than a correction
+#: to this one, and widening a frozenset is the quietest possible place to take
+#: a decision like that.
+#:
+#: **Over half of what an ÖNB title search returns is one of these**, and
+#: nothing already here catches them. Measured over 8 title searches on
+#: 2026-08-27, 280 records: 155 (55.4%) are level `a`, journal articles and
+#: book chapters with a 773 host item entry and usually no 300 extent at all.
+#: `_is_physical_book` tests the extent for an online form and the title for a
+#: volume slot, and an absent extent passes both, so every one of the 155 would
+#: have reached the picker as a book.
+#:
+#: **The leader decides rather than the 773**, and the difference was measured
+#: on the same 280 records: the leader catches 155 of 155 and loses **0** of
+#: the 122 monographs, where refusing anything carrying a 773 catches the same
+#: 155 and loses 3 monographs that carry a host entry legitimately.
+_COMPONENT_PART_LEVELS: Final = frozenset({"a", "b"})
+
+
+def _is_component_part(record: ElementTree.Element) -> bool:
+    """Whether this MARC record describes an article or a chapter.
+
+    Reads the leader off the record node, because `_marc_fields` maps
+    `datafield` only and the leader is neither a datafield nor a controlfield.
+    Kept here rather than added to that map: one source needs it, and widening
+    the shared shape for one caller is how a field map grows keys nobody reads.
+
+    A leader shorter than eight characters is not a component part. A truncated
+    leader is a broken record rather than an article, and the fields below
+    decide it on their own merits.
+    """
+    leader = record.findtext(f"{_MARC}leader") or ""
+    return len(leader) > 7 and leader[7] in _COMPONENT_PART_LEVELS
+
+
+def _oenb_records(root: ElementTree.Element) -> list[ElementTree.Element]:
+    """Every MARC record in an ÖNB response that describes a whole publication.
+
+    **An SRU diagnostic needs no branch of its own here**, which is worth
+    saying because the endpoint answers every error with HTTP 200. An invalid
+    query and an unsupported one both come back as a well formed
+    `searchRetrieveResponse` carrying a `diag:diagnostic` and no records, so the
+    body parses, this returns nothing, and the source reports no results, which
+    is what it should do. `test_metadata.py` pins that with a recorded
+    diagnostic rather than leaving it to be rediscovered.
+    """
+    return [
+        record
+        for record in root.iter(f"{_MARC}record")
+        if not _is_component_part(record)
+    ]
+
+
+async def _oenb(isbn: str, api_key: str) -> Lookup:
+    del api_key  # Free, CC0, and no registration to have a key from.
+
+    params = {
+        "version": "1.2",
+        "operation": "searchRetrieve",
+        "query": f"{_OENB_ISBN_INDEX}={isbn}",
+        "recordSchema": "marcxml",
+        "maximumRecords": str(_OENB_RECORDS),
+    }
+    try:
+        response = await fetch.get_once(_OENB_URL, params=params)
+        if response.status_code == 429:
+            return Lookup(Outcome.RATE_LIMITED, source="oenb")
+        if response.status_code != 200:
+            return Lookup(Outcome.UNAVAILABLE, source="oenb")
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError):
+        logger.warning("ÖNB lookup failed for %s", isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source="oenb")
+
+    # **`_marc_claims_isbn` is not a tidy extra check on this source, it is the
+    # whole defence.** A mistyped index name answers with the entire catalogue
+    # rather than with nothing, so without this a future edit to
+    # `_OENB_ISBN_INDEX` would answer a member's scan with an arbitrary record
+    # that parses perfectly. See that constant.
+    records = [
+        fields
+        for fields in (_marc_fields(node) for node in _oenb_records(root))
+        if _marc_claims_isbn(fields, isbn)
+    ]
+    parsed = [
+        record
+        for fields in records
+        for record in [_dnb_record(fields, isbn, source="oenb", read_author_identifiers=False)]
+        if record is not None
+    ]
+    if not parsed:
+        return Lookup(Outcome.NOT_FOUND, source="oenb")
+
+    return Lookup(
+        Outcome.FOUND,
+        source="oenb",
+        record=max(parsed, key=lambda record: record.completeness),
+    )
+
+
+async def _oenb_search(query: str, limit: int) -> list[Record]:
+    """The ÖNB, one ANDed title term per word.
+
+    Not the catch-all `alma.all_for_ui`, which is the same choice
+    `_k10plus_search` made and for a sharper reason here: measured 2026-08-27,
+    ANDing "wien" and "geschichte" over the title index returns 4,885 records
+    where the same pair over the keyword index returns 65,872.
+    """
+    terms = _search_terms(query)
+    if not terms:
+        return []
+
+    cql = " and ".join(f"{_OENB_TITLE_INDEX}={term}" for term in terms)
+    params = {
+        "version": "1.2",
+        "operation": "searchRetrieve",
+        "query": cql,
+        "recordSchema": "marcxml",
+        # More than asked for, because the ordering is the catalogue's and the
+        # ranking is ours. The endpoint clamps this at 50 silently: asking for
+        # 100 or 200 returns 50 records with no diagnostic, measured.
+        "maximumRecords": str(min(limit * 3, 50)),
+    }
+    try:
+        response = await fetch.get_once(_OENB_URL, params=params)
+        if response.status_code != 200:
+            return []
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError):
+        logger.warning("ÖNB search failed for %r", query, exc_info=True)
+        return []
+
+    results: list[Record] = []
+    for node in _oenb_records(root):
+        fields = _marc_fields(node)
+        record = _dnb_record(
+            fields, isbn=None, source="oenb", read_author_identifiers=False
+        )
+        if record is None or not _is_physical_book(
+            _marc_extent(fields), record.title
+        ):
+            continue
+        results.append(record)
+    return results
 
 
 # ── The chain ─────────────────────────────────────────────────────────────────
@@ -1506,12 +1859,20 @@ def _k10plus_record(
 # **The Library of Congress is not worth an ISBN request.** Two hits in ten, and
 # both were covered by something else. It is kept for title search, where it is
 # the best free source for a book printed before ISBNs existed.
+#
+# **ÖNB is not in that table and deliberately not added to it**, because it was
+# measured on a different sample and a row carrying a figure from somewhere else
+# is worse than no row. Its own measurement is 50 Austrian imprint ISBNs on
+# 2026-08-27, where it answered 50 of 50 against the DNB's 47 and K10plus's 39,
+# and held 3 that the German pair both missed. Mean latency 0.240s. Where it
+# sits and why: `_FALLBACK_SOURCES`.
 
 _SOURCES: Final = {
     "open_library": _open_library,
     "google_books": _google_books,
     "dnb": _dnb,
     "k10plus": _k10plus,
+    "oenb": _oenb,
 }
 
 #: Asked together, on every lookup. Free, unmetered, and fast enough that the
@@ -1520,7 +1881,21 @@ _FAST_SOURCES: Final = ("dnb", "k10plus")
 
 #: Asked in turn, only if the fast pair found nothing. Open Library is broad and
 #: slow; Google is the only source with a key, a quota and a bill attached.
-_FALLBACK_SOURCES: Final = ("open_library", "google_books")
+#:
+#: **ÖNB is first of the three, and the order is measured rather than
+#: alphabetical.** It is the only source here that answers for an Austrian
+#: imprint the German pair both missed: 3 of 50, measured 2026-08-27.
+#:
+#: It is also much the fastest of the three, and **the two figures come from
+#: different samples and are not one measurement**: the ÖNB's mean of 0.240s is
+#: over the 50 live lookups of that same 2026-08-27 Austrian sample, while Open
+#: Library's 1.64s is off the ten ISBN comparison in the chain comment above,
+#: taken on another date against another set of books. They are the right order
+#: of magnitude apart rather than precisely comparable, which is all this
+#: ordering needs: asking the fast Austrian source before the slow broad one
+#: costs a fraction of a second on the lookups that reach this list at all, and
+#: nothing on the ones the fast pair already answered.
+_FALLBACK_SOURCES: Final = ("oenb", "open_library", "google_books")
 
 #: Bookland registration group for German-language publishing.
 _GERMAN_PREFIX: Final = "9783"
@@ -2334,11 +2709,11 @@ _BOTH_HALVES_BONUS: Final = 4
 #: English title still gets the English book.
 _LANGUAGE_WEIGHT: Final = 3
 
-#: Catalogues kept for the languages the primary three cover least well. A row
+#: Catalogues kept for the publishing the primary three cover least well. A row
 #: only they found is worth having; a row they merely duplicate is not worth
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc"})
+_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb"})
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a row pickable rather than a stub. Scored **separately**
@@ -2452,15 +2827,34 @@ async def search(
     for German and European publishing, the DNB for German legal deposit.
 
     **Tier two, free, regional:** the BnF for French, the Library of Congress
-    for Spanish, Portuguese and Latin American printings. Both are ranked a
-    point below the primaries: they are here for the books nobody else holds,
-    not to reorder the ones everybody does.
+    for Spanish, Portuguese and Latin American printings, the ÖNB for Austrian
+    imprints. All three are ranked a point below the primaries: they are here
+    for the books nobody else holds, not to reorder the ones everybody does.
 
     **Tier three, only with a key:** Google Books, for the blurb and the
     categories the others do not carry.
 
     Every source in every tier is asked **concurrently**, so the wall clock is
-    the slowest of six rather than the sum, measured at 1.2s to 1.8s.
+    the slowest of seven rather than the sum, measured at 1.2s to 1.8s before
+    the seventh joined.
+
+    **The seventh moved that, and the honest figure is a range rather than a
+    number.** Across 24 live ÖNB title searches on 2026-08-27, at the shape this
+    function actually requests, latency ran **0.156s to 3.23s**. It is variable
+    enough that which source is slowest changes between runs: one eight query
+    comparison of the six free sources, Google Books excluded because it needs
+    a key and a library without one never asks it, put the BnF slowest by mean
+    at 1.216s and K10plus slowest by any single request at 1.687s, with the ÖNB
+    third at 0.795s mean,
+    while a twelve query run of the ÖNB alone reached 2.121s and a separate four
+    query run reached 3.23s.
+
+    What matters is not which one is slowest, it is that a single measured ÖNB
+    request has come within **0.8s of `SEARCH_DEADLINE_SECONDS`**. So this
+    source is the most likely of the seven to be the one the deadline drops, and
+    the deadline is what stops that costing the search. An earlier version of
+    this sentence said 0.82s to 1.41s, which was in no record, was about half
+    the true upper bound, and read as "the seventh source changes nothing".
 
     **Then ours:** filtering out what is not a book, merging one book's rows
     from several catalogues into one, and ranking the result against the query.
@@ -2497,6 +2891,7 @@ async def search(
             _dnb_search(trimmed, limit),
             _bnf_search(trimmed, limit),
             _loc_search(trimmed, limit),
+            _oenb_search(trimmed, limit),
             _google(),
         ]
     )
@@ -2511,7 +2906,7 @@ async def search(
 
 #: How long a search may take, whatever the catalogues do.
 #:
-#: Six sources are asked at once, so the wall clock is the slowest of them, and
+#: Seven sources are asked at once, so the wall clock is the slowest of them, and
 #: one national catalogue having a bad afternoon was turning a 1.3s search into
 #: a 7s one. A deadline degrades the *results* instead of the latency: whatever
 #: has answered is ranked and returned, and the straggler is cancelled.
@@ -2551,6 +2946,12 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
+    # Last, and named rather than left to the default so that a reader can see
+    # it was decided. It is the newest and the least compared of the seven, and
+    # the field it would win is a field the DNB or K10plus has already filled
+    # for any book all three hold. Where it is the only catalogue with a row,
+    # precedence never runs.
+    "oenb",
 )
 
 

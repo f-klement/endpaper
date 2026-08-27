@@ -50,13 +50,28 @@ REGISTER_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
 # wedge the database for everyone else.
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
-# Every metadata call fans out to as many as four public catalogues, none of
+# Every metadata call fans out to as many as seven public catalogues, none of
 # which the library runs or pays for. One member holding the scan page open
 # with a script behind it would spend somebody else's quota and put this
 # deployment's address in front of their rate limiter, which is a way to lose
 # metadata for everyone. Sixty a minute is far above scanning a shelf by hand
 # and far below what would be noticed upstream.
 METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
+
+# The authority files are not the catalogues and their published budget is much
+# smaller, so they get their own limit rather than sharing `METADATA_LIMIT`.
+#
+# lobid's usage policy records **30 complex searches a minute** for the whole of
+# its service, and one call to `GET /authors/authority` is one such search.
+# `METADATA_LIMIT` is 60 a minute **per member**, so the route ran at twice a
+# published budget with one member and further past it with two. That is the
+# failure `METADATA_LIMIT`'s own comment describes: putting this deployment's
+# address in front of somebody else's rate limiter.
+#
+# Ten a minute per member. A member confirming an author does it once and looks
+# at the answer; ten leaves room to retype a name a few times through `q`, and
+# three members doing that at once still sit inside lobid's figure.
+AUTHORITY_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
 
 # One run of the cover backfill fetches up to a hundred images from the same two
 # services the metadata limit protects, and it is the one call here that a
@@ -113,6 +128,7 @@ login_limiter = SlidingWindowLimiter(LOGIN_LIMIT)
 register_limiter = SlidingWindowLimiter(REGISTER_LIMIT)
 import_limiter = SlidingWindowLimiter(IMPORT_LIMIT)
 metadata_limiter = SlidingWindowLimiter(METADATA_LIMIT)
+authority_limiter = SlidingWindowLimiter(AUTHORITY_LIMIT)
 cover_backfill_limiter = SlidingWindowLimiter(COVER_BACKFILL_LIMIT)
 
 

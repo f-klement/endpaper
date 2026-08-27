@@ -16,6 +16,7 @@ from enums import (
 )
 from google_books import split_categories
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from schemas.author import RefusedAssertionOut
 from schemas.classification import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     ClassificationIn,
@@ -195,6 +196,17 @@ class CopyCreate(BaseModel):
 
 
 class BookOut(BaseModel):
+    #: Authority identifiers a catalogue asserted for this Book's author and
+    #: this Library declined, because it already holds a different one.
+    #:
+    #: **Empty on every response but two.** Only `PUT /{id}/refresh` and
+    #: `POST /{id}/enrich` fetch a catalogue record and so can produce one; a
+    #: plain read has nothing to report and leaves it empty. It is on `BookOut`
+    #: rather than on an enrichment-only model because those two handlers return
+    #: different types and the fact is the same one.
+    #:
+    #: Not stored. See `schemas.author.RefusedAssertionOut`.
+    refused_identifiers: list[RefusedAssertionOut] = Field(default_factory=list)
     id: int
     isbn: str | None
     title: str

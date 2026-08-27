@@ -50,9 +50,9 @@ def titles(response: httpx.Response) -> list[str]:
 
 # ── Metadata catalogues ───────────────────────────────────────────────────────
 #
-# Six sources answer a lookup or a search, and respx fails a test that makes an
-# unmocked request rather than letting it reach the real service. So a test
-# touching either path has to silence all six, and stating them one by one in
+# Seven sources answer a lookup or a search, and respx fails a test that makes
+# an unmocked request rather than letting it reach the real service. So a test
+# touching either path has to silence all seven, and stating them one by one in
 # every test was both noise and a trap: adding a source broke thirty tests in
 # an unrelated file.
 
@@ -67,6 +67,7 @@ DNB = "https://services.dnb.de/sru/dnb"
 K10PLUS = "https://sru.k10plus.de/opac-de-627"
 BNF = "https://catalogue.bnf.fr/api/SRU"
 LOC = "http://lx2.loc.gov:210/lcdb"
+OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
 
 #: An SRU envelope holding no records. Every SRU source answers 200 with an
 #: empty set rather than a 404, so mocking a 404 would test a case none of them
@@ -101,6 +102,24 @@ def silence_covers(mock: Any) -> Any:
     return mock
 
 
+def silence_oenb(mock: Any) -> Any:
+    """Answer the ÖNB with "nothing found".
+
+    A helper of its own rather than a line in every test, because it was added
+    to a module whose tests each register their sources by hand: the ÖNB joined
+    a lookup chain and a search fan-out that 21 existing tests already pinned,
+    and every one of them failed on an unmocked request rather than on anything
+    about the ÖNB.
+
+    **Not autouse, deliberately.** A fixture registering this for every test
+    would also register it for the tests that exist to watch the ÖNB answer,
+    and respx resolves routes in registration order with the first match
+    winning, so those would have silently tested nothing.
+    """
+    mock.get(url__regex=f"{re.escape(OENB)}.*").mock(return_value=sru_response())
+    return mock
+
+
 def silence_catalogues(mock: Any) -> Any:
     """Register a "nothing found" answer for every metadata source.
 
@@ -117,7 +136,7 @@ def silence_catalogues(mock: Any) -> Any:
       pattern left one route, this one, and the test's own Google response was
       silently discarded.
     """
-    for base in (DNB, K10PLUS, BNF, LOC):
+    for base in (DNB, K10PLUS, BNF, LOC, OENB):
         mock.get(url__regex=f"{re.escape(base)}.*").mock(return_value=sru_response())
     silence_covers(mock)
     mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(

@@ -8,9 +8,10 @@ losing.
 Three of these would have been the only warning of a real regression:
 
 * `ResponseTooLarge` being an `httpx.HTTPError` is what makes the cap cost
-  nothing at ten call sites. Break the base class and every one of them turns a
-  hostile answer into a 500, silently, because the `except` clauses still
-  compile.
+  nothing at every call site. Break the base class and every one of them turns
+  a hostile answer into a 500, silently, because the `except` clauses still
+  compile. The count and its unit live in `fetch._walk_hops`; naming one here
+  too is how this file came to hold five stale copies of six figures.
 * The count is over the **raw wire** bytes, and any encoding other than
   `identity` is refused rather than decoded. Counting the decoded stream
   instead passes every test that sends plain text and caps nothing: httpx
@@ -27,6 +28,7 @@ catalogue.
 import ast
 import asyncio
 import gzip
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +48,42 @@ from tests.test_shelf import _bindings
 URL = "https://catalogue.test/sru"
 
 BACKEND = Path(__file__).resolve().parent.parent
+
+
+def _concurrent_search_sources() -> int:
+    """How many catalogues `metadata.search` has in flight at once.
+
+    **Derived from the tree rather than written down**, because the literal 6
+    that used to sit in `test_the_default_cap_fits_the_pod_it_runs_in` went on
+    passing after a seventh source joined that list: it bounded six sources
+    against the pod while `MAX_RESPONSE_BYTES`'s own docstring had started
+    claiming seven, so the only enforcement of that arithmetic was enforcing
+    the wrong arithmetic.
+
+    Reads the list literal handed to `_within_deadline`, which is the fan out
+    itself. If that call stops taking a list literal this raises rather than
+    guessing, because a silently wrong count here is the exact failure it
+    exists to prevent.
+    """
+    tree = ast.parse((BACKEND / "metadata.py").read_text())
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_within_deadline"
+            and node.args
+        ):
+            argument = node.args[0]
+            if not isinstance(argument, ast.List):
+                raise AssertionError(
+                    "_within_deadline no longer takes a list literal, so the "
+                    "concurrent source count cannot be read off it"
+                )
+            return len(argument.elts)
+    raise AssertionError("no call to _within_deadline found in metadata.py")
+
+
+_CONCURRENT_SOURCES = _concurrent_search_sources()
 
 #: The three modules allowed to speak HTTP without going through this one.
 #:
@@ -323,8 +361,11 @@ class TestTheCapIsTheWholePoint:
         """The header is half the fix, and it is the half a reader cannot see.
 
         `aiter_raw` alone would leave every honest body arriving gzipped and
-        unparseable. Measured live 2026-08-27, all six catalogues answer 200
-        under `identity`; three of them gzip when it is not sent.
+        unparseable. Measured live 2026-08-27, all seven catalogues answer 200
+        under `identity`; four of them gzip when it is not sent. The names and
+        the byte counts are in `fetch._IDENTITY`, which is where they belong:
+        restating them here is what left this sentence saying six and three
+        after a seventh source was added.
         """
         with respx.mock:
             route = respx.get(URL).mock(return_value=httpx.Response(200))
@@ -332,6 +373,26 @@ class TestTheCapIsTheWholePoint:
 
         sent = route.calls.last.request.headers["accept-encoding"]
         assert sent == "identity"
+
+    @pytest.mark.asyncio
+    async def test_this_app_says_who_it_is(self):
+        """**A requirement rather than a courtesy, and that is measured.**
+
+        lobid's usage policy asks in writing for "a meaningful, recurring
+        string". Wikidata does not ask: a request with no `User-Agent` answers
+        **403** with "Please set a user-agent and respect our robot policy",
+        measured live 2026-08-27. Without this header the authority file half of
+        the author feature does not work at all.
+
+        The value is asserted rather than merely tested for presence, because
+        the policy asks for it to stay the same for the life of the project:
+        httpx would otherwise send its own default and the test would pass.
+        """
+        with respx.mock:
+            route = respx.get(URL).mock(return_value=httpx.Response(200))
+            await fetch.get_once(URL)
+
+        assert route.calls.last.request.headers["user-agent"] == "endpaper"
 
     @pytest.mark.asyncio
     async def test_a_body_carrying_an_encoding_we_did_not_ask_for_is_refused(self):
@@ -399,14 +460,61 @@ class TestTheCapIsTheWholePoint:
 
         `> 3 * 687_481` is satisfied by 512 MiB, which is the failure the cap
         exists to prevent. The ceiling is the arithmetic the constant's own
-        docstring states: six concurrent sources, each retaining a measured
-        15.28x its wire bytes, inside a 512Mi pod. Today that is 192.3 MB
-        against 536,870,912, and it permits growth to about 5.58 MiB before the
-        two bounds meet.
+        docstring states: every source `metadata.search` asks concurrently, each
+        retaining a measured 15.28x its wire bytes, inside a 512Mi pod. Today
+        that is 224.3 MB against 536,870,912, and it permits growth to about
+        4.79 MiB before the two bounds meet.
+
+        **The source count is read from `metadata`, not written here.** It was
+        written here, as a literal 6, and it stayed 6 when the ÖNB became a
+        seventh concurrent source: the assertion went on passing because it
+        bounded six sources against the pod while the constant it exists to
+        enforce had started claiming seven. A test that restates a number the
+        tree already holds is a second place for that number to be wrong, and
+        this was the only enforcement of that arithmetic.
         """
         pod = 512 * 1024 * 1024
-        worst_case = 6 * fetch.MAX_RESPONSE_BYTES * 15.28
+        worst_case = _CONCURRENT_SOURCES * fetch.MAX_RESPONSE_BYTES * 15.28
         assert pod > worst_case
+
+    def test_the_constant_states_the_source_count_the_tree_has(self):
+        """The docstring's number and the fan out, compared.
+
+        **The test above does not catch a wrong source count on its own**, and
+        that was measured rather than assumed: hardcoding it back to 6 leaves it
+        passing, because six sources against the pod is a *weaker* bound than
+        seven and the assertion is an inequality. So the count needs pinning
+        from the other side, which is what this does: the prose a reader
+        believes has to agree with the list the code actually asks.
+
+        Same habit as `test_serialisation.py`'s
+        `test_the_number_in_the_docstring_is_the_number_it_costs`, which reads
+        its figure back out of the docstring rather than trusting it.
+
+        **What this pair does and does not catch, attacked rather than assumed.**
+        Adding a source to the fan out without updating the docstring fails
+        here, and so does removing one: both directions measured. Raising
+        `MAX_RESPONSE_BYTES` past the pod fails the test above. What neither
+        catches is somebody editing that test to name a literal instead of
+        `_CONCURRENT_SOURCES`, which still passes, because a smaller count is a
+        weaker inequality. That is a deliberate edit rather than the drift these
+        exist for, and it is written down instead of chased with a guard on a
+        guard.
+        """
+        source = (BACKEND / "fetch.py").read_text()
+        stated = re.search(r"asks (\w+) sources at once", source)
+        assert stated is not None, (
+            "MAX_RESPONSE_BYTES's docstring no longer states how many sources "
+            "`metadata.search` asks at once"
+        )
+        words = {
+            "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+            "ten": 10,
+        }
+        assert words.get(stated.group(1)) == _CONCURRENT_SOURCES, (
+            f"the docstring says {stated.group(1)} sources; `metadata.search` "
+            f"asks {_CONCURRENT_SOURCES}"
+        )
 
     def test_the_cap_is_resolved_at_call_time_not_at_import(self):
         """`limit` defaults to None so the constant stays the single value.
@@ -638,9 +746,11 @@ class TestTheRedirectPolicy:
         `idna.IDNAError` is a `UnicodeError`, so this arrived as a bare
         `ValueError` out of `client.stream`.
 
-        **Six of the ten call sites catch `(httpx.HTTPError,
-        ElementTree.ParseError)` and would not have caught it**, so one hostile
-        source 500s `GET /api/books/search` instead of being dropped. Both
+        **Eight of the thirteen `try` blocks wrapping a call into this module
+        catch `(httpx.HTTPError, ElementTree.ParseError)` and would not have
+        caught it**, so one hostile source 500s `GET /api/books/search` instead
+        of being dropped. The unit is the block rather than the call, and
+        `fetch._walk_hops` carries the count and how it was taken. Both
         spellings here are plain ASCII on the wire, and `_LOC_URL` is plaintext
         HTTP, so forging it needs no TLS.
         """

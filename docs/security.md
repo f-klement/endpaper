@@ -472,7 +472,7 @@ Five things are limited, for three different reasons:
 | `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
 | `/api/imports/*` | 3 / min | username | `/csv` writes thousands of rows in one transaction, holding the single SQLite writer against the library. `/preview` writes nothing and is limited for the other half of the cost: parsing a 5.02 MB, 20,000 row export is 3.081 seconds of CPU, measured, and `MAX_UPLOAD_BYTES` caps the body without capping the rate. One window covers both, so the ordinary flow of a preview then an import spends two of the three |
-| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as four public catalogues that this library neither runs nor pays for |
+| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as seven public catalogues that this library neither runs nor pays for |
 
 The last is the one that is not about this deployment: spending somebody else's quota is a
 way to get this deployment's address rate-limited upstream, which loses metadata for
@@ -572,8 +572,8 @@ therefore never repair another member's private books. It is rate limited instea
 
 ## Catalogue requests
 
-Six third party catalogues are asked for records: Open Library, the DNB, K10plus, the BnF,
-the Library of Congress and Google Books. `backend/fetch.py` is the only place a client for
+Seven third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+BnF, the Library of Congress, the Austrian National Library and Google Books. `backend/fetch.py` is the only place a client for
 them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass over the
 tree, because the defect that produced the module was ten hand built clients that agreed on
 the timeout and agreed on nothing else.
@@ -582,7 +582,7 @@ the timeout and agreed on nothing else.
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
 per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
-mean adding six catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+mean adding seven catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
 
 **Redirects are walked here, and only to the same host.** Measured live with redirects off,
@@ -604,9 +604,21 @@ why it needed separate handling. httpx builds the redirect request inside `send(
 with `follow_redirects=False`**, to populate `response.next_request`, so `idna.decode` runs
 on the header value before this module sees the response and the hop check never runs.
 `http://xn--a.gov/x` raises `IDNAError`, which is a `UnicodeError` and therefore a
-`ValueError` and **not** an `httpx.HTTPError`, so it escaped the handler six of the ten call
-sites use and took a whole search down with a 500 instead of dropping one source. It is
-converted to `RedirectedOffHost` at the boundary.
+`ValueError` and **not** an `httpx.HTTPError`, so it escaped the handler eight of the
+thirteen `try` blocks around a `fetch` call use, and took a whole search down with a 500
+instead of dropping one source. It is converted to `RedirectedOffHost` at the boundary.
+
+**A second `ValueError` reached the same gap from inside the parser**, and the cap could
+not help with it. `_pages_from_extent` matched an unbounded digit run and called `int()`
+on it; CPython refuses a conversion over 4,300 digits and raises `ValueError`, so a single
+MARC record with 4,301 digits in its `300 $a` turned both `GET /api/books/search` and
+`GET /api/books/lookup` into a 500 for **every** MARC source at once. The poisoned envelope
+is 4,870 bytes, 0.23% of `MAX_RESPONSE_BYTES`, and more to the point it is **larger than the
+smallest honest response that source sends**, whose measured floor is 4,585 bytes over 50
+live lookups. No cap that still admits a real lookup could have refused it, which is what
+makes this the clearest case that a transport bound and a parser bound are not substitutes. The digit run is now
+bounded and range checked, and an over-long run is refused rather than having its tail read
+as a page count.
 
 **The response body is bounded whichever host answers**, which is the half that does not
 depend on trusting anybody. `fetch.MAX_RESPONSE_BYTES` is 2 MiB and **the count is over raw
@@ -617,20 +629,23 @@ is refused on the header.
 exactly that.** `aiter_bytes()` hands the decoder a whole raw chunk before yielding
 anything, so the decompressed allocation happens *before* the running total is compared to
 the limit. Measured: **65,250 wire bytes reached 67,108,864 counted and 148.3 MB allocated**,
-and across the six sources `metadata.search` asks at once, 463.8 MB peak in a pod limited to
-512Mi. The cap was advertised at 1 MB throughout. Reading `aiter_raw()` under
+and across the six sources `metadata.search` asked at once when that was measured, 463.8 MB
+peak in a pod limited to 512Mi. It asks seven now, so that figure is the shape it was taken
+at rather than today's. The cap was advertised at 1 MB throughout. Reading `aiter_raw()` under
 `accept-encoding: identity` brings the same payload to 0.1 MB.
 
 Measured live across seven worst case queries at each source's record ceiling, the largest
 honest body was K10plus `pica.all=geschichte deutschland` at 687,481 bytes, so the cap sits
 3.05x over it. Parsing retains a measured 15.28x the wire bytes, giving a worst case of
-about 192 MB against 512Mi, which a test asserts. The margin is deliberately generous rather
+about 224 MB against 512Mi, which a test asserts. That test reads the source count off
+`metadata.search` rather than restating it, because it was written as a literal 6 and went
+on passing when a seventh source was added. The margin is deliberately generous rather
 than tight: the same quantity measured 587,810 bytes three days earlier, so the tail is being
 sampled and not bounded.
 
 Going over raises `fetch.ResponseTooLarge`, which is an `httpx.HTTPError`, so it lands in
-the handler every caller already has for a timeout: that source is unavailable and the other
-five answer. `metadata._parsed` is the other half of the same bound, refusing a doctype so
+the handler every caller already has for a timeout: that source is unavailable and the
+other six answer. `metadata._parsed` is the other half of the same bound, refusing a doctype so
 that an honest looking body cannot expand past the cap after it has been let through.
 
 **The whole request is bounded in time, not each read.** `TIMEOUT_SECONDS` is a budget for

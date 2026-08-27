@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, nullslast
 from sqlalchemy.orm import Session, joinedload
 
+import authority
 import catalogue
 import covers
 import custom_fields
@@ -22,7 +23,13 @@ import isbn as isbn_utils
 import metadata
 import settings_store
 from auth import require_admin
-from authorship import AuthorNotFound, Authorship
+from authors import AUTHOR_NAME_MAX
+from authorship import (
+    AuthorNotFound,
+    Authorship,
+    IdentifierConflict,
+    RecordedAssertions,
+)
 from config import COVERS_DIR
 from dependencies import (
     BookForOwner,
@@ -62,11 +69,15 @@ from models import (
     book_tags,
     copy_group_token,
 )
-from ratelimit import cover_backfill_limiter, metadata_limiter
+from ratelimit import authority_limiter, cover_backfill_limiter, metadata_limiter
 from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_ROW_ID,
+    AuthorIdentifierOut,
+    AuthorIdentifierRequest,
+    AuthorityCandidateOut,
+    AuthorityDisagreementOut,
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
@@ -104,6 +115,7 @@ from schemas import (
     QuoteCreate,
     QuoteOut,
     QuoteWithBookOut,
+    RefusedAssertionOut,
     SeriesOut,
     TagCreate,
     TagOut,
@@ -1532,6 +1544,245 @@ def unmerge_author(alias_id: RowId, db: DbSession, current_user: CurrentUser) ->
         raise _author_not_found() from None
 
 
+def _with_refusals(
+    out: BookOut, recorded: RecordedAssertions
+) -> BookOut:
+    """The Book, carrying what a catalogue asserted and this Library declined.
+
+    `model_copy` rather than a parameter on `book_to_out`: twenty call sites
+    build a `BookOut` and two of them can ever have something to report, so the
+    fact is attached where it arises instead of threaded through everything.
+    """
+    if not recorded.refused:
+        return out
+    return out.model_copy(
+        update={
+            "refused_identifiers": [
+                RefusedAssertionOut(
+                    name=row.name,
+                    scheme=row.scheme,
+                    asserted=row.asserted,
+                    kept=row.kept,
+                    kept_provenance=row.kept_provenance,
+                )
+                for row in recorded.refused
+            ]
+        }
+    )
+
+
+def _authority_out(candidate: authority.AuthorityCandidate) -> AuthorityCandidateOut:
+    """One authority record as the API serves it."""
+    return AuthorityCandidateOut(
+        scheme=candidate.scheme,
+        identifier=candidate.identifier,
+        name=candidate.name,
+        variants=list(candidate.variants),
+        born=candidate.born,
+        died=candidate.died,
+        same_as=list(candidate.same_as),
+        certain=candidate.certain,
+        wikidata_id=candidate.wikidata_id,
+        description=candidate.description,
+        disagreements=[
+            AuthorityDisagreementOut(
+                about=row.about, lobid=row.lobid, wikidata=row.wikidata
+            )
+            for row in candidate.disagreements
+        ],
+    )
+
+
+@router.get("/authors/authority", response_model=list[AuthorityCandidateOut])
+async def author_authority(
+    db: DbSession,
+    current_user: CurrentUser,
+    author: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=AUTHOR_NAME_MAX,
+            description="An author key, or any spelling of the name",
+        ),
+    ],
+    q: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=AUTHOR_NAME_MAX,
+            description=(
+                "Search the authority file for this name instead of the "
+                "author's own. Forces the name search route."
+            ),
+        ),
+    ] = None,
+) -> list[AuthorityCandidateOut]:
+    """What the authority files say about this author.
+
+    **Two routes, and which one ran is on every row as `certain`.** Where a
+    catalogue record for one of this author's Books already asserted a GND
+    number, that number is a key: it resolves to exactly one record, and the
+    spelling on it is the suggestion this feature exists to offer. Where it did
+    not, the author's name is put to a name search, and a name is not a key.
+    Two people are spelled `Stevenson, Robert Louis` in the GND.
+
+    **`q` steers that search and forces it.** Without it the query is the
+    author's own display name, which is exactly wrong when the shelf spells
+    somebody in a form the GND does not use: the search then answers with the
+    wrong people and there is no way to retype it. This is the one shape
+    decision worth making before a client exists, because a client built
+    against the narrower version would have to change to gain it.
+
+    **Nothing here writes, on either route.** A suggestion is offered and may be
+    overruled, which was settled on 2026-08-24: suggest the authority's spelling
+    and let it be overwritten, while storing the reference either way. Taking a
+    suggested spelling is `POST /authors/merge`, which already accepts a name
+    typed by hand. Confirming an identifier from a name search is
+    `POST /authors/identifiers`, which records that a person chose it.
+
+    **Nothing here is stored either**, and most of it has no column to be
+    stored in. The dates and the one line description are there so somebody can
+    tell two same named people apart while they decide.
+    `docs/featurelist.md` refuses author biographies and portraits, and this is
+    the identity half of that line rather than an exception to it.
+
+    An author nobody can see is **404, not 403**, exactly as a private book is.
+    503 where the authority file could not be reached: nothing in this feature
+    is blocked by it, so the client can offer "try again" rather than an error
+    page.
+    """
+    # Its own limiter, not the catalogues'. lobid publishes 30 complex searches
+    # a minute for its whole service and `METADATA_LIMIT` is 60 per member: see
+    # `ratelimit.AUTHORITY_LIMIT`.
+    authority_limiter.check(current_user.username)
+    authorship = Authorship.seen_by(db, current_user.id)
+    try:
+        stored = authorship.identifiers_for(author)
+    except AuthorNotFound:
+        raise _author_not_found() from None
+
+    # **One deadline for the whole lookup, and a ceiling on the fan out.**
+    # Both were missing and the resolve branch had neither: it is one candidate
+    # per identifier stored for the person, which is one per spelling folded
+    # into them, and `fetch.get_once` gives every call its own budget when it is
+    # passed none. `authority.DEADLINE_SECONDS` carries the measurement.
+    deadline = authority.deadline_from_now()
+    try:
+        if q is not None:
+            # A retyped name is a search whatever is stored: the member is
+            # saying the shelf spelling is not the one to look up.
+            found = await authority.search(q, deadline=deadline)
+        elif stored:
+            # One row per scheme per spelling. `resolve` answers None for a
+            # number the file does not hold, which a hand edited row or a
+            # retired GND record can produce.
+            found = [
+                candidate
+                for candidate in await asyncio.gather(
+                    *(
+                        authority.resolve(row.identifier, deadline=deadline)
+                        for row in stored[: authority.MAX_CANDIDATES]
+                    )
+                )
+                if candidate is not None
+            ]
+        else:
+            found = await authority.search(
+                authorship.display_name(author), deadline=deadline
+            )
+    except authority.AuthorityUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Could not reach the authority file. Try again in a moment, or "
+                "leave the name as it is."
+            ),
+        ) from None
+
+    return [_authority_out(row) for row in found]
+
+
+@router.post(
+    "/authors/identifiers",
+    response_model=AuthorIdentifierOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def confirm_author_identifier(
+    payload: AuthorIdentifierRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> AuthorIdentifierOut:
+    """Confirm that a candidate authority identifier is this author's.
+
+    **This endpoint exists because a name is not a key.** An identifier on the
+    record a catalogue returned for a Book's own ISBN is a cataloguer's
+    assertion about that Book and is stored without asking, by `refresh` and
+    `enrich`. One found by searching an authority file by name is a candidate:
+    two authors share a name and one author has five spellings, so storing it
+    silently would merge two people behind somebody's back. It reaches the store
+    only through here, and the row records that a person chose it.
+
+    **409, not 422, where the spelling already carries a different value.** The
+    request is well formed and the state is what refuses it. Retyping an
+    identifier is the one operation this store has no verb for: correcting a
+    wrong one is `DELETE`, and a re-import may put it back.
+
+    An author nobody can see is **404, not 403**, exactly as a private book is.
+    """
+    try:
+        row = Authorship.seen_by(db, current_user.id).confirm_identifier(
+            payload.author,
+            payload.scheme,
+            payload.identifier,
+            by_user_id=current_user.id,
+        )
+    except AuthorNotFound:
+        raise _author_not_found() from None
+    except IdentifierConflict:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That spelling already carries a different identifier. Remove it first.",
+        ) from None
+    spelling = Authorship.seen_by(db, current_user.id).spelling_for(row.author_key)
+    return AuthorIdentifierOut(
+        id=row.id,
+        # **The stored key's own spelling, never what the caller sent.** A
+        # client holds `AuthorOut.key` and posts it, so echoing the payload put
+        # `le guin ursula k` in a field whose own docstring says it is not the
+        # key. `Authorship` files the row under a spelling the shelf carries,
+        # and that is what a reader needs to see.
+        spelling=spelling,
+        scheme=row.scheme,
+        identifier=row.identifier,
+        provenance=row.provenance,
+    )
+
+
+@router.delete(
+    "/authors/identifiers/{identifier_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def forget_author_identifier(
+    identifier_id: RowId, db: DbSession, current_user: CurrentUser
+) -> None:
+    """Remove a wrong identifier. A later import may write it again.
+
+    **The only correction there is**, and it is deliberately destructive rather
+    than an edit: an upstream cluster can be wrong, and a fact that cannot be
+    corrected is a trap. What is refused is retyping it to a different value,
+    because that is the operation that turns somebody's guess into something
+    that reads like a national library's assertion.
+
+    A row whose spelling is on no book this caller can see is **404**, for the
+    reason `unmerge_author` gives: authority rather than secrecy.
+
+    How that is carried out is `authorship.Authorship.forget_identifier`.
+    """
+    try:
+        Authorship.seen_by(db, current_user.id).forget_identifier(identifier_id)
+    except AuthorNotFound:
+        raise _author_not_found() from None
+
+
 # ── Shelf locations ───────────────────────────────────────────────────────────
 
 
@@ -2841,10 +3092,28 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
 
     # A refresh selects no Catalogue record. Its Classifications remain
     # external evidence until a Member selects a candidate through enrich/apply.
-
+    #
+    # **The author's authority identifier is written here, and that is not the
+    # same rule.** A Classification is a fact about *this Book* and ADR 0006
+    # says one reaches a Book only when a Member confirms the whole record. An
+    # authority identifier is a fact about a *name*: it says which record in an
+    # external file the person credited here is, it is filed under the spelling
+    # rather than under the book, and nothing about the Book changes. What makes
+    # it certain is the same thing that makes this handler willing to overwrite
+    # the title: the record was found by this Book's own verified ISBN.
+    # **Below the handler's own commit, deliberately.**
+    # `record_catalogue_assertions` commits internally, which `enrich_book`
+    # depends on and which must not be removed. Called above this line it
+    # decided the boundary for eight fields pending on the same session, so
+    # anything that ever sits between the two would leave a half refreshed Book
+    # committed. The identifier write is independent of the Book row, so it
+    # belongs after it.
     db.commit()
+    recorded = Authorship.seen_by(db, current_user.id).record_catalogue_assertions(
+        record.author_identifiers, credited=book.author
+    )
     db.refresh(book)
-    return book_to_out(book, current_user, db)
+    return _with_refusals(book_to_out(book, current_user, db), recorded)
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
@@ -3029,8 +3298,9 @@ async def enrich_book(
     """Fill in the fields a book is missing, from every catalogue available.
 
     Matched by ISBN when there is one, which runs the full merged chain (the
-    DNB and K10plus together, then Open Library, then Google), and by title and
-    author otherwise, which runs the ranked search across all six sources.
+    DNB and K10plus together, then the Austrian National Library, then Open
+    Library, then Google), and by title and author otherwise, which runs the
+    ranked search across all seven sources.
 
     **No API key is required.** This was Google-only and refused outright
     without a key, which made it useless for exactly the books the German and
@@ -3055,6 +3325,8 @@ async def enrich_book(
     # construction. That is ADR 0006 held by the type rather than by this
     # handler remembering: an unattended write has nothing to write.
     fields: dict[str, Any] | None = None
+    assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
+    recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
         result = await metadata.lookup(book.isbn, api_key)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
@@ -3065,6 +3337,17 @@ async def enrich_book(
         if result.found:
             assert result.record is not None
             fields = result.record.as_match()
+            # **Only on this branch.** A record found by the Book's own ISBN
+            # asserts who wrote *this* Book; the title and author search below
+            # asserts who wrote something with a similar name, which is a
+            # candidate and reaches the store only through
+            # `POST /authors/identifiers`. `as_match()` carries no assertions,
+            # so the search branch has nothing to write even by mistake, which
+            # is the same property ADR 0006 gets from it for Classifications.
+            #
+            # Held rather than recorded here: the write happens below
+            # `merge_into`, once the Book's credit line is final.
+            assertions = result.record.author_identifiers
 
     if fields is None:
         # No ISBN, or no catalogue carries this edition under it.
@@ -3075,7 +3358,9 @@ async def enrich_book(
 
     if fields is None:
         return BookEnrichmentOut(
-            book=book_to_out(book, current_user, db), updated_fields=[], found=False
+            book=_with_refusals(book_to_out(book, current_user, db), recorded),
+            updated_fields=[],
+            found=False,
         )
 
     updated = google_books.merge_into(book, fields, overwrite=overwrite)
@@ -3087,8 +3372,28 @@ async def enrich_book(
         db.commit()
         db.refresh(book)
 
+    # **Below `merge_into`, and below the commit, and both matter.**
+    #
+    # Below `merge_into` because it skips `author` whenever the Book already has
+    # one and `overwrite` is false, which is the default. Recorded above it, the
+    # credit line was whatever it had been, the catalogue's spelling of the
+    # author had never been adopted, and identifiers were filed under spellings
+    # no Book carried: invisible, undeletable, reported as stored.
+    #
+    # Below the commit for the reason `refresh_metadata` states: this helper
+    # commits internally, so between `merge_into` and `db.commit()` it decided
+    # the transaction boundary for the Book's own pending fields, with
+    # `_store_cover` sitting in the gap. That is safe today only because
+    # `covers.resolve_and_store` does not raise, which is a property of another
+    # module rather than of this one. Here nothing of the Book's is pending.
+    recorded = Authorship.seen_by(db, current_user.id).record_catalogue_assertions(
+        assertions, credited=book.author
+    )
+
     return BookEnrichmentOut(
-        book=book_to_out(book, current_user, db), updated_fields=updated, found=True
+        book=_with_refusals(book_to_out(book, current_user, db), recorded),
+        updated_fields=updated,
+        found=True,
     )
 
 

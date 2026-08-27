@@ -11,7 +11,10 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from database import Base
+from enums import AuthorityProvenance, AuthorityScheme
 from models import (
+    AUTHORITY_IDENTIFIER_MAX,
+    AuthorIdentifier,
     Book,
     Collection,
     Loan,
@@ -687,3 +690,107 @@ class TestCoversAreStoredOverHttps:
         db.commit()
         assert book.cover_url is None
 
+
+
+class TestTheAuthorityIdentifierConstraints:
+    """Attempted at the database, which is the point.
+
+    `Authorship` refuses a retype and never writes a bad scheme, so every check
+    here is an evasion of that module: a restore, a hand edit, or a future
+    writer that forgets. A constraint nobody has tried to get past is a comment.
+
+    **Each assertion names the constraint that fired**, not merely that an
+    `IntegrityError` was raised. A test that accepts any refusal passes when a
+    foreign key or a `NOT NULL` fires instead, which is the difference between
+    knowing a mutation was noticed and knowing what noticed it.
+    """
+
+    @staticmethod
+    def _row(db, **overrides: Any) -> AuthorIdentifier:
+        row = AuthorIdentifier(
+            **{
+                "author_key": "kane sean p",
+                "scheme": AuthorityScheme.GND,
+                "identifier": "1042243212",
+                "provenance": AuthorityProvenance.CATALOGUE,
+            }
+            | overrides
+        )
+        db.add(row)
+        return row
+
+    def test_a_scheme_no_authority_file_is_read_for_is_refused(self, db):
+        self._row(db, scheme="viaf")
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        assert "ck_author_identifiers_scheme" in str(refusal.value)
+
+    def test_a_provenance_that_is_neither_is_refused(self, db):
+        self._row(db, provenance="robot")
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        assert "ck_author_identifiers_provenance" in str(refusal.value)
+
+    def test_a_machine_assertion_may_not_name_a_person(self, db, user):
+        """`ck_author_identifiers_asserter`. A row that says a catalogue said so
+        while naming somebody is the shape an audit cannot read."""
+        self._row(db, provenance=AuthorityProvenance.CATALOGUE, created_by_user_id=user.id)
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        assert "ck_author_identifiers_asserter" in str(refusal.value)
+
+    def test_a_member_assertion_with_no_person_is_allowed(self, db):
+        """The other direction is deliberately open, so a row whose author is
+        gone still reads `member` rather than becoming a machine's."""
+        self._row(db, provenance=AuthorityProvenance.MEMBER, created_by_user_id=None)
+        db.commit()
+
+        assert db.query(AuthorIdentifier).count() == 1
+
+    def test_an_empty_identifier_is_refused(self, db):
+        self._row(db, identifier="")
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        assert "ck_author_identifiers_bounds" in str(refusal.value)
+
+    def test_an_identifier_past_the_bound_is_refused(self, db):
+        """A stored denial of service bound: a catalogue response has no size
+        cap anywhere in `metadata.py`."""
+        self._row(db, identifier="9" * (AUTHORITY_IDENTIFIER_MAX + 1))
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        assert "ck_author_identifiers_bounds" in str(refusal.value)
+
+    def test_one_spelling_may_not_carry_two_values_under_one_scheme(self, db):
+        """What makes "refuse a retype" enforceable below the application: a
+        differing assertion has no second row to land in."""
+        self._row(db)
+        db.commit()
+
+        self._row(db, identifier="9999")
+        with pytest.raises(IntegrityError) as refusal:
+            db.commit()
+
+        # SQLite names the **columns** for a unique index violation and not the
+        # index, where it names a CHECK by its own name. Matching on the pair is
+        # therefore the strongest form available here, and it is still specific:
+        # a foreign key or a NOT NULL firing instead would not print it.
+        assert (
+            "UNIQUE constraint failed: author_identifiers.author_key, "
+            "author_identifiers.scheme" in str(refusal.value)
+        )
+
+    def test_two_spellings_may_share_one_identifier(self, db):
+        """Not unique on the identifier, because that is exactly the case a
+        merge is usually made from."""
+        self._row(db)
+        db.commit()
+        self._row(db, author_key="kane s")
+        db.commit()
+
+        assert db.query(AuthorIdentifier).count() == 2

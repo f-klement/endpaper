@@ -109,6 +109,65 @@
         "title": "AuthMode",
         "type": "string"
       },
+      "AuthorIdentifierOut": {
+        "description": "Which record in an authority file one spelling of this name means.\n\n`spelling` rather than the key it is filed under, for the reason\n`AuthorMergeOut` carries one: the key is normalised past the point of being\nreadable, and the whole use of this field is to say *which* of a merged\nauthor's spellings carries this number when two of them disagree.\n\n`provenance` is an explicit value and never a null. A member auditing the\nlist has to be able to tell an assertion a catalogue made from one somebody\nchose, and inferring it from an absent user id would make a deleted account\nlook like a machine. See `enums.AuthorityProvenance`.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "identifier": {
+            "title": "Identifier",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/AuthorityProvenance"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/AuthorityScheme"
+          },
+          "spelling": {
+            "title": "Spelling",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "spelling",
+          "scheme",
+          "identifier",
+          "provenance"
+        ],
+        "title": "AuthorIdentifierOut",
+        "type": "object"
+      },
+      "AuthorIdentifierRequest": {
+        "description": "Confirm that a candidate identifier is this author's.\n\n**The write for the uncertain half only.** An identifier on the record a\ncatalogue returned for a Book's own ISBN is stored without asking; this is\nwhat a name search produces, which is a candidate rather than a match, and\nit reaches the store only because a person said so.\n\n`author` is a key or any spelling, like every other author endpoint.\n`identifier` is bounded by what the column holds rather than by a per scheme\nformat: a GND number is digits and hyphens today, and hard coding that here\nwould make the next authority file a schema change instead of an enum\nmember.",
+        "properties": {
+          "author": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "identifier": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Identifier",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/AuthorityScheme"
+          }
+        },
+        "required": [
+          "author",
+          "scheme",
+          "identifier"
+        ],
+        "title": "AuthorIdentifierRequest",
+        "type": "object"
+      },
       "AuthorMergeOut": {
         "description": "A spelling that reached this author through somebody's merge.\n\nCarries the alias row's id because undoing a merge is deleting that row,\nand the spelling as written because the key it is stored under is\nnormalised past the point of being readable (\"le guin ursula k\").",
         "properties": {
@@ -163,6 +222,20 @@
             "minimum": 0.0,
             "title": "Book Count",
             "type": "integer"
+          },
+          "identifier_conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorityScheme"
+            },
+            "title": "Identifier Conflicts",
+            "type": "array"
+          },
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
           },
           "key": {
             "title": "Key",
@@ -227,6 +300,152 @@
         ],
         "title": "AuthorSuggestionOut",
         "type": "object"
+      },
+      "AuthorityCandidateOut": {
+        "description": "One person an authority file holds, offered for a Member to choose.\n\n**Nothing here is stored, and there is nowhere to store most of it.** The\ndescription and the dates exist so somebody can tell two same named people\napart at the moment they confirm, and the only column this whole path can\nwrite is an identifier. `docs/featurelist.md` refuses author biographies and\nportraits, and this is the identity and disambiguation half of that line\nrather than an exception to it.\n\n`certain` says which route produced the row, and it is the **only** bit\nsaying it. True where this Library already holds the identifier and it was\nresolved as a key, so there is exactly one record behind it and `name` is a\nspelling that can be offered with confidence. False where a name search\nproduced it, which is a guess: two authors share a name. A client offers\nconfirmation on exactly the false ones.\n\n**There was a second field, `stored`, and it carried the same bit.**\n`resolve` set `certain` true unconditionally and only ran for identifiers\nalready held, so the two agreed on every reachable path. Their one\ndivergence was a defect rather than information: a **superseded** GND\nresolves to the current record, whose `gndIdentifier` differs from the\nnumber stored, and the pair then read `certain=True, stored=False` while the\nLibrary did hold one.\n\n`wikidata_id` being null is a **hint**, not a verdict. Of the two GND\nrecords spelled `Stevenson, Robert Louis`, only one has a Wikidata item.\nThat is worth showing to whoever is confirming and is exactly the wrong\nthing to resolve on automatically.",
+        "properties": {
+          "born": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Born"
+          },
+          "certain": {
+            "default": false,
+            "title": "Certain",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "died": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Died"
+          },
+          "disagreements": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorityDisagreementOut"
+            },
+            "title": "Disagreements",
+            "type": "array"
+          },
+          "identifier": {
+            "title": "Identifier",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "same_as": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Same As",
+            "type": "array"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/AuthorityScheme"
+          },
+          "variants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Variants",
+            "type": "array"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "scheme",
+          "identifier",
+          "name"
+        ],
+        "title": "AuthorityCandidateOut",
+        "type": "object"
+      },
+      "AuthorityDisagreementOut": {
+        "description": "Two authority files pointing at different records for one person.\n\nReported and never resolved by precedence: neither file is the authority on\nthe other, and a rule picking a winner would decide silently exactly where a\nperson should be asked. The same call `AuthorOut.identifier_conflicts` makes\nfor two local spellings, at the other end of the feature.",
+        "properties": {
+          "about": {
+            "title": "About",
+            "type": "string"
+          },
+          "lobid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lobid"
+          },
+          "wikidata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata"
+          }
+        },
+        "required": [
+          "about"
+        ],
+        "title": "AuthorityDisagreementOut",
+        "type": "object"
+      },
+      "AuthorityProvenance": {
+        "description": "Who said an author's identifier is that author's.\n\n**Explicit on both sides, because a null would only be implicit.**\n`author_aliases.created_by_user_id` is nullable and a null there could mean\na catalogue said so or that the member who said so has since been deleted.\nThat ambiguity is affordable for a display name and is not affordable here:\nthe question this column exists to answer is whether a curated list has\nquietly become a generated one, and it has to be answerable by reading one\nvalue rather than by inferring from the absence of another.\n\nA `CATALOGUE` row never names a person, and `ck_author_identifiers_asserter`\nenforces it. **The other direction is deliberately left unconstrained**, so\nthat a `MEMBER` row whose author is gone still reads `member` rather than\nbecoming indistinguishable from a machine's. That is slack for a change not\nyet made rather than a live case: no path deletes an account today, counted\n2026-08-27 over `backend/routers/` and `backend/*.py`, so the column is\nnever nulled and never dangles.",
+        "enum": [
+          "catalogue",
+          "member"
+        ],
+        "title": "AuthorityProvenance",
+        "type": "string"
+      },
+      "AuthorityScheme": {
+        "description": "Authority files a person's identifier may come from.\n\nNot `ClassificationScheme`, and the split is the point rather than tidiness.\nEvery member of that enum answers \"what is this book about\"; every member of\nthis one answers \"which record in a file of *people* is this author\". The\nDNB writes both in the same MARC `$0`, which is exactly why they need two\nclosed sets: `4203576-4` is a subject heading and `118181505` is a person,\nand one column holding both would make a heading and an author the same kind\nof row.\n\n**One member, and the count is the honest state of the supply rather than a\nstub.** Counted 2026-08-27: the DNB is the only catalogue this app reads for\na person's identifier (`100 $0` and `700 $0`), and it writes GND. K10plus\ncarries the same subfield and is deliberately not read for it, which\n`_k10plus_record` records. VIAF would be the second member and is not one:\nnothing in this app queries it, and until something does, an enum member for\nit would be a value no writer can produce.\n\nAdding a member costs one line here, one value in\n`ck_author_identifiers_scheme`, and a migration to widen that constraint.\nThat last one is why the set is closed: a scheme nobody recognises is an\nidentifier with no file to look it up in.",
+        "enum": [
+          "gnd"
+        ],
+        "title": "AuthorityScheme",
+        "type": "string"
       },
       "Body_import_csv": {
         "properties": {
@@ -1454,6 +1673,13 @@
             ],
             "title": "Purchased At"
           },
+          "refused_identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/RefusedAssertionOut"
+            },
+            "title": "Refused Identifiers",
+            "type": "array"
+          },
           "series_index": {
             "anyOf": [
               {
@@ -1713,7 +1939,7 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not, which costs nothing because nothing here sorts on it.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. See `docs/decisions.md`, \"The author's GND is read\nby nothing\".\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three\nare stored because a catalogue heading is worth keeping whole, not because\nanything reads them yet.",
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not, which costs nothing because nothing here sorts on it.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three\nare stored because a catalogue heading is worth keeping whole, not because\nanything reads them yet.",
         "enum": [
           "ddc",
           "lcc",
@@ -3268,6 +3494,38 @@
         "title": "ReadStatus",
         "type": "string"
       },
+      "RefusedAssertionOut": {
+        "description": "A catalogue said one thing, this Library already held another.\n\n**Not stored anywhere**: a fact about the refresh or enrichment that\nproduced it, served on that response and nowhere else. The store holds one\nvalue per spelling per scheme, which is what makes an identifier\nunretypeable, so a second value has no row to go in. Reporting it here is\nthe alternative to discarding it silently, which would be resolution by\nprecedence and is what this feature refuses to do anywhere else.\n\n`kept_provenance` is the field to read first. `catalogue` means two\ncatalogues disagree, which is somebody else's problem to look at.\n`member` means a person's guess is outranking a national library, and the\nfix is to delete the guess and refresh again.",
+        "properties": {
+          "asserted": {
+            "title": "Asserted",
+            "type": "string"
+          },
+          "kept": {
+            "title": "Kept",
+            "type": "string"
+          },
+          "kept_provenance": {
+            "$ref": "#/components/schemas/AuthorityProvenance"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/AuthorityScheme"
+          }
+        },
+        "required": [
+          "name",
+          "scheme",
+          "asserted",
+          "kept",
+          "kept_provenance"
+        ],
+        "title": "RefusedAssertionOut",
+        "type": "object"
+      },
       "RestoreResult": {
         "description": "What a restore actually put back.\n\nCounted per table rather than reported as \"done\", so a backup that was\nmissing its covers or its loans says so instead of looking successful.\n\nThe list is the tables whose absence a library would notice: their books,\ntheir accounts, what they wrote, who has what, and what they have read. It\nis not every table, and the two it leaves out are the two nobody counts:\n`tags` and `book_tags` come back with the books, and `settings` is one row\nper toggle. A table added to `backup._TABLES` belongs here if losing it\nsilently would look like a successful restore.",
         "properties": {
@@ -4729,6 +4987,172 @@
           }
         ],
         "summary": "Unmerge Author",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/authority": {
+      "get": {
+        "description": "What the authority files say about this author.\n\n**Two routes, and which one ran is on every row as `certain`.** Where a\ncatalogue record for one of this author's Books already asserted a GND\nnumber, that number is a key: it resolves to exactly one record, and the\nspelling on it is the suggestion this feature exists to offer. Where it did\nnot, the author's name is put to a name search, and a name is not a key.\nTwo people are spelled `Stevenson, Robert Louis` in the GND.\n\n**`q` steers that search and forces it.** Without it the query is the\nauthor's own display name, which is exactly wrong when the shelf spells\nsomebody in a form the GND does not use: the search then answers with the\nwrong people and there is no way to retype it. This is the one shape\ndecision worth making before a client exists, because a client built\nagainst the narrower version would have to change to gain it.\n\n**Nothing here writes, on either route.** A suggestion is offered and may be\noverruled, which was settled on 2026-08-24: suggest the authority's spelling\nand let it be overwritten, while storing the reference either way. Taking a\nsuggested spelling is `POST /authors/merge`, which already accepts a name\ntyped by hand. Confirming an identifier from a name search is\n`POST /authors/identifiers`, which records that a person chose it.\n\n**Nothing here is stored either**, and most of it has no column to be\nstored in. The dates and the one line description are there so somebody can\ntell two same named people apart while they decide.\n`docs/featurelist.md` refuses author biographies and portraits, and this is\nthe identity half of that line rather than an exception to it.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.\n503 where the authority file could not be reached: nothing in this feature\nis blocked by it, so the client can offer \"try again\" rather than an error\npage.",
+        "operationId": "author_authority",
+        "parameters": [
+          {
+            "description": "An author key, or any spelling of the name",
+            "in": "query",
+            "name": "author",
+            "required": true,
+            "schema": {
+              "description": "An author key, or any spelling of the name",
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Author",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Search the authority file for this name instead of the author's own. Forces the name search route.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search the authority file for this name instead of the author's own. Forces the name search route.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorityCandidateOut"
+                  },
+                  "title": "Response Author Authority",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Author Authority",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/identifiers": {
+      "post": {
+        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier on the\nrecord a catalogue returned for a Book's own ISBN is a cataloguer's\nassertion about that Book and is stored without asking, by `refresh` and\n`enrich`. One found by searching an authority file by name is a candidate:\ntwo authors share a name and one author has five spellings, so storing it\nsilently would merge two people behind somebody's back. It reaches the store\nonly through here, and the row records that a person chose it.\n\n**409, not 422, where the spelling already carries a different value.** The\nrequest is well formed and the state is what refuses it. Retyping an\nidentifier is the one operation this store has no verb for: correcting a\nwrong one is `DELETE`, and a re-import may put it back.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.",
+        "operationId": "confirm_author_identifier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorIdentifierRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorIdentifierOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Confirm Author Identifier",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/identifiers/{identifier_id}": {
+      "delete": {
+        "description": "Remove a wrong identifier. A later import may write it again.\n\n**The only correction there is**, and it is deliberately destructive rather\nthan an edit: an upstream cluster can be wrong, and a fact that cannot be\ncorrected is a trap. What is refused is retyping it to a different value,\nbecause that is the operation that turns somebody's guess into something\nthat reads like a national library's assertion.\n\nA row whose spelling is on no book this caller can see is **404**, for the\nreason `unmerge_author` gives: authority rather than secrecy.\n\nHow that is carried out is `authorship.Authorship.forget_identifier`.",
+        "operationId": "forget_author_identifier",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identifier_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Identifier Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Author Identifier",
         "tags": [
           "books"
         ]
@@ -6304,7 +6728,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain (the\nDNB and K10plus together, then Open Library, then Google), and by title and\nauthor otherwise, which runs the ranked search across all six sources.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain (the\nDNB and K10plus together, then the Austrian National Library, then Open\nLibrary, then Google), and by title and author otherwise, which runs the\nranked search across all seven sources.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {

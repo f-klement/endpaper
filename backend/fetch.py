@@ -1,6 +1,6 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask six third party catalogues for records.
+`metadata.py` and `google_books.py` ask seven third party catalogues for records.
 Every one of those requests used to be built by hand: nine `httpx.AsyncClient(...)`
 constructions in `metadata.py` and one in `google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
@@ -12,7 +12,7 @@ question: `cover_url` arrives on `BookCreate` from any signed in member, so the
 host is chosen by an attacker and has to be tested against an allowlist
 (`covers.is_fetchable`) on every hop. Here the host is a module constant and the
 member supplies at most a query string, so there is no allowlist to apply and
-nothing an allowlist would refuse. Folding them together would mean adding six
+nothing an allowlist would refuse. Folding them together would mean adding seven
 catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's `img-src`
 is generated from: the merge would widen the browser policy to pay for a fetch
 policy. What the two do share is the *shape* of the read loop, and both now have
@@ -73,9 +73,20 @@ MAX_REDIRECTS: Final = 2
 #:
 #: What it defends: a hostile or broken source filling a pod limited to 512Mi,
 #: where a 1.8 GB peak has already caused an OOMKill once. `metadata.search`
-#: asks six sources at once and parsing retains a measured 15.28x the wire
-#: bytes, so the worst case this admits is 6 x 2 MiB x 15.28, about 192 MB. Six
-#: *honest* worst cases is 4 MiB on the wire and about 61 MB parsed.
+#: asks seven sources at once and parsing retains a measured 15.28x the wire
+#: bytes, so the worst case this admits is 7 x 2 MiB x 15.28, about 224 MB.
+#: Seven *honest* worst cases is about 4.49 MiB on the wire and about 72 MB
+#: parsed. The seventh is the ÖNB, and the figure is its **largest** measured
+#: page, 516,771 bytes (`alma.publisher=Zsolnay`, 50 records, 2026-08-27), not
+#: the 295,821 an `alma.title=wien` page happened to cost. Picking the smaller
+#: one was this comment's own version of sampling the tail rather than bounding
+#: it, which is the mistake the paragraph above exists to record.
+#:
+#: **That 4.49 is 516,771 added to a base that was already rounded**, the "4
+#: MiB" the six-source version of this sentence carried, whose per source bodies
+#: were not written down. So it is exact in its new term and rounded in the
+#: other, and anyone re-deriving it from six live responses should expect to
+#: land near rather than on it.
 #:
 #: **Going over is not an error the reader sees.** Every caller already treats a
 #: transport failure as "this source is unavailable" and answers from the
@@ -95,10 +106,15 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #:
 #: So the bytes are counted raw, and compression is not requested, which keeps
 #: "the wire bytes" and "the memory" the same number. Measured live 2026-08-27,
-#: all six sources answer under `identity`: DNB, the BnF and Google Books gzip
-#: when offered and honour this, K10plus, Open Library and the Library of
-#: Congress never compressed anyway. The one that would cost most, K10plus at
-#: 687,481 bytes, is uncompressed today either way.
+#: all seven sources answer under `identity`: DNB, the BnF, Google Books and
+#: the ÖNB gzip when offered and honour this, K10plus, Open Library and the
+#: Library of Congress never compressed anyway. The one that would cost most,
+#: K10plus at 687,481 bytes, is uncompressed today either way. The ÖNB was the
+#: seventh, and it was measured both ways rather than assumed: one
+#: `alma.title=wien` page at `maximumRecords=50` is **295,821 bytes** under
+#: `accept-encoding: identity` and **25,934** under `gzip, deflate, br`, both
+#: 2026-08-27. It honours the header rather than ignoring it, which is what
+#: this depends on.
 _IDENTITY: Final = {"accept-encoding": "identity"}
 
 
@@ -112,7 +128,7 @@ class FetchRefused(httpx.HTTPError):
     timeout already lands in. A separate hierarchy would have needed an `except`
     clause added at ten sites, which is ten chances to miss one and turn a
     hostile response into a 500. Same reasoning as `metadata._parsed`, which
-    raises `ParseError` because its six callers already caught that.
+    raises `ParseError` because its eight callers already caught that.
     """
 
 
@@ -189,6 +205,24 @@ class Fetched:
         return jsonlib.loads(self.content)
 
 
+#: Who this is, for the services being asked.
+#:
+#: **Set because a source asked for it in writing.** lobid's usage policy asks
+#: for "a meaningful, recurring string" so the hbz can tell one caller from
+#: another in its statistics, and asks that it stay the same for the life of a
+#: project. It costs nothing and it is the only thing any of these services has
+#: asked of this app in return for answering without a key.
+#:
+#: **No version number and no contact address.** A version would change with
+#: every release, which is the opposite of what was asked for, and an address
+#: here would be one in every published image. The project's own name is the
+#: whole of the identification, and it names software rather than a person.
+#:
+#: Set on the client rather than per request, like `_IDENTITY` and for the same
+#: reason: it holds for anything this client is used for.
+_AGENT: Final = {"user-agent": "endpaper"}
+
+
 def catalogue_client() -> httpx.AsyncClient:
     """The client every catalogue request is made with.
 
@@ -200,10 +234,11 @@ def catalogue_client() -> httpx.AsyncClient:
     the same shape from the other direction and for the same reason.
 
     `accept-encoding: identity` is set here rather than per request so that it
-    holds for anything this client is used for. See `_IDENTITY`.
+    holds for anything this client is used for. See `_IDENTITY`, and `_AGENT`
+    for why there is a `user-agent` beside it.
     """
     return httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False, headers=_IDENTITY
+        timeout=TIMEOUT_SECONDS, follow_redirects=False, headers=_IDENTITY | _AGENT
     )
 
 
@@ -298,11 +333,31 @@ async def _walk_hops(
             # ASCII `location: http://xn--a.gov/x` came out as a `ValueError`
             # from `client.stream`.
             #
-            # That is not cosmetic. Six of the ten call sites catch
-            # `(httpx.HTTPError, ElementTree.ParseError)` and would have let it
-            # through: one hostile source 500s the whole `GET /api/books/search`
-            # instead of being dropped, and `_LOC_URL` is plaintext HTTP, so
-            # forging it needs no TLS.
+            # That is not cosmetic. Eight of the thirteen `try` blocks wrapping
+            # a call into this module catch `(httpx.HTTPError,
+            # ElementTree.ParseError)` and would have let it through: one
+            # hostile source 500s the whole `GET /api/books/search` instead of
+            # being dropped, and `_LOC_URL` is plaintext HTTP, so forging it
+            # needs no TLS.
+            #
+            # **The unit is the `try` block, not the call**, because the handler
+            # is what decides whether this escapes. Thirteen blocks, all in
+            # `metadata.py`, wrap fourteen of the sixteen call expressions
+            # across `metadata.py` and `google_books.py`; the other two are
+            # covered by a `gather` and by a caller. Counted by walking both
+            # trees, 2026-08-27.
+            #
+            # Neither uncovered call is exposed. `_open_library_author_names`
+            # runs its `fetch.get` inside `asyncio.gather(...,
+            # return_exceptions=True)` and drops a `BaseException` result, so
+            # one author record failing costs that author's name.
+            # `google_books.py`'s single call is caught a frame up, by
+            # `metadata._google_books`'s `except (httpx.HTTPError, ValueError)`
+            # around `lookup_by_isbn`.
+            #
+            # The pair this replaced said "six of the ten": a pre-change
+            # denominator under a post-change numerator, with no unit stated
+            # either way.
             #
             # Wrapping `httpx.URL(...)` in `_same_host_hop` does **not** fix
             # this: `URL()` constructs fine and `.host` is what raises, by which

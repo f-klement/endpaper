@@ -23,6 +23,12 @@ and `split_authors`: `models.py`, `schemas/author.py` and `schemas/book.py`.
     authorship.book_ids_for("le guin ursula k")
     authorship.merge(keys, keep_name, by_user_id=member.id)
     authorship.unmerge(alias_id)
+    authorship.identifiers_for(name)            # what is stored for one author
+    authorship.spelling_for(key)
+    authorship.display_name(name)
+    authorship.record_catalogue_assertions(assertions, credited=book.author)
+    authorship.confirm_identifier(name, scheme, value, by_user_id=member.id)
+    authorship.forget_identifier(identifier_id)
 
 `seen_by` mirrors `Shelf.seen_by`, and for the same reason: an author index is a
 Book query wearing a different hat, so it is scoped to a viewer at the point of
@@ -41,10 +47,19 @@ and the spelling becomes its own author again. There is no operation that
 changes an `alias_key` in place, because that is not an undo of anything: it
 would silently reassign every book carrying that spelling.
 
+**The same rule, arrived at from the opposite direction, governs an authority
+identifier.** A `canonical_name` is a preference and `merge` overwrites it
+freely; an identifier is a claim about which record in an external file an
+author is, so `forget_identifier` deletes and nothing updates, and a second,
+differing assertion raises `IdentifierConflict` rather than winning. The
+asymmetry is written out in full on `models.AuthorIdentifier`.
+
 **A key is per spelling, not per person.** Two alias rows may disagree about who
 a pair of spellings means, and that disagreement is evidence about what two
 members decided rather than a bug to reconcile. `resolve_alias_map` flattens
-what it is given; it does not adjudicate.
+what it is given; it does not adjudicate. An authority identifier is filed the
+same way, so two spellings folded into one person may carry different numbers:
+`AuthorOut.identifier_conflicts` reports that and nothing resolves it.
 
 ## The index is read fresh, and there is no cache
 
@@ -62,20 +77,55 @@ because that behaviour still has to hold and they now guard against the cache
 coming back.
 """
 
+import logging
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import cast
 
 from sqlalchemy.orm import Session
 
 from authors import (
+    AUTHOR_NAME_MAX,
     AuthorEntry,
     author_key,
     build_index,
     resolve_alias_map,
+    split_authors,
     suggest_merges,
 )
-from models import AuthorAlias, Book
-from schemas.author import AuthorMergeOut, AuthorOut, AuthorSuggestionOut
+from catalogue import AuthorityAssertion
+from enums import AuthorityProvenance, AuthorityScheme
+from models import (
+    AUTHOR_KEY_MAX,
+    AUTHORITY_IDENTIFIER_MAX,
+    AuthorAlias,
+    AuthorIdentifier,
+    Book,
+)
+from schemas.author import (
+    AuthorIdentifierOut,
+    AuthorMergeOut,
+    AuthorOut,
+    AuthorSuggestionOut,
+)
 from shelf import Shelf
+
+logger = logging.getLogger(__name__)
+
+#: How many authority assertions one catalogue record may deposit.
+#:
+#: **A stored denial of service bound, not a modelling opinion.** A catalogue
+#: response has no size cap anywhere in `metadata.py`, and a record's credited
+#: authors are `100` plus every `700` with an author relator, so a hostile SRU
+#: answer carrying ten thousand `700` fields would otherwise write ten thousand
+#: rows into a Library wide table on one member's refresh. The same reasoning
+#: `MAX_CLASSIFICATIONS_PER_BOOK` applies per book, with the difference that
+#: these rows are not deleted with any book.
+#:
+#: 20 rather than a rounder number: measured over 85 live DNB records on
+#: 2026-08-24 the widest carried 7 credited names, and an anthology naming
+#: twenty is a real thing to catalogue.
+MAX_ASSERTIONS_PER_RECORD = 20
 
 
 class AuthorNotFound(Exception):
@@ -89,6 +139,61 @@ class AuthorNotFound(Exception):
     An exception rather than `None`, because every caller of the operations that
     raise it treats the case as an error, and returning `None` from a write
     would make "nothing to merge" and "merged nothing" the same value.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class RefusedAssertion:
+    """A catalogue's assertion this Library declined, and what it kept instead.
+
+    **The alternative to a `logger.info` and to a schema change.** Two
+    catalogues, or one catalogue and one Member, can name different records for
+    one spelling. The store holds one value per spelling per scheme, which is
+    the invariant that makes "an identifier cannot be retyped" enforceable
+    below the application, so the second value cannot be stored. Discarding it
+    silently is resolution by precedence; adding a column to hold it moves the
+    uniqueness rule into application code that has already been walked past
+    three ways.
+
+    So it is neither stored nor dropped: it is reported on the response of the
+    request that produced it, to the person standing in front of it. A fact
+    about one refresh, not about the Library.
+
+    `kept_provenance` is what makes it actionable. A catalogue losing to another
+    catalogue is a real upstream disagreement to look at. A catalogue losing to
+    a **member** is somebody's guess outranking a national library, and the
+    remedy is to delete the guess and refresh again.
+    """
+
+    name: str
+    scheme: AuthorityScheme
+    asserted: str
+    kept: str
+    kept_provenance: AuthorityProvenance
+
+
+@dataclass(frozen=True, slots=True)
+class RecordedAssertions:
+    """What one catalogue record's assertions did: what stuck, and what did not."""
+
+    stored: list[AuthorIdentifier]
+    refused: list[RefusedAssertion]
+
+
+class IdentifierConflict(Exception):
+    """This spelling already carries a different identifier under this scheme.
+
+    **The refusal is the feature.** A display name is a preference and a member
+    may overwrite it; an authority identifier is a claim about which record in
+    an external file this author is, and a person editing one is only ever
+    introducing an error. So there is no operation that changes `identifier` in
+    place, and an attempt to assert a second value raises here rather than
+    updating the row.
+
+    Removal is a different question and is allowed: see `forget_identifier`.
+
+    The router maps this to 409 rather than 422, because the request is
+    well formed and the state is what refuses it.
     """
 
 
@@ -165,10 +270,34 @@ class Authorship:
         return self._load()[0]
 
     def listing(self) -> list[AuthorOut]:
-        """Every author, as the API serves them."""
+        """Every author, as the API serves them.
+
+        **Three statements rather than two**, and the third is the whole
+        `author_identifiers` table. `_load`'s two are unchanged, so `entries`,
+        `book_ids_for`, `merge` and `unmerge` still cost what they did and only
+        the listing pays. The table holds one row per spelling per scheme
+        Library wide, so reading it whole and grouping in Python is cheaper than
+        a join that would have to name every visible key in an `IN` clause.
+        """
         entries, aliases = self._load()
         alias_ids = {row.alias_key: row.id for row in aliases}
-        return [self._out(entry, alias_ids) for entry in entries]
+        identifiers = self._identifiers_by_key()
+        return [self._out(entry, alias_ids, identifiers) for entry in entries]
+
+    def _identifiers_by_key(self) -> dict[str, list[AuthorIdentifier]]:
+        """Every stored authority identifier, grouped by the spelling it is filed under.
+
+        **Not filtered, exactly like the alias table**, and for the same reason
+        recorded under "The alias mapping is library wide": a row here says
+        which record in an external file a *name* means and never says a Book
+        exists. What is filtered is which of these rows an entry reaches, and
+        that is `_out`, which offers only the keys already on this Member's
+        shelf.
+        """
+        grouped: dict[str, list[AuthorIdentifier]] = {}
+        for row in self._db.query(AuthorIdentifier).order_by(AuthorIdentifier.id).all():
+            grouped.setdefault(row.author_key, []).append(row)
+        return grouped
 
     def suggestions(self) -> list[AuthorSuggestionOut]:
         """Names that are probably one person.
@@ -221,7 +350,11 @@ class Authorship:
         return next((entry for entry in entries if entry.key == key), None)
 
     @staticmethod
-    def _out(entry: AuthorEntry, alias_ids: dict[str, int]) -> AuthorOut:
+    def _out(
+        entry: AuthorEntry,
+        alias_ids: dict[str, int],
+        identifiers: dict[str, list[AuthorIdentifier]],
+    ) -> AuthorOut:
         """One index entry as the API serves it.
 
         `merged` is built from the entry's own `alias_keys`, which
@@ -231,6 +364,14 @@ class Authorship:
         else's Private Book would otherwise announce that the Book exists.
         """
         spelling_for = {author_key(spelling): spelling for spelling in reversed(entry.spellings)}
+        # Only keys a visible Book evidences. `_evidenced_keys` carries the
+        # measurement of what including `entry.key` here let a member read and
+        # delete.
+        rows = [
+            row
+            for key in sorted(_evidenced_keys(entry))
+            for row in identifiers.get(key, [])
+        ]
         return AuthorOut(
             key=entry.key,
             name=entry.name,
@@ -251,6 +392,17 @@ class Authorship:
                 ),
                 key=lambda merged: merged.spelling.casefold(),
             ),
+            identifiers=[
+                AuthorIdentifierOut(
+                    id=row.id,
+                    spelling=spelling_for.get(row.author_key, entry.name),
+                    scheme=AuthorityScheme(row.scheme),
+                    identifier=row.identifier,
+                    provenance=AuthorityProvenance(row.provenance),
+                )
+                for row in rows
+            ],
+            identifier_conflicts=sorted(_disagreements(rows)),
         )
 
     # ── Writing ───────────────────────────────────────────────────────────────
@@ -322,7 +474,7 @@ class Authorship:
             # for the race: another Member trashing the last of those Books
             # between the two index reads leaves an author with nothing to show.
             raise AuthorNotFound
-        return self._out(merged, alias_ids)
+        return self._out(merged, alias_ids, self._identifiers_by_key())
 
     @staticmethod
     def _resolved_keep_name(
@@ -380,3 +532,383 @@ class Authorship:
 
         self._db.delete(alias)
         self._db.commit()
+
+    # ── Authority identifiers ─────────────────────────────────────────────────
+    #
+    # Which record in an external file a spelling means, as opposed to which
+    # person this Household decided two spellings are. Both are keyed on a
+    # spelling and they are not the same claim: an alias is a preference and is
+    # editable, an identifier is a fact and is not. `models.AuthorIdentifier`
+    # holds the asymmetry in full.
+
+    def record_catalogue_assertions(
+        self, assertions: Iterable[AuthorityAssertion], *, credited: str | None
+    ) -> RecordedAssertions:
+        """Store what a record found by this Book's own ISBN said, without asking.
+
+        **Certain, and that is the caller's claim rather than this method's.**
+        `100 $0` on a record the server fetched for a verified ISBN is a
+        cataloguer's assertion about *this* Book, so it is stored silently. The
+        identical subfield on a record found by a title and author search is a
+        guess about somebody with a similar name, and the way that guess is
+        refused is that no search path calls this. See
+        `catalogue.AuthorityAssertion` for why certainty is not a field.
+
+        **Never fed from a request body.** Every caller passes a
+        `catalogue.Record` the server fetched itself. A payload the client
+        posted back would let a member type any number and have it stored with
+        `CATALOGUE` provenance, which is exactly the laundering
+        `IdentifierConflict` exists to prevent, only from the other end.
+
+        **A conflicting assertion is kept and reported, not discarded.** A
+        refresh must not answer 500 because a catalogue disagrees with a number
+        already stored, so the stored value stands and nothing raises. What
+        changed is that the losing assertion used to vanish into a
+        `logger.info`, which is resolution by precedence: whoever wrote first
+        won, silently, and that is exactly what this feature refuses to do for
+        two authority files.
+
+        **The live case is not catalogue against catalogue, it is a member's
+        guess beating a catalogue.** A Member confirms a number for a spelling
+        that has none, a later refresh brings the DNB's real one, and the
+        catalogue's fact lost to the guess with nothing on screen. That inverts
+        this feature's own premise, that a person editing an identifier is only
+        ever introducing an error, and it is reachable today with one supplier.
+
+        So the refusal is returned rather than logged away, and the two handlers
+        that call this put it on the response, where the person who caused the
+        disagreement is standing. **No column and no migration**: it is a fact
+        about one request, not about the Library.
+
+        **`credited` is the Book's own credit line, and it is required.** Only
+        an assertion naming somebody that line carries is stored, which is what
+        makes `_evidenced_keys` reachable by construction rather than by
+        convention. It is not a formality: `google_books.merge_into` skips
+        `author` whenever the Book already has one and `overwrite` is false,
+        which is the default, so on the commonest enrichment there is the
+        catalogue's spelling **never reaches `books.author`**. Measured through
+        the real handler with a Book credited `S. P. Kane` and a DNB record
+        spelling the same person `Kane, Sean P.`: one `POST /enrich` wrote a row
+        under `sean p kane`, `listing()` and `identifiers_for` could not see it,
+        `forget_identifier` raised, and the response called it stored.
+
+        Keyword-only and undefaulted so a new call site has to answer the
+        question rather than inherit the old behaviour.
+
+        **Storing nothing is the right answer when the spelling is not
+        adopted.** The app then holds no evidence tying that identifier to any
+        name it carries, and the Member still reaches the same record through
+        the name search route, where confirming it files it under a spelling the
+        shelf does carry.
+        """
+        carried = {
+            key
+            for spelling in split_authors(credited or "")
+            if (key := _storable_key(spelling)) is not None
+        }
+        stored: list[AuthorIdentifier] = []
+        refused: list[RefusedAssertion] = []
+        # Bounded before anything is looked up, so a hostile record costs one
+        # slice rather than one query per assertion. See
+        # `MAX_ASSERTIONS_PER_RECORD`.
+        for assertion in list(assertions)[:MAX_ASSERTIONS_PER_RECORD]:
+            key = _storable_key(assertion.name)
+            if key is None or not _storable_identifier(assertion.identifier):
+                logger.info("Dropped an unstorable authority assertion: %r", assertion)
+                continue
+            if key not in carried:
+                # The catalogue named somebody this Book does not credit, or
+                # spells them a way this Library did not adopt. A bound rather
+                # than a disagreement, so it is logged and not reported: there
+                # is nothing for a Member to act on and nothing was overruled.
+                logger.info(
+                    "Dropped an assertion for %r, which is not in this book's "
+                    "credit line",
+                    assertion.name,
+                )
+                continue
+            existing = self._identifier_row(key, assertion.scheme)
+            if existing is not None:
+                if existing.identifier != assertion.identifier:
+                    refused.append(
+                        RefusedAssertion(
+                            name=assertion.name,
+                            scheme=assertion.scheme,
+                            asserted=assertion.identifier,
+                            kept=existing.identifier,
+                            kept_provenance=AuthorityProvenance(existing.provenance),
+                        )
+                    )
+                    continue
+                stored.append(existing)
+                continue
+            row = AuthorIdentifier(
+                author_key=key,
+                scheme=assertion.scheme,
+                identifier=assertion.identifier,
+                provenance=AuthorityProvenance.CATALOGUE,
+                # Null by check constraint on a CATALOGUE row: a machine
+                # assertion never names a person. See
+                # `ck_author_identifiers_asserter`.
+                created_by_user_id=None,
+            )
+            self._db.add(row)
+            stored.append(row)
+        if stored:
+            self._db.commit()
+        return RecordedAssertions(stored=stored, refused=refused)
+
+    def confirm_identifier(
+        self,
+        author: str,
+        scheme: AuthorityScheme,
+        identifier: str,
+        *,
+        by_user_id: int,
+    ) -> AuthorIdentifier:
+        """A Member confirming a candidate that did not come from this Book's record.
+
+        The other half of `record_catalogue_assertions`: a name search returns a
+        candidate rather than a match, because a name is not a key and two
+        authors share one. Nothing stores it until somebody says it is the right
+        person, and that decision is recorded as `MEMBER` provenance so an audit
+        of the list can tell it from a machine's.
+
+        `author` is a key or any spelling, resolved the way every other
+        operation here resolves one.
+
+        Raises `AuthorNotFound` for a name naming nobody this Member can see,
+        which is the same authority rule `unmerge` applies: confirm what you can
+        see the effect of. Raises `IdentifierConflict` where the spelling
+        already carries a different value under this scheme, because retyping is
+        the one thing this store refuses.
+        """
+        entry = self._entry_for(author)
+        if entry is None:
+            raise AuthorNotFound
+        key = _confirmable_key(entry)
+        if key is None:
+            raise AuthorNotFound
+
+        existing = self._identifier_row(key, scheme)
+        if existing is not None:
+            if existing.identifier != identifier:
+                raise IdentifierConflict
+            return existing
+
+        row = AuthorIdentifier(
+            author_key=key,
+            scheme=scheme,
+            identifier=identifier,
+            provenance=AuthorityProvenance.MEMBER,
+            created_by_user_id=by_user_id,
+        )
+        self._db.add(row)
+        self._db.commit()
+        return row
+
+    def forget_identifier(self, identifier_id: int) -> None:
+        """Remove a wrong identifier. A later import may write it again.
+
+        **"Never edited" must not mean "never removable."** An upstream cluster
+        can be wrong, and a fact that cannot be corrected is a trap rather than
+        an invariant. Deleting is the correction, and re-import is the undo, so
+        nothing here is lost that a catalogue cannot say again.
+
+        A row filed under a spelling on no Book this Member can see raises
+        `AuthorNotFound`, for the reason `unmerge` gives: authority rather than
+        secrecy, and the page offers this beside the spelling it names.
+        """
+        row = self._db.get(AuthorIdentifier, identifier_id)
+        if row is None:
+            raise AuthorNotFound
+        if row.author_key not in self._visible_keys():
+            raise AuthorNotFound
+        self._db.delete(row)
+        self._db.commit()
+
+    def identifiers_for(self, author: str) -> list[AuthorIdentifier]:
+        """Every identifier stored for one author, by key or by any spelling.
+
+        Raises `AuthorNotFound` for a name naming nobody this Member can see,
+        which is what makes this the access check for the authority lookup as
+        well as its input: a caller who cannot see the author cannot use this
+        app to ask an outside service about them either.
+
+        An author who exists and carries none answers an empty list, which is
+        the ordinary case and is what sends the caller down the name search
+        route.
+        """
+        entry = self._entry_for(author)
+        if entry is None:
+            raise AuthorNotFound
+        identifiers = self._identifiers_by_key()
+        return [
+            row
+            for key in sorted(_evidenced_keys(entry))
+            for row in identifiers.get(key, [])
+        ]
+
+    def spelling_for(self, key: str) -> str:
+        """The shelf spelling one stored key belongs to.
+
+        For rendering a single identifier row, where `listing()` renders many
+        and already has the entries in hand. A key nothing on the shelf carries
+        answers with the key itself, which is the honest answer and is what
+        `_out` falls back to as well.
+
+        The key is normalised past being readable (`le guin ursula k`), which is
+        why nothing serves it to a person unresolved.
+        """
+        for entry in self.entries:
+            for spelling in entry.spellings:
+                if author_key(spelling) == key:
+                    return spelling
+        return key
+
+    def display_name(self, author: str) -> str:
+        """The name this Library shows for one author, by key or by any spelling.
+
+        The name rather than the key, because the key is normalised past the
+        point of being a name: `author_key` folds case, accents and punctuation,
+        so putting one to an authority file would search for
+        `le guin ursula k`.
+
+        Raises `AuthorNotFound` on the same rule as everything else here.
+        """
+        entry = self._entry_for(author)
+        if entry is None:
+            raise AuthorNotFound
+        return entry.name
+
+    def _identifier_row(
+        self, key: str, scheme: AuthorityScheme
+    ) -> AuthorIdentifier | None:
+        """The row this spelling already carries under one scheme, if any."""
+        return (
+            self._db.query(AuthorIdentifier)
+            .filter(
+                AuthorIdentifier.author_key == key,
+                AuthorIdentifier.scheme == scheme,
+            )
+            .one_or_none()
+        )
+
+    def _visible_keys(self) -> set[str]:
+        """Every spelling key that resolves to somebody on this Member's shelf."""
+        return {key for entry in self.entries for key in _evidenced_keys(entry)}
+
+
+def _evidenced_keys(entry: AuthorEntry) -> set[str]:
+    """Every spelling key this person reaches that a **visible Book** carries.
+
+    **The one place the reachable set is built, and `entry.key` is deliberately
+    not in it.** That omission is a fix for a privacy breach rather than a
+    tidy-up, so it must not be undone: `entry.key` is derived from `entry.name`,
+    `entry.name` is an alias row's `canonical_name` once a merge has run, and
+    `merge` accepts a `keep_name` that **no Book carries** by design, which
+    `test_a_name_no_book_carries_is_allowed` pins. So a member could merge their
+    own author under a name they guessed, and that guess became a key reaching
+    rows derived from somebody else's Private Book.
+
+    Measured through this module's seam before the fix, attacker owning only
+    `Terry Pratchett` and a stranger owning a Private book by `Sean P. Kane`
+    with one catalogue row: `listing()` went from `[]` to
+    `('Sean P. Kane', '1042243212', CATALOGUE)`, `identifiers_for` returned the
+    row, and `forget_identifier` **deleted it**. A destructive write against
+    data derived from a Book the caller cannot see.
+
+    The other two terms are evidence by construction. `build_index` records
+    `alias_keys` from the visible rows it was handed, and `spellings` is the set
+    of credit line spellings on those same rows, so neither can name a Book this
+    Member cannot see.
+
+    **The cost is an orphan, taken deliberately.** A row filed under a key no
+    visible Book carries is unreachable and undeletable here. That is the trade
+    `AuthorAlias` already documents for the alias table, and it is narrow rather
+    than routine, because both writers are now constrained to evidenced keys:
+    `record_catalogue_assertions` stores only an assertion naming somebody the
+    Book's own credit line carries, and `confirm_identifier` files under a
+    spelling the shelf carries rather than under the display name.
+
+    **That first clause used to say "files under the catalogue's own spelling,
+    which reaches `books.author` on the same refresh", and it was false on the
+    commonest path there is.** `google_books.merge_into` skips `author`
+    whenever the Book already has one and `overwrite` is false, which is the
+    default, so an ordinary `POST /enrich` never adopts the catalogue's
+    spelling. Measured through the real handler: a Book credited `S. P. Kane`
+    enriched from a DNB record spelling the same person `Kane, Sean P.` wrote a
+    row under `sean p kane`, which `listing()` and `identifiers_for` could not
+    see, `forget_identifier` refused, and the response reported as stored.
+    Unreclaimable, and every `GET /authors` reads the whole table.
+
+    So nothing this app writes lands on an unevidenced key. A hand edit, a
+    restore or a deleted Book can still produce one.
+    """
+    return set(entry.alias_keys) | {
+        author_key(spelling) for spelling in entry.spellings
+    }
+
+
+def _disagreements(rows: list[AuthorIdentifier]) -> set[AuthorityScheme]:
+    """The schemes on which the spellings folded into one person do not agree.
+
+    **Reported rather than resolved.** Two alias keys carrying different GND
+    numbers means either the local merge is wrong or the upstream cluster is,
+    and there is no rule that says which. Automatic merging on a shared
+    identifier is out of scope for the same reason in the other direction.
+    """
+    values: dict[AuthorityScheme, set[str]] = {}
+    for row in rows:
+        values.setdefault(AuthorityScheme(row.scheme), set()).add(row.identifier)
+    return {scheme for scheme, seen in values.items() if len(seen) > 1}
+
+
+def _confirmable_key(entry: AuthorEntry) -> str | None:
+    """The key a Member's own confirmation is filed under.
+
+    **The most used spelling on the shelf, not the display name**, and the
+    difference is a defect rather than a preference. `entry.name` is an alias
+    row's `canonical_name` once a merge has run, and `merge` accepts a
+    `keep_name` no Book carries: filing here under that name put the row on an
+    unevidenced key, so `_evidenced_keys` could not reach it and a second merge
+    to a different `keep_name` orphaned it outright, invisible in the listing
+    and undeletable through `forget_identifier`.
+
+    A spelling is the right key anyway, and not merely the safe one: this table
+    is per spelling by design, exactly as `author_aliases` is, and the display
+    name is the one string in the whole feature that is a choice rather than
+    something a Book carries.
+
+    `spellings` is ordered most used first by `build_index`, and it is non empty
+    for any entry, because an entry is derived from credit lines. The None is
+    for the case that cannot happen and would otherwise file a row under `""`,
+    which no spelling can ever match.
+    """
+    if not entry.spellings:
+        return None
+    return _storable_key(entry.spellings[0])
+
+
+def _storable_key(name: str) -> str | None:
+    """The key a name is filed under, or None if the column cannot hold it.
+
+    **Dropped rather than raised**, the same call `routers/books._headings`
+    makes for a heading: a catalogue record is a third party value with no size
+    cap anywhere in `metadata.py`, and nothing in one is worth failing a
+    member's refresh for.
+
+    A name that normalises to nothing has an empty key, which no spelling can
+    ever match, so a row under it would be unreachable and undeletable.
+    """
+    if len(name) > AUTHOR_NAME_MAX:
+        return None
+    key = author_key(name)
+    if not key or len(key) > AUTHOR_KEY_MAX:
+        return None
+    return key
+
+
+def _storable_identifier(identifier: str) -> bool:
+    """Whether `ck_author_identifiers_bounds` would accept this value."""
+    return bool(identifier) and len(identifier) <= AUTHORITY_IDENTIFIER_MAX

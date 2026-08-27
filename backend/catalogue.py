@@ -33,8 +33,8 @@ and `as_match()` name the two schemas it fills.
   heading wrote `[]`, `[]` is not `None`, so it beat a populated list from the
   next source. Measured over 30 live title searches, 6 of 10 merged rows whose
   Library of Congress half carried LCSH lost every heading. Here the scalars
-  and the two collections are separate fields with separate rules, so the trap
-  cannot be written.
+  and the three collections are separate fields with separate rules, so the
+  trap cannot be written.
 * Which fields make a record worth preferring (`completeness`).
 * That several catalogues answering for one book are recorded as one row naming
   all of them (`sources`).
@@ -82,7 +82,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 import google_books
-from enums import ClassificationScheme
+from enums import AuthorityScheme, ClassificationScheme
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 #: How several catalogues answering for one book are spelled in `source`.
@@ -115,6 +115,39 @@ class Heading:
     label: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AuthorityAssertion:
+    """One catalogue saying which record in an authority file an author is.
+
+    **Not a `Heading`, though the DNB writes both in the same MARC `$0`.** A
+    heading says what the book is about and belongs to the book; this says who
+    wrote it and belongs to a *name*, which outlives every book carrying it. One
+    type for both would put a subject heading and a person in the same store and
+    make `4203576-4` and `118181505` the same kind of row.
+
+    `name` is the spelling the record used, already in reading order: the key it
+    is filed under is derived from it by `authors.author_key`, and deriving it
+    here would put a normalisation rule in a parser. Unbounded, like
+    `Heading.number`, because this is what a catalogue said rather than what a
+    client may post: `authorship.Authorship` drops what the column cannot hold,
+    one layer later, with the whole record in hand.
+
+    **Certainty is not a field**, and its absence is the design. Whether an
+    assertion is trustworthy is a property of the path that fetched it, not of
+    the record: `100 $0` on a record found by this book's verified ISBN is a
+    cataloguer's claim about this book, and the identical subfield on a record
+    found by a title and author search is a guess about somebody with a similar
+    name. The parser cannot tell them apart because it is the same parser. So
+    the call site decides, by calling `Authorship.record_catalogue_assertions`
+    or by not calling it, which is the same reason `merged_with` and
+    `filled_from` are two names rather than one function with a flag.
+    """
+
+    name: str
+    scheme: AuthorityScheme
+    identifier: str
+
+
 #: Fields worth having, and therefore worth scoring a record on.
 #:
 #: Used twice, and the two uses are why this is a property rather than a rule at
@@ -135,8 +168,8 @@ _SCORED: Final = (
 #:
 #: `source` is absent on purpose: it is unioned rather than filled, because two
 #: catalogues answering for one book is not one of them being missing.
-#: `subjects` and `headings` are absent for the opposite reason: they are
-#: collections with two rules of their own, above.
+#: `subjects`, `headings` and `author_identifiers` are absent for the opposite
+#: reason: they are collections with two rules of their own, above.
 _FILLED: Final = (
     "isbn",
     "title",
@@ -194,7 +227,11 @@ class Record:
     subjects: tuple[str, ...] = ()
     #: Assertions from a published scheme, which is what §30i's table holds.
     headings: tuple[Heading, ...] = ()
-    #: Whether the two collections above have already been folded.
+    #: Which record in an authority file each credited person is, where the
+    #: catalogue said so. Empty everywhere but the DNB: see
+    #: `metadata._marc_author_identifiers`.
+    author_identifiers: tuple[AuthorityAssertion, ...] = ()
+    #: Whether the three collections above have already been folded.
     #:
     #: **Not a cache and not an optimisation to be tidied away.** Every `replace`
     #: re-runs `__post_init__`, and `_merge_matches` folds every row sharing a
@@ -237,9 +274,9 @@ class Record:
     #: and taken at a shape nobody wrote down. A number is only checkable if it
     #: says what it was measured against, and a retraction is a number too.
     #:
-    #: **The one rule: a `replace` that changes `subjects` or `headings` passes
-    #: `_folded=False`.** `merged_with` is the only one that does, because it is
-    #: the only one that concatenates. Everything else copies tuples this record
+    #: **The one rule: a `replace` that changes `subjects`, `headings` or
+    #: `author_identifiers` passes `_folded=False`.** `merged_with` is the only
+    #: one that does, because it is the only one that concatenates. Everything else copies tuples this record
     #: has already folded, and re-folding them cannot find anything.
     #:
     #: `compare=False` so two records are equal on what a catalogue said rather
@@ -248,7 +285,7 @@ class Record:
     _folded: bool = dataclasses.field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Deduplicate both collections, in place, once per record.
+        """Deduplicate all three collections, in place, once per record.
 
         **Here rather than in each parser, and that is a rule moving rather than
         a rule added.** `metadata._dnb_subjects` deduplicated its own subjects
@@ -267,6 +304,9 @@ class Record:
             return
         object.__setattr__(self, "subjects", _unique(self.subjects))
         object.__setattr__(self, "headings", _union(self.headings))
+        object.__setattr__(
+            self, "author_identifiers", _distinct(self.author_identifiers)
+        )
         object.__setattr__(self, "_folded", True)
 
     @property
@@ -307,6 +347,8 @@ class Record:
             changes["subjects"] = other.subjects
         if not self.headings:
             changes["headings"] = other.headings
+        if not self.author_identifiers:
+            changes["author_identifiers"] = other.author_identifiers
         changes["source"] = _SOURCE_JOIN.join(sorted(self.sources | other.sources))
         return dataclasses.replace(self, **changes)
 
@@ -323,6 +365,7 @@ class Record:
             self.filled_from(other),
             subjects=self.subjects + other.subjects,
             headings=self.headings + other.headings,
+            author_identifiers=self.author_identifiers + other.author_identifiers,
             # The one replace in this repository that changes either collection,
             # and therefore the one that has to fold again. See `_folded`.
             _folded=False,
@@ -374,14 +417,22 @@ class Record:
         catches no `ValidationError`, so the response would be a 500.
 
         **Left as it is, deliberately, and written down rather than fixed.** All
-        four sources on the lookup path set `isbn` from the canonicalised
+        **five** sources on the lookup path set `isbn` from the canonicalised
         argument `metadata.lookup` was given, so no live record reaches here
         without one, and coercing it to `""` would answer a member's scan with a
         book carrying an empty ISBN instead of an error. What makes it worth
         stating is that nothing checks it: the return type is `dict[str, Any]`,
-        so mypy sees no requirement, and the guarantee lives in four adapters
-        rather than in a type. A fifth lookup source that leaves `isbn` unset is
-        the change that turns this paragraph into a defect.
+        so mypy sees no requirement, and the guarantee lives in five adapters
+        rather than in a type.
+
+        **The fifth arrived on 2026-08-27 and this paragraph is why it was
+        checked.** It used to end "a fifth lookup source that leaves `isbn`
+        unset is the change that turns this paragraph into a defect", and the
+        ÖNB is that fifth source. It passes the canonicalised ISBN into
+        `metadata._dnb_record` the way the DNB's own lookup does, so the
+        guarantee holds. A **sixth** that leaves `isbn` unset is now the change
+        that turns this paragraph into a defect, and the tripwire only worked
+        because somebody wrote the trigger down rather than the count alone.
         """
         return {
             "isbn": self.isbn,
@@ -435,6 +486,27 @@ def _unique(values: Iterable[str]) -> tuple[str, ...]:
     seen: dict[str, None] = {}
     for value in values:
         seen.setdefault(value, None)
+    return tuple(seen)
+
+
+def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssertion, ...]:
+    """The same assertions, first occurrence kept, order preserved.
+
+    **Deduplicated on the whole value, not on a key.** `_union` folds two
+    headings that share a scheme and a number because the caption is the half
+    sources omit and there is a right answer to merge towards. There is no such
+    half here: two records giving one spelling two different GND numbers is a
+    disagreement to carry to the store, which refuses the second rather than
+    picking, and folding it here would hide the conflict behind whichever
+    catalogue answered first.
+
+    What this does remove is the ordinary repeat, which every DNB record with an
+    author produces: `100` names the author and a `700` for the same person
+    names them again, exactly as `_marc_authors` already has to fold.
+    """
+    seen: dict[AuthorityAssertion, None] = {}
+    for assertion in assertions:
+        seen.setdefault(assertion, None)
     return tuple(seen)
 
 

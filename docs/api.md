@@ -462,7 +462,7 @@ and a catalogue will happily return the other one.
 Library merges printings under a *work*, and `GET /{id}/enrich/candidates` asks that
 cluster with the book's own ISBN: every row in it is a printing of the same book by Open
 Library's own merge rather than by a title match. Underneath it sits the free text search
-across all six catalogues, which is the only answer for a book with no ISBN, for a work
+across all seven catalogues, which is the only answer for a book with no ISBN, for a work
 Open Library has not merged, and for a good deal of German publishing, where Open Library
 returns 404.
 
@@ -519,12 +519,12 @@ one more source when a key is set.
 `GET /api/books/search?q=&limit=&lang=` is how a book with no barcode, a damaged one, or
 one printed before ISBNs existed gets added. **It needs no API key.**
 
-Six catalogues, in three tiers, all asked concurrently:
+Seven catalogues, in three tiers, all asked concurrently:
 
 | Tier | Sources | For |
 |---|---|---|
 | Primary | Open Library, K10plus, DNB | Breadth and covers; German and European publishing; German legal deposit |
-| Regional | BnF, Library of Congress | French; Spanish, Portuguese and Latin American |
+| Regional | BnF, Library of Congress, Austrian National Library | French; Spanish, Portuguese and Latin American; Austrian imprints |
 | Keyed | Google Books | The blurb and the categories, when an API key is configured |
 
 Regional sources are ranked one point below the primaries, so they surface the books
@@ -589,7 +589,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks four catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks five catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and answered
@@ -597,8 +597,11 @@ in 0.1s and 0.4s against a ten-ISBN sample. Their records are merged field by fi
 nothing overwritten, so a page count from one and a subject heading from the other land on
 the same book.
 
-**Phase two, asked in turn, only if neither knew the book:** **Open Library**, then
-**Google Books**. Open Library is the broadest source, and at 1.6s the slowest by five
+**Phase two, asked in turn, only if neither knew the book:** the **Austrian National
+Library**, then **Open Library**, then **Google Books**. The ÖNB is first because it is
+both fast and narrow: over 50 ISBNs from ten Austrian presses it held all 50 where the DNB
+held 47 and K10plus 39, and 3 of the 50 were held by it and by neither of them. Open
+Library is the broadest source, and at 1.6s the slowest by five
 times; Google is the only one with a key, a quota and a bill attached. An ordinary lookup
 therefore spends no quota at all.
 
@@ -625,7 +628,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the four sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the five sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the

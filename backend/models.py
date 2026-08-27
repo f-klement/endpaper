@@ -29,6 +29,8 @@ from authors import AUTHOR_NAME_MAX
 from database import Base
 from enums import (
     AuthMode,
+    AuthorityProvenance,
+    AuthorityScheme,
     BookCondition,
     BookFormat,
     ClassificationScheme,
@@ -257,6 +259,134 @@ class AuthorAlias(Base):
     # Provenance, like `Collection.created_by_user_id`, and read by nothing.
     # Deliberately not indexed: no query consults it and there is no
     # delete-account path whose child check it would speed up.
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+#: The longest identifier an authority file gives one person.
+#:
+#: A GND number is at most 11 characters (`118181505`, `4203576-4`), and the
+#: longest identifier any authority file in scope issues is a VIAF cluster id,
+#: which is 9 digits today. 60 is far past both and is not a guess about a
+#: format: it is a **stored denial of service bound**, the same job
+#: `CUSTOM_FIELD_VALUE_MAX` does. A catalogue response has no size cap anywhere
+#: in `metadata.py`, so without a bound here a hostile `$0` writes as many bytes
+#: into this column as the record holds.
+AUTHORITY_IDENTIFIER_MAX = 60
+
+
+class AuthorIdentifier(Base):
+    """Which record in an authority file one spelling of a name means.
+
+    **Per spelling, not per person, and that is the design rather than a
+    simplification.** Two spellings a member folded into one author may carry
+    different GND numbers, and that disagreement is evidence: either the local
+    merge is wrong or the upstream cluster is. Storing one row per person would
+    have to choose between them at write time, silently, with nothing left to
+    look at. So both are stored, `Authorship.listing` reports the conflict, and
+    nothing here adjudicates.
+
+    **Not a column on `author_aliases`**, though that table is also keyed on a
+    spelling. An alias row is a **decision** somebody made about two names, and
+    most spellings have none: an author nobody has ever merged has no alias row,
+    so an identifier column there would have nowhere to put the ordinary case
+    and would make the DNB's assertion depend on whether a member had happened
+    to tidy the name. The two tables answer different questions about the same
+    key.
+
+    **Nothing here is a foreign key to an author, for the reason `AuthorAlias`
+    gives**: an author has no row to point at. A row whose spelling no book
+    carries any more costs a row and breaks nothing, and it starts meaning
+    something again by itself the day an import re-creates that spelling.
+
+    **The display name and the identifier have deliberately different
+    mutability, and the asymmetry is the whole feature.**
+    `author_aliases.canonical_name` is how this Household wants a name to read,
+    so a member may overwrite it: a national library is entitled to be overruled
+    about spelling. This is a claim about *which record in an external file* an
+    author is, which is a fact rather than a preference, so there is no
+    operation that changes `identifier` in place. `Authorship` refuses a second,
+    differing assertion rather than updating the row, and
+    `uq_author_identifiers_key_scheme` makes a second row impossible besides.
+
+    **Removable, though.** An upstream cluster can be wrong, and a fact that
+    cannot be corrected is a trap rather than an invariant, so a member may
+    delete a row and a later import may write it again. What is refused is
+    retyping it to a different value, which is the only operation that can
+    launder a guess into a fact.
+    """
+
+    __tablename__ = "author_identifiers"
+
+    __table_args__ = (
+        # One identifier per spelling per scheme. This is what makes "refuse a
+        # retype" enforceable below the application: a differing assertion has
+        # no second row to land in, so a writer that forgot to check gets an
+        # IntegrityError rather than two answers.
+        #
+        # Not unique on the identifier alone: two spellings legitimately share
+        # one GND number, which is precisely the case a merge is made from.
+        Index(
+            "uq_author_identifiers_key_scheme",
+            "author_key",
+            "scheme",
+            unique=True,
+        ),
+        CheckConstraint(
+            "scheme IN ('gnd')",
+            name="ck_author_identifiers_scheme",
+        ),
+        CheckConstraint(
+            "provenance IN ('catalogue', 'member')",
+            name="ck_author_identifiers_provenance",
+        ),
+        # A machine assertion never names a person. The other direction is
+        # deliberately not constrained, so that a member written row whose
+        # author is gone still reads `member`: that is the value somebody
+        # auditing the list reads, and a stricter check would make the two
+        # indistinguishable exactly when the audit matters. Nothing deletes an
+        # account today (counted 2026-08-27 over `routers/` and `backend/*.py`:
+        # no `db.delete(user)` anywhere), so this is slack for a change not yet
+        # made rather than a case in flight.
+        CheckConstraint(
+            "provenance <> 'catalogue' OR created_by_user_id IS NULL",
+            name="ck_author_identifiers_asserter",
+        ),
+        CheckConstraint(
+            f"length(identifier) > 0 AND length(identifier) <= {AUTHORITY_IDENTIFIER_MAX}",
+            name="ck_author_identifiers_bounds",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    # The key rather than the spelling as written, for the reason
+    # `author_aliases.alias_key` gives: `authors.author_key` folds case,
+    # accents and punctuation, so the DNB's decomposed `Müller` and a member's
+    # composed one are one spelling here.
+    #
+    # No standalone index: `uq_author_identifiers_key_scheme` leads with this
+    # column, and every read of this table is either the whole of it or a
+    # lookup by key.
+    author_key: Mapped[str] = mapped_column(String(AUTHOR_KEY_MAX), nullable=False)
+
+    scheme: Mapped[AuthorityScheme] = mapped_column(String(20), nullable=False)
+
+    # Stored bare, without MARC's `(DE-588)` wrapper: the scheme is already a
+    # column, and keeping the prefix would let one identifier arrive under two
+    # spellings that `uq_author_identifiers_key_scheme` cannot collapse. The
+    # same rule `metadata._gnd_identifier` applies to a subject heading.
+    identifier: Mapped[str] = mapped_column(
+        String(AUTHORITY_IDENTIFIER_MAX), nullable=False
+    )
+
+    provenance: Mapped[AuthorityProvenance] = mapped_column(String(20), nullable=False)
+
+    # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
+    # constraint. Deliberately not indexed, like `author_aliases`: no query
+    # consults it.
     created_by_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True
     )

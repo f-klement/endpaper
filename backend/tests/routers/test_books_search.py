@@ -24,6 +24,7 @@ from tests.helpers import (
     GOOGLE_BOOKS,
     K10PLUS,
     LOC,
+    OENB,
     OPEN_LIBRARY_SEARCH,
     silence_catalogues,
     sru_response,
@@ -373,7 +374,7 @@ class TestValidation:
 
 def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
          extent: str = "992 Seiten", isbn: str = "9783596294336",
-         subtitle: str = "", extra: str = "") -> str:
+         subtitle: str = "", extra: str = "", year: str = "2024") -> str:
     """One MARCXML record, as K10plus and the DNB both return it."""
     part_b = f'<subfield code="b">{subtitle}</subfield>' if subtitle else ""
     return (
@@ -387,12 +388,39 @@ def marc(title: str = "Der Zauberberg", *, author: str = "Mann, Thomas",
         f'<datafield tag="100"><subfield code="a">{author}</subfield>'
         '<subfield code="4">aut</subfield></datafield>'
         '<datafield tag="264"><subfield code="b">Fischer</subfield>'
-        '<subfield code="c">2024</subfield></datafield>'
+        f'<subfield code="c">{year}</subfield></datafield>'
         f'<datafield tag="300"><subfield code="a">{extent}</subfield></datafield>'
         '<datafield tag="041"><subfield code="a">ger</subfield></datafield>'
         f"{extra}"
         "</record></zs:recordData></zs:record></zs:records>"
         "</zs:searchRetrieveResponse>"
+    )
+
+
+def oenb_record(title: str = "&lt;&lt;Das&gt;&gt; angehaltene Leben") -> str:
+    """One ÖNB MARCXML record, in that catalogue's own envelope and conventions.
+
+    Two things here are the ÖNB's rather than MARC's in general: the SRU
+    namespace is the default rather than prefixed `zs:`, and the non-sorting
+    delimiters around a leading article are `<<` and `>>` where every other
+    source uses U+0098 and U+009C. The default title carries a bracketed run so
+    that the route level assertion sees the stripped form.
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>'
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        "<numberOfRecords>1</numberOfRecords><records><record><recordData>"
+        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+        "<leader>01533nam a2200505 c 4500</leader>"
+        '<datafield tag="020"><subfield code="a">9783552058217</subfield></datafield>'
+        f'<datafield tag="245"><subfield code="a">{title}</subfield></datafield>'
+        '<datafield tag="100"><subfield code="a">Torchio, Maurizio</subfield>'
+        '<subfield code="4">aut</subfield></datafield>'
+        '<datafield tag="264"><subfield code="b">Zsolnay</subfield>'
+        '<subfield code="c">2017</subfield></datafield>'
+        '<datafield tag="300"><subfield code="a">237 Seiten</subfield></datafield>'
+        '<datafield tag="041"><subfield code="a">ger</subfield></datafield>'
+        "</record></recordData></record></records></searchRetrieveResponse>"
     )
 
 
@@ -444,7 +472,15 @@ def mods_record(title: str = "sombra del viento", non_sort: str = "La ",
 
 
 class TestEveryCatalogueAnswers:
-    """Search reaches all six sources, not just the English-language two."""
+    """Search reaches the non-English catalogues, not just the English two.
+
+    **Five of the seven, and the name overstates it.** Open Library and Google
+    Books are covered by their own files; the five checked here are K10plus, the
+    DNB, the BnF, the Library of Congress and the ÖNB, which are the ones a
+    reader would doubt answer at all. The docstring said "all six sources" while
+    covering four, so the count moved when a seventh was added and the gap did
+    not: it is written out here rather than carried as a number.
+    """
 
     def _search(self, client, headers, query="zauberberg mann", **routes):
         with respx.mock(assert_all_called=False) as mock:
@@ -476,6 +512,22 @@ class TestEveryCatalogueAnswers:
         # The life dates and the role are not part of the name.
         assert match["author"] == "Albert Camus"
         assert match["source"] == "bnf"
+
+    def test_the_oenb_contributes_for_austrian(self, client, admin):
+        """The ÖNB reaches the picker through the route, not just the adapter.
+
+        Everything else about this source is tested at `metadata.py`'s seam.
+        This is the one check that it survives the whole request: the fan out,
+        the merge, the ranking and the response schema.
+        """
+        [match] = self._search(
+            client,
+            admin["headers"],
+            "angehaltene leben",
+            **{OENB: oenb_record()},
+        )
+        assert match["title"] == "Das angehaltene Leben"
+        assert match["source"] == "oenb"
 
     def test_the_library_of_congress_contributes_for_spanish(self, client, admin):
         [match] = self._search(
@@ -601,6 +653,13 @@ class TestOneBadRecordCostsOneResult:
     own row and a ninth heading costs the ninth heading. Everything else in the
     record still costs the whole result, `year` being the reachable one: MARC
     writes 9999 for a continuing resource and `MAX_YEAR` is 2200.
+
+    **`page_count` used to be reachable here too and no longer is.**
+    `_pages_from_extent` was bounded on 2026-08-27, to close a `ValueError`
+    that 500d the whole request, and range checking it against
+    `MAX_PAGE_NUMBER_IN_A_BOOK` was part of that fix. An out of range extent
+    now costs the page count rather than the row, so a test that wants a record
+    the model refuses has to poison the year.
     """
 
     def _search(self, client, headers, **routes):
@@ -619,7 +678,11 @@ class TestOneBadRecordCostsOneResult:
         return f'<datafield tag="082">{subfields}</datafield>'
 
     def _two_records(
-        self, first_extra: str, second_title: str, first_extent: str = "992 Seiten"
+        self,
+        first_extra: str,
+        second_title: str,
+        first_extent: str = "992 Seiten",
+        first_year: str = "2024",
     ) -> str:
         """One K10plus response holding two books, the first one poisoned.
 
@@ -628,9 +691,9 @@ class TestOneBadRecordCostsOneResult:
         `_merge_matches` would fold them into a single row carrying the bad
         field, which is not the case under test.
         """
-        head, _, tail = marc(extra=first_extra, extent=first_extent).partition(
-            "<zs:records>"
-        )
+        head, _, tail = marc(
+            extra=first_extra, extent=first_extent, year=first_year
+        ).partition("<zs:records>")
         second = marc(title=second_title, isbn="9783596294343")
         _, _, body = second.partition("<zs:records>")
         return head + "<zs:records>" + tail.replace(
@@ -711,9 +774,13 @@ class TestOneBadRecordCostsOneResult:
         take the other results on the page with it. Before the guard this
         answered 500 and lost both.
 
-        On the page count rather than on a caption, which no longer reaches the
-        guard: `MAX_PAGE_NUMBER_IN_A_BOOK` is 100,000 and a catalogue really
-        does write an extent this parser reads a larger number out of.
+        **On the year, and it moved there on 2026-08-27.** It used to poison the
+        record with `999999 Seiten`, because an out of range page count reached
+        `BookMatch` and failed its bound. `_pages_from_extent` now range checks
+        what it parses, so that extent costs the page count and nothing else,
+        and the record is no longer bad at all. The year is the reachable bound
+        this class's docstring already named: MARC writes 9999 for a continuing
+        resource and `MAX_YEAR` is 2200.
         """
         res = self._search(
             client,
@@ -722,7 +789,7 @@ class TestOneBadRecordCostsOneResult:
                 K10PLUS: self._two_records(
                     "",
                     "Der Zauberberg Kommentar",
-                    first_extent="999999 Seiten",
+                    first_year="9999",
                 )
             },
         )

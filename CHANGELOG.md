@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+**Added: the Austrian National Library is now one of the catalogues a lookup asks.**
+An ISBN that the German National Library and K10plus both miss is put to the
+ÖNB before the slower fallbacks, and a title search asks it alongside the other
+six. Its records carry the same Dewey numbers and GND subject headings a DNB
+record does, so confirming one enriches a book the same way. Metadata from it is
+published under CC0.
+
+It is a fallback rather than a first choice because that is what the measurement
+supported: over 50 ISBNs from ten Austrian presses, the ÖNB held all 50, the DNB
+47 and K10plus 39, and 3 were held by the ÖNB and by neither of the German pair.
+Six percent is worth a request that costs nothing when the German pair answer.
+
+**Fixed: titles from the ÖNB no longer arrive with the cataloguer's sorting brackets.**
+MARC brackets a leading article so a catalogue can file `Die Klavierspielerin`
+under K. Most catalogues use two invisible control characters for it and the ÖNB
+uses `<<` and `>>`, so one title in seven would have reached the shelf reading
+`<<Die>> Klavierspielerin`. It is also used inside personal names, so
+`Einem, Gottfried <<von>>` was affected too.
+
+**Fixed: a journal article is no longer offered as a book.** Over half of what an ÖNB
+title search returns is articles and book chapters rather than whole
+publications, and they have a title, an author and a year like anything else.
+They are now recognised and dropped.
+
+**Fixed: a catalogue record with an absurd page count no longer breaks the
+whole search.** One record whose page count ran to more than 4,300 digits turned both
+an ISBN lookup and a title search into a server error, for every catalogue at
+once, rather than costing that one record. Found while adding the new
+catalogue; it affected all of them and had been there for some time. A page
+count outside the range a book can have is now ignored, and the record is kept
+with everything else it carries.
+
+**Internal: author authority identifiers, as an API change.** Nothing renders any
+of this yet, so these are the endpoints rather than a screen.
+
+- Author authority identifiers. The German National Library sends each author's
+  GND number in its catalogue records and Endpaper was discarding it; it is
+  stored now, on a refresh or an enrichment matched by the book's own ISBN.
+- A new read, `GET /api/books/authors/authority`, answers with what the GND and
+  Wikidata hold for an author: the authority's own spelling, dates, a one line
+  description, and cross references. Where an identifier is already held it
+  resolves that number; otherwise it searches by name and returns candidates.
+  `q` retypes the name to search for.
+- `POST` and `DELETE` on `/api/books/authors/identifiers` confirm a candidate
+  and remove a wrong identifier. There is no verb that changes one: correcting
+  it is a delete, and a re-import may write it again.
+- Every identifier records whether a catalogue asserted it or a person chose it.
+- Disagreements are reported rather than resolved: between two spellings merged
+  into one author, between the two authority files, and between a catalogue and
+  a value already held, which now comes back on the refresh that caused it
+  instead of going to the log.
+
 **Added: the predefined tags are shown in your own language.** The tags a new library
 starts with are now translated, and German is the first language they exist in. A tag you
 have renamed is left exactly as you typed it and stays that way: renaming a tag is how you

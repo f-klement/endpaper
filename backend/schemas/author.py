@@ -3,7 +3,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from authors import AUTHOR_NAME_MAX, author_key
-from models import AUTHOR_KEY_MAX
+from enums import AuthorityProvenance, AuthorityScheme
+from models import AUTHOR_KEY_MAX, AUTHORITY_IDENTIFIER_MAX
 
 #: An author key as it arrives from a caller.
 #:
@@ -36,6 +37,159 @@ class AuthorMergeOut(BaseModel):
     spelling: str
 
 
+class RefusedAssertionOut(BaseModel):
+    """A catalogue said one thing, this Library already held another.
+
+    **Not stored anywhere**: a fact about the refresh or enrichment that
+    produced it, served on that response and nowhere else. The store holds one
+    value per spelling per scheme, which is what makes an identifier
+    unretypeable, so a second value has no row to go in. Reporting it here is
+    the alternative to discarding it silently, which would be resolution by
+    precedence and is what this feature refuses to do anywhere else.
+
+    `kept_provenance` is the field to read first. `catalogue` means two
+    catalogues disagree, which is somebody else's problem to look at.
+    `member` means a person's guess is outranking a national library, and the
+    fix is to delete the guess and refresh again.
+    """
+
+    name: str
+    scheme: AuthorityScheme
+    #: What the catalogue said, and what was not stored.
+    asserted: str
+    #: What this Library holds, and what still stands.
+    kept: str
+    kept_provenance: AuthorityProvenance
+
+
+class AuthorityDisagreementOut(BaseModel):
+    """Two authority files pointing at different records for one person.
+
+    Reported and never resolved by precedence: neither file is the authority on
+    the other, and a rule picking a winner would decide silently exactly where a
+    person should be asked. The same call `AuthorOut.identifier_conflicts` makes
+    for two local spellings, at the other end of the feature.
+    """
+
+    #: Which cross reference they disagree about, `wikidata` or `viaf`. What a
+    #: reader has to look up, rather than which service said what.
+    about: str
+    lobid: str | None = None
+    wikidata: str | None = None
+
+
+class AuthorityCandidateOut(BaseModel):
+    """One person an authority file holds, offered for a Member to choose.
+
+    **Nothing here is stored, and there is nowhere to store most of it.** The
+    description and the dates exist so somebody can tell two same named people
+    apart at the moment they confirm, and the only column this whole path can
+    write is an identifier. `docs/featurelist.md` refuses author biographies and
+    portraits, and this is the identity and disambiguation half of that line
+    rather than an exception to it.
+
+    `certain` says which route produced the row, and it is the **only** bit
+    saying it. True where this Library already holds the identifier and it was
+    resolved as a key, so there is exactly one record behind it and `name` is a
+    spelling that can be offered with confidence. False where a name search
+    produced it, which is a guess: two authors share a name. A client offers
+    confirmation on exactly the false ones.
+
+    **There was a second field, `stored`, and it carried the same bit.**
+    `resolve` set `certain` true unconditionally and only ran for identifiers
+    already held, so the two agreed on every reachable path. Their one
+    divergence was a defect rather than information: a **superseded** GND
+    resolves to the current record, whose `gndIdentifier` differs from the
+    number stored, and the pair then read `certain=True, stored=False` while the
+    Library did hold one.
+
+    `wikidata_id` being null is a **hint**, not a verdict. Of the two GND
+    records spelled `Stevenson, Robert Louis`, only one has a Wikidata item.
+    That is worth showing to whoever is confirming and is exactly the wrong
+    thing to resolve on automatically.
+    """
+
+    scheme: AuthorityScheme
+    identifier: str
+    #: The authority's own spelling, which is the suggestion. In catalogue order
+    #: (`Stevenson, Robert Louis`), because that is how the GND writes a name.
+    name: str
+    #: The authority's other spellings. Shown, and deliberately not written to
+    #: `author_aliases`: an alias row is this Household's decision and this is a
+    #: national library's list, and folding one into the other would turn a
+    #: curated list into a generated one.
+    variants: list[str] = Field(default_factory=list)
+    #: As the GND writes them, which is often partial (`1850`, `1850-11-13`) and
+    #: often absent. Strings rather than dates: nothing sorts or subtracts them.
+    born: str | None = None
+    died: str | None = None
+    #: Every cross reference the GND record lists. Recorded and shown, never
+    #: fetched. This is where a VIAF cluster id arrives without VIAF being
+    #: called.
+    same_as: list[str] = Field(default_factory=list)
+    certain: bool = False
+    wikidata_id: str | None = None
+    description: str | None = None
+    disagreements: list[AuthorityDisagreementOut] = Field(default_factory=list)
+
+
+class AuthorIdentifierOut(BaseModel):
+    """Which record in an authority file one spelling of this name means.
+
+    `spelling` rather than the key it is filed under, for the reason
+    `AuthorMergeOut` carries one: the key is normalised past the point of being
+    readable, and the whole use of this field is to say *which* of a merged
+    author's spellings carries this number when two of them disagree.
+
+    `provenance` is an explicit value and never a null. A member auditing the
+    list has to be able to tell an assertion a catalogue made from one somebody
+    chose, and inferring it from an absent user id would make a deleted account
+    look like a machine. See `enums.AuthorityProvenance`.
+    """
+
+    id: int
+    spelling: str
+    scheme: AuthorityScheme
+    identifier: str
+    provenance: AuthorityProvenance
+
+
+class AuthorIdentifierRequest(BaseModel):
+    """Confirm that a candidate identifier is this author's.
+
+    **The write for the uncertain half only.** An identifier on the record a
+    catalogue returned for a Book's own ISBN is stored without asking; this is
+    what a name search produces, which is a candidate rather than a match, and
+    it reaches the store only because a person said so.
+
+    `author` is a key or any spelling, like every other author endpoint.
+    `identifier` is bounded by what the column holds rather than by a per scheme
+    format: a GND number is digits and hyphens today, and hard coding that here
+    would make the next authority file a schema change instead of an enum
+    member.
+    """
+
+    author: AuthorKeyField
+    scheme: AuthorityScheme
+    identifier: Annotated[
+        str, StringConstraints(min_length=1, max_length=AUTHORITY_IDENTIFIER_MAX)
+    ]
+
+    @field_validator("identifier")
+    @classmethod
+    def tidy_identifier(cls, value: str) -> str:
+        """Collapse the whitespace, and refuse what is left if it is nothing.
+
+        A value of only spaces passes `min_length` and then violates
+        `ck_author_identifiers_bounds` at the database, which is a 500 rather
+        than a 422.
+        """
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("An identifier needs a value.")
+        return cleaned
+
+
 class AuthorOut(BaseModel):
     """One person, as far as this shelf knows, and what it knows about them.
 
@@ -64,6 +218,15 @@ class AuthorOut(BaseModel):
     #: one whose spelling survives only on somebody else's private book is left
     #: out, because listing it would announce that the book exists.
     merged: list[AuthorMergeOut] = Field(default_factory=list)
+    #: What the authority files say this person is, one row per spelling per
+    #: scheme. Filtered exactly like `merged` and for the same reason.
+    identifiers: list[AuthorIdentifierOut] = Field(default_factory=list)
+    #: The schemes on which the spellings folded into this person disagree.
+    #:
+    #: Reported rather than resolved: either the local merge is wrong or the
+    #: upstream cluster is, and nothing here can tell which. Empty is the
+    #: ordinary case, including for an author with no identifier at all.
+    identifier_conflicts: list[AuthorityScheme] = Field(default_factory=list)
 
 
 class AuthorSuggestionOut(BaseModel):

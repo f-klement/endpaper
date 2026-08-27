@@ -65,7 +65,7 @@ def google_enabled(client, admin):
 def google_search():
     """Google answers with one volume; every other catalogue holds nothing.
 
-    Enrichment reaches all six sources now, so the rest have to be silenced
+    Enrichment reaches all seven sources now, so the rest have to be silenced
     for a test to prove that Google's answer is the one that landed.
     """
     with respx.mock(assert_all_called=False) as mock:

@@ -1202,25 +1202,48 @@ above an online one and takes what it has. A search has no ISBN to tell an editi
 book from a digitisation of another one, so it refuses, which is what `_k10plus_search`
 already did.
 
-### The author's GND is read by nothing
+That section says `100 $0` is stored nowhere, names the two candidate homes and
+defers to the VIAF question. It is now answered and should be rewritten rather
+than left, because it currently states something the code no longer does.
 
-`100 $0` carries it, and this round deliberately stores it nowhere.
+The answer is a **third** home, and neither of the two it names. Not a column on
+`author_aliases`, because an alias row is a decision somebody made about two
+names and most spellings have none: an author nobody has merged would have
+nowhere to put an identifier. Not authors becoming rows, which is the expensive
+change §30g says to decide before writing a migration and which storing an
+identifier does not require. `author_identifiers` is keyed on a spelling the shelf
+carries, as `author_aliases` is, and answers a different question about that key.
 
-**There is no row for a person here.** Authors are derived from the `books.author` string,
-and `author_aliases` holds "these two spellings are one person" as a decision rather than a
-person. `books.author` is a comma joined credit line, so an identifier on the book would be
-a fact about one of several people stored on the row that holds all of them.
+**That keying had to be corrected before the claim was true.** A row a Member
+confirms was filed under the author's *display name*, which is an alias row's
+`canonical_name` once a merge has run, and `merge` accepts a `keep_name` no Book
+carries. So a member's row landed on a key nothing evidenced, and a second merge
+to a different name orphaned it: invisible in the listing and undeletable. It is
+filed under the most used spelling on the shelf instead.
 
-**The two places it could go are the ones §30g says to decide before writing a migration**:
-the alias table grows an authority column, which is odd because an alias is a decision and
-not a person, or authors finally become rows. That is the VIAF question, the owner left VIAF
-in the pool for exactly that reason, and the reason given was that it is expensive to change
-once data exists. A GND identifier is the same question with a German vocabulary, so it gets
-the same answer.
+**The same unevidenced key was a privacy hole read from the other end**, and
+that is the sharper half. The set of keys an author reaches included the key
+derived from that typed name, so a member could merge their own author under a
+guessed spelling and reach rows derived from somebody else's Private Book.
+Measured through the module seam: a listing that was empty returned the
+stranger's identifier, the authority lookup's own door returned it, and
+`forget_identifier` **deleted it**. The reachable set is now built from
+evidenced keys only.
 
-It costs one line to read when there is somewhere to put it.
-`tests/test_metadata.py::TestDnbRecord::test_the_author_identifier_is_read_by_nothing`
-pins the refusal, so it reads as a decision rather than an oversight.
+Three properties carry the design and each is enforced rather than documented:
+
+* **The name is editable and the identifier is not.** A `canonical_name` is how
+  a household wants a name to read and a national library may be overruled about
+  it. An identifier is a claim about which record in an external file this is, so
+  there is no operation that changes one in place: correcting a wrong one is a
+  delete, and a re-import may write it again.
+  `uq_author_identifiers_key_scheme` makes a second row impossible below the
+  application.
+* **Provenance is explicit on both sides.** `catalogue` or `member`, never
+  inferred from a null `created_by_user_id`, because the question the column
+  exists to answer is whether a curated list has quietly become a generated one.
+* **An identifier is per spelling, not per person.** Two merged spellings may
+  carry different numbers, and that disagreement is evidence rather than a bug.
 
 ### Open Library's subjects are not classifications, and its two classification fields are
 
@@ -2934,6 +2957,256 @@ have the same cause and the rule that a stated number says what it was measured
 against catches both, including when the statement is a retraction.
 
 
+### The Austrian National Library is a third MARCXML source, and the probe is why it works
+
+Added 2026-08-27. Austrian imprints were reaching members as hand typed records,
+because the four catalogues this app asked cover Austrian publishing thinly. The
+ÖNB publishes its catalogue over Alma SRU: CQL in, MARCXML out, no key, CC0.
+
+**Third MARCXML source, fifth SRU one**, and the counts differ because the
+schemas do: the DNB answers `MARC21-xml`, K10plus and the ÖNB answer `marcxml`,
+the BnF answers `dublincore` and the Library of Congress answers `mods`. Calling
+it "a fifth MARCXML source", as an earlier draft of this section did, conflates
+the two.
+
+**The whole item was blocked on one fact that no documentation states, and
+guessing it fails in the worst available way.** The published examples establish
+the MMS ID, AC number, barcode and title indexes and say nothing about the ISBN
+index. The index is `alma.isbn`, confirmed by reading an ISBN off a live record
+and putting it back through the index rather than by reading anything.
+
+What makes it worth a paragraph is the failure mode. A wrong index name is not
+an error and does not return nothing. Measured live against one ISBN:
+`alma.isbn=` returns 1 record, and both `alma.isbn13=` and `zzz.qqq=` return
+**7,793,152**, the entire catalogue, under HTTP 200 with no diagnostic. So a
+typo would have answered a member's scan with a well formed MARC record for an
+arbitrary unrelated book. The only thing between that and a shelf is the check
+that a returned record's own 020 carries the ISBN asked for, which already
+existed for the DNB and K10plus for a different reason. It is now load bearing
+for a third source in a way it was not before, and that is written at the
+constant rather than left in a commit message.
+
+**Every error this endpoint reports arrives as HTTP 200.** An invalid query and
+an unsupported one both come back as a well formed envelope carrying an SRU
+`diag:diagnostic` and no records. There is deliberately no branch for it: the
+body parses, no record is found, and the source reports nothing, which is the
+correct degradation. It is pinned with a recorded diagnostic so that staying
+correct is checked rather than assumed.
+
+**A bare multi-word term is one of those invalid queries**, so ANDing the terms
+is a correctness requirement here where the same shape in `_k10plus_search` is a
+precision preference.
+
+#### Where it sits, and the measurement that put it there
+
+It is asked after the DNB and K10plus and before Open Library. 50 ISBNs, five
+each from ten Austrian presses, taken off live ÖNB records printed after 2005:
+
+| catalogue | held | mean latency |
+|---|---|---|
+| ÖNB | 50 / 50 | 0.240s |
+| DNB | 47 / 50 | 0.210s |
+| K10plus | 39 / 50 | 0.390s |
+| neither of the German pair | **3 / 50** | |
+
+Six percent is a floor rather than an estimate, and the shape is why: every ISBN
+came off an ÖNB record that carried one, from ten well known presses, which is
+the half of Austrian publishing the German catalogues are likeliest to hold too.
+That is enough for a fallback and not enough to widen the fast pair everybody
+pays for.
+
+#### Two defects the mapping would have shipped, neither visible by reading
+
+**The non-sorting delimiters are spelled differently.** MARC brackets a leading
+article so a catalogue can file it, and the DNB writes U+0098 and U+009C, which
+is what MARC21 specifies. The ÖNB writes `<<` and `>>` and writes U+0098 nowhere.
+21 of 150 live 245 `$a` values carry a bracketed run. It is also used for
+nobiliary particles inside personal names, `Einem, Gottfried <<von>>`, so 28 of
+the 111 runs in 21,760 subfields are not at the start and it reaches `100 $a` as
+well as `245 $a`. Both spellings are now stripped for every source rather than
+for the ÖNB alone, which is safe by measurement rather than by hope: `<<` and
+`>>` appear in 0 of 32,038 live DNB subfields and 0 of 45,710 K10plus subfields.
+
+**Over half of what a title search returns is journal articles.** Measured over
+8 live title searches, 155 of 280 records are MARC bibliographic level `a`, a
+monographic component part: an article or chapter with a 773 host item entry and
+usually no 300 extent at all. `_is_physical_book` catches none of them, because
+it tests the extent for an online form and the title for a volume slot and an
+absent extent passes both. The MARC leader is now read for this source.
+
+The leader decides rather than the 773, and that was measured against the same
+280 records rather than reasoned about: the leader catches 155 of 155 and loses
+**0** of the 122 monographs, where refusing anything carrying a 773 catches the
+same 155 and loses 3 monographs that carry a host entry legitimately.
+
+#### A `ValueError` from the parser, found while adding the seventh source
+
+`_pages_from_extent` matched `(\d+)` and called `int()` on it. CPython refuses
+an int/str conversion of more than `sys.get_int_max_str_digits()` digits, 4,300
+by default, and raises **`ValueError`**, which is neither `httpx.HTTPError` nor
+`ElementTree.ParseError`, so **none of the eight SRU handlers caught it**. One
+MARC record carrying 4,301 digits in its `300 $a` turned `GET /api/books/search`
+and `GET /api/books/lookup` into a 500 for **every MARC source at once**.
+
+**The response cap could not reach it**, and that is what makes it worth a
+section rather than a line. The poisoned envelope measures **4,870 bytes**,
+0.23% of `MAX_RESPONSE_BYTES`. The percentage is the weaker way to say it: the
+poison is **larger than the smallest honest response that source sends**, whose
+floor is **4,585 bytes** over 50 live lookups, so no cap that still admits a
+real lookup could ever have refused it. A transport bound and a parser bound
+are not substitutes, and this measures it rather than asserting it.
+
+`_LOC_URL` is plaintext HTTP, so it needed no compromised catalogue: it is the
+same on-path attacker `fetch.RedirectedOffHost` already exists for. It was
+pre-existing for six sources and this item added a seventh, and user story 6
+asks for exactly "a hostile or oversized catalogue response refused rather than
+parsed", so it was in scope rather than beside it.
+
+The digit run is now bounded and range checked against
+`MAX_PAGE_NUMBER_IN_A_BOOK`, which `_open_library_pages` has always applied to
+the same field from the other source: this was the only `int()` on catalogue
+text in the module without a bound, and every other one reads `\d{4}`.
+
+**The lookbehind is the part worth keeping.** A bare `\d{1,6}` would match the
+*last* six digits of a 4,301 digit run and report a page count invented out of
+the tail of an attack. Requiring that no digit precede the run makes an
+over-long number no number at all.
+
+**It changed one behaviour deliberately**, and a test had to move because of it:
+an out of range page count used to fail `BookMatch`'s bound and cost the whole
+row, and now costs only the page count. Keeping the record is the better answer,
+since only one subfield was unusable, but it meant
+`TestOneBadRecordCostsOneResult` no longer had a reachable bound at that site
+and now poisons the year instead, which its own docstring already named as the
+reachable one.
+
+#### What was not done, and why the omission is deliberate
+
+**The ÖNB is not read for author authority identifiers**, though it carries
+them: 158 of 209 live `100 $a` fields carry a `$0`, 75.6%, and every `$0` on a
+100 field is `(DE-588)` with no other authority file appearing. That is a better
+rate than the DNB's. It is withheld because reusing the DNB's parser would
+otherwise have admitted a second source to that path as a side effect of a
+mapping, and the rule this follows is the one already stated for K10plus: a
+catalogue is not read for a person's identifier until somebody has compared it
+live, and comparing the numbers is not the same as comparing the people they
+name. It is one argument to turn on and the measurement is recorded so that
+doing so costs a comparison rather than a fresh probe.
+
+**MARC 084 is not read.** ÖNB records carry it heavily, 188 `bkl`, 101 `rvk` and
+88 `sdnb` values over 150 records, and none of those three schemes is in
+`ClassificationScheme`. Adding a scheme is a decision rather than a mapping.
+
+**No cover host was added.**
+
+**The response cap slice was half built, not built**, and reporting it as
+"already delivered" was wrong in a way worth recording. `fetch.py` does cap
+every catalogue response on raw wire bytes, at every call site, and the ÖNB
+inherited that by using the same door: that half needed no work. But the ticket
+also asks for **one boundary fixture per XML SRU caller**, and the tree had two
+of eight. Measured by raising each caller's own `limit` to 200,000,000 and
+running the file: only the DNB and ÖNB lookups noticed. Worse, the test that
+looked like the K10plus fixture was **vacuous**, its body being `<x>yyy</x>`,
+which yields no records whether the cap holds or not, so `rows == []` passed
+with the cap defeated.
+
+Fixed here rather than left, because the ticket asks for it: eight fixtures, one
+per caller, each carrying a body that **would parse to a record** if the cap let
+it through, plus a test asserting that precondition so a typo in a fixture
+cannot quietly restore the vacuous shape. Re-measured the same way, 8 of 8 now
+fail when their own site's cap is defeated.
+
+#### What adding a catalogue cost, which is the seam's own report card
+
+**Two** parameters and about forty lines of adapter. The ÖNB's record profile is
+the DNB's, so it goes through `_dnb_record` rather than getting a parser of its
+own, and what had to change there was that the source is now an argument and
+that reading `100 $0` is now a choice rather than a given. `Record` is frozen and nothing outside `catalogue.py` may replace a
+field on one, so the source has to be known where the record is built rather
+than corrected afterwards, which is the guard doing exactly what it was added
+for. Adding a catalogue was a mapping, as intended.
+
+VIAF's read API is half closed and easy to probe wrongly in two opposite
+directions. **The variable is the `Accept` request header**, not the
+`User-Agent`, which two separate probes of this concluded before a matrix was
+run. Measured 2026-08-27 on
+`GET viaf.org/viaf/search?query=...&httpAccept=application/json`:
+
+| `Accept: application/json` | `User-Agent` | result |
+|---|---|---|
+| sent | anything, curl's default included | **200 `application/json`**, ten `VIAFCluster` records |
+| absent | a custom agent, or a browser string | **307** to `/en/viaf/search?...` |
+| absent | curl's default | **403**, 5,481 bytes of `text/html` |
+
+`httpAccept=` in the query string is VIAF's **old** convention and the current
+site ignores it, so following the 307 answers **200 `text/html`**, 93,813 bytes
+of Next.js page: a probe that follows redirects and reads only the status code
+concludes the API works, and one that sends no `Accept` header concludes it is
+gone. `AutoSuggest` also answers 200 JSON with the header; the record endpoints
+are gone whatever is sent.
+
+It is still the wrong supplier, for a reason unrelated to availability. VIAF **aggregates** national authority
+files and mints nothing, and the identifier this app already receives is a GND,
+so going through an aggregator is the indirect route to a file that can be read
+directly. lobid carries the VIAF cluster id in `sameAs` anyway.
+
+Two suppliers rather than one, deliberately: lobid for the GND, Wikidata as the
+cross check. The join is verifiable in both directions, which is the property
+that makes the second request worth making. Where they disagree the disagreement
+is surfaced and never resolved by precedence, because neither file is the
+authority on the other.
+
+Wikidata is read for identity and disambiguation only, which is
+`docs/featurelist.md`'s refusal of author biographies and portraits held as a
+structural rule rather than a remembered one: three fields in responses this app
+already parses would cross it, and a test names all three.
+
+**Not a decision about the feature. A decision about how this repository writes
+guards**, and it earned a section because the same mistake was made four times
+in four days by three different seats.
+
+`author_identifiers.identifier` may not be retyped, and
+`test_there_is_no_operation_that_retypes_an_identifier` is what enforces it.
+That guard has been rewritten **four times and been substantially wrong every
+time**, including the rewrite that was itself billed as the simplification:
+
+1. a substring search, `".identifier =" not in source`. Four ordinary spellings
+   walked past it: no space, augmented assignment, tuple target, `setattr`.
+2. a hand walk over `Assign`, `AugAssign` and `AnnAssign`. Three more walked
+   past: a bulk `update({...})`, an aliased `setattr`, `row.__dict__[...] = v`.
+3. store context, which **is** structurally complete for assignment. But it kept
+   a fourth arm matching the **text** of SQL strings, and that arm both
+   false-positived on the module's own docstring ("updated" uppercases to
+   contain "UPDATE") and missed every f-string, because an f-string is a
+   `JoinedStr` and no single `Constant` in it carries both the verb and the
+   column.
+4. the payload matcher deleted, the call names widened. Two seats independently
+   found the same arm.
+
+**The transferable lesson: an arm that matches a payload is a defect, an arm
+that matches structure is not.** Rounds 1 and 2 taught this guard to stop
+matching payloads, and round 3 reintroduced it in the one arm nobody
+re-derived. A raw SQL write's invariant is the **call**, not the string.
+
+**The closed form, for whoever needs a fifth arm: do not add one.** The arms
+enumerate an open set, so arm five is already implied by arm four. Every shape
+either reviewing seat found names `AuthorIdentifier` or `author_identifiers`, so
+**an allowlist of the functions permitted to name that model closes all of them
+at once**, exactly as `TestTheShelfIsTheOnlyWayIn` does for `Book`. That turns
+the guard from "no spelling I thought of" into "these functions are the whole
+write surface", which is a claim a reader can check.
+
+It was **not** done in this round on purpose: it is a fifth rewrite of a guard
+that had just been rewritten, on a change already through three review rounds,
+and the arms as they stand catch every shape either seat has found. The next
+person to reach for arm six should build the allowlist instead.
+
+The acknowledged survivor is a **subscript key assembled at runtime**, which
+needs a line whose only purpose is to hide a write from a reader. It is stated
+in the guard's own docstring rather than left to be discovered, because the
+previous version claimed to catch "all the cheap spellings" and that was false
+when written.
+
 ## Frontend
 
 ### Page-centric colocation
@@ -2945,7 +3218,8 @@ domain-free in `src/components/`. See [frontend.md](frontend.md).
 
 Eleven one-line setters wrote one field each of a single `BookFilters`, so adding a filter
 cost the interface, the hook and every caller a line, and no caller stopped knowing
-anything: the test [ADR 0008](adr/0008-deep-modules-behind-narrow-doors.md) sets.
+anything: the test the deep modules rule sets, that a module is judged by what a
+caller stops having to know rather than by its size.
 `update(patch: Partial<BookFilters>)` replaces them, and `UseLibraryResult` went from 32
 members to 21.
 

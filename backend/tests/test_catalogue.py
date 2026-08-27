@@ -8,8 +8,8 @@ XML is pinned in `test_metadata.py`, which is where the parsers are.
 import dataclasses
 
 import catalogue
-from catalogue import Heading, Record
-from enums import ClassificationScheme
+from catalogue import AuthorityAssertion, Heading, Record
+from enums import AuthorityScheme, ClassificationScheme
 from schemas.book import BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
@@ -17,6 +17,8 @@ DDC_004 = Heading(ClassificationScheme.DDC, "004")
 DDC_004_CAPTIONED = Heading(ClassificationScheme.DDC, "004", "Informatik")
 GND = Heading(ClassificationScheme.GND, "4026894-9", "Informatik")
 LCSH = Heading(ClassificationScheme.LCSH, "France -- History")
+KANE = AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
+MATTHIAS = AuthorityAssertion("Karl Matthias", AuthorityScheme.GND, "1042243213")
 
 
 class TestARecordFoldsWhatOneSourceRepeats:
@@ -52,6 +54,67 @@ class TestARecordFoldsWhatOneSourceRepeats:
         record = Record(subjects=("Informatik", "Roman", "Informatik"))
 
         assert record.subjects == ("Informatik", "Roman")
+
+    def test_one_author_named_by_both_100_and_700_is_asserted_once(self):
+        record = Record(author_identifiers=(KANE, KANE))
+
+        assert record.author_identifiers == (KANE,)
+
+    def test_two_records_disagreeing_about_one_name_keep_both_assertions(self):
+        """The opposite call from `_union`, and the reason `_distinct` is not it.
+
+        A heading's caption is folded towards a single answer because there is
+        one to fold towards. Two catalogues giving one spelling two GND numbers
+        is a disagreement, and hiding it behind whichever answered first is what
+        the store refuses to do at its own layer: see
+        `authorship.Authorship.record_catalogue_assertions`.
+        """
+        other = AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "9999")
+        record = Record(author_identifiers=(KANE, other))
+
+        assert record.author_identifiers == (KANE, other)
+
+
+class TestAuthorityAssertionsFollowTheCollectionRules:
+    """Filed with `subjects` and `headings`, not with the scalars.
+
+    `_FILLED` tests a scalar with `is None`, which an empty tuple is not, so a
+    collection listed there would never fill a gap and nothing would say so.
+    """
+
+    def test_a_row_with_no_assertions_takes_the_other_row_s(self):
+        empty = Record(source="google", title="X")
+        dnb = Record(source="dnb", title="X", author_identifiers=(KANE,))
+
+        assert empty.filled_from(dnb).author_identifiers == (KANE,)
+
+    def test_a_row_that_has_assertions_keeps_its_own_on_the_search_path(self):
+        """The leading catalogue describes the book. Two rows meet on the search
+        path because they share a title, an author and a year, which is a guess.
+        """
+        leading = Record(source="dnb", title="X", author_identifiers=(KANE,))
+        other = Record(source="loc", title="X", author_identifiers=(MATTHIAS,))
+
+        assert leading.filled_from(other).author_identifiers == (KANE,)
+
+    def test_the_lookup_path_carries_both_catalogues_assertions(self):
+        """Every record `merged_with` folds was found by the same verified ISBN,
+        so both are describing the people who wrote this printing."""
+        dnb = Record(source="dnb", title="X", author_identifiers=(KANE,))
+        onb = Record(source="onb", title="X", author_identifiers=(MATTHIAS,))
+
+        assert dnb.merged_with(onb).author_identifiers == (KANE, MATTHIAS)
+
+    def test_neither_draft_shape_carries_an_assertion(self):
+        """The same omission ADR 0006 gets for Classifications, for the same
+        reason: `refresh` and automatic `enrich` write from these dictionaries,
+        and an assertion reaches the store from the `Record` itself instead. A
+        key here would put a third party value into a request body a client
+        posts back."""
+        record = Record(source="dnb", isbn="1", title="X", author_identifiers=(KANE,))
+
+        assert "author_identifiers" not in record.as_lookup()
+        assert "author_identifiers" not in record.as_match()
 
 
 class TestFillingOneRowFromAnother:
@@ -293,6 +356,10 @@ class TestTheFoldRunsOncePerSetOfCollections:
         """Every entry `_unique` and `_union` look at, one entry per element."""
         inspected: list[int] = []
         real_unique, real_union = catalogue._unique, catalogue._union
+        # The third collection is counted too, and deliberately: a fold that
+        # escaped `_folded` here would be invisible to a counter watching only
+        # the two that existed when this test was written.
+        real_distinct = catalogue._distinct
 
         def unique(values):
             values = tuple(values)
@@ -304,8 +371,14 @@ class TestTheFoldRunsOncePerSetOfCollections:
             inspected.append(len(headings))
             return real_union(headings)
 
+        def distinct(assertions):
+            assertions = tuple(assertions)
+            inspected.append(len(assertions))
+            return real_distinct(assertions)
+
         monkeypatch.setattr(catalogue, "_unique", unique)
         monkeypatch.setattr(catalogue, "_union", union)
+        monkeypatch.setattr(catalogue, "_distinct", distinct)
         return inspected
 
     @staticmethod
@@ -316,6 +389,10 @@ class TestTheFoldRunsOncePerSetOfCollections:
             subjects=tuple(f"subject {index}" for index in range(200)),
             headings=tuple(
                 Heading(ClassificationScheme.LCSH, f"heading {index}")
+                for index in range(200)
+            ),
+            author_identifiers=tuple(
+                AuthorityAssertion(f"Author {index}", AuthorityScheme.GND, str(index))
                 for index in range(200)
             ),
         )
@@ -364,5 +441,6 @@ class TestWhatARecordFillsIsEveryScalarItHolds:
             "source",
             "subjects",
             "headings",
+            "author_identifiers",
             "_folded",
         }

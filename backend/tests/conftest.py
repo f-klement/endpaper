@@ -117,6 +117,7 @@ import metadata  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
 from ratelimit import (  # noqa: E402
+    authority_limiter,
     cover_backfill_limiter,
     import_limiter,
     login_limiter,
@@ -213,6 +214,7 @@ def reset_rate_limits() -> None:
     register_limiter.reset()
     import_limiter.reset()
     metadata_limiter.reset()
+    authority_limiter.reset()
     cover_backfill_limiter.reset()
 
 

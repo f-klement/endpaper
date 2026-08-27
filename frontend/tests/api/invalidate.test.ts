@@ -64,6 +64,9 @@ const KEYS: Record<string, readonly unknown[]> = {
   exportBooks: books.getExportBooksQueryKey(),
   lookupIsbn: books.getLookupIsbnQueryKey({ isbn: "9780441013593" }),
   searchBooks: books.getSearchBooksQueryKey({ q: "dune" }),
+  authorAuthority: books.getAuthorAuthorityQueryKey({
+    author: "Ursula K. Le Guin",
+  }),
   listCollections: collections.getListCollectionsQueryKey(),
   listLoans: loans.getListLoansQueryKey(),
   getStats: stats.getGetStatsQueryKey(),
@@ -145,9 +148,12 @@ describe("the inventory is complete", () => {
   it("is reading the generated tree at all", () => {
     // A glob that matched nothing would make the assertion above pass for
     // ever, by comparing an empty list against an empty list. Measured
-    // 2026-08-27: 11 modules, 36 getters.
+    // 2026-08-27: 11 modules, 37 getters. The count moves whenever an endpoint
+    // is added, and that is the point: it is the second half of the tripwire,
+    // so a glob that quietly stopped matching cannot hide behind a KEYS list
+    // that also stopped growing.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(36);
+    expect(Object.keys(KEYS).length).toBe(37);
   });
 });
 
@@ -174,13 +180,21 @@ describe("the catalogue is everything derived from the books table", () => {
     ]);
   });
 
-  it("leaves the two outward lookups alone", () => {
+  it("leaves the three outward lookups alone", () => {
     // The point of the whole module. `searchBooks` is a billed Google Books
     // call carrying `staleTime: 5 * 60_000` precisely so that going back to
     // edit a draft does not re-spend the quota, and an invalidate ignores
     // staleTime. Adding a book used to refetch it.
+    //
+    // `authorAuthority` is the third, and it arrived the way the docstring on
+    // `isCatalogueQuery` said one would: the inventory assertion above failed
+    // on it rather than letting it default into every write. It asks lobid and
+    // Wikidata, so it is not derived from the books table and no write to the
+    // library can make it stale. It is also rate limited at 10 a minute
+    // against lobid's published 30, which an invalidate would spend.
     expect(isCatalogueQuery(query(KEYS.lookupIsbn!))).toBe(false);
     expect(isCatalogueQuery(query(KEYS.searchBooks!))).toBe(false);
+    expect(isCatalogueQuery(query(KEYS.authorAuthority!))).toBe(false);
   });
 
   it("leaves a book's children to the hooks that write them", () => {

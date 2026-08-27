@@ -36,21 +36,24 @@ import respx
 
 import fetch
 import metadata
-from catalogue import Heading, Record
-from enums import ClassificationScheme
+from catalogue import AuthorityAssertion, Heading, Record
+from enums import AuthorityScheme, ClassificationScheme
 from metadata import (
     Outcome,
     _dc_title_statement,
     _flip_catalogue_name,
     _is_placeholder_title,
     _loc_record,
+    _marc_author_identifiers,
+    _marc_authors,
     _marc_fields,
     _pages_from_extent,
     _parsed,
     lookup,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
-from tests.helpers import silence_covers
+from schemas.book import BookLookup
+from tests.helpers import silence_covers, silence_oenb
 
 OPEN_LIBRARY = "https://openlibrary.org/"
 GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes"
@@ -197,6 +200,240 @@ K10PLUS_RECORD = _marc(_marc_record())
 K10PLUS_EMPTY = _marc()
 
 
+def _oenb_envelope(*records: str) -> str:
+    """An ÖNB SRU envelope around zero or more MARCXML records.
+
+    Not `_marc`, and the difference is one the fixtures below would otherwise
+    misrepresent: K10plus prefixes the SRU namespace `zs:` and ÖNB declares it
+    as the default. Neither parser cares, because both iterate the MARC
+    namespace and never name the envelope, but a fixture that says it was
+    copied from a live response should look like one.
+    """
+    body = "".join(
+        f"<record><recordSchema>marcxml</recordSchema>"
+        f"<recordData>{record}</recordData></record>"
+        for record in records
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="no"?>'
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        "<version>1.2</version>"
+        f"<numberOfRecords>{len(records)}</numberOfRecords>"
+        f"<records>{body}</records></searchRetrieveResponse>"
+    )
+
+
+OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+
+#: One live ÖNB record, ISBN 9783552058217, `Das angehaltene Leben`, Zsolnay.
+#:
+#: **Copied from the live response rather than written to suit the test**, so
+#: every trap in it is the catalogue's own. Four are load bearing here.
+#:
+#: * `245 $a` is `<<Das>> angehaltene Leben`. ÖNB writes MARC's non-sorting
+#:   delimiters as `<<` and `>>` where the DNB writes U+0098 and U+009C, and
+#:   writes U+0098 nowhere: 21 of 150 live 245 `$a` values carry a bracketed
+#:   run, measured 2026-08-27.
+#: * `082` carries a real Dewey number, so the DDC path is exercised.
+#: * `655` carries a `(DE-588)` heading and a second entry naming a different
+#:   vocabulary with no `$0`, so the GND path is exercised on a record where
+#:   only one of the two headings is identified.
+#: * `700` is the translator, `$4 trl`. It is not an author relator, so it must
+#:   not reach the author string. The live record is the reason to check: a
+#:   translated Italian novel is exactly the shape a naive 700 reader spoils.
+#:
+#: `041` carries `$h ita`, the language translated from, beside `$a ger`.
+OENB_RECORD = _oenb_envelope(
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam a2200505 c 4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783552058217</subfield>'
+    '<subfield code="c">Festeinband : EUR 22,70</subfield></datafield>'
+    '<datafield tag="041" ind1=" " ind2=" ">'
+    '<subfield code="a">ger</subfield><subfield code="h">ita</subfield></datafield>'
+    '<datafield tag="082" ind1="0" ind2="4">'
+    '<subfield code="a">853.92</subfield><subfield code="2">22/ger</subfield></datafield>'
+    '<datafield tag="084" ind1=" " ind2=" ">'
+    '<subfield code="a">18.27</subfield><subfield code="2">bkl</subfield></datafield>'
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">Torchio, Maurizio</subfield>'
+    '<subfield code="d">1970-</subfield>'
+    '<subfield code="0">(DE-588)138150680</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    "<subfield code=\"a\">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield>"
+    '<subfield code="b">Roman</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="a">Wien</subfield>'
+    '<subfield code="b">Paul Zsolnay Verlag</subfield>'
+    '<subfield code="c">[2017]</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">237 Seiten</subfield>'
+    '<subfield code="c">21 cm</subfield></datafield>'
+    '<datafield tag="655" ind1=" " ind2="7">'
+    '<subfield code="a">Fiktionale Darstellung</subfield>'
+    '<subfield code="0">(DE-588)1071854844</subfield>'
+    '<subfield code="2">gnd-content</subfield></datafield>'
+    '<datafield tag="655" ind1=" " ind2="7">'
+    '<subfield code="a">Roman</subfield>'
+    '<subfield code="2">bellobv</subfield></datafield>'
+    '<datafield tag="700" ind1="1" ind2=" ">'
+    '<subfield code="a">Kopetzki, Annette</subfield>'
+    '<subfield code="4">trl</subfield></datafield>'
+    "</record>"
+)
+
+#: One live ÖNB record for an Austrian imprint that the DNB and K10plus both
+#: miss, ISBN 9783700316206, Braumüller, Vienna 2007.
+#:
+#: **One of the three that the whole item turns on.** 50 ISBNs, five each from
+#: ten Austrian presses, taken off live ÖNB records printed after 2005 and put
+#: to all three catalogues on 2026-08-27: ÖNB held 50, the DNB 47, K10plus 39,
+#: and 3 were held by ÖNB and by neither of the German pair. This is one of
+#: those 3. That 6% is a floor rather than an estimate, because every ISBN in
+#: the sample came off an ÖNB record that carried one, from ten well known
+#: presses, which is the half of Austrian publishing the German catalogues are
+#: likeliest to hold too.
+OENB_AUSTRIAN_ONLY = _oenb_envelope(
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01201nam a2200349 cc4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783700316206</subfield></datafield>'
+    '<datafield tag="041" ind1=" " ind2=" ">'
+    '<subfield code="a">ger</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">?Kunst!</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="a">Wien</subfield>'
+    '<subfield code="b">Braumüller</subfield>'
+    '<subfield code="c">2007</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">III, 272 S.</subfield></datafield>'
+    "</record>"
+)
+
+#: One live ÖNB record that is a **journal article**, not a book: leader/07 is
+#: `a`, a monographic component part, and the 773 names the volume it sits in.
+#:
+#: Copied whole from the first row of the live title search
+#: `alma.title=klavierspielerin and alma.title=jelinek`, whose entire first page
+#: of five records is articles like this one.
+#:
+#: **It has a title, an author and a year, and no 300 at all**, which is exactly
+#: why the leader has to be read: `_is_physical_book` tests the extent for an
+#: online form and the title for a volume slot, and an absent extent passes
+#: both. Measured over 8 live title searches, 155 of 280 records are this shape.
+OENB_ARTICLE = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>00733naa a2200229zc 4500</leader>"
+    '<controlfield tag="001">990006303820603338</controlfield>'
+    '<datafield tag="041" ind1=" " ind2=" ">'
+    '<subfield code="a">eng</subfield></datafield>'
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">DeMeritt, Linda C.</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    "<subfield code=\"a\">&lt;&lt;A&gt;&gt; \"healthier marriage\"</subfield>"
+    "<subfield code=\"b\">Elfriede Jelinek's marxist feminism</subfield></datafield>"
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="c">1994</subfield></datafield>'
+    '<datafield tag="773" ind1="0" ind2="8">'
+    '<subfield code="i">Enthalten in</subfield>'
+    '<subfield code="t">Elfriede Jelinek</subfield></datafield>'
+    "</record>"
+)
+
+#: A whole publication, leader/07 `m`, to sit beside the article above so a
+#: search fixture can show which of the two survives.
+#:
+#: **The `100` carries its `(DE-588)` on purpose.** The live record does, 75.6%
+#: of live ÖNB `100 $a` fields do, and without it the test asserting that a
+#: search row carries no author identifier would pass whether the source is read
+#: for them or not. A fixture that cannot fail is the shape a review caught in
+#: this file once already.
+OENB_MONOGRAPH = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam a2200505 c 4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783552058217</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    "<subfield code=\"a\">&lt;&lt;Das&gt;&gt; angehaltene Leben</subfield></datafield>"
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">Torchio, Maurizio</subfield>'
+    '<subfield code="0">(DE-588)138150680</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="c">2017</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">237 Seiten</subfield></datafield>'
+    "</record>"
+)
+
+OENB_SEARCH = _oenb_envelope(OENB_ARTICLE, OENB_MONOGRAPH)
+
+#: A whole publication by its leader, and an **online resource** by its extent.
+#:
+#: The leader test passes it, so this is the record that shows `_is_physical_book`
+#: is doing separate work from `_is_component_part`. Deleting either refusal
+#: leaves the other in place and this row reaching the picker.
+OENB_ONLINE = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam a2200505 c 4500</leader>"
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Nur online</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="c">2019</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">1 Online-Ressource (240 Seiten)</subfield></datafield>'
+    "</record>"
+)
+
+OENB_SEARCH_WITH_ONLINE = _oenb_envelope(OENB_ONLINE, OENB_MONOGRAPH)
+
+
+OENB_EMPTY = _oenb_envelope()
+
+#: What the endpoint answers a query it will not run: **HTTP 200**, a well
+#: formed envelope, a `diag:diagnostic`, and no records at all.
+#:
+#: Copied from the live answer to `alma.title=wien geschichte`, which is refused
+#: because a bare multi-word term is not valid CQL there. Kept as a fixture
+#: rather than as a code path, because the right handling is to have none: the
+#: body parses, no record is found, and the source reports no results.
+OENB_DIAGNOSTIC = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/"
+  xmlns:diag="http://www.loc.gov/zing/srw/diagnostic/">
+  <version>1.2</version>
+  <diagnostics>
+    <diag:diagnostic>
+      <diag:uri>200812</diag:uri>
+      <diag:message>Invalid query</diag:message>
+    </diag:diagnostic>
+  </diagnostics>
+</searchRetrieveResponse>
+"""
+
+#: What a **mistyped index name** answers, and the reason this source needs
+#: `_marc_claims_isbn` more than any other here.
+#:
+#: Measured live 2026-08-27: `alma.isbn=9783825354077` returns 1 record and both
+#: `alma.isbn13=9783825354077` and `zzz.qqq=9783825354077` return **7,793,152**,
+#: the whole catalogue, HTTP 200, no diagnostic. So the failure mode of a wrong
+#: index is not an empty result, it is arbitrary records that parse perfectly.
+#: This stands in for that: a well formed record for a completely different book.
+OENB_WRONG_BOOK = _oenb_envelope(
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>00731nam a2200277 c 4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9783701716678</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Ein ganz anderes Buch</subfield></datafield>'
+    '<datafield tag="264" ind1=" " ind2="1">'
+    '<subfield code="c">1860</subfield></datafield>'
+    "</record>"
+)
+
+
 def _marc_element(datafields: str) -> ElementTree.Element:
     """One MARC record element, built from the datafields a test cares about."""
     return ElementTree.fromstring(
@@ -264,6 +501,7 @@ class TestSourceOrder:
     async def test_open_library_answers_when_the_fast_pair_misses(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -302,6 +540,7 @@ class TestSourceOrder:
     async def test_google_is_tried_after_open_library_misses(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -333,6 +572,7 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=OPEN_LIBRARY).mock(
@@ -358,6 +598,7 @@ class TestSourceOrder:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -379,6 +620,7 @@ class TestOutcome:
     async def test_a_throttled_source_is_reported_as_rate_limited(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -403,6 +645,7 @@ class TestOutcome:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -422,6 +665,7 @@ class TestOutcome:
     async def test_every_source_answering_nothing_is_not_found(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -441,6 +685,7 @@ class TestOutcome:
     async def test_a_network_failure_is_unavailable_not_missing(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -750,6 +995,7 @@ class TestDnbRecord:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -766,13 +1012,14 @@ class TestDnbRecord:
         assert result.outcome is Outcome.NOT_FOUND
 
     @pytest.mark.asyncio
-    async def test_the_author_identifier_is_read_by_nothing(self):
-        """`100 $0` is a person, and this app has no person to hang it on.
+    async def test_the_author_identifier_reaches_the_record(self):
+        """`100 $0` is carried now, where it used to be thrown away.
 
-        Recorded rather than implied: see `docs/decisions.md`, "The author\'s
-        GND is read by nothing". A row here would answer the author identity
-        question that entry defers, and that answer is expensive to change once
-        data exists.
+        This replaces `test_the_author_identifier_is_read_by_nothing`, which
+        pinned the opposite and pinned it for a stated reason: there was nowhere
+        correct to put a person. `author_identifiers` is that place, and it is a
+        store keyed on a spelling rather than the person table §30g says to
+        decide on first.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
@@ -784,12 +1031,34 @@ class TestDnbRecord:
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
-        assert "1042243212" not in str(result.record)
+        assert result.record.author_identifiers == (
+            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_author_identifier_is_not_in_the_draft_a_client_posts_back(self):
+        """`BookLookup` is a draft a client sends straight back, so a value in
+        it is a value a member could retype. The assertion reaches the store
+        from the `Record` the server fetched instead, which is what makes
+        `CATALOGUE` provenance mean anything."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.record is not None
+        assert "1042243212" not in str(result.record.as_lookup())
+        assert "1042243212" not in str(result.record.as_match())
 
     @pytest.mark.asyncio
     async def test_an_empty_result_set_is_a_miss_not_an_outage(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -879,6 +1148,7 @@ class TestCatalogueXml:
         )
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -923,10 +1193,159 @@ class TestTheResponseSizeCap:
     def _tiny_cap(self, monkeypatch):
         monkeypatch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
 
+    # ── One boundary fixture per XML SRU caller ──────────────────────────────
+    #
+    # **Every body below would parse to a real record if the cap let it
+    # through**, and that clause is the whole point of this block. The test
+    # this replaces looked like the K10plus fixture and asserted `rows == []`
+    # against a body of `<x>yyy</x>`, which yields no records whether the cap
+    # holds or not: it passed with the cap defeated. Measured by raising each
+    # caller's own `limit` to 200,000,000 and running the file, only the DNB
+    # and ÖNB lookups noticed; six callers had no fixture that could fail.
+    #
+    # Each body is a valid record for that caller's own schema, padded past the
+    # patched cap with a comment. If the cap stops working, the record arrives,
+    # the assertion sees a row, and the test fails.
+
+    #: Padding that survives the parser, so the body is over the cap without
+    #: being malformed. A comment rather than junk text: `_parsed` would still
+    #: parse trailing character data, but a comment cannot be mistaken for a
+    #: record by anything downstream.
+    @staticmethod
+    def _padded(body: str, closing: str) -> str:
+        filler = f"<!--{'p' * 4096}-->"
+        return body.replace(closing, filler + closing)
+
+    def _marc_over_cap(self) -> str:
+        return self._padded(_marc(_marc_record()), "</zs:records>")
+
+    def _oenb_over_cap(self) -> str:
+        return self._padded(
+            _oenb_envelope(OENB_MONOGRAPH), "</records>"
+        )
+
+    def _dublincore_over_cap(self) -> str:
+        return self._padded(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<srw:searchRetrieveResponse xmlns:srw="http://www.loc.gov/zing/srw/"'
+            ' xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<srw:records><srw:record><srw:recordData>"
+            "<dc:dc>"
+            "<dc:title>Le Comte de Monte-Cristo</dc:title>"
+            "<dc:type>texte imprime</dc:type>"
+            "<dc:publisher>Gallimard (Paris)</dc:publisher>"
+            "<dc:date>1998</dc:date>"
+            "<dc:format>500 p.</dc:format>"
+            "</dc:dc>"
+            "</srw:recordData></srw:record></srw:records>"
+            "</srw:searchRetrieveResponse>",
+            "</srw:records>",
+        )
+
+    def _mods_over_cap(self) -> str:
+        return self._padded(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+            "<zs:records><zs:record><zs:recordData>"
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            "<typeOfResource>text</typeOfResource>"
+            "<titleInfo><title>Cien anos de soledad</title></titleInfo>"
+            "<physicalDescription><extent>417 p.</extent></physicalDescription>"
+            "</mods>"
+            "</zs:recordData></zs:record></zs:records>"
+            "</zs:searchRetrieveResponse>",
+            "</zs:records>",
+        )
+
+    def test_every_body_below_would_parse_if_the_cap_let_it_through(self):
+        """The fixtures' own precondition, checked rather than asserted in prose.
+
+        Without this, a typo in any body silently turns its cap test back into
+        the vacuous shape this block exists to replace: the row would be absent
+        because the record never parsed, not because the cap refused it.
+        """
+        # Bound and narrowed before the call: `find` answers `Element | None`,
+        # and passing that straight in is a type error rather than a check.
+        marc_record = _parsed(self._marc_over_cap()).find(f".//{metadata._MARC}record")
+        assert marc_record is not None
+        assert _marc_fields(marc_record)
+        assert _parsed(self._oenb_over_cap()).find(f".//{metadata._MARC}record") is not None
+        assert (
+            _parsed(self._dublincore_over_cap()).find(f".//{metadata._DC}title")
+            is not None
+        )
+        assert _parsed(self._mods_over_cap()).find(f".//{metadata._MODS}mods") is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "host, body",
+        [
+            (DNB, "_marc_over_cap"),
+            (K10PLUS, "_marc_over_cap"),
+            (OENB, "_oenb_over_cap"),
+        ],
+    )
+    async def test_an_oversized_lookup_answer_costs_that_source(self, host, body):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            for other in (DNB, K10PLUS, OENB):
+                mock.get(url__startswith=other).mock(
+                    return_value=_xml(
+                        getattr(self, body)() if other == host else OENB_EMPTY
+                    )
+                )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(ENGLISH_ISBN)
+
+        name = {DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb"}[host]
+        assert (name, Outcome.UNAVAILABLE) in result.attempts
+        assert result.outcome is not Outcome.FOUND
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "host, body",
+        [
+            (DNB, "_marc_over_cap"),
+            (K10PLUS, "_marc_over_cap"),
+            (OENB, "_oenb_over_cap"),
+            ("https://catalogue.bnf.fr", "_dublincore_over_cap"),
+            ("http://lx2.loc.gov", "_mods_over_cap"),
+        ],
+    )
+    async def test_an_oversized_search_answer_costs_that_source_its_rows(
+        self, host, body
+    ):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            for other, empty in (
+                (DNB, DNB_EMPTY),
+                (K10PLUS, K10PLUS_EMPTY),
+                (OENB, OENB_EMPTY),
+                ("https://catalogue.bnf.fr", DNB_EMPTY),
+                ("http://lx2.loc.gov", DNB_EMPTY),
+            ):
+                mock.get(url__startswith=other).mock(
+                    return_value=_xml(
+                        getattr(self, body)() if other == host else empty
+                    )
+                )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            rows = await metadata.search("clean code")
+
+        assert rows == []
+
     @pytest.mark.asyncio
     async def test_an_enormous_catalogue_answer_is_unavailable_not_a_500(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -958,26 +1377,6 @@ class TestTheResponseSizeCap:
 
         assert result.source == "k10plus"
 
-    @pytest.mark.asyncio
-    async def test_an_enormous_search_answer_costs_that_source_its_rows(self):
-        with respx.mock(assert_all_called=False) as mock:
-            silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(
-                return_value=_xml(self.ENORMOUS)
-            )
-            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
-            mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(200, json={"docs": []})
-            )
-            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
-                return_value=httpx.Response(500)
-            )
-            mock.get(url__startswith="http://lx2.loc.gov").mock(
-                return_value=httpx.Response(500)
-            )
-            rows = await metadata.search("anything at all")
-
-        assert rows == []
 
 
 class TestMarcSubfields:
@@ -1035,6 +1434,124 @@ class TestMarcSubfields:
         assert fields["100"][0]["a"] == "M\u00fcller, Hans"
 
 
+class TestTheAuthorsAuthorityIdentifier:
+    """`100 $0` and `700 $0`, which say which GND record wrote this book.
+
+    The subject fields carry the identical subfield and go somewhere else: 600
+    says a person is what the book is *about*. That split is
+    `enums.AuthorityScheme`.
+    """
+
+    @staticmethod
+    def _fields(*datafields: str):
+        return _marc_fields(_marc_element("".join(datafields)))
+
+    MAIN = (
+        '<datafield tag="100" ind1="1" ind2=" ">'
+        '<subfield code="0">(DE-588)1042243212</subfield>'
+        '<subfield code="a">Kane, Sean P.</subfield>'
+        '<subfield code="4">aut</subfield></datafield>'
+    )
+
+    def test_the_main_entry_identifier_is_stored_bare(self):
+        """Without `(DE-588)`: the scheme is a column, and keeping the prefix
+        would let one identifier arrive under two spellings the unique index
+        cannot collapse. The same rule `_gnd_identifier` states for a heading."""
+        assert _marc_author_identifiers(self._fields(self.MAIN)) == [
+            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
+        ]
+
+    def test_a_record_with_no_identifier_produces_none(self):
+        """21 of 73 live 100 fields carry no `(DE-588)` at all, measured over 85
+        records on 2026-08-24. Ordinary, not broken."""
+        fields = self._fields(
+            '<datafield tag="100" ind1="1" ind2=" ">'
+            '<subfield code="a">Kane, Sean P.</subfield></datafield>'
+        )
+
+        assert _marc_author_identifiers(fields) == []
+
+    def test_a_700_that_wrote_the_book_is_read(self):
+        fields = self._fields(
+            self.MAIN,
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)1042243213</subfield>'
+            '<subfield code="a">Matthias, Karl</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+        )
+
+        assert _marc_author_identifiers(fields) == [
+            AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212"),
+            AuthorityAssertion("Karl Matthias", AuthorityScheme.GND, "1042243213"),
+        ]
+
+    def test_a_700_that_only_translated_it_is_not(self):
+        """`$4=trl` is a translator. Reading it would file a translator's GND
+        under a name that is not in this Book's credit line at all."""
+        fields = self._fields(
+            self.MAIN,
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)9999</subfield>'
+            '<subfield code="a">Meier, Eva</subfield>'
+            '<subfield code="4">trl</subfield></datafield>',
+        )
+
+        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
+            "1042243212"
+        ]
+
+    def test_an_added_entry_for_a_work_is_not_a_person_here(self):
+        """`$t` links the original title, and the name beside it is that work's
+        author rather than a second author of this book."""
+        fields = self._fields(
+            self.MAIN,
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)9999</subfield>'
+            '<subfield code="a">Melville, Herman</subfield>'
+            '<subfield code="t">Moby Dick</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+        )
+
+        assert [row.identifier for row in _marc_author_identifiers(fields)] == [
+            "1042243212"
+        ]
+
+    def test_every_identifier_is_filed_under_a_name_in_the_credit_line(self):
+        """The property `_marc_author_entries` exists to make structural.
+
+        Two loops testing the same three conditions would let the credit line
+        and the identifiers drift apart, and the symptom would be a row filed
+        under a spelling no Book carries: invisible, undeletable through the UI,
+        and never matched by anything.
+        """
+        fields = self._fields(
+            self.MAIN,
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)1042243213</subfield>'
+            '<subfield code="a">Matthias, Karl</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)9999</subfield>'
+            '<subfield code="a">Meier, Eva</subfield>'
+            '<subfield code="4">trl</subfield></datafield>',
+        )
+
+        credited = _marc_authors(fields) or ""
+        for row in _marc_author_identifiers(fields):
+            assert row.name in credited
+
+    def test_one_person_named_by_both_100_and_700_is_asserted_once(self):
+        fields = self._fields(
+            self.MAIN,
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            '<subfield code="0">(DE-588)1042243212</subfield>'
+            '<subfield code="a">Kane, Sean P.</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+        )
+
+        assert len(_marc_author_identifiers(fields)) == 1
+
+
 class TestPersonName:
     def test_turns_catalogue_order_into_a_readable_name(self):
         assert _flip_catalogue_name("Kane, Sean P.") == "Sean P. Kane"
@@ -1090,6 +1607,7 @@ class TestK10plusIdentity:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
                     _marc(
@@ -1704,12 +2222,140 @@ class TestRanking:
 class TestAHostileSourceCostsItsOwnRows:
     """One source misbehaving must not take `GET /api/books/search` down.
 
-    Six are asked at once through `_within_deadline`, whose `task.result()`
-    re-raises whatever a source raised. Six of the ten call sites catch
-    `(httpx.HTTPError, ElementTree.ParseError)` and nothing else, so anything
-    outside that pair becomes a 500 for the whole search rather than a missing
-    tier.
+    Seven are asked at once through `_within_deadline`, whose `task.result()`
+    re-raises whatever a source raised. Eight of the thirteen `try` blocks that
+    wrap a call into `fetch` catch `(httpx.HTTPError, ElementTree.ParseError)`
+    and nothing else, so anything outside that pair becomes a 500 for the whole
+    search rather than a missing tier.
     """
+
+    #: An extent whose page count is too long for CPython to turn into an int.
+    #:
+    #: `int()` refuses a string of more than `sys.get_int_max_str_digits()`
+    #: digits, 4,300 by default, and raises **`ValueError`**, which is neither
+    #: `httpx.HTTPError` nor `ElementTree.ParseError`. Every MARC source runs its
+    #: `300 $a` through `_pages_from_extent`, so one poisoned record 500s the
+    #: whole request for all of them.
+    #:
+    #: **The response cap cannot reach this.** The poisoned envelope is 4,870
+    #: bytes without an ISBN and 4,964 with one, 0.23% of
+    #: `fetch.MAX_RESPONSE_BYTES` either way. More usefully, it is **larger than
+    #: the smallest honest response this source sends**, an ÖNB lookup floor of
+    #: 4,585 bytes measured over 50 live lookups, so no cap that still admits a
+    #: real lookup could refuse it. It is a parser bound, not a transport one.
+    POISONED_EXTENT = "9" * 4301 + " Seiten"
+
+    def _poisoned_marc(self, isbn: str = "") -> str:
+        """One MARC record whose only fault is an unparsable extent.
+
+        **`isbn` is not decoration.** The lookup path drops any record whose own
+        020 does not carry the ISBN asked for, so a poisoned record without one
+        never reaches the parser and a test using it passes for the wrong
+        reason. This one did, on the first attempt.
+        """
+        isbn_field = (
+            f'<datafield tag="020" ind1=" " ind2=" ">'
+            f'<subfield code="a">{isbn}</subfield></datafield>'
+            if isbn
+            else ""
+        )
+        return _oenb_envelope(
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            "<leader>01533nam a2200505 c 4500</leader>"
+            f"{isbn_field}"
+            '<datafield tag="245" ind1="1" ind2="0">'
+            "<subfield code=\"a\">Poisoned</subfield></datafield>"
+            '<datafield tag="300" ind1=" " ind2=" ">'
+            f'<subfield code="a">{self.POISONED_EXTENT}</subfield></datafield>'
+            "</record>"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unparsable_page_count_is_not_a_500(self):
+        """A 4,870 byte record must cost its own row, not the whole search.
+
+        The Library of Congress is reached over **plaintext HTTP**, so this
+        needs no compromised catalogue: it is the same on-path attacker
+        `fetch.RedirectedOffHost` exists for, and the same one the test above
+        records. User story 6 asks for exactly this.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+                return_value=httpx.Response(500)
+            )
+            mock.get(url__startswith="http://lx2.loc.gov").mock(
+                return_value=httpx.Response(500)
+            )
+            oenb = mock.get(url__startswith=OENB).mock(
+                return_value=_xml(self._poisoned_marc())
+            )
+            rows = await metadata.search("poisoned")
+
+        assert oenb.called
+        # **The row survives, and that is the right answer rather than a
+        # concession.** Only the extent was unusable, so only the page count is
+        # lost: the record still names a book somebody may want. Dropping the
+        # row would let one bad subfield cost a real search result.
+        assert [row.title for row in rows] == ["Poisoned"]
+        assert rows[0].page_count is None
+
+    @pytest.mark.asyncio
+    async def test_an_unparsable_page_count_does_not_500_a_lookup(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(self._poisoned_marc("9783700316206"))
+            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup("9783700316206")
+
+        assert result.outcome is Outcome.FOUND
+        assert result.record is not None
+        assert result.record.page_count is None
+
+    @pytest.mark.parametrize(
+        "extent, expected",
+        [
+            ("390 Seiten", 390),
+            ("348 S.", 348),
+            ("528 p.", 528),
+            ("III, 272 S.", 272),
+            # The bound `_open_library_pages` has always applied, now applied
+            # here too: a page count out of range is no page count.
+            ("999999 Seiten", None),
+            ("0 Seiten", None),
+            # The digit run is refused whole rather than having its tail read
+            # as a page count, which is what a bare `\d{1,6}` would have done.
+            ("9" * 4301 + " Seiten", None),
+            ("9" * 12 + " Seiten", None),
+            # **This is the case that actually pins the lookbehind**, and the
+            # two above are not: with `\d{1,6}` and no lookbehind they match
+            # the last six digits, `999999`, which the range check rejects
+            # anyway, so both still answer None with the guard removed. Here
+            # the tail is a plausible page count, so dropping the lookbehind
+            # invents 350 out of the end of an attack. Measured: the mutation
+            # survived the whole file until this row existed.
+            ("1" * 20 + "000350 Seiten", None),
+            # Still not a page count.
+            ("23 cm", None),
+            (None, None),
+        ],
+    )
+    def test_a_page_count_is_bounded_at_both_ends(self, extent, expected):
+        assert metadata._pages_from_extent(extent) == expected
 
     @pytest.mark.asyncio
     async def test_a_redirect_naming_an_unusable_host_is_not_a_500(self):
@@ -1724,6 +2370,7 @@ class TestAHostileSourceCostsItsOwnRows:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_oenb(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -1744,7 +2391,7 @@ class TestAHostileSourceCostsItsOwnRows:
 
 
 class TestSearchDeadline:
-    """Six sources are asked at once, so the slowest one sets the wall clock."""
+    """Seven sources are asked at once, so the slowest one sets the wall clock."""
 
     @pytest.mark.asyncio
     async def test_a_slow_catalogue_is_dropped_rather_than_waited_for(
@@ -2630,6 +3277,7 @@ class TestTheCandidates:
         mock.get(url__startswith="http://lx2.loc.gov").mock(
             return_value=httpx.Response(500)
         )
+        silence_oenb(mock)
 
     @pytest.mark.asyncio
     async def test_the_cluster_leads(self):
@@ -2768,3 +3416,647 @@ class TestTheCandidates:
             )
 
         assert [row.isbn for row in rows] == ["9780262046305"]
+class TestTheAustrianNationalLibrary:
+    """The third MARCXML source and the fifth SRU one, and what it is here for.
+
+    The two counts differ because the schemas do: the DNB answers `MARC21-xml`,
+    K10plus and the ÖNB answer `marcxml`, the BnF answers `dublincore` and the
+    Library of Congress answers `mods`.
+
+    **It is asked only after the fast pair miss.** The ticket's whole premise is
+    that it holds Austrian imprints the German catalogues do not, which is worth
+    a fallback request and not worth widening the pair everybody pays for.
+    Measured 2026-08-27 over 50 ISBNs from ten Austrian presses: ÖNB held 50,
+    the DNB 47, K10plus 39, and 3 were held by ÖNB and by neither of the pair.
+
+    **A wrong index name is not caught by the endpoint**, so it has to be caught
+    here. See `OENB_WRONG_BOOK`.
+
+    **Its records are the DNB's profile**, so they go through the same parser,
+    which is what `_dnb_record`'s `source` argument exists for.
+
+    **Over half of what a title search returns is journal articles**, which
+    nothing already in this module refuses. See `OENB_ARTICLE`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_fast_pair_answering_means_the_oenb_is_never_asked(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            oenb = mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_RECORD)
+            )
+            result = await lookup(GERMAN_ISBN)
+
+        assert result.source == "dnb"
+        assert not oenb.called
+
+    @pytest.mark.asyncio
+    async def test_an_austrian_imprint_neither_german_catalogue_holds_resolves(self):
+        """The 3 of 50 the whole item turns on, as a test rather than a claim."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_AUSTRIAN_ONLY)
+            )
+            result = await lookup("9783700316206")
+
+        assert result.outcome is Outcome.FOUND
+        assert result.source == "oenb"
+        assert result.record is not None
+        assert result.record.title == "?Kunst!"
+        assert result.record.publisher == "Braumüller"
+        assert result.record.year == 2007
+
+    @pytest.mark.asyncio
+    async def test_the_oenb_is_asked_before_open_library(self):
+        """Order inside the fallback list, which is measured rather than a taste.
+
+        Mean lookup latency 2026-08-27: ÖNB 0.240s, Open Library 1.64s. Asking
+        the slow broad source first would cost every Austrian lookup a second
+        and a half for a record ÖNB already had.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_AUSTRIAN_ONLY)
+            )
+            open_library = mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            result = await lookup("9783700316206")
+
+        assert result.source == "oenb"
+        assert not open_library.called
+
+    @pytest.mark.asyncio
+    async def test_a_record_for_a_different_book_is_refused(self):
+        """A mistyped CQL index answers with the catalogue, not with nothing.
+
+        `alma.isbn13=` and `zzz.qqq=` both returned all 7,793,152 records under
+        HTTP 200 with no diagnostic, measured live. Without the 020 check this
+        source would answer a member's scan with whichever record sorted first.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_WRONG_BOOK)
+            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup("9783700316206")
+
+        assert result.outcome is not Outcome.FOUND
+        assert ("oenb", Outcome.NOT_FOUND) in result.attempts
+
+    @pytest.mark.asyncio
+    async def test_the_record_carries_its_classifications(self):
+        """User story 3: confirming an ÖNB record enriches a Book like a DNB one."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
+            result = await lookup("9783552058217")
+
+        assert result.record is not None
+        headings = result.record.headings
+        assert Heading(ClassificationScheme.DDC, "853.92") in headings
+        assert (
+            Heading(
+                ClassificationScheme.GND, "1071854844", "Fiktionale Darstellung"
+            )
+            in headings
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_heading_naming_another_vocabulary_is_not_a_classification(self):
+        """`655 $a Roman $2 bellobv` has no `(DE-588)`, so it is a subject only.
+
+        Same rule `_dnb_subjects` applies to the DNB: a value with no GND number
+        cannot become a classification row, and reaches `subjects`, which is the
+        field documented as weak evidence.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
+            result = await lookup("9783552058217")
+
+        assert result.record is not None
+        assert "Roman" in result.record.subjects
+        assert not [
+            heading for heading in result.record.headings if heading.number == "Roman"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_author_identifier_is_taken_from_this_catalogue_yet(self):
+        """A withheld decision, pinned so that taking it is deliberate.
+
+        The fixture's `100` carries `(DE-588)138150680`, and the ÖNB carries one
+        on 158 of 209 live `100 $a` fields, 75.6%, every one of them
+        `(DE-588)`. So this is not absent for want of data. It is the rule
+        `_k10plus_record` states: a catalogue is not read for a person's
+        identifier until somebody has compared it live, and reusing the DNB's
+        parser would otherwise have admitted a second source to that path as a
+        side effect of a mapping.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
+            result = await lookup("9783552058217")
+
+        assert result.record is not None
+        assert result.record.author_identifiers == ()
+
+    @pytest.mark.asyncio
+    async def test_the_translator_is_not_credited_as_an_author(self):
+        """`700 $4 trl`. The live record is a novel translated from Italian."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
+            result = await lookup("9783552058217")
+
+        assert result.record is not None
+        assert result.record.author == "Maurizio Torchio"
+
+    @pytest.mark.asyncio
+    async def test_the_lookup_asks_the_index_the_probe_established(self):
+        """The one fact the whole item was blocked on, pinned.
+
+        `alma.isbn` was confirmed by reading an ISBN off a live ÖNB record and
+        putting it back through this index. The alternatives do not fail
+        visibly: `alma.isbn13` and `zzz.qqq` both answer 200 with all 7,793,152
+        records and no diagnostic, so a wrong value here is caught by
+        `_marc_claims_isbn` turning every lookup into a miss rather than by
+        anything raising. This says which index, so that the day it changes it
+        changes here and not by accident.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            route = mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_AUSTRIAN_ONLY)
+            )
+            await lookup("9783700316206")
+
+        params = route.calls.last.request.url.params
+        assert params["query"] == "alma.isbn=9783700316206"
+        assert params["recordSchema"] == "marcxml"
+        assert params["maximumRecords"] == "5"
+
+    @pytest.mark.asyncio
+    async def test_a_throttled_oenb_is_not_reported_as_a_missing_book(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup("9783700316206")
+
+        assert ("oenb", Outcome.RATE_LIMITED) in result.attempts
+        assert result.outcome is Outcome.RATE_LIMITED
+
+    @pytest.mark.asyncio
+    async def test_a_diagnostic_costs_the_source_its_rows_and_nothing_else(self):
+        """Every error this endpoint reports arrives as HTTP 200.
+
+        An invalid query answers with a well formed envelope carrying a
+        `diag:diagnostic` and no records. The right handling is none: the body
+        parses, no record is found, the source reports nothing, and a search
+        still answers from the other six.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_DIAGNOSTIC)
+            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup("9783700316206")
+
+        assert ("oenb", Outcome.NOT_FOUND) in result.attempts
+
+    @pytest.mark.asyncio
+    async def test_an_enormous_oenb_answer_costs_the_oenb_and_nothing_else(self):
+        """The response cap, at this source's own call site.
+
+        `tests/test_fetch.py` proves the cap works. This proves going over lands
+        in the handler a timeout already lands in rather than escaping as a 500,
+        which is the same thing `TestTheResponseSizeCap` asks of the other four
+        XML SRU callers.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml("<x>" + "y" * 4096 + "</x>")
+            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
+                result = await lookup("9783700316206")
+
+        assert ("oenb", Outcome.UNAVAILABLE) in result.attempts
+
+
+class TestTheAustrianNationalLibrarySearch:
+    """Title search, and the noise that made it more than a fifth `_search`."""
+
+    @staticmethod
+    def _quiet(mock):
+        """Every source but the ÖNB answering nothing."""
+        silence_covers(mock)
+        mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+        mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+        mock.get(url__startswith=OPEN_LIBRARY).mock(
+            return_value=httpx.Response(200, json={"docs": []})
+        )
+        mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+            return_value=httpx.Response(500)
+        )
+        mock.get(url__startswith="http://lx2.loc.gov").mock(
+            return_value=httpx.Response(500)
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_journal_article_is_not_offered_as_a_book(self):
+        """55.4% of 280 live records over 8 title searches are this shape.
+
+        The article in the fixture has a title, an author and a year and no
+        extent at all, so every test already in this file would pass with it
+        accepted. Only the leader says it is part of something else.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
+            rows = await metadata.search("angehaltene leben")
+
+        assert [row.title for row in rows] == ["Das angehaltene Leben"]
+
+    @pytest.mark.asyncio
+    async def test_the_non_sorting_brackets_do_not_reach_the_title(self):
+        """ÖNB writes MARC's non-sorting device as `<<` and `>>`.
+
+        Untreated this row reads `<<Das>> angehaltene Leben`, and it would reach
+        the picker and then the shelf that way: 21 of 150 live 245 `$a` values
+        carry a bracketed run.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
+            rows = await metadata.search("angehaltene leben")
+
+        assert rows[0].title == "Das angehaltene Leben"
+        assert "<<" not in rows[0].title
+
+    @pytest.mark.asyncio
+    async def test_the_query_is_one_anded_term_per_word(self):
+        """A bare multi-word term is refused by the endpoint, not merely loose.
+
+        `alma.title=wien geschichte` answers 200 with diagnostic 200812
+        `Invalid query`, measured live. So this is a correctness requirement
+        where the same shape in `_k10plus_search` is a precision preference.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            route = mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_EMPTY)
+            )
+            await metadata.search("angehaltene leben")
+
+        query = route.calls.last.request.url.params["query"]
+        assert query == "alma.title=angehaltene and alma.title=leben"
+
+    @pytest.mark.asyncio
+    async def test_a_row_names_the_catalogue_that_found_it(self):
+        """The record's own `source`, which is not the same field as `Lookup.source`.
+
+        **Found by mutating `_dnb_record` and watching nothing fail.** Every
+        other test here reads `Lookup.source`, and `lookup` sets that from the
+        name of the chain entry it asked rather than from the record, so
+        hardcoding this parser back to `"dnb"` passed the whole file. The search
+        path is where it shows: `Record.source` becomes `BookMatch.source`,
+        which the picker prints, and it is what `_MATCH_PRECEDENCE` ranks on, so
+        a mislabelled ÖNB row would be believed over K10plus for a shared field.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
+            rows = await metadata.search("angehaltene leben")
+
+        assert rows[0].sources == {"oenb"}
+
+    @pytest.mark.asyncio
+    async def test_an_online_resource_is_not_offered_as_a_book(self):
+        """`_is_physical_book` is a second refusal, not a spare one.
+
+        This record's leader says monograph, so `_is_component_part` passes it
+        and only the extent refuses it. Without this the extent test could be
+        deleted from `_oenb_search` and every other test here would still pass,
+        which is what the review found.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            mock.get(url__startswith=OENB).mock(
+                return_value=_xml(OENB_SEARCH_WITH_ONLINE)
+            )
+            rows = await metadata.search("nur online")
+
+        assert [row.title for row in rows] == ["Das angehaltene Leben"]
+
+    @pytest.mark.asyncio
+    async def test_a_search_row_carries_no_author_identifier_either(self):
+        """The other half of the withheld decision, and it was unpinned.
+
+        The lookup path is asserted elsewhere in this file. The **search** path
+        was not, and a review found that deleting `read_author_identifiers=False`
+        from `_oenb_search` failed nothing: a search row reaches the HTTP layer
+        through `Record.as_match()`, which carries no identifiers at all, so
+        there is nothing to observe from outside.
+
+        There is something to observe *here*, because `metadata.search` returns
+        `Record` objects rather than the wire dictionaries. So the assertion is
+        made at the seam that still has the fact.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            self._quiet(mock)
+            mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
+            rows = await metadata.search("angehaltene leben")
+
+        assert rows[0].author_identifiers == ()
+
+    @pytest.mark.asyncio
+    async def test_a_broken_oenb_costs_its_own_rows_and_no_others(self):
+        """User story 5, from the search side."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_RECORD)
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+                return_value=httpx.Response(500)
+            )
+            mock.get(url__startswith="http://lx2.loc.gov").mock(
+                return_value=httpx.Response(500)
+            )
+            rows = await metadata.search("great gatsby")
+
+        assert [row.title for row in rows] == ["The Great Gatsby"]
+
+    @pytest.mark.asyncio
+    async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self):
+        """User story 5. The deadline degrades the results, never the latency."""
+
+        async def _crawl(request):
+            await asyncio.sleep(5)
+            return _xml(OENB_SEARCH)
+
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=OENB).mock(side_effect=_crawl)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_RECORD)
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+                return_value=httpx.Response(500)
+            )
+            mock.get(url__startswith="http://lx2.loc.gov").mock(
+                return_value=httpx.Response(500)
+            )
+            started = asyncio.get_running_loop().time()
+            rows = await metadata.search("great gatsby")
+            elapsed = asyncio.get_running_loop().time() - started
+
+        assert elapsed < 5
+        assert [row.title for row in rows] == ["The Great Gatsby"]
+
+
+class TestTheComponentPartRefusal:
+    """The leader test, alone, so its edges are visible.
+
+    Measured over the same 280 live records: the leader catches 155 of 155
+    component parts and loses 0 of 122 monographs, where refusing anything
+    carrying a 773 catches the same 155 and loses 3 monographs.
+    """
+
+    @pytest.mark.parametrize(
+        "leader, expected",
+        [
+            ("00733naa a2200229zc 4500", True),
+            ("00733nab a2200229zc 4500", True),
+            ("01533nam a2200505 c 4500", False),
+            ("01533nac a2200505 c 4500", False),
+            # A truncated leader is a broken record rather than an article, and
+            # the fields decide it on their own merits.
+            ("00733n", False),
+            ("", False),
+        ],
+    )
+    def test_the_bibliographic_level_decides(self, leader, expected):
+        record = ElementTree.fromstring(
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            f"<leader>{leader}</leader></record>"
+        )
+        assert metadata._is_component_part(record) is expected
+class TestEverySourceSetsTheIsbnItWasAskedFor:
+    """`catalogue.Record.as_lookup()`'s guarantee, as a test rather than a docstring.
+
+    **That docstring is a tripwire and it fired once.** It says a `Record` with
+    no `isbn` makes `BookLookup(**record.as_lookup())` raise, that `lookup_isbn`
+    catches no `ValidationError`, and that the response would therefore be a
+    500. Nothing enforces it: the return type is `dict[str, Any]`, so mypy sees
+    no requirement, and the guarantee lives in the adapters. It ended "a fifth
+    lookup source that leaves `isbn` unset is the change that turns this
+    paragraph into a defect", and on 2026-08-27 the ÖNB was that fifth source.
+
+    It fired because somebody wrote the **trigger** down rather than only the
+    count. It should not have to fire twice. The standing rule here is that a
+    mechanically detectable finding becomes a test, and this one is: every value
+    in `metadata._SOURCES` has the same shape, `(isbn, api_key) -> Lookup`, so
+    driving each of them with a body that resolves and asserting the record
+    carries the ISBN asked for covers all five at once.
+
+    **Parametrised over `_SOURCES` itself, not over a list written here**, which
+    is the whole point: a sixth source is covered the moment it is registered,
+    and a sixth source with no response body below fails this file rather than
+    being silently skipped. Without that, arming the guarantee depends on
+    somebody adding a source in `metadata.py` and happening to read a docstring
+    in `catalogue.py`. That is the same distance that let five copies of six
+    stale figures sit in `test_fetch.py`.
+
+    **What this asserts is the invariant, not the mechanism, and that boundary
+    was measured rather than assumed.** Five mutations were tried. Making
+    `_open_library` or `_google_books` stop passing the argument fails here, and
+    so does registering a sixth source with no body. Making the **MARC**
+    adapters pass `None` instead of the argument does **not**, and that is
+    correct rather than a hole: all three MARC lookups filter their candidates
+    through `_marc_claims_isbn` first, so a record that reaches the parser is
+    guaranteed to carry a matching 020, and `_dnb_record`'s
+    `isbn = isbn or _marc_isbn(fields)` then supplies the same canonical value
+    from the record. Two independent mechanisms satisfy the invariant on those
+    paths, and the invariant is what `as_lookup()` needs. A test that failed
+    there would be pinning which of the two ran, which is not the guarantee and
+    would break on a legitimate refactor.
+    """
+
+    ISBN = "9780743273565"
+
+    #: One resolving response per source, keyed by its name in `_SOURCES`.
+    #:
+    #: Each is the smallest body that reaches `Outcome.FOUND` for that adapter,
+    #: because what is under test is which field the record carries rather than
+    #: how richly it parses.
+    #:
+    #: **No body carries the canonical ISBN-13 anywhere**, which is what makes
+    #: the assertion discriminating rather than circular. The JSON sources carry
+    #: no identifier at all. The MARC sources cannot do that, because
+    #: `_marc_claims_isbn` refuses a record whose own 020 does not name the ISBN
+    #: asked for, so their 020 carries the **ISBN-10** form, `0743273567`. That
+    #: satisfies the identity check, which canonicalises both sides, while
+    #: leaving `9780743273565` obtainable only from the argument. A first draft
+    #: of this class omitted the 020 entirely and two of the five adapters
+    #: correctly reported NOT_FOUND.
+    # `tuple[str, httpx.Response]`, not `object`: the values are unpacked as
+    # `host, response` at three call sites, and `object` is not iterable.
+    def _bodies(self) -> dict[str, tuple[str, httpx.Response]]:
+        marc = _marc(
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            "<leader>01533nam a2200505 c 4500</leader>"
+            '<datafield tag="020" ind1=" " ind2=" ">'
+            "<subfield code=\"a\">0743273567</subfield></datafield>"
+            '<datafield tag="245" ind1="1" ind2="0">'
+            "<subfield code=\"a\">The Great Gatsby</subfield></datafield>"
+            '<datafield tag="264" ind1=" " ind2="1">'
+            "<subfield code=\"c\">1925</subfield></datafield>"
+            '<datafield tag="300" ind1=" " ind2=" ">'
+            "<subfield code=\"a\">218 S.</subfield></datafield>"
+            "</record>"
+        )
+        oenb = _oenb_envelope(
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            "<leader>01533nam a2200505 c 4500</leader>"
+            '<datafield tag="020" ind1=" " ind2=" ">'
+            "<subfield code=\"a\">0743273567</subfield></datafield>"
+            '<datafield tag="245" ind1="1" ind2="0">'
+            "<subfield code=\"a\">The Great Gatsby</subfield></datafield>"
+            '<datafield tag="264" ind1=" " ind2="1">'
+            "<subfield code=\"c\">1925</subfield></datafield>"
+            '<datafield tag="300" ind1=" " ind2=" ">'
+            "<subfield code=\"a\">218 S.</subfield></datafield>"
+            "</record>"
+        )
+        return {
+            "dnb": (DNB, _xml(marc)),
+            "k10plus": (K10PLUS, _xml(marc)),
+            "oenb": (OENB, _xml(oenb)),
+            "open_library": (
+                OPEN_LIBRARY,
+                httpx.Response(200, json={"title": "The Great Gatsby"}),
+            ),
+            "google_books": (
+                GOOGLE_BOOKS,
+                httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {"id": "gb-1", "volumeInfo": {"title": "The Great Gatsby"}}
+                        ]
+                    },
+                ),
+            ),
+        }
+
+    def test_every_registered_source_has_a_body_here(self):
+        """The arming step, and the reason this class is parametrised on `_SOURCES`.
+
+        A source added to `metadata._SOURCES` with no entry below would make the
+        parametrised test skip it in silence. This turns that into a failure, so
+        adding a source forces the question the `catalogue.py` docstring asks.
+        """
+        missing = sorted(set(metadata._SOURCES) - set(self._bodies()))
+        assert not missing, (
+            f"{missing} registered in `metadata._SOURCES` with no response body "
+            "in this test. Add one, and check the new adapter sets `isbn` from "
+            "the argument rather than from the record it parsed: see "
+            "`catalogue.Record.as_lookup`."
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", sorted(metadata._SOURCES))
+    async def test_the_record_carries_the_isbn_the_source_was_asked_for(self, name):
+        host, response = self._bodies()[name]
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=host).mock(return_value=response)
+            result = await metadata._SOURCES[name](self.ISBN, "a-key")
+
+        assert result.outcome is Outcome.FOUND, (
+            f"the {name} body no longer resolves, so this asserts nothing"
+        )
+        assert result.record is not None
+        assert result.record.isbn == self.ISBN
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", sorted(metadata._SOURCES))
+    async def test_the_lookup_schema_accepts_what_each_source_produces(self, name):
+        """The other end of the same guarantee: the dictionary must build.
+
+        `as_lookup()` names `isbn` as required and coerces only `title`, and
+        `lookup_isbn` catches no `ValidationError`, so a record reaching here
+        without an ISBN is a 500 rather than a bad answer. This constructs the
+        model the route constructs.
+        """
+        host, response = self._bodies()[name]
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=host).mock(return_value=response)
+            result = await metadata._SOURCES[name](self.ISBN, "a-key")
+
+        assert result.record is not None
+        assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN

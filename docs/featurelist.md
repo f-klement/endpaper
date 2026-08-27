@@ -171,6 +171,8 @@ offline shell could only lie.
 **No library circulation.** No queue positions, no pickup notifications, no
 fines, no MARC, no Z39.50 as a client. Koha exists and is better at all of it.
 
-**No author biographies or portraits.** The shelf knows a name and nothing else
-about a person, which is what keeps an author a derived fact rather than a
-second thing to maintain.
+**No author biographies or portraits.** The shelf stores a name and, where a
+catalogue asserted one, that authority file's identifier for that spelling.
+Dates and a one line description are shown while you tell two same named writers
+apart, and are not kept. An author stays a derived fact rather than a second
+thing to maintain.

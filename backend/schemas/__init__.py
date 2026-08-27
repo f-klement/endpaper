@@ -13,10 +13,15 @@ than at request time.
 """
 
 from schemas.author import (
+    AuthorIdentifierOut,
+    AuthorIdentifierRequest,
+    AuthorityCandidateOut,
+    AuthorityDisagreementOut,
     AuthorMergeOut,
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
+    RefusedAssertionOut,
 )
 from schemas.book import (
     BookCreate,
@@ -97,6 +102,11 @@ __all__ = [
     "AppearanceOut",
     "AppearanceUpdate",
     "AuthConfigOut",
+    "AuthorIdentifierOut",
+    "AuthorIdentifierRequest",
+    "AuthorityCandidateOut",
+    "AuthorityDisagreementOut",
+    "RefusedAssertionOut",
     "AuthorMergeOut",
     "AuthorMergeRequest",
     "AuthorOut",

@@ -124,11 +124,16 @@ const BOOK_RECORD = /^\/api\/books\/\d+(\/copies)?$/;
  *
  * Exported for the inventory test, which walks every query key the generated
  * client can produce and asserts each one is classified deliberately. That
- * test is the guard on the two exclusions below, both of which are outward
- * calls this app does not own: `/api/books/lookup` (Open Library) and
- * `/api/books/search` (Google Books, billed). Neither is derived from the
- * books table, so neither belongs to any write, and a third one arriving
+ * test is the guard on the three exclusions below, all of which are outward
+ * calls this app does not own: `/api/books/lookup` (Open Library),
+ * `/api/books/search` (Google Books, billed) and `/api/authors/authority`
+ * (lobid and Wikidata, rate limited at 10 a minute). None is derived from the
+ * books table, so none belongs to any write, and a fourth one arriving
  * unclassified fails that test rather than quietly joining every invalidate.
+ *
+ * **The third arrived exactly that way.** `authorAuthority` landed with the
+ * author identifier work and the inventory assertion failed on it, which is
+ * the whole reason this sentence can be written in the past tense.
  */
 export function isCatalogueQuery(query: Query): boolean {
   const path = pathOf(query);
