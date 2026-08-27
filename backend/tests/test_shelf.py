@@ -178,6 +178,13 @@ def _book_aliases(tree: ast.Module) -> set[str]:
 def _bindings(node: ast.AST) -> list[tuple[ast.expr, ast.expr]]:
     """The `(target, value)` pairs one statement binds.
 
+    **`tests/test_fetch.py` imports this**, for the rule that keeps every HTTP
+    request behind `fetch.py`. Narrowing it for the shelf rule would weaken that
+    one silently, in a different file, with nothing here to say so. Widening it
+    is free. It is imported rather than copied because "what does this statement
+    bind" is one fact, and the `AnnAssign` half below is exactly the part a
+    second implementation gets wrong.
+
     **`AnnAssign` as well as `Assign`, and that is not a completeness flourish.**
     The annotated form is the more idiomatic half of this backend: counted over
     the tree excluding tests and migrations, **125** module-level `AnnAssign`

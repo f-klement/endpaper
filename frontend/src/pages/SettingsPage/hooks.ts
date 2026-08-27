@@ -41,6 +41,7 @@ import {
   usePreviewImport,
 } from "../../api/generated/endpoints/imports/imports";
 import { useBackfillCovers } from "../../api/generated/endpoints/books/books";
+import { useInvalidate } from "../../api/invalidate";
 import { useNotifyOverdue } from "../../api/generated/endpoints/loans/loans";
 import type {
   CoverBackfillOut,
@@ -101,7 +102,7 @@ export function useSettings() {
  * on before anything is written.
  */
 export function useLibraryImport() {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreviewOut | null>(null);
   const [result, setResult] = useState<ImportResultOut | null>(null);
@@ -116,9 +117,10 @@ export function useLibraryImport() {
         setResult(data);
         setPreview(null);
         setFile(null);
-        // An import can create books and change statuses, so every list view
-        // is now stale.
-        void queryClient.invalidateQueries();
+        // An import creates books, tags, authors and shelves, so every
+        // catalogue view is now stale. Not the accounts or the settings: a
+        // CSV import writes neither.
+        invalidate.catalogue();
       },
     },
   });
@@ -181,7 +183,7 @@ export function useLibraryImport() {
  * the failures, since a service that was down may not be.
  */
 export function useCoverBackfill() {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const [result, setResult] = useState<CoverBackfillOut | null>(null);
   const [cursor, setCursor] = useState(0);
 
@@ -190,8 +192,10 @@ export function useCoverBackfill() {
       onSuccess: (data: CoverBackfillOut) => {
         setResult(data);
         setCursor(data.next_after_id);
-        // Every list and detail view renders a cover, so all of them are stale.
-        void queryClient.invalidateQueries();
+        // A run rewrites `cover_url` on up to a hundred books at once, and
+        // every list and detail view renders it. Covers themselves are `<img>`
+        // elements rather than queries, so what goes stale is the catalogue.
+        invalidate.catalogue();
       },
     },
   });
@@ -217,16 +221,17 @@ export function useCoverBackfill() {
  * `confirm=true`, and the page asks before sending it.
  */
 export function useBackup() {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
 
   const restore = useRestoreBackup({
     mutation: {
       onSuccess: () => {
-        // Every book, account, note and loan has just been replaced. Nothing
-        // in the cache survives that, so all of it goes.
-        void queryClient.invalidateQueries();
+        // The other write that earns the whole cache, and the clearer of the
+        // two: every book, account, note, loan and setting has just been
+        // replaced, including the row behind the signed-in member.
+        invalidate.everything();
       },
     },
   });

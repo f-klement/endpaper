@@ -6,10 +6,12 @@ break: private books never leave, a failed delivery retries, and the log
 carries the host rather than the URL.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -329,6 +331,107 @@ class TestRunDigest:
         logged = caplog.text
         assert "hooks.example.org" in logged
         assert "abcdef" not in logged
+
+
+class TestTheReplyIsNeverRead:
+    """The digest is a send, and a receiver's answer is not data this app wants.
+
+    Two defects, both on an **hourly ticker with no member action involved**, so
+    a hostile or broken receiver gets a scheduled attempt at the pod rather than
+    a one-off.
+    """
+
+    async def test_the_body_of_the_reply_is_not_buffered(self, configured, lend):
+        """`client.post` reads the whole reply; `raise_for_status` needs none of it.
+
+        A reply whose body raises on the second chunk, so reading it is the only
+        thing that can fail. `client.post` buffers and the `RuntimeError`
+        escapes; streaming and never reading finishes cleanly. Asserting on
+        respx's `is_stream_consumed` instead does not work: httpx closes the
+        stream on the way out of the context manager either way.
+        """
+        lend()
+
+        async def explodes():
+            yield b"x"
+            raise RuntimeError("the reply was read")
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.post(HOOK).mock(return_value=httpx.Response(200, stream=explodes()))
+            result = await notifications.run_digest(configured)
+
+        assert result["sent"] is True
+
+    async def test_a_receiver_that_never_answers_does_not_stop_the_ticker(
+        self, configured, lend, monkeypatch
+    ):
+        """httpx's timeout is per operation, so it does not bound this at all.
+
+        Measured on httpx 0.28.1: twenty bytes trickled at 0.9s apiece completed
+        in 18.0s under a 1.0s timeout. `post_digest` therefore wraps the whole
+        request in `asyncio.timeout`, and `run_digest` catches the `TimeoutError`
+        that raises, because an uncaught one 500s the endpoint and kills the
+        hourly run.
+        """
+        monkeypatch.setattr(notifications, "TIMEOUT_SECONDS", 0.05)
+        lend()
+
+        async def never() -> None:
+            await asyncio.sleep(30)
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.post(HOOK).mock(side_effect=lambda request: never())
+            started = time.monotonic()
+            result = await notifications.run_digest(configured)
+            spent = time.monotonic() - started
+
+        assert result["sent"] is False
+        assert result["reason"] is OverdueNotifyReason.UNREACHABLE
+        assert spent < 5.0
+
+    async def test_a_redirect_naming_an_unusable_host_is_not_a_500(
+        self, configured, lend
+    ):
+        """Redirects are not followed, and httpx still builds the next request.
+
+        `_build_redirect_request` reads `URL.host`, which calls `idna.decode`,
+        so a receiver answering 302 with `location: http://xn--a.gov/x` raised
+        `idna.IDNAError` out of `client.stream`. That is a `UnicodeError` and
+        not an `httpx.HTTPError`, so it escaped this handler and 500ed
+        `POST /api/loans/overdue/notify` on a webhook nobody here controls.
+        """
+        loan = lend()
+        with respx.mock(assert_all_called=False) as mock:
+            mock.post(HOOK).mock(
+                return_value=httpx.Response(
+                    302, headers={"location": "http://xn--a.gov/x"}
+                )
+            )
+            result = await notifications.run_digest(configured)
+
+        assert result["sent"] is False
+        assert result["reason"] is OverdueNotifyReason.UNREACHABLE
+        configured.refresh(loan)
+        assert loan.notified_at is None
+
+    async def test_the_loans_are_left_to_retry_after_a_timeout(self, configured, lend):
+        """A digest that timed out did not arrive, so nothing may be stamped."""
+        loan = lend()
+        monkey = notifications.TIMEOUT_SECONDS
+        try:
+            notifications.TIMEOUT_SECONDS = 0.05
+
+            async def never() -> None:
+                await asyncio.sleep(30)
+
+            with respx.mock(assert_all_called=False) as mock:
+                mock.post(HOOK).mock(side_effect=lambda request: never())
+                await notifications.run_digest(configured)
+        finally:
+            notifications.TIMEOUT_SECONDS = monkey
+
+        configured.refresh(loan)
+        assert loan.notified_at is None
 
 
 class TestReminderDays:

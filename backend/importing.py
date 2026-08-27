@@ -54,7 +54,8 @@ from sqlalchemy.orm import Session
 
 import csv_import
 from enums import OwnershipStatus, ReadStatus, TagCategory
-from models import Book, Note, Tag, UserBook
+from models import Book, Note, Tag
+from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.tag import MAX_TAG_NAME
 from shelf import Shelf, whole_table_for_uniqueness
@@ -106,7 +107,7 @@ class _CatalogueIndex:
     by_isbn: dict[str, int]
     by_title: dict[str, int]
     taken_isbns: set[str]
-    statuses: dict[int, UserBook]
+    statuses: Records
     notes: set[int]
 
     @classmethod
@@ -138,10 +139,10 @@ class _CatalogueIndex:
                     Book.isbn.isnot(None)
                 )
             },
-            statuses={
-                row.book_id: row
-                for row in db.query(UserBook).filter(UserBook.user_id == user_id)
-            },
+            # The Member's whole reading record rather than the matched Books':
+            # which Books a 5,000 row file will match is not known until it has
+            # been walked, and per row would be one SELECT per line.
+            statuses=Reading.by(db, user_id).everything(),
             notes={
                 book_id
                 for (book_id,) in db.query(Note.book_id).filter(Note.user_id == user_id)
@@ -439,15 +440,19 @@ class Import:
             # should not leave an "unread" marker on every Book it touched.
             return False
 
-        existing = index.statuses.get(book_id)
+        # **`status_of`, not `existing.status`.** A file carrying two rows for
+        # one Book (a rating on the first, a status on the second) leaves the
+        # first row's `open()` unflushed, and `find()` answers the second from
+        # the identity map, so nothing flushes in between: `status` is still
+        # None and `ReadStatus(None)` raises, taking the whole import down with
+        # it. Read before `open()`, because opening is what creates that row.
+        had_a_record = index.statuses.get(book_id) is not None
+        current = index.statuses.status_of(book_id)
+        existing = index.statuses.open(book_id)
 
-        if existing is None:
-            existing = UserBook(user_id=self._member_id, book_id=book_id)
-            self._db.add(existing)
-            index.statuses[book_id] = existing
-            changed = True
-        else:
-            changed = row.status is not None and ReadStatus(existing.status) is not row.status
+        # A Book with no record is changed by getting one. One that had a
+        # record changes only if this row names a different status.
+        changed = not had_a_record or (row.status is not None and current is not row.status)
 
         if row.status is not None:
             existing.status = row.status

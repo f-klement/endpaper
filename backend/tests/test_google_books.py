@@ -9,6 +9,7 @@ import httpx
 import pytest
 import respx
 
+import fetch
 from google_books import (
     GoogleBooksError,
     _series_from_title,
@@ -143,6 +144,23 @@ class TestErrors:
     async def test_any_other_failure_is_generic(self, google):
         google.get(url__startswith=VOLUMES).mock(return_value=httpx.Response(500))
         with pytest.raises(GoogleBooksError, match="not responding"):
+            await lookup_by_isbn("9780441013593", "key")
+
+    async def test_an_enormous_volume_body_is_refused_at_the_cap(
+        self, google, monkeypatch
+    ):
+        """Google is trusted for records and not for byte counts.
+
+        `_request` used to hand the whole body to `.json()` whichever size it
+        was. Both callers in `metadata.py` catch `httpx.HTTPError`, which is
+        what `fetch.ResponseTooLarge` is, so this degrades to "Google Books is
+        unavailable" rather than filling a 512Mi pod.
+        """
+        monkeypatch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
+        google.get(url__startswith=VOLUMES).mock(
+            return_value=httpx.Response(200, content=b'{"items":[' + b" " * 4096 + b"]}")
+        )
+        with pytest.raises(httpx.HTTPError):
             await lookup_by_isbn("9780441013593", "key")
 
 

@@ -58,6 +58,28 @@ both rather than letting either pass quietly. `backup.py` needs naming most, bec
 builds its query from a loop variable and no rule reading the arguments to `query()` can
 see it at all.
 
+### A reading record is private in a second, separate way
+
+A book being visible says nothing about whose reading of it the caller may see. Two members
+reading the same public copy is the ordinary case here, and the status, the rating and both
+dates in `user_books` are one person's. That is a different rule from the visibility
+predicate, not a consequence of it, so it has its own owner: `backend/reading.py`.
+
+Every query there filters on `user_id`, applied by construction. A `Reading` is built from
+a member id (`Reading.by(db, member_id)`) and no method on it takes a different one, so
+there is no call site that can forget the filter. Two module functions read across members
+and both say why in their own docstring: `discussers()`, because `wants_to_discuss` is the
+one column on that table meant to be read by other people, and `resolve_merge()`, because a
+book merge has to carry everybody's reading history onto the survivor or the rows are
+cascade deleted with the losing book.
+
+`backend/tests/test_reading.py::TestReadingIsTheOnlyWayIn` holds it the same way: only
+`reading.py`, `shelf.py`, `backup.py` and `models.py` may import `UserBook`, and the two
+ways past a member are counted by call site rather than by module, so a second call in a
+module already on the list cannot appear quietly. That import check is a proxy for a query
+over the table and its blind spots are listed in the file's docstring, the sharpest being
+that a lazy read of the `book.user_books` relationship is invisible to it.
+
 ## Authentication
 
 Stateless JWT, HS256, seven-day expiry. There is no refresh token and no server-side
@@ -333,6 +355,76 @@ different questions with different answers.
 `POST /api/books/covers/backfill` is scoped to the books the caller can see. It is not
 admin-only, because `visible_to()` has no admin bypass and an admin-only backfill could
 therefore never repair another member's private books. It is rate limited instead.
+
+## Catalogue requests
+
+Six third party catalogues are asked for records: Open Library, the DNB, K10plus, the BnF,
+the Library of Congress and Google Books. `backend/fetch.py` is the only place a client for
+them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass over the
+tree, because the defect that produced the module was ten hand built clients that agreed on
+the timeout and agreed on nothing else.
+
+**There is no host allowlist here, and that is the difference from a cover.** A cover URL is
+member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
+per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
+cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
+mean adding six catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+generated from: the browser policy would be widened to pay for a fetch policy.
+
+**Redirects are walked here, and only to the same host.** Measured live with redirects off,
+Open Library is the only source that redirects at all, once, and to its own host. So
+following a redirect **off** host was never something a source needed, and it was the whole
+of the exposure: a compromised catalogue, or one substituted on the wire, could otherwise
+send this server to a host of its choosing. `fetch.get` therefore sets
+`follow_redirects=False` and walks hops itself, matching scheme, host and port with the
+implicit 443 and 80 filled in, at most `MAX_REDIRECTS` of them. Anything else raises
+`RedirectedOffHost`.
+
+That matters most at the Library of Congress, which has no TLS endpoint, so an on path
+attacker there could answer for it: `docs/decisions.md`, "The Library of Congress is fetched
+over plaintext HTTP, knowingly". Substituting a record is still open to such an attacker;
+turning one request into a request against an arbitrary internal address is not.
+
+**A `Location` naming an unusable host is refused the same way**, and it is worth knowing
+why it needed separate handling. httpx builds the redirect request inside `send()` **even
+with `follow_redirects=False`**, to populate `response.next_request`, so `idna.decode` runs
+on the header value before this module sees the response and the hop check never runs.
+`http://xn--a.gov/x` raises `IDNAError`, which is a `UnicodeError` and therefore a
+`ValueError` and **not** an `httpx.HTTPError`, so it escaped the handler six of the ten call
+sites use and took a whole search down with a 500 instead of dropping one source. It is
+converted to `RedirectedOffHost` at the boundary.
+
+**The response body is bounded whichever host answers**, which is the half that does not
+depend on trusting anybody. `fetch.MAX_RESPONSE_BYTES` is 2 MiB and **the count is over raw
+wire bytes**: compression is never requested, and a `content-encoding` other than `identity`
+is refused on the header.
+
+**Counting decoded bytes instead does not work, and the first version of this module did
+exactly that.** `aiter_bytes()` hands the decoder a whole raw chunk before yielding
+anything, so the decompressed allocation happens *before* the running total is compared to
+the limit. Measured: **65,250 wire bytes reached 67,108,864 counted and 148.3 MB allocated**,
+and across the six sources `metadata.search` asks at once, 463.8 MB peak in a pod limited to
+512Mi. The cap was advertised at 1 MB throughout. Reading `aiter_raw()` under
+`accept-encoding: identity` brings the same payload to 0.1 MB.
+
+Measured live across seven worst case queries at each source's record ceiling, the largest
+honest body was K10plus `pica.all=geschichte deutschland` at 687,481 bytes, so the cap sits
+3.05x over it. Parsing retains a measured 15.28x the wire bytes, giving a worst case of
+about 192 MB against 512Mi, which a test asserts. The margin is deliberately generous rather
+than tight: the same quantity measured 587,810 bytes three days earlier, so the tail is being
+sampled and not bounded.
+
+Going over raises `fetch.ResponseTooLarge`, which is an `httpx.HTTPError`, so it lands in
+the handler every caller already has for a timeout: that source is unavailable and the other
+five answer. `metadata._parsed` is the other half of the same bound, refusing a doctype so
+that an honest looking body cannot expand past the cap after it has been let through.
+
+**The whole request is bounded in time, not each read.** `TIMEOUT_SECONDS` is a budget for
+one call including its redirects and its body, enforced by an `asyncio.timeout` around the
+whole walk. A per read timeout bounds nothing useful: measured, a body trickled 20 bytes at a
+time under a 1.0 second read timeout completed in **18.0 seconds**, and at the shipped
+settings that is roughly 109 days of held request. The same trickle now raises
+`DeadlineExceeded` at 1.001 seconds.
 
 ## Response headers
 

@@ -13,7 +13,7 @@ code. It exists because the same review that produced two new seams also propose
 line count. A deep module has a small door and a lot of room behind it. A shallow one costs
 a reader an import and a name and gives back a line they could have written.
 
-Measured over the three this ADR names, plus the two the refactor added:
+Measured over the three this ADR names, plus the two the refactor added and the one added after it:
 
 | Module | Lines | Public surface | Private |
 |---|---|---|---|
@@ -22,6 +22,16 @@ Measured over the three this ADR names, plus the two the refactor added:
 | `dependencies.py` | 211 | 5 functions, 1 class | 1 |
 | `shelf.py` | 533 | 3 functions, 3 classes | 0 |
 | `authorship.py` | 382 | 2 classes | 0 |
+| `reading.py` | 575 | 2 functions, 2 classes | 3 |
+
+`reading.py` is the fourth concept found the same way, added here rather than left to
+the next reviewer to re-derive. Counted 2026-08-27: 575 lines behind two classes and two
+functions. Its depth is what a caller stops knowing. Before it, five sites in
+`routers/books.py` alone spelled the same get-or-create by hand, and three rules had no
+owner: absence of a row means unread, a reading record is private to its member, and the
+reading dates are derived from the status transition. It takes the same shape as the other
+two the refactor added: two named functions read past a member rather than one general
+escape hatch.
 
 `metadata.py` is the clearest case and the one most often mistaken for a problem: **3,217
 lines behind five public functions, and one importer.** Nothing outside it knows that a MARC
@@ -53,10 +63,20 @@ knowing something.
 
 ## What this rules out
 
-Splitting `routers/books.py` by resource. Measured after both refactors: 3,144 lines, 47
-routes, 33 private helpers, and only **7 of those 33 used by more than one section**. The
-coupling is low enough that a split is mechanically easy, which is exactly why it is
-tempting. It is refused because nothing becomes deeper: the same 47 handlers would do the
+Splitting `routers/books.py` by resource. Measured at this ADR's own commit (`a1a2a1e`):
+3,171 lines, 53 routes, 33 private helpers, and only **7 of those 33 used by more than one
+section**. Re-measured 2026-08-27, after `reading.py` took the reading record out of it:
+**3,030 lines, 53 routes, 32 private helpers**. The line and helper counts moved and the
+argument did not, because it rests on the route count and on helper coupling rather than on
+size.
+
+This paragraph first said 3,144 lines and 47 routes. Both were wrong when it was written:
+`grep -cE '^@router\.[a-z]+'` gives 53 at that same commit, and `wc -l` gives 3,171.
+Corrected rather than carried, on the standing rule that a stated number says what it was
+measured against.
+
+The coupling is low enough that a split is mechanically easy, which is exactly why it is
+tempting. It is refused because nothing becomes deeper: the same 53 handlers would do the
 same work in eight files, no caller would stop knowing anything, and the public surface would
 grow by seven helpers that are private today.
 
@@ -67,9 +87,16 @@ comments in the generated client. Making handlers thin is about code, not about 
 same session that added these two modules stripped 882 and 655 characters of served
 description from two routes and had to put it back.
 
-**What is worth extracting from that file is a concept, not a resource.** The two that were
-found this way both paid: the many-Book query and author identity. One candidate remains and
-is on the tracker rather than in this ADR, because it is work rather than a decision.
+**What is worth extracting from that file is a concept, not a resource.** Three were found
+this way and all three paid: the many-Book query, author identity, and the reading record.
+
+The candidate this section used to hand to the tracker was the book-duplicate concept,
+issue #74. It is **closed as refused**, and its closing comment points back here for the
+reasoning, so this document is the record of that refusal rather than a pointer to pending
+work. The argument is the one above: `_duplicate_key`, `_one_per_copy_group` and the merge
+are two thin handlers over helpers no other section calls, so moving them publishes three
+names and lets no caller stop knowing anything. Somebody proposing it again should start
+here.
 
 ## A worked example of the test, in both directions
 

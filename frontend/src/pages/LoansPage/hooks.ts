@@ -8,6 +8,7 @@ import {
   useReturnLoan,
 } from "../../api/generated/endpoints/loans/loans";
 import type { LoanOut } from "../../api/generated/model";
+import { useInvalidate } from "../../api/invalidate";
 
 /** Rows per request. The list is read top-down, so a page is generous. */
 export const PAGE_SIZE = 50;
@@ -34,6 +35,7 @@ export function useLoans(): UseLoansResult {
   const [showAll, setShowAll] = useState(false);
   const [overdueOnly, setOverdueOnly] = useState(false);
   const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
 
   const params = {
     active_only: !showAll,
@@ -57,7 +59,9 @@ export function useLoans(): UseLoansResult {
         void queryClient.invalidateQueries({
           queryKey: getListLoansQueryKey(),
         });
-        void queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+        // `invalidate.listings()` rather than `["/api/books"]`: the grid is an
+        // infinite query and a hand-written key does not match it.
+        invalidate.listings();
       },
     },
   });

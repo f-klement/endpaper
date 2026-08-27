@@ -47,6 +47,13 @@ logger = logging.getLogger("endpaper.notifications")
 #: The receiver is somebody's own script or bridge, so it is allowed to be slow,
 #: but not allowed to hold this process open. The ticker is one task; a hung
 #: request would stop every later run, not only this one.
+#:
+#: **Passed to httpx *and* wrapped in `asyncio.timeout`, because httpx's is per
+#: operation.** A receiver dribbling its status line one byte at a time restarts
+#: httpx's read clock on every byte and holds the ticker open indefinitely,
+#: which is the exact thing the paragraph above says this constant prevents.
+#: Measured on httpx 0.28.1, twenty trickled bytes took 18.0s under a 1.0s
+#: timeout. `fetch.TIMEOUT_SECONDS` carries the same note for the same reason.
 TIMEOUT_SECONDS = 10.0
 
 #: How often the background task looks. Hourly rather than daily, so a
@@ -224,18 +231,27 @@ async def post_digest(url: str, body: bytes, secret: str) -> None:
     **Redirects are not followed.** A 302 from the configured host to somewhere
     else would send the library's book titles to a destination nobody
     approved, and this is the one request in the app whose payload is
-    catalogue content going somewhere unauthenticated. The metadata lookups
-    follow redirects because they are asking rather than telling.
+    catalogue content going somewhere unauthenticated. `fetch.get` refuses a
+    redirect that leaves the host; this refuses one at all, because there is no
+    hop a webhook needs and the payload is going out rather than coming in.
+
+    **The reply is never read**, which is why this streams. `client.post`
+    buffers the whole body, and the only thing done with it is
+    `raise_for_status`, which reads the status line. A receiver answering a
+    hostile reply would otherwise fill the pod on the hourly ticker, with no
+    member action involved at all. Streaming and not reading costs nothing: the
+    status is on the response before the body is touched.
     """
     headers = {"Content-Type": "application/json"}
     if secret:
         headers[SIGNATURE_HEADER] = sign(body, secret)
 
-    async with httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False
-    ) as client:
-        response = await client.post(url, content=body, headers=headers)
-    response.raise_for_status()
+    async with (
+        asyncio.timeout(TIMEOUT_SECONDS),
+        httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=False) as client,
+        client.stream("POST", url, content=body, headers=headers) as response,
+    ):
+        response.raise_for_status()
 
 
 def _outcome(
@@ -291,7 +307,20 @@ async def run_digest(db: Session) -> dict[str, Any]:
 
     try:
         await post_digest(url, body, secret)
-    except (httpx.HTTPError, httpx.InvalidURL) as error:
+    except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, UnicodeError) as error:
+        # `UnicodeError` because a receiver answering 302 with a malformed host
+        # in `Location` raises `idna.IDNAError` from inside `client.stream`,
+        # even though redirects are not followed: httpx builds the redirect
+        # request anyway to populate `response.next_request`. Without it a
+        # webhook nobody controls 500s `POST /api/loans/overdue/notify`.
+        # `fetch._walk_hops` carries the full trace of that path.
+        #
+        # `TimeoutError` because `post_digest` bounds the whole request with
+        # `asyncio.timeout`, and that raises the builtin rather than
+        # `httpx.TimeoutException`. Without it a slow receiver 500s
+        # `POST /api/loans/overdue/notify` and stops the hourly ticker, which is
+        # a worse outcome than the hang it replaced.
+        #
         # The host, never the URL. See `_host`.
         logger.warning(
             "Overdue digest to %s failed, leaving %d loans to retry: %s",

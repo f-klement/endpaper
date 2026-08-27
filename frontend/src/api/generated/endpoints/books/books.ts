@@ -5247,8 +5247,9 @@ export const getAddProgressUrl = (bookId: number) => {
  * Saying where you are in a book is the same claim the READING button makes,
  * arrived at from the other direction, so it promotes an unstarted book
  * rather than leaving a member with a page number and a status of "unread".
- * The transition itself goes through `_stamp_reading_dates`, which owns those
- * rules; duplicating them here is how the two would drift.
+ * The promotion itself goes through `Reading.begin`, which owns that rule
+ * and the date stamping under it; duplicating them here is how the two would
+ * drift.
  *
  * **It never sets READ, whatever the page number.** `page_count` comes from a
  * metadata provider and is off by one often enough that the last page is not

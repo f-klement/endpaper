@@ -13,8 +13,9 @@ book it very likely has, so discarding a cover on that would lose it to a blip.
 """
 
 import ast
+import gzip
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 
 import httpx
 import pytest
@@ -451,6 +452,36 @@ class TestOutcomesAreCounted:
         assert covers.outcome_counts()[covers.CoverOutcome.NO_CANDIDATE.value] == 1
 
 
+class _Raw(httpx.SyncByteStream):
+    """Bytes handed over exactly as given, whatever the headers claim.
+
+    `httpx.Response(content=...)` decodes eagerly against `content-encoding`, so
+    a response whose header **lies** cannot be built that way: it raises
+    `DecodingError` in the test rather than in the code under test. A stream is
+    not read at construction.
+    """
+
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    def __iter__(self):
+        yield self._payload
+
+
+class _Trickle(httpx.SyncByteStream):
+    """A body that never ends and never idles long enough to time out.
+
+    Every chunk arrives inside `covers.TIMEOUT_SECONDS`, so httpx is satisfied
+    on every read and the connection stays open for as long as the sender wants.
+    That is the shape a per-operation timeout cannot see.
+    """
+
+    def __iter__(self):
+        for _ in range(1000):
+            sleep(0.01)
+            yield b"\xff\xd8\xff"
+
+
 class TestDownloading:
     """A hotlinked cover depends on the image service, the URL not rotting, the
     pod's egress, every reader's browser and the CSP. Four of the five are
@@ -500,6 +531,110 @@ class TestDownloading:
                 side_effect=httpx.ConnectError("no route")
             )
             assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_compression_is_not_requested(self):
+        """`iter_raw` alone would hand `sniff_image_extension` a gzip header.
+
+        The pair is the fix. `iter_bytes` decoded a whole chunk before the cap
+        could look at it, measured on httpx 0.28.1 at 67,108,864 bytes counted
+        against an 8,192 byte limit; `iter_raw` never expands, and `identity`
+        is what keeps the raw bytes and the image the same thing. It costs
+        nothing: JPEG, PNG and WebP are already compressed.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=image())
+            covers.download(covers.open_library_url(ENGLISH))
+
+        assert route.calls.last.request.headers["accept-encoding"] == "identity"
+
+    def test_a_body_carrying_an_encoding_is_not_expanded_to_get_past_the_cap(self):
+        """Raw bytes, so what the cap counts is what arrives.
+
+        A 32 MiB image gzipped is a few KB on the wire. Counting the decoded
+        stream would allocate all of it before comparing; counting raw lets it
+        through as a few KB and then fails the magic byte sniff, which is a
+        refusal that costs nothing.
+        """
+        payload = b"\xff\xd8\xff" + b"\x00" * (32 * 1024 * 1024)
+        compressed = gzip.compress(payload)
+        assert len(compressed) < covers.MAX_COVER_BYTES
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200,
+                    content=compressed,
+                    headers={
+                        "content-type": "image/jpeg",
+                        "content-encoding": "gzip",
+                    },
+                )
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_a_body_labelled_gzip_is_refused_even_when_the_bytes_look_fine(self):
+        """The braces to `identity`'s belt, and the case the sniff cannot catch.
+
+        These bytes are a real JPEG, and the header says gzip. `iter_raw` does
+        not decode, so without this check they sniff as `jpg` and are written to
+        disk as the cover, having never been the thing the server claimed to
+        send. Refusing on the header is what keeps "the raw bytes" and "the
+        image" the same thing.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200,
+                    stream=_Raw(JPEG_BYTES),
+                    headers={
+                        "content-type": "image/jpeg",
+                        "content-encoding": "gzip",
+                    },
+                )
+            )
+            assert covers.download(covers.open_library_url(ENGLISH)) is None
+
+    def test_an_identity_encoding_header_is_what_was_asked_for(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200,
+                    content=JPEG_BYTES,
+                    headers={
+                        "content-type": "image/jpeg",
+                        "content-encoding": "identity",
+                    },
+                )
+            )
+            fetched = covers.download(covers.open_library_url(ENGLISH))
+
+        assert fetched is not None
+        assert fetched[1] == "jpg"
+
+    def test_a_trickled_body_stops_at_the_budget(self):
+        """httpx's timeout is per read, so it does not bound a download at all.
+
+        Measured on httpx 0.28.1, twenty bytes at 0.9s apiece completed in 18.0s
+        under a 1.0s timeout. The deadline was checked between hops and before
+        the read; a service dribbling chunks inside `TIMEOUT_SECONDS` sailed
+        past `INTERACTIVE_BUDGET_SECONDS` with a person waiting on it.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(
+                    200,
+                    stream=_Trickle(),
+                    headers={"content-type": "image/jpeg"},
+                )
+            )
+            started = monotonic()
+            fetched = covers.download(
+                covers.open_library_url(ENGLISH), deadline=monotonic() + 0.2
+            )
+            spent = monotonic() - started
+
+        assert fetched is None
+        assert spent < 3.0
 
 
 class TestStoring:

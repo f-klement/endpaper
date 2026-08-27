@@ -4,7 +4,8 @@ from fastapi import APIRouter
 from sqlalchemy import func
 
 from dependencies import CurrentUser, DbSession
-from models import Book, Collection, ReadingProgress, Tag, User, UserBook, book_tags
+from models import Book, Collection, ReadingProgress, Tag, User, book_tags
+from reading import Reading
 from schemas import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
 from shelf import Shelf
 
@@ -111,19 +112,12 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         .all()
     )
 
-    # Joined out from Book so the privacy predicate still applies: a finished
-    # private book of somebody else's must not appear even as an anonymous count.
-    finished_by_month = (
-        shelf.select(
-            func.strftime("%Y-%m", UserBook.finished_at).label("month"),
-            func.count(UserBook.id).label("count"),
-        )
-        .join(UserBook, UserBook.book_id == Book.id)
-        .filter(UserBook.user_id == current_user.id, UserBook.finished_at.isnot(None))
-        .group_by("month")
-        .order_by("month")
-        .all()
-    )
+    # Both reading figures come from `reading.py`, which owns the `user_books`
+    # table. Each is joined out from Book so the privacy predicate still
+    # applies: a finished private book of somebody else's must not appear even
+    # as an anonymous count, which is why they take the shelf.
+    reading = Reading.by(db, current_user.id)
+    finished_by_month = reading.finished_by_month(shelf)
 
     # Joined out from Book for the privacy predicate, like the aggregation
     # above. Page-unit entries only: a percent cannot be added to a page count.
@@ -146,13 +140,7 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         .all()
     )
 
-    rating_row = (
-        shelf.select(func.avg(UserBook.rating), func.count(UserBook.id))
-        .join(UserBook, UserBook.book_id == Book.id)
-        .filter(UserBook.user_id == current_user.id, UserBook.rating.isnot(None))
-        .one()
-    )
-    average, rated_count = rating_row
+    average, rated_count = reading.rating_summary(shelf)
 
     return StatsOut(
         total=total,

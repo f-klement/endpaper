@@ -1,6 +1,6 @@
 # Frontend test coverage
 
-**1,484 tests**, in 100 files.
+**1,569 tests**, in 104 files. Counted 2026-08-27; the table below sums to it.
 
 No coverage percentage is quoted here, deliberately. `bun run test:coverage` does not work
 on the machine the suites run on: `@vitest/coverage-v8` calls the V8 inspector, which bun
@@ -53,18 +53,21 @@ readers as a side effect.
 
 | File                                  | Tests | Covers                                                      |
 | ------------------------------------- | ----: | ----------------------------------------------------------- |
-| `houseRules.test.ts`                  |    12 | Rules that hold across the whole tree: the generated client behind hooks, retired text tiers, one focus ring, one session writer, stated dark hover states, no dashes, nothing hand-written under `assets/` |
+| `houseRules.test.ts`                  |    15 | Rules that hold across the whole tree: the generated client behind hooks, retired text tiers, one focus ring, one session writer, stated dark hover states, no dashes, nothing hand-written under `assets/`, and that a write names what it made stale rather than dropping the whole cache |
+| `api/invalidate.test.ts`              |    11 | Which cached queries a write drops: the four groups and their inclusion chain, the two outward lookups kept out of it, the grid key a hand-written one misses, and an inventory of every query key the generated client can build |
 | `api/mutator.test.ts`                 |    48 | Token attachment, the Accept header the portal negotiates on, 401 handling, error flattening, downloads, and the counted reload an edge sign-out triggers |
 | `api/query-client.test.ts`            |    16 | Retry policy and cache defaults                             |
 | `app/*`                               |    56 | The session gate, the top bar (incl. the way back from a switched session), the library export, appearance sync, and the portal sign-out that must reload once and then say so |
-| `components/*.test.tsx`               |    57 | The general dumb components, incl. the star rating, the toast, and the collapsible section's disclosure contract |
-| `i18n/index.test.tsx`                 |    34 | Language detection, interpolation, catalogue parity         |
+| `components/*.test.tsx`               |    60 | The general dumb components, incl. the star rating, the toast, and the collapsible section's disclosure contract |
+| `i18n/index.test.tsx`                 |    38 | Language detection, interpolation, catalogue parity         |
 | `lib/isbn.test.ts`                    |    31 | Check digits, ISBN-10 to ISBN-13, normalisation             |
 | `lib/goodreads.test.ts`               |     7 | Search URLs, mirroring the backend's own tests              |
+| `lib/bookFilters.test.ts`             |    42 | The URL round trip, and the guard that the filters this app offers are the ones `backend/shelf.py` accepts |
+| `lib/nameOrder.test.ts`               |     8 | Name lists ordered by collation rather than by case fold, asserted as properties so the fixture is not node's ICU build |
 | `lib/lastLocation.test.ts`            |    10 | Shelf carry-over, clearing, storage refusing to work        |
 | `lib/savedSearches.test.ts`           |    11 | Named views, replace-on-resave, corrupt and refused storage |
 | `lib/libraryView.test.ts`             |     6 | Covers, list or table, remembered locally, and storage refusing to answer |
-| `lib/sectionState.test.ts`            |    14 | Which sections a reader folded away: three states, an id no section answers to, corrupt and refused storage |
+| `lib/sectionState.test.ts`            |    16 | Which sections a reader folded away: three states, an id no section answers to, corrupt and refused storage |
 | `lib/money.test.ts`                   |    10 | Prices as whole cents, a comma separator, refusing a typo   |
 | `pages/hooks.test.ts`                 |    33 | Session state, auth modes, corrupt storage, switching into a test account under proxy, and dropping the cache whenever the identity changes |
 | `pages/types.test.ts`                 |    16 | Tag grouping, the style tables, the lending answers, and the light and dark modes |
@@ -72,10 +75,11 @@ readers as a side effect.
 | `pages/components/BookCard.test.tsx`  |    39 | One book in a grid: status, tags, ownership, the talk-about-it marker, selection, and the fold out |
 | `pages/TrashPage/TrashPage.test.tsx`  |    11 | Restoring without asking, and destroying only after asking  |
 | `pages/components/LocationField.test.tsx` |  5 | Shelf suggestions, and one datalist per instance            |
+| `pages/components/CoverImage.test.tsx` |    8 | One cover: the fallback when there is none and when the fetch fails |
 | `pages/Home/*`                        |   175 | Filters (incl. the collection filter and its unfiled option, and the author a link arrives with), ownership, lending, pagination, selection, the bulk verbs, the table view, and the dense list: what its row holds, its lazy covers, and that a selection still forces the grid |
 | `pages/BookDetail/*`                  |   199 | Status, ratings, series, shelf, the collection this copy is filed in, loans and the never-lent confirmation, the offer to talk about a book, notes, quotes and their page numbers, enrichment, the reading log and its two units, the credit line whose names are links, and the six collapsible groups: their defaults, what stays outside them, and what a reader's own choice overrides |
 | `pages/ScanPage/*`                    |   143 | Scan, typed ISBN, keyless search, prefill, rapid mode, shelf carry-over, and the scan and copy requests checked against the API's own schema |
-| `pages/SettingsPage/*`                |   100 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
+| `pages/SettingsPage/*`                |   140 | Feature toggles, the API key, the Goodreads import, backup and restore, test accounts and switching into one, the overdue webhook and its masked secret, the cover backfill |
 | `pages/AppearancePage/*`              |    40 | The picker: modes, seven palettes, twelve wallpaper tiles, the constructed note, the licences, and previewing on the reader's own books |
 | `pages/LoginPage/LoginPage.test.tsx`  |    24 | Sign-in, registration, the background uploader              |
 | `pages/LoansPage/LoansPage.test.tsx`  |    19 | Listing, returning, due dates and the overdue view          |
@@ -88,7 +92,7 @@ readers as a side effect.
 | `pages/errors/*`                      |    13 | 404, 403, the render-crash boundary, and the session that ended at the proxy |
 | `theme/index.test.tsx`                |    31 | Mode resolution, the palette on the document, more contrast, and a wallpaper turned off |
 | `theme/appearance.test.ts`            |    16 | The per account cache, unknown values, corrupt storage, the front door |
-| `theme/palettes.test.ts`              |    91 | Every palette and mode, measured against the rung contract, with and without more contrast, plus the catalogue and the swatch read |
+| `theme/palettes.test.ts`              |   109 | Every palette and mode, measured against the rung contract, with and without more contrast, plus the catalogue and the swatch read |
 | `theme/patterns.test.ts`              |    43 | The wallpaper engine: the ink budget, the admission rule, the byte cap |
 | `theme/oklab.test.ts`                 |    15 | Lightness, the sRGB composite, and the alpha solve |
 

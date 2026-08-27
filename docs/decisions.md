@@ -969,7 +969,7 @@ unbounded value, take an endpoint down, or reach a column outside this table.
 one-constant change. Nobody has found one. Until then this paragraph is the point: an
 undocumented plaintext source is read as a guarantee it never made.
 
-### Catalogue XML refuses a doctype, and still has no response size cap
+### Catalogue XML refuses a doctype, and the response size cap that was deferred
 
 Two risks were recorded here as one in round 1. **The first is closed.** All six catalogue
 parses go through `metadata._parsed`, which refuses a body carrying `<!DOCTYPE` and raises
@@ -980,18 +980,31 @@ module's memory use not bounded by the response size. It costs nothing measurabl
 DNB and K10plus responses cached 2026-08-24 carry no doctype, nor does a live BnF or Library
 of Congress answer.
 
-**The second is unchanged: nothing caps the body read from any source.** A hostile or
-substituted response is a memory exhaustion in a pod limited to 512Mi, where a 1.8 GB peak
-has already caused an OOMKill once (see the backup upload cap, which exists for the same
-reason from the other direction). Measured 2026-08-24: parsing retains 15.28x the wire
-bytes, so the largest honest page this app asks for peaks around 9 MB.
+**The second is now closed too, and the reason for deferring it was wrong.** It was deferred
+because a wire byte cap "turns six `client.get` calls into streamed reads with their own
+fixtures", which would be a transport change shipped inside a feature round. That cost was
+never paid: respx intercepts `client.stream` exactly as it intercepts `client.get`, and the
+190 existing tests in `test_metadata.py` and `test_google_books.py` passed against streamed
+reads with **zero fixtures changed**. The deferral rested on a cost nobody had measured.
 
-**Still deliberately not fixed, and now for a narrower reason.** The cap has to be on the
-wire bytes rather than the parsed size, which turns six `client.get` calls into streamed
-reads with their own fixtures. That is a transport change, and shipping one inside a feature
-round is how it goes untested. The doctype refusal was taken because it closes its half
-independently, in three lines, with no fixture touched. 1 MB is the right order for the cap
-when somebody sizes it.
+The risk it left open was real: a hostile or substituted response is a memory exhaustion in a
+pod limited to 512Mi, where a 1.8 GB peak has already caused an OOMKill once (see the backup
+upload cap, which exists for the same reason from the other direction). Parsing retains a
+measured 15.28x the wire bytes.
+
+**And "1 MB is the right order" was wrong in two ways**, both found only when somebody built
+it. The cap is 2 MiB, because the largest honest body moved from 587,810 to 687,481 bytes in
+three days as the query sample widened: the tail of a third party catalogue's record sizes is
+being sampled, not bounded, so the margin is deliberately 3.05x rather than tight.
+
+More important, **a cap counted after decoding is not a cap**. `aiter_bytes()` hands the
+decoder a whole raw chunk before yielding, so the decompressed allocation happens before the
+running total is compared to the limit: 65,250 wire bytes counted 67,108,864 and allocated
+148.3 MB, or 463.8 MB across the six sources `metadata.search` asks at once. The first
+implementation of this cap had exactly that shape and would have shipped looking like a
+security improvement. The rule is now "never expand it": `accept-encoding: identity`,
+`aiter_raw()`, and a `content-encoding` we did not ask for refused on the header. Same
+payload, 0.1 MB.
 
 **Moving the DNB to MARC21 made it worth sooner.** An honest page of search results went
 from 51 KB to between 438 and 588 KB, measured over four `WOE=` queries at the 50 record
@@ -4074,6 +4087,83 @@ names, and the loan picker that draws it is choosing an account.
 **Grouping and ordering tags is one call.** `groupTagsByCategory(tags, locale)` sorts before
 it filters, so no caller can get the grouping without the ordering. The categories keep
 `TAG_CATEGORY_ORDER`, which is curated rather than alphabetical.
+
+## The reading record has one owner, and it is a second privacy rule
+
+`backend/reading.py` owns every read and write of `user_books`. The door is
+`Reading.by(db, member_id)`, deliberately shaped like `Shelf.seen_by(db, viewer_id)`.
+
+**It exists because this is a different rule from `visible_to()`, not the same one
+applied twice.** `visible_to()` decides who may see a **book**. A reading record is
+private to its member separately: a book being visible to you does not make my rating or
+my status on it yours to read. Before this, eight call sites each spelled
+`user_id == current_user.id` inline, and a site that forgot would have leaked with a 200.
+
+**`Records` is a loaded working set that creates on demand.** That is what lets a page, a
+bulk write and a 5,000 row import each cost one SELECT: measured, `books_to_out` issues a
+flat **7 statements** at page sizes 1, 25 and 100.
+
+**Two named functions read past a member, and they are two rules rather than one hatch.**
+`discussers` is a read of the one column that exists to be read by other people;
+`resolve_merge` is a write with no viewer at all, on a catalogue operation. Different
+direction, different reason, different failure if removed: a blank marker on the grid,
+against silent data loss for third parties. Same distinction `test_shelf.py` insists on.
+
+**`shelf.py` is on the import allowlist, and the boundary is a rule rather than a
+favour.** Its three `user_books` joins narrow a listing of Books, which house rule 2
+owns. The reason the list will not grow is that the next module wanting `UserBook` has to
+argue it is narrowing Books, and that argument only works from `shelf.py`.
+
+**Rating a book and offering to discuss it deliberately stamp no dates.** Two of the five
+creation sites never called `_stamp_reading_dates`, which looked like an omission and is
+not: rating is not a claim about having finished just now, and offering to discuss says
+nothing about having read it. Both handler docstrings said so, two tests pinned it, and
+the live database held 0 rows with `status=read` and no `finished_at` and 0 with
+`status=reading` and no `started_at`. The catalogue is too young to have exercised the
+rating only path, so the data rules out an inconsistent row rather than confirming the
+rule.
+
+**Concurrent get-or-create is named, not fixed.** Two requests that both find no row both
+insert, and the second raises on the unique index. It was present at all five sites
+before and is now in one. The fix is a savepoint plus a re-read, which changes behaviour
+under a load nobody has reported and cannot be pinned without driving two sessions at one
+row, so it fails the house test for an unprompted fix. Being in one place is what makes
+it cheap later.
+
+## A write names what it made stale
+
+`frontend/src/api/invalidate.ts` holds four groups, smallest first: `listings()`,
+`book(id)`, `catalogue()`, `everything()`. Measured inclusion chain, against the test's
+own key set: **2 ⊂ 6 ⊂ 15 ⊂ 34**, so "smallest first" is an ordering rather than a
+decoration.
+
+**The seam was opened for eleven keyless invalidations and the real defect was the
+opposite.** Four sites hand wrote `queryKey: ["/api/books"]`, and the grid is
+`useListBooksInfinite` whose key is `["infinite", "/api/books", params]`. React Query
+matches element by element, so `"/api/books"` was compared against `"infinite"` and never
+matched. **What bounded it was not a keyless call elsewhere**: `AuthorsPage.refresh` has
+three keyed invalidations and no keyless call in either flow. Home is a separate route, so
+the grid unmounts and the client default `staleTime` at `src/api/query-client.ts` refetches
+it on remount. The observable window was a return to Home within thirty seconds of the
+write.
+
+**Not one group per write.** That is combinatorial, and it is what produced eleven
+independent decisions in the first place.
+
+**`catalogue()` is defined by exclusion**, which makes the exclusion the fragile half, so
+`tests/api/invalidate.test.ts` finds every generated endpoint module with
+`import.meta.glob` and asserts its `get*QueryKey` set equals a hand named map. A hand
+written module list was tried first and rejected on measurement: `git log --diff-filter=A`
+shows five of the eleven modules arrived after the initial commit, so the one way
+endpoints actually appear here is the way such a list cannot see.
+
+**Two sites stay wide and carry the reason at the call site.** A duplicate merge moves
+notes, loans, quotes and statuses between books and the response names the survivor but
+not which children moved; a backup restore replaces every row, including the one behind
+the signed in member.
+
+**A keyless `invalidateQueries()` is now confined to that module** by
+`houseRules.test.ts`. Its blind spot is stated in the test: it counts a spelling.
 
 ## Tooling
 

@@ -6081,7 +6081,7 @@
         ]
       },
       "post": {
-        "description": "Record where the caller has got to.\n\nSaying where you are in a book is the same claim the READING button makes,\narrived at from the other direction, so it promotes an unstarted book\nrather than leaving a member with a page number and a status of \"unread\".\nThe transition itself goes through `_stamp_reading_dates`, which owns those\nrules; duplicating them here is how the two would drift.\n\n**It never sets READ, whatever the page number.** `page_count` comes from a\nmetadata provider and is off by one often enough that the last page is not\na reliable finish signal, and finishing already has an explicit control.",
+        "description": "Record where the caller has got to.\n\nSaying where you are in a book is the same claim the READING button makes,\narrived at from the other direction, so it promotes an unstarted book\nrather than leaving a member with a page number and a status of \"unread\".\nThe promotion itself goes through `Reading.begin`, which owns that rule\nand the date stamping under it; duplicating them here is how the two would\ndrift.\n\n**It never sets READ, whatever the page number.** `page_count` comes from a\nmetadata provider and is off by one often enough that the last page is not\na reliable finish signal, and finishing already has an explicit control.",
         "operationId": "add_progress",
         "parameters": [
           {

@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+**Fixed: a catalogue could stop a search working, or use this server to reach somewhere
+else.** Records are fetched from six third party catalogues. A reply that was much larger
+than any real record could exhaust the server's memory, one that redirected could send it to
+an address of the sender's choosing, and one that redirected to a malformed address took the
+whole search down instead of dropping that one source. Replies are now capped, redirects are
+followed only back to the same catalogue, and a bad one costs that catalogue its own results
+and nothing else. The reminder webhook no longer reads the reply it is sent.
+
+**Fixed: a spreadsheet holding two rows for the same book could abandon the whole
+import.** One row carrying a rating and another carrying a reading status, for a book
+the library already had, ended the import with nothing written and no explanation. It
+now applies both rows.
+
+**Fixed: some changes did not reach the library grid until you left the page and came
+back.** Merging two authors, returning a loan, and several edits made from a book's own
+page updated everything except the grid itself, because the instruction to refresh it
+named the wrong thing. The grid caught up on its own within thirty seconds of leaving
+and returning, which is why this looked like slowness rather than a fault.
+
+**Changed: editing a book no longer reloads everything else on screen.** A write used
+to throw away the whole cache, so a page showing ten things fetched all ten again. It
+now refreshes what the change actually affected: ten requests down to five for a tag
+change, and to two for an ordinary edit. Confirming a book you found by searching no
+longer repeats the search, which on the metadata sources is a billed request.
+
+**Internal: one module now owns the reading record.** `backend/reading.py` is the only
+place that reads or writes what you have read, what you are reading, your rating and
+your dates. Those rules were spelled out at eight call sites, each carrying the same
+rule that a reading record is yours and not the library's. Nothing about what anybody
+sees has changed.
+
 **Changed: two shelves whose names differ only in case are now one shelf, and an
 upgrade merges any pair a library already has.** A library that had both "Ästhetik"
 and "ästhetik" had two shelves nothing downstream could tell apart, because the rule

@@ -33,6 +33,7 @@ import httpx
 import pytest
 import respx
 
+import fetch
 import metadata
 from enums import ClassificationScheme
 from metadata import (
@@ -880,6 +881,86 @@ class TestCatalogueXml:
         assert _parsed(DNB_RECORD).tag.endswith("searchRetrieveResponse")
 
 
+class TestTheResponseSizeCap:
+    """The other half of the doctype refusal, from the wire side.
+
+    The doctype guard bounds what a body costs to parse. This bounds the body.
+    Neither substitutes for the other, and until 2026-08-26 only the first
+    existed: a catalogue answering with an endless stream filled a pod limited
+    to 512Mi, where a 1.8 GB peak has already caused an OOMKill once.
+
+    What these check is not that the cap works, which `tests/test_fetch.py`
+    does. It is that going over lands in the handler a timeout already lands
+    in, at the call sites, rather than escaping as a 500.
+    """
+
+    #: Small, because the cap is patched down rather than the body built up.
+    #: `fetch.get` resolves `MAX_RESPONSE_BYTES` at call time for exactly this
+    #: reason; while it was a default argument these tests each carried a 1.1 MB
+    #: module level string to reach it.
+    ENORMOUS = "<x>" + "y" * 4096 + "</x>"
+
+    @pytest.fixture(autouse=True)
+    def _tiny_cap(self, monkeypatch):
+        monkeypatch.setattr(fetch, "MAX_RESPONSE_BYTES", 1024)
+
+    @pytest.mark.asyncio
+    async def test_an_enormous_catalogue_answer_is_unavailable_not_a_500(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_EMPTY)
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(self.ENORMOUS))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(GERMAN_ISBN)
+
+        assert ("dnb", Outcome.UNAVAILABLE) in result.attempts
+
+    @pytest.mark.asyncio
+    async def test_one_enormous_source_does_not_cost_the_others(self):
+        """The margin over the largest honest page is 1.52x, so a cap set a
+        little low has to be survivable. It is: the other sources answer."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(self.ENORMOUS))
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(K10PLUS_RECORD)
+            )
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            result = await lookup(ENGLISH_ISBN)
+
+        assert result.source == "k10plus"
+
+    @pytest.mark.asyncio
+    async def test_an_enormous_search_answer_costs_that_source_its_rows(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(self.ENORMOUS)
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+                return_value=httpx.Response(500)
+            )
+            mock.get(url__startswith="http://lx2.loc.gov").mock(
+                return_value=httpx.Response(500)
+            )
+            rows = await metadata.search("anything at all")
+
+        assert rows == []
+
+
 class TestMarcSubfields:
     """What a MARC record carries that a Dublin Core crosswalk had cleaned up."""
 
@@ -1650,6 +1731,48 @@ class TestRanking:
     def test_a_row_matching_nothing_scores_zero(self):
         unrelated = self.match(title="Something else", author="Nobody")
         assert metadata._relevance(unrelated, ["dune"], None)[0] == 0
+
+
+class TestAHostileSourceCostsItsOwnRows:
+    """One source misbehaving must not take `GET /api/books/search` down.
+
+    Six are asked at once through `_within_deadline`, whose `task.result()`
+    re-raises whatever a source raised. Six of the ten call sites catch
+    `(httpx.HTTPError, ElementTree.ParseError)` and nothing else, so anything
+    outside that pair becomes a 500 for the whole search rather than a missing
+    tier.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_redirect_naming_an_unusable_host_is_not_a_500(self):
+        """The one that got through, and it needed no compromised catalogue.
+
+        httpx builds the redirect request inside `send()` even with
+        `follow_redirects=False`, so `URL.host` calls `idna.decode` before the
+        hop guard runs. `idna.IDNAError` is a `UnicodeError`, so
+        `location: http://xn--a.gov/x` came out of `_loc_search` as a bare
+        `ValueError`. Plain ASCII on the wire, and the Library of Congress is
+        the one source reached over plaintext HTTP.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith="https://openlibrary.org/search.json").mock(
+                return_value=httpx.Response(200, json={"docs": []})
+            )
+            mock.get(url__startswith="https://catalogue.bnf.fr").mock(
+                return_value=httpx.Response(500)
+            )
+            loc = mock.get(url__startswith="http://lx2.loc.gov").mock(
+                return_value=httpx.Response(
+                    302, headers={"location": "http://xn--a.gov/x"}
+                )
+            )
+            rows = await metadata.search("anything at all")
+
+        assert loc.called
+        assert rows == []
 
 
 class TestSearchDeadline:

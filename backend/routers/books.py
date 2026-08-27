@@ -56,11 +56,11 @@ from models import (
     ReadingProgress,
     Tag,
     User,
-    UserBook,
     book_tags,
     copy_group_token,
 )
 from ratelimit import cover_backfill_limiter, metadata_limiter
+from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_ROW_ID,
@@ -512,18 +512,10 @@ def export_books(
 ) -> StreamingResponse:
     books = Shelf.seen_by(db, current_user.id).all(Book.title.asc(), load=Loading.EXPORTED)
 
-    # Batch the read statuses rather than querying per book.
-    status_map: dict[int, str] = {}
-    if books:
-        status_map = {
-            user_book.book_id: user_book.status
-            for user_book in db.query(UserBook)
-            .filter(
-                UserBook.user_id == current_user.id,
-                UserBook.book_id.in_([book.id for book in books]),
-            )
-            .all()
-        }
+    # Batched rather than queried per book, and empty costs no statement.
+    # `status_of` is what applies "absence means unread", so the writer below
+    # reads a value for every row rather than a default per cell.
+    statuses = Reading.by(db, current_user.id).of([book.id for book in books])
 
     filename = f"endpaper-export-{date.today().isoformat()}.{format.value}"
 
@@ -551,7 +543,7 @@ def export_books(
                     book.year if book.year is not None else "",
                     _csv_safe(book.description),
                     _csv_safe("; ".join(tag.name for tag in book.tags)),
-                    status_map.get(book.id, ReadStatus.UNREAD),
+                    statuses.status_of(book.id),
                     book.added_at.date().isoformat() if book.added_at else "",
                     _csv_safe(book.added_by.username if book.added_by else ""),
                     book.format or "",
@@ -585,7 +577,7 @@ def export_books(
                         f"Publisher: {book.publisher or ''}",
                         f"Year: {book.year if book.year is not None else ''}",
                         f"Tags: {'; '.join(tag.name for tag in book.tags)}",
-                        f"My Status: {status_map.get(book.id, ReadStatus.UNREAD)}",
+                        f"My Status: {statuses.status_of(book.id)}",
                         f"Date Added: {book.added_at.date().isoformat() if book.added_at else ''}",
                         f"Added By: {book.added_by.username if book.added_by else ''}",
                         f"Description: {book.description or ''}",
@@ -766,8 +758,12 @@ def _store_cover(book: Book) -> bool:
         return False
 
     # Budgeted, because every caller of this is a request with a person waiting
-    # at the end of it. The backfill does not come through here and passes none:
-    # nothing is waiting on it and it is bounded by its batch size instead.
+    # at the end of it. The backfill does not come through here and passes none,
+    # which bounds how many covers it fetches and **not** how long each one may
+    # take: a trickled body is held to `MAX_COVER_BYTES` and the per read
+    # timeout, and nothing else. That costs one threadpool worker and a stalled
+    # backfill, and it needs a compromised host in `COVER_HOSTS`, all six of
+    # which are https. `covers.resolve_and_store` carries the same note.
     resolved = covers.resolve_and_store(
         book.id, book.isbn, book.cover_url, budget=covers.INTERACTIVE_BUDGET_SECONDS
     )
@@ -1127,31 +1123,11 @@ def _bulk_set_status(
     except ValueError:
         raise HTTPException(status_code=422, detail=f"{value!r} is not a reading status") from None
 
-    existing = {
-        row.book_id: row
-        for row in db.query(UserBook)
-        .filter(
-            UserBook.user_id == current_user.id,
-            UserBook.book_id.in_([book.id for book in books]),
-        )
-        .all()
-    }
-
-    updated = unchanged = 0
-    for book in books:
-        user_book = existing.get(book.id)
-        if user_book is not None and ReadStatus(user_book.status) is new_status:
-            unchanged += 1
-            continue
-        if user_book is None:
-            user_book = UserBook(user_id=current_user.id, book_id=book.id)
-            db.add(user_book)
-        # The same stamping the single-book route uses, so a bulk "mark read"
-        # produces the same dates as marking them one at a time would.
-        _stamp_reading_dates(user_book, new_status)
-        user_book.status = new_status
-        updated += 1
-    return updated, unchanged
+    # One statement for the selection, the same stamping the single-book route
+    # uses, and the unchanged rule: all three on `Reading.mark_each`.
+    return Reading.by(db, current_user.id).mark_each(
+        [book.id for book in books], new_status
+    )
 
 
 def _bulk_set_ownership(
@@ -1837,19 +1813,9 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     ):
         entry.book_id = keeper.id
 
-    # Statuses cannot simply move: (user_id, book_id) is unique, so a member
-    # holding a status on two of the merged rows would violate it. The
-    # survivor's own row wins and the duplicate is dropped.
-    already_rated = {
-        row.user_id
-        for row in db.query(UserBook).filter(UserBook.book_id == keeper.id).all()
-    }
-    for user_book in db.query(UserBook).filter(UserBook.book_id.in_(loser_ids)).all():
-        if user_book.user_id in already_rated:
-            db.delete(user_book)
-        else:
-            user_book.book_id = keeper.id
-            already_rated.add(user_book.user_id)
+    # Every member's reading records, not just the caller's: see
+    # `reading.resolve_merge`, which owns why they cannot simply move.
+    resolve_merge(db, keeper.id, loser_ids)
 
 
 # ── Covers ────────────────────────────────────────────────────────────────────
@@ -2443,68 +2409,9 @@ def update_status(
 ) -> BookOut:
     """Set the caller's own reading status. Read access is enough: a status is
     personal to the member setting it and changes nothing for anyone else."""
-    user_book = (
-        db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
-        .first()
-    )
-    if user_book is None:
-        user_book = UserBook(user_id=current_user.id, book_id=book.id)
-        db.add(user_book)
-
-    _stamp_reading_dates(user_book, payload.status)
-    user_book.status = payload.status
+    Reading.by(db, current_user.id).mark(book.id, payload.status)
     db.commit()
     return book_to_out(book, current_user, db)
-
-
-def _stamp_reading_dates(user_book: UserBook, new_status: ReadStatus) -> None:
-    """Record when reading started and finished, from the status transition.
-
-    Derived rather than typed in, because nobody fills in a date field but
-    everybody moves a book to "reading" when they start it. Three rules, and
-    each exists for a case that came up while writing them:
-
-    * Only stamp what is not already stamped. Re-selecting the current status,
-      which a UI with pressable buttons makes easy, must not move a date that
-      already records something true.
-    * Going straight to READ stamps both. Plenty of books are only marked once,
-      after the fact, and a finish with no start reads like missing data.
-    * Moving *back* to an earlier status clears the later date. Marking a book
-      unread again and leaving a finish date behind would leave it counted in
-      "books finished this year" forever.
-
-    DID_NOT_FINISH needed no fourth rule, and that is worth stating rather than
-    leaving to be rediscovered. It is a claim that reading **started**, so it
-    stamps `started_at` alongside READING and READ, and it is not a finish, so
-    the `else` below already clears `finished_at` for it. What it must never do
-    is fall into the last branch: clearing `started_at` would erase the fact
-    that the book was ever picked up, which is the one thing this status is for.
-
-    It also touches no `reading_progress` row. How far somebody got before
-    giving up is exactly the interesting part, and nothing here deletes it.
-    """
-    now = datetime.now(UTC).replace(tzinfo=None)
-
-    started = new_status in (
-        ReadStatus.READING,
-        ReadStatus.READ,
-        ReadStatus.DID_NOT_FINISH,
-    )
-    if started and user_book.started_at is None:
-        user_book.started_at = now
-
-    if new_status is ReadStatus.READ:
-        if user_book.finished_at is None:
-            user_book.finished_at = now
-    else:
-        # Anything other than READ means it is not finished, whatever it was.
-        # DID_NOT_FINISH included, and deliberately: a book somebody gave up on
-        # must not be counted in "books finished this year".
-        user_book.finished_at = None
-
-    if new_status in (ReadStatus.UNREAD, ReadStatus.WANT_TO_READ):
-        user_book.started_at = None
 
 
 # ── Reading progress ──────────────────────────────────────────────────────────
@@ -2560,8 +2467,9 @@ def add_progress(
     Saying where you are in a book is the same claim the READING button makes,
     arrived at from the other direction, so it promotes an unstarted book
     rather than leaving a member with a page number and a status of "unread".
-    The transition itself goes through `_stamp_reading_dates`, which owns those
-    rules; duplicating them here is how the two would drift.
+    The promotion itself goes through `Reading.begin`, which owns that rule
+    and the date stamping under it; duplicating them here is how the two would
+    drift.
 
     **It never sets READ, whatever the page number.** `page_count` comes from a
     metadata provider and is off by one often enough that the last page is not
@@ -2576,38 +2484,9 @@ def add_progress(
     )
     db.add(entry)
 
-    user_book = (
-        db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
-        .first()
-    )
-    if user_book is None:
-        user_book = UserBook(user_id=current_user.id, book_id=book.id)
-        db.add(user_book)
-
-    # Only from a standing start. A book already READING needs no change, and
-    # one already READ is being re-read, which is a thing the log records and
-    # the status has no way to say.
-    #
-    # **DID_NOT_FINISH promotes**, unlike READ. It is a claim about the past,
-    # and a new position contradicts it: leaving it alone would have the shelf
-    # say "gave up on this" while the log says "reached page 240 this morning".
-    # Picking an abandoned book back up is the case the status exists for. The
-    # earlier progress rows are untouched, and `finished_at` is already null for
-    # such a book and stays null, because READING is not READ.
-    #
-    # `or UNREAD` because a row added in this request has not been flushed, so
-    # the column default has not been applied and `status` is still None. That
-    # is the whole first-progress-on-a-new-book case, so without it the
-    # promotion never fired at all.
-    current = user_book.status or ReadStatus.UNREAD
-    if current in (
-        ReadStatus.UNREAD,
-        ReadStatus.WANT_TO_READ,
-        ReadStatus.DID_NOT_FINISH,
-    ):
-        _stamp_reading_dates(user_book, ReadStatus.READING)
-        user_book.status = ReadStatus.READING
+    # The promotion rules, the unflushed-status trap and the reason
+    # DID_NOT_FINISH promotes where READ does not all live on `Reading.begin`.
+    Reading.by(db, current_user.id).begin(book.id)
 
     db.commit()
     db.refresh(entry)
@@ -3104,16 +2983,7 @@ def set_rating(
     the reading dates, because rating a book is not a claim about having
     finished it just now.
     """
-    user_book = (
-        db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
-        .first()
-    )
-    if user_book is None:
-        user_book = UserBook(user_id=current_user.id, book_id=book.id)
-        db.add(user_book)
-
-    user_book.rating = payload.rating
+    Reading.by(db, current_user.id).rate(book.id, payload.rating)
     db.commit()
     return book_to_out(book, current_user, db)
 
@@ -3138,16 +3008,7 @@ def set_discuss(
     rating paths do: absence of a row means unread, not the absence of a
     member.
     """
-    user_book = (
-        db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id == book.id)
-        .first()
-    )
-    if user_book is None:
-        user_book = UserBook(user_id=current_user.id, book_id=book.id)
-        db.add(user_book)
-
-    user_book.wants_to_discuss = payload.wants_to_discuss
+    Reading.by(db, current_user.id).offer_to_discuss(book.id, payload.wants_to_discuss)
     db.commit()
     return book_to_out(book, current_user, db)
 

@@ -17,7 +17,9 @@ import {
   useListCollections,
   useRenameCollection,
 } from "../../api/generated/endpoints/collections/collections";
+import { getGetStatsQueryKey } from "../../api/generated/endpoints/stats/stats";
 import type { CollectionOut } from "../../api/generated/model";
+import { useInvalidate } from "../../api/invalidate";
 
 export interface UseCollectionsResult {
   collections: CollectionOut[];
@@ -40,6 +42,7 @@ export interface UseCollectionsResult {
 
 export function useCollections(): UseCollectionsResult {
   const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const query = useListCollections({ query: { retry: false } });
   // The endpoint orders by `lower(name)`, which is a case fold and not a
   // collation: it still files every accented name after `z`. See
@@ -54,8 +57,10 @@ export function useCollections(): UseCollectionsResult {
   // list. Creating one cannot change any book, so it does not.
   const refreshEverything = () => {
     refreshList();
-    void queryClient.invalidateQueries({ queryKey: ["/api/books"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+    // `invalidate.listings()` rather than `["/api/books"]`: the grid is an
+    // infinite query and a hand-written key does not match it.
+    invalidate.listings();
+    void queryClient.invalidateQueries({ queryKey: getGetStatsQueryKey() });
   };
 
   const create = useCreateCollection({ mutation: { onSuccess: refreshList } });

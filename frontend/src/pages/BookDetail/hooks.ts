@@ -13,6 +13,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { useInvalidate } from "../../api/invalidate";
 import {
   readSectionChoices,
   resolveOpen,
@@ -21,10 +22,9 @@ import {
 } from "../../lib/sectionState";
 
 import {
-  getGetBookQueryKey,
   getGetNotesQueryKey,
   getGetQuotesQueryKey,
-  getListCopiesQueryKey,
+  getListQuotesQueryKey,
   getListProgressQueryKey,
   useAddBookTag,
   useAddCopy,
@@ -92,19 +92,6 @@ import type {
   TagOut,
   UserOut,
 } from "../../api/generated/model";
-
-/** Query keys touched by anything that changes a book. */
-function useInvalidateBook(bookId: number) {
-  const queryClient = useQueryClient();
-  return () => {
-    void queryClient.invalidateQueries({
-      queryKey: getGetBookQueryKey(bookId),
-    });
-    // The grid and the loans list both embed book state.
-    void queryClient.invalidateQueries({ queryKey: ["/api/books"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/loans"] });
-  };
-}
 
 export interface UseBookResult {
   book: BookOut | undefined;
@@ -181,8 +168,9 @@ export function useBookActions(
   bookId: number,
   onDeleted: () => void,
 ): UseBookActionsResult {
-  const invalidate = useInvalidateBook(bookId);
-  const mutation = { onSuccess: invalidate };
+  const invalidate = useInvalidate();
+  const invalidateBook = () => invalidate.book(bookId);
+  const mutation = { onSuccess: invalidateBook };
   const queryClient = useQueryClient();
   const toast = useToast();
   const { t } = useTranslation();
@@ -194,8 +182,9 @@ export function useBookActions(
   const deleteTag = useDeleteTag({
     mutation: {
       onSuccess: () => {
-        // It came off every book in the library, not only this one.
-        void queryClient.invalidateQueries();
+        // It came off every book in the library, not only this one, and the
+        // tag list itself is now a name shorter.
+        invalidate.catalogue();
       },
     },
   });
@@ -214,7 +203,12 @@ export function useBookActions(
   });
   const removeTag = useRemoveBookTag({ mutation });
   const cover = useUploadCover({ mutation });
-  const refresh = useRefreshMetadata({ mutation });
+  // Not `mutation`: a metadata refresh rewrites the title, the author and the
+  // series, which the author index, the series index and the shelf list are
+  // all built from. On `book()` alone those three stayed on the old name.
+  const refresh = useRefreshMetadata({
+    mutation: { onSuccess: () => invalidate.catalogue() },
+  });
   const ownership = useSetOwnership({ mutation });
   const collection = useSetCollection({ mutation });
 
@@ -234,13 +228,19 @@ export function useBookActions(
   });
   const rating = useSetRating({ mutation });
   const discuss = useSetDiscuss({ mutation });
-  const details = useUpdateBookDetails({ mutation });
+  // Same reason as `refresh`: `BookDetailsUpdate` carries `author`,
+  // `series_name` and `location`.
+  const details = useUpdateBookDetails({
+    mutation: { onSuccess: () => invalidate.catalogue() },
+  });
   const restore = useRestoreBook({
     mutation: {
       onSuccess: () => {
         // A restored book is back in every listing, every count and every
-        // statistic, so the whole cache is dropped rather than patched.
-        void queryClient.invalidateQueries();
+        // statistic, and out of the trash, so the catalogue goes rather than
+        // this one book. Not the accounts or the settings: a restore cannot
+        // touch either, and this page has both on screen.
+        invalidate.catalogue();
       },
     },
   });
@@ -248,7 +248,7 @@ export function useBookActions(
   const remove = useDeleteBook({
     mutation: {
       onSuccess: () => {
-        invalidate();
+        invalidateBook();
         // The offer to undo is the point. A delete is one tap away from every
         // book and this used to be the only thing in the app that repeating
         // could not reverse.
@@ -385,9 +385,11 @@ export function useBookQuotes(bookId: number): UseBookQuotesResult {
       void queryClient.invalidateQueries({
         queryKey: getGetQuotesQueryKey(bookId),
       });
-      // The prefix, not `getListQuotesQueryKey()`: that key carries the paging
-      // parameters, so an exact match would leave every page but the first.
-      void queryClient.invalidateQueries({ queryKey: ["/api/books/quotes"] });
+      // `invalidateQueries` matches a key by prefix, so the bare getter also
+      // selects the pages whose keys carry paging parameters.
+      void queryClient.invalidateQueries({
+        queryKey: getListQuotesQueryKey(),
+      });
     },
   };
 
@@ -417,8 +419,8 @@ export interface UseBookLoanResult {
 }
 
 export function useBookLoan(bookId: number): UseBookLoanResult {
-  const invalidate = useInvalidateBook(bookId);
-  const mutation = { onSuccess: invalidate };
+  const invalidate = useInvalidate();
+  const mutation = { onSuccess: () => invalidate.book(bookId) };
 
   const create = useCreateLoan({ mutation });
   const complete = useReturnLoan({ mutation });
@@ -466,21 +468,19 @@ export interface UseBookCopiesResult {
  * Fetched even for the overwhelming majority of books that have exactly one
  * copy, because the answer is a one-element list rather than an empty one and
  * the panel offers the add action either way. It is one request against a
- * page that already makes six.
+ * page that already makes nine. Counted 2026-08-27 with both feature flags
+ * off, which is the fewest this page ever makes.
  */
 export function useBookCopies(bookId: number): UseBookCopiesResult {
-  const queryClient = useQueryClient();
-  const invalidateBook = useInvalidateBook(bookId);
+  const invalidate = useInvalidate();
   const copies = useListCopies(bookId);
 
   const add = useAddCopy({
     mutation: {
       onSuccess: () => {
-        void queryClient.invalidateQueries({
-          queryKey: getListCopiesQueryKey(bookId),
-        });
-        // The book itself, because `copy_count` has just changed on it.
-        invalidateBook();
+        // A new copy is a new book, so the shelf list, the counts and the
+        // statistics move with it, not only `copy_count` on this one.
+        invalidate.catalogue();
       },
     },
   });
@@ -537,7 +537,10 @@ export interface UseBookEnrichmentResult {
  * nothing new to add, and a button that silently does nothing looks broken.
  */
 export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
-  const invalidate = useInvalidateBook(bookId);
+  // The catalogue rather than the book: applying an edition writes the title,
+  // the author, the publisher and the year, so the author and series indexes
+  // move with it.
+  const invalidate = useInvalidate();
   const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
@@ -554,7 +557,7 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
   const apply = useApplyEnrichment({
     mutation: {
       onSuccess: () => {
-        invalidate();
+        invalidate.catalogue();
         setIsPickerOpen(false);
       },
     },
@@ -613,7 +616,7 @@ export interface UseBookProgressResult {
  */
 export function useBookProgress(bookId: number): UseBookProgressResult {
   const queryClient = useQueryClient();
-  const invalidateBook = useInvalidateBook(bookId);
+  const invalidate = useInvalidate();
   const entries = useListProgress(bookId);
 
   const mutation = {
@@ -623,7 +626,7 @@ export function useBookProgress(bookId: number): UseBookProgressResult {
       });
       // Recording a position moves `my_progress_*` on the book, and the first
       // one moves `my_status` with it.
-      invalidateBook();
+      invalidate.book(bookId);
     },
   };
 

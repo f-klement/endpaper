@@ -29,6 +29,7 @@ import {
   useUnmergeAuthor,
 } from "../../api/generated/endpoints/books/books";
 import type { AuthorOut, AuthorSuggestionOut } from "../../api/generated/model";
+import { useInvalidate } from "../../api/invalidate";
 
 export interface UseAuthorsResult {
   authors: AuthorOut[];
@@ -48,6 +49,7 @@ export interface UseAuthorsResult {
 
 export function useAuthors(): UseAuthorsResult {
   const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const toast = useToast();
   const { t } = useTranslation();
   const authors = useListAuthors({ query: { retry: false } });
@@ -65,8 +67,10 @@ export function useAuthors(): UseAuthorsResult {
     });
     // The library's author filter resolves a name through the alias rows, so a
     // merge changes which books it answers with. Nothing else about a book
-    // changes, which is why the book caches are dropped and the stats are not.
-    void queryClient.invalidateQueries({ queryKey: ["/api/books"] });
+    // changes, which is why the listings are dropped and the stats are not.
+    // Through `invalidate` because the grid is an infinite query and a
+    // hand-written `["/api/books"]` does not match it.
+    invalidate.listings();
   };
 
   const merge = useMergeAuthors({

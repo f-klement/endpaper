@@ -329,6 +329,26 @@ spelling of the same thing.
 Per member rather than per book because two people can hold the same copy and feel entirely
 differently about it, which is the same reason the rating is per member.
 
+### Where these rules live
+
+`backend/reading.py` owns the table. A caller asks `Reading.by(db, member_id)` and gets one
+member's record, so the `user_id` filter is a property of construction rather than of
+remembering, exactly as `Shelf.seen_by` is for the privacy predicate. Absence-means-unread
+is `Records.status_of`, the date rules are `_stamp_reading_dates`, and the three writes that
+are reading events (`mark`, `mark_each`, `begin`) stamp while the two that are not (`rate`,
+`offer_to_discuss`) deliberately do not.
+
+Two module functions read across members and both are named rather than left to a comment:
+`discussers()`, for the one public column above, and `resolve_merge()`, which folds
+everybody's records onto the surviving book when two rows turn out to be one. Left out, the
+losers' rows are cascade deleted and those members lose their history.
+
+`backend/tests/test_reading.py::TestReadingIsTheOnlyWayIn` holds it: no module but
+`reading.py`, `shelf.py`, `backup.py` and `models.py` may even import `UserBook`, and the
+two ways past a member are counted by call site so neither list grows quietly. `shelf.py`
+is on that list because three of its Book listing filters join `user_books`, which is the
+Shelf's rule and not this one.
+
 ## Progress is a log
 
 `reading_progress` answers "where am I" the same way a bank statement answers "how much
@@ -360,7 +380,7 @@ because a provider's page count is off by one often enough that the last page co
 101. `serialisation.derived_percent` is the single definition.
 
 **Recording progress promotes an unstarted book to `reading`** and stamps `started_at`,
-through `_stamp_reading_dates`, which owns those rules. It **never** sets `read`, whatever
+through `Reading.begin`, over `_stamp_reading_dates`, which owns those rules. It **never** sets `read`, whatever
 the page number: `page_count` is a provider's figure, and there is already an explicit
 control for finishing.
 
@@ -656,7 +676,8 @@ columns:
 
 - `active_loan`: the open `Loan`, or null.
 - `my_status`, `my_rating`, `my_started_at`, `my_finished_at`, `my_wants_to_discuss`: the
-  caller's row from `user_books`, with the status defaulting to `"unread"`.
+  caller's row from `user_books`, with the status defaulting to `"unread"`. Read through
+  `Reading.of`, one statement for the page.
 - `discuss_with`: every member who has offered to talk about this book, the caller
   included. **Not scoped to the caller**, unlike everything else in this list, which is the
   point of the flag rather than an oversight. See *What `user_books` carries* above.

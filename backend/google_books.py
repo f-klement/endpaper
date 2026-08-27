@@ -15,18 +15,13 @@ import logging
 import re
 from typing import Any, Final
 
-import httpx
-
 import covers
+import fetch
 from isbn import parse as parse_isbn
 
 logger = logging.getLogger("endpaper.google_books")
 
 _VOLUMES_URL: Final = "https://www.googleapis.com/books/v1/volumes"
-
-# Google is on the request path, so a slow reply must fail rather than hold a
-# worker open.
-TIMEOUT_SECONDS: Final = 10
 
 
 class GoogleBooksError(Exception):
@@ -159,8 +154,7 @@ async def _request(params: dict[str, str], api_key: str) -> dict[str, Any]:
     if api_key:
         query["key"] = api_key
 
-    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=True) as client:
-        response = await client.get(_VOLUMES_URL, params=query)
+    response = await fetch.get_once(_VOLUMES_URL, params=query)
 
     if response.status_code in (401, 403):
         # Almost always a bad or restricted key, and the admin can fix it, so

@@ -6,8 +6,6 @@
  * one tap, deleting for good asks first, because that one really is final.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
-
 import {
   useEmptyTrash,
   useListTrash,
@@ -15,6 +13,7 @@ import {
   useRestoreBook,
 } from "../../api/generated/endpoints/books/books";
 import type { BookOut } from "../../api/generated/model";
+import { useInvalidate } from "../../api/invalidate";
 import { useToast } from "../../app/toast";
 import { useTranslation } from "../../i18n";
 
@@ -37,29 +36,30 @@ export interface UseTrashResult {
 }
 
 export function useTrash(): UseTrashResult {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const toast = useToast();
   const { t } = useTranslation();
 
   const trash = useListTrash({ page_size: PAGE_SIZE });
 
   // Every one of these moves a book between two lists and changes counts and
-  // statistics, so the whole cache is dropped rather than patched by hand.
-  const invalidate = () => void queryClient.invalidateQueries();
+  // statistics, so the catalogue is dropped rather than patched by hand. Not
+  // the accounts or the settings: emptying the trash cannot touch either.
+  const refresh = () => invalidate.catalogue();
 
   const restore = useRestoreBook({
     mutation: {
       onSuccess: () => {
-        invalidate();
+        refresh();
         toast.show({ message: t("trash.restored") });
       },
     },
   });
-  const purge = usePurgeBook({ mutation: { onSuccess: invalidate } });
+  const purge = usePurgeBook({ mutation: { onSuccess: refresh } });
   const empty = useEmptyTrash({
     mutation: {
       onSuccess: (result) => {
-        invalidate();
+        refresh();
         toast.show({ message: t("trash.emptied", { count: result.purged }) });
       },
     },

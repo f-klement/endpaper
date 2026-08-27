@@ -205,6 +205,31 @@ class TestReadingRecordsArePersonal:
 
         assert db.query(UserBook).one().rating == 5
 
+    def test_two_rows_for_one_book_do_not_take_the_import_down(self, db, member):
+        """A rating on the first row and a status on the second.
+
+        The first row's `open()` creates a record that is never flushed, because
+        matching the second row is a dictionary lookup rather than a query. Its
+        `status` is therefore still None, and reading that column raw raised
+        `ValueError: None is not a valid ReadStatus`, which aborts the whole
+        transaction: a 5,000 row file writes nothing. `Records.status_of` is the
+        one place that knows about the unflushed row.
+        """
+        db.add(Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id))
+        db.commit()
+
+        result = Import.for_member(db, member.id).apply(
+            parse(
+                row("Dune", isbn="9780441013593", shelf="", rating=4),
+                row("Dune", isbn="9780441013593", shelf="read"),
+            )
+        )
+
+        assert result.skipped == 0
+        record = db.query(UserBook).one()
+        assert record.rating == 4
+        assert record.status == ReadStatus.READ
+
     def test_a_row_with_nothing_personal_leaves_no_marker(self, db, member):
         """A file that is a plain book list should not leave an "unread" marker
         on every Book it touched."""

@@ -10,6 +10,7 @@ import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { errorText } from "../../components/ErrorState";
+import { useInvalidate } from "../../api/invalidate";
 import { ApiError } from "../../api/mutator";
 
 import {
@@ -132,6 +133,7 @@ export function useScanFlow(
   );
 
   const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const tags = useListTags();
   const locations = useKnownLocations();
 
@@ -215,7 +217,12 @@ export function useScanFlow(
         ),
       );
 
-      void queryClient.invalidateQueries();
+      // The catalogue, not the whole cache. A keyless invalidate here also
+      // refetched `/api/settings/features` and, worse, `/api/books/search`,
+      // which is a billed Google Books call the query's own `staleTime` exists
+      // to avoid re-spending. Measured: 4 requests, of which 2 were about a
+      // book having been added.
+      invalidate.catalogue();
       onAdded(book.id);
     } catch (error) {
       setAddError(error);
@@ -257,7 +264,8 @@ export function useScanFlow(
         data: toCopyRequest(pending),
       });
       rememberLastLocation(shelf);
-      void queryClient.invalidateQueries();
+      // A copy is a new book. Same group as `confirm`, same reason.
+      invalidate.catalogue();
       onAdded(copy.id);
     } catch (error) {
       setAddError(error);
@@ -438,6 +446,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
   } | null>(null);
 
   const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const scanAdd = useScanAdd();
   const locations = useKnownLocations();
   // For the per-row failure reason: a rejected fetch has no message worth
@@ -520,7 +529,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     }
 
     if (added > 0) rememberLastLocation(shelf);
-    void queryClient.invalidateQueries();
+    // Once for the batch rather than once per book, and the catalogue rather
+    // than everything: a rapid run leaves the scanner open, so a keyless
+    // invalidate re-spent the search quota in the middle of a shelf.
+    invalidate.catalogue();
     // Only the ones that landed leave the queue. What is left is exactly what
     // still needs a decision.
     setEntries(failures);

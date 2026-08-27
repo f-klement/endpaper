@@ -39,6 +39,7 @@ from rapidfuzz.distance import Levenshtein
 
 import covers
 import ddc
+import fetch
 import google_books
 from enums import ClassificationScheme
 from isbn import parse as parse_isbn
@@ -46,10 +47,6 @@ from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
-
-# Third-party services sit on the request path, so the timeout is what stops a
-# slow one from holding a worker open.
-TIMEOUT_SECONDS: Final = 10
 
 
 class Outcome(StrEnum):
@@ -114,12 +111,26 @@ _OPEN_LIBRARY: Final = "https://openlibrary.org"
 #: digits plus `A` is a well formed key and a 10,040 byte URL. Live ids are six
 #: to eight digits.
 #:
-#: **`follow_redirects=True` is on every client here and this guard runs before
-#: it**, so what is constrained is the host at request time rather than the host
-#: finally reached: `/isbn/{isbn}.json` measured `num_redirects=1` live, so
-#: turning it off is not an option. That is the right trade for the threat this
-#: is actually against, which is a wiki field any account can edit rather than
-#: control of the site.
+#: **Four requests interpolate a key and this guard precedes all four**:
+#: `_open_library_author`, `_open_library_work`, `_open_library_author_names._name`
+#: and `editions`. Nothing else here does.
+#:
+#: **Named rather than cited by line, because the line numbers were wrong three
+#: times.** Twice from edits elsewhere in the file, and once because writing the
+#: correction inserted six lines and moved every request it had just named. A
+#: function name survives that; a line number is stale the moment anything above
+#: it changes.
+#:
+#: The two requests that look similar, `_open_library`'s and `editions`' first
+#: one, interpolate an **ISBN** that `isbn.parse` has already reduced to a
+#: canonical ISBN-13, which is a different guard on a different value.
+#:
+#: What it constrains is the host at request time. What happens after the
+#: request is `fetch.get`'s: redirects are walked by hand and a hop that
+#: changes scheme, host or port is refused, so a key that got past this could
+#: still not move the request off `openlibrary.org`. The threat this is
+#: actually against is a wiki field any account can edit, not control of the
+#: site, and two independent guards is the right amount for it.
 _OL_AUTHOR_KEY: Final = re.compile(r"/authors/OL\d{1,12}A")
 _OL_WORK_KEY: Final = re.compile(r"/works/OL\d{1,12}W")
 
@@ -138,7 +149,7 @@ def _open_library_key(value: object, pattern: re.Pattern[str]) -> str | None:
     return None
 
 
-def _open_library_object(response: httpx.Response) -> dict[str, Any]:
+def _open_library_object(response: fetch.Fetched) -> dict[str, Any]:
     """A response body as a JSON object, or an empty one.
 
     **A valid body that is not an object is the failure this exists for.**
@@ -363,7 +374,7 @@ async def _open_library_author(
     if key is None:
         return None
     try:
-        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        response = await fetch.get(client, f"{_OPEN_LIBRARY}{key}.json")
         if response.status_code != 200:
             return None
         name = _open_library_object(response).get("name")
@@ -400,7 +411,7 @@ async def _open_library_work(
     if key is None:
         return {}
     try:
-        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        response = await fetch.get(client, f"{_OPEN_LIBRARY}{key}.json")
         if response.status_code != 200:
             return {}
         return _open_library_object(response)
@@ -424,10 +435,8 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
     del api_key  # Open Library needs none.
 
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
+        async with fetch.catalogue_client() as client:
+            response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
             if response.status_code == 429:
                 return Lookup(Outcome.RATE_LIMITED, source="open_library")
             if response.status_code == 404:
@@ -560,12 +569,10 @@ def _parsed(body: str) -> ElementTree.Element:
     that starts sending a doctype degrades to "this source is unavailable"
     rather than to a 500.
 
-    **This is one half of what `docs/decisions.md` says would close that
-    entry.** The other half is a cap on the bytes read off the wire, which is
-    not a few lines: it turns six `client.get` calls into streamed reads with
-    their own fixtures. What stays open is therefore an honest body at a
-    measured 15.28x its own size, 9 MB at the largest page this app asks for,
-    which is what that entry accepts.
+    **The other half is `fetch.MAX_RESPONSE_BYTES`**, which caps the bytes read
+    off the wire. Both halves are needed and neither substitutes for the other:
+    the cap bounds an honest body at a measured 15.28x its own size, and the
+    doctype refusal bounds the one construct that makes that ratio a lie.
     """
     if _DOCTYPE in body:
         raise ElementTree.ParseError("Refused a catalogue response carrying a doctype.")
@@ -1029,10 +1036,7 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
         "maximumRecords": str(_DNB_RECORDS),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_DNB_URL, params=params)
+        response = await fetch.get_once(_DNB_URL, params=params)
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source="dnb")
         if response.status_code != 200:
@@ -1303,10 +1307,7 @@ async def _k10plus(isbn: str, api_key: str) -> Lookup:
         "maximumRecords": str(_K10PLUS_RECORDS),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_K10PLUS_URL, params=params)
+        response = await fetch.get_once(_K10PLUS_URL, params=params)
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source="k10plus")
         if response.status_code != 200:
@@ -1664,10 +1665,7 @@ async def _open_library_search(query: str, limit: int) -> list[dict[str, Any]]:
         "fields": _OPEN_LIBRARY_SEARCH_FIELDS,
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_OPEN_LIBRARY_SEARCH, params=params)
+        response = await fetch.get_once(_OPEN_LIBRARY_SEARCH, params=params)
         if response.status_code != 200:
             logger.info("Open Library search returned %s", response.status_code)
             return []
@@ -1786,10 +1784,7 @@ async def _k10plus_search(query: str, limit: int) -> list[dict[str, Any]]:
         "maximumRecords": str(min(limit * 3, 50)),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_K10PLUS_URL, params=params)
+        response = await fetch.get_once(_K10PLUS_URL, params=params)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -1837,10 +1832,7 @@ async def _dnb_search(query: str, limit: int) -> list[dict[str, Any]]:
         "maximumRecords": str(min(limit * 3, 50)),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_DNB_URL, params=params)
+        response = await fetch.get_once(_DNB_URL, params=params)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -1910,10 +1902,7 @@ async def _bnf_search(query: str, limit: int) -> list[dict[str, Any]]:
         "maximumRecords": str(min(limit * 2, 20)),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_BNF_URL, params=params)
+        response = await fetch.get_once(_BNF_URL, params=params)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -2027,10 +2016,7 @@ async def _loc_search(query: str, limit: int) -> list[dict[str, Any]]:
         "maximumRecords": str(min(limit * 2, 20)),
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(_LOC_URL, params=params)
+        response = await fetch.get_once(_LOC_URL, params=params)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -2815,7 +2801,7 @@ async def _open_library_author_names(
         return {}
 
     async def _name(key: str) -> tuple[str, str | None]:
-        response = await client.get(f"{_OPEN_LIBRARY}{key}.json")
+        response = await fetch.get(client, f"{_OPEN_LIBRARY}{key}.json")
         if response.status_code != 200:
             return key, None
         found = _open_library_object(response).get("name")
@@ -2950,16 +2936,15 @@ async def editions(
     if canonical is None or limit <= 0:
         return []
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SECONDS, follow_redirects=True
-        ) as client:
-            response = await client.get(f"{_OPEN_LIBRARY}/isbn/{canonical}.json")
+        async with fetch.catalogue_client() as client:
+            response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{canonical}.json")
             if response.status_code != 200:
                 return []
             key = _open_library_work_key(_open_library_object(response).get("works"))
             if key is None:
                 return []
-            listing = await client.get(
+            listing = await fetch.get(
+                client,
                 f"{_OPEN_LIBRARY}{key}/editions.json",
                 params={"limit": str(_OPEN_LIBRARY_EDITIONS)},
             )

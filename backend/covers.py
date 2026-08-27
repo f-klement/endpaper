@@ -129,6 +129,20 @@ MAX_COVER_BYTES: Final = MAX_UPLOAD_BYTES
 #: refused by both image services at once.
 MAX_CONCURRENT_FETCHES: Final = 6
 
+#: Sent on every cover request, and paired with `iter_raw` below.
+#:
+#: `iter_bytes` yields the body **after** content decoding, and httpx decodes a
+#: whole raw chunk before yielding it, so the allocation `MAX_COVER_BYTES` exists
+#: to prevent happens before the count is compared to it. Measured on httpx
+#: 0.28.1: a 65,250 byte gzip of 64 MiB counted 67,108,864 against an 8,192 byte
+#: limit. `iter_raw` never expands anything, and not asking for compression is
+#: what keeps the raw bytes and the image the same thing. It costs nothing here:
+#: JPEG, PNG and WebP are already compressed, so no image service gzips them.
+#:
+#: Same defect, same fix and the same measurement as `fetch._IDENTITY`. The two
+#: modules stay separate for the reason that file's docstring gives.
+_IDENTITY: Final = {"accept-encoding": "identity"}
+
 
 class CoverOutcome(StrEnum):
     """What happened to one cover, for the log and the counters.
@@ -426,7 +440,10 @@ async def _check(
                     # A 200 that is not an image is an error page with the wrong
                     # status, which is the other way this fails.
                     return False
-                async for chunk in response.aiter_bytes(_PROBE_BYTES):
+                # `aiter_raw`, not `aiter_bytes`: see `_IDENTITY`. The probe
+                # only asks whether any bytes arrive, so raw is also the honest
+                # question.
+                async for chunk in response.aiter_raw(_PROBE_BYTES):
                     return len(chunk) > 0
                 return False
         except httpx.HTTPError:
@@ -461,7 +478,7 @@ async def resolve(
     # tested against `is_fetchable`. Letting the client follow means trusting the
     # first host and then going wherever it points, which is the bug.
     async with httpx.AsyncClient(
-        timeout=TIMEOUT_SECONDS, follow_redirects=False
+        timeout=TIMEOUT_SECONDS, follow_redirects=False, headers=_IDENTITY
     ) as client:
         for url in order:
             left = _time_left(deadline)
@@ -682,9 +699,11 @@ def download(url: str, deadline: float | None = None) -> tuple[bytes, str] | Non
     `portal.dnb.de/opac/mvb/cover?isbn=...` has no extension in it at all. Same
     rule, and the same function, as an upload.
 
-    The body is read in chunks against `MAX_COVER_BYTES` rather than with
-    `response.read()`, so a service answering with an endless stream is refused
-    at the cap instead of filling the container's memory.
+    The body is read in **raw** chunks against `MAX_COVER_BYTES` rather than
+    with `response.read()`, so a service answering with an endless stream is
+    refused at the cap instead of filling the container's memory. Raw because
+    the decoded iterator expands a chunk before the cap can look at it: see
+    `_IDENTITY`.
 
     **The URL is tested against `is_fetchable` before every request, redirects
     included.** `cover_url` reaches here from `BookCreate`, which is member
@@ -709,7 +728,9 @@ def download(url: str, deadline: float | None = None) -> tuple[bytes, str] | Non
         chunks = []
         try:
             with (
-                httpx.Client(timeout=timeout, follow_redirects=False) as client,
+                httpx.Client(
+                    timeout=timeout, follow_redirects=False, headers=_IDENTITY
+                ) as client,
                 client.stream("GET", target) as response,
             ):
                 if response.is_redirect:
@@ -723,11 +744,40 @@ def download(url: str, deadline: float | None = None) -> tuple[bytes, str] | Non
                         "Cover download refused with %d: %s", response.status_code, target
                     )
                     return None
+                encoding = (
+                    response.headers.get("content-encoding", "").strip().lower()
+                )
+                if encoding not in ("", "identity"):
+                    # **The braces to `_IDENTITY`'s belt, and without it the
+                    # belt is a regression.** `iter_raw` never decodes, so a
+                    # service that gzips anyway would have its gzip bytes
+                    # written to disk as the image, where `iter_bytes` decoded
+                    # them correctly before. `is_fetchable` limits this to the
+                    # four `COVER_HOSTS`, so it is robustness rather than a
+                    # hole, but refusing is one line and keeps "raw bytes" and
+                    # "the image" the same thing. `fetch.UnrequestedEncoding` is
+                    # the same check at the same point.
+                    logger.info(
+                        "Cover came back %s when identity was asked for: %s",
+                        encoding,
+                        target,
+                    )
+                    return None
                 total = 0
-                for chunk in response.iter_bytes():
+                # `iter_raw`, not `iter_bytes`: see `_IDENTITY`.
+                for chunk in response.iter_raw():
                     total += len(chunk)
                     if total > MAX_COVER_BYTES:
                         logger.info("Cover over %d bytes, refused: %s", MAX_COVER_BYTES, target)
+                        return None
+                    # **Inside the loop, not only before it.** httpx applies
+                    # `timeout` per read, so a service trickling one chunk just
+                    # under it holds this open past any budget: the check above
+                    # bounds the bytes and this bounds the seconds. Without it
+                    # `INTERACTIVE_BUDGET_SECONDS` is a number nobody keeps.
+                    remaining = _time_left(deadline)
+                    if remaining is not None and remaining <= 0:
+                        logger.info("Cover download ran past its budget: %s", target[:200])
                         return None
                     chunks.append(chunk)
         except httpx.HTTPError as error:
@@ -810,8 +860,19 @@ def resolve_and_store(
     `budget` is a wall clock ceiling in seconds for the whole call, for the
     paths with a person waiting: see `INTERACTIVE_BUDGET_SECONDS`. Past it the
     best candidate found so far is returned unverified and the bytes are left to
-    the backfill, which passes no budget because nothing is waiting on it and it
-    is bounded by its batch size instead.
+    the backfill, which passes no budget because nothing is waiting on it.
+
+    **With no budget, nothing bounds a download in time, and "bounded by its
+    batch size instead" was the wrong reason.** The batch size bounds how many
+    downloads happen, not how long one takes: with `deadline=None` both checks
+    in `download` are no-ops and the only bound left is `MAX_COVER_BYTES`
+    against a per-read timeout, which a server sizing chunks at one byte
+    stretches for as long as it likes. What that actually costs is one
+    threadpool worker and a stalled backfill, and the precondition is a
+    compromised host on `COVER_HOSTS`, all six of which are https, so an on-path
+    attacker cannot reach it. Accepted on those grounds rather than on a bound
+    that does not exist. Giving the backfill a per-book deadline would close it
+    and is the fix if that ever stops being true.
 
     **Calls `asyncio.run`, so it must not be called from a coroutine.** Every
     handler that adds a book is a `def` and therefore already runs in a worker

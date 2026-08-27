@@ -6,7 +6,7 @@
  * changes this file and nothing else on the page.
  */
 
-import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -32,6 +32,7 @@ import {
   type LocationOut,
   type TagOut,
 } from "../../api/generated/model";
+import { useInvalidate } from "../../api/invalidate";
 import { readFilters, toParams } from "../../lib/bookFilters";
 import {
   deleteSearch,
@@ -235,7 +236,7 @@ export interface UseBookSelectionResult {
  * a few hundred rows is not a real option.
  */
 export function useBookSelection(): UseBookSelectionResult {
-  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
   const toast = useToast();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -246,7 +247,11 @@ export function useBookSelection(): UseBookSelectionResult {
     mutation: {
       onSuccess: (result, variables) => {
         setSelected(new Set());
-        void queryClient.invalidateQueries();
+        // Every verb here writes several books at once: tagging, status,
+        // shelf, collection and delete. The counts on the tag, shelf and
+        // collection lists move with them, which is why this is the catalogue
+        // and not just the grid.
+        invalidate.catalogue();
 
         // Only the delete verb raises one, and it offers the trash rather than
         // an undo. Undoing a bulk delete means restoring each book in turn,

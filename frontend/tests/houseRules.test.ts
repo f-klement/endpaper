@@ -216,6 +216,69 @@ describe("an identity change drops the cache with it", () => {
   });
 });
 
+/** The one module allowed to drop the whole cache. */
+const INVALIDATION_OWNER = "api/invalidate.ts";
+
+describe("a write names what it made stale", () => {
+  it("does not drop the whole cache at the call site", () => {
+    // `queryClient.invalidateQueries()` with no key refetches every mounted
+    // query on the page, whatever it is about and whatever staleTime it was
+    // given. Eleven call sites did it. Measured on 2026-08-26: ten requests on
+    // a book's page for deleting a curated tag, where five are about the tag,
+    // and on the scan page a refetch of `/api/books/search`, which is a billed
+    // Google Books call the query's own staleTime exists to avoid re-spending.
+    //
+    // Two writes still earn the whole cache and both go through
+    // `invalidate.everything()`, where the reason is written down: restoring a
+    // backup, and merging duplicates. The rule is that the decision is made in
+    // the module that knows what each group covers, not at a call site that
+    // has to remember.
+    //
+    // Said out loud so nobody trusts it as total: this counts a spelling. A
+    // call site holding a `QueryClient` under another name, or building an
+    // empty filter object, is outside it.
+    const offenders = entries()
+      .filter(([path]) => path !== INVALIDATION_OWNER)
+      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .filter(([, code]) => /invalidateQueries\(\s*\)/.test(code))
+      .map(([path]) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("drops the whole cache from exactly two call sites", () => {
+    // `everything()` is the same keyless invalidate with a better name, and the
+    // rule above permits it anywhere. Its docstring says "two callers, and both
+    // earn it", which is a count, and a count with no enforcement is how the
+    // group whose whole point is being rare stops being rare.
+    //
+    // Both are named here rather than counted, because what makes them correct
+    // is what they do and not how many they are: a backup restore replaces
+    // every row in the database including the signed-in member's, and merging
+    // duplicates moves notes, quotes, progress and reading statuses between
+    // books with no account in the response of what moved. A third caller is a
+    // decision somebody has to make, in this file, rather than a line in a
+    // diff.
+    const callers = entries()
+      .map(([path, source]) => [path, withoutProse(source)] as const)
+      .filter(([, code]) => /\.everything\s*\(/.test(code))
+      .map(([path]) => path)
+      .sort();
+
+    expect(callers).toEqual([
+      "pages/DuplicatesPage/hooks.ts",
+      "pages/SettingsPage/hooks.ts",
+    ]);
+  });
+
+  it("still has an owner that does it", () => {
+    // A rule whose subject has been renamed passes by matching nothing.
+    const owner = entries().find(([path]) => path === INVALIDATION_OWNER);
+    expect(owner).toBeDefined();
+    expect(withoutProse(owner![1])).toMatch(/invalidateQueries\(\s*\)/);
+  });
+});
+
 describe("a dark hover state is stated, never inherited", () => {
   it("appears nowhere in the source", () => {
     // Every ramp runs the other way in the dark, so a hover written once is

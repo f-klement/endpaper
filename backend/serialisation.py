@@ -21,8 +21,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
 import ddc
-from enums import ClassificationScheme, ReadStatus
-from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook
+from enums import ClassificationScheme
+from models import Book, Collection, Loan, ReadingProgress, Tag, User
+from reading import Reading, discussers
 from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserOut
 from shelf import Shelf, rereading_filtered_rows
 
@@ -228,31 +229,16 @@ def _latest_progress(
 
 
 def _discussers(book_ids: list[int], db: Session) -> dict[int, list[UserOut]]:
-    """Who has offered to talk about each of these books.
+    """Who has offered to talk about each of these books, as the API says it.
 
-    **Not filtered to the caller**, unlike every other per-member field here,
-    and that is the whole point of the flag: a reader browsing the shelf has to
-    be able to see whose door to knock on. It leaks nothing else, in particular
-    not whether those members have read the book.
-
-    One statement for the page, joined to `users` so the names arrive with it.
-    A per-book query here is the exact N+1 this module exists to avoid, and a
-    lazy `user_book.user` read inside the loop would be the same thing wearing
-    a different coat.
-
-    Ordered by username so a book with three readers reads the same way twice.
+    The query is `reading.discussers`, which owns why this one field is read
+    across members instead of scoped to the caller. What is left here is the
+    part that belongs to serialisation: turning the rows into `UserOut`.
     """
-    rows = (
-        db.query(UserBook.book_id, User)
-        .join(User, User.id == UserBook.user_id)
-        .filter(UserBook.book_id.in_(book_ids), UserBook.wants_to_discuss.is_(True))
-        .order_by(User.username.asc())
-        .all()
-    )
-    grouped: dict[int, list[UserOut]] = {}
-    for book_id, user in rows:
-        grouped.setdefault(book_id, []).append(UserOut.model_validate(user))
-    return grouped
+    return {
+        book_id: [UserOut.model_validate(user) for user in users]
+        for book_id, users in discussers(db, book_ids).items()
+    }
 
 
 def _copy_counts(books: list[Book], current_user: User, db: Session) -> dict[str, int]:
@@ -414,15 +400,13 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # One query for the whole page, not one per book. The row carries the
     # status, the rating and both dates, so adding those three fields cost no
     # extra statements: the fetch was already here.
-    user_books = {
-        user_book.book_id: user_book
-        for user_book in db.query(UserBook)
-        .filter(UserBook.user_id == current_user.id, UserBook.book_id.in_(book_ids))
-        .all()
-    }
+    user_books = Reading.by(db, current_user.id).of(book_ids)
 
     latest_progress = _latest_progress(book_ids, current_user, db)
-    discussers = _discussers(book_ids, db)
+    # `discuss_with`, not `discussers`: the module function of that name is
+    # imported at the top of this file, and a local binding would shadow it
+    # for the whole of this function body.
+    discuss_with = _discussers(book_ids, db)
     # Only when something on the page is a copy, so the ordinary page pays
     # nothing for a feature almost no book uses.
     copy_counts = _copy_counts(books, current_user, db)
@@ -444,17 +428,17 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
         out.active_loan = loan_summary(loan) if loan else None
 
         user_book = user_books.get(book.id)
-        # No row means unread: a user_books row only appears once a status is set.
-        # The status is coerced back to the enum explicitly, because the column
-        # is a plain VARCHAR and assigning a str onto an enum-typed Pydantic
-        # field bypasses validation and serialises with a warning. (Assignment
-        # skips validation; model_validate would coerce.)
-        out.my_status = ReadStatus(user_book.status) if user_book else ReadStatus.UNREAD
+        # No row means unread, and `status_of` is the one place that says so.
+        # It also coerces back to the enum, which matters because the column is
+        # a plain VARCHAR and assigning a str onto an enum-typed Pydantic field
+        # bypasses validation and serialises with a warning. (Assignment skips
+        # validation; model_validate would coerce.)
+        out.my_status = user_books.status_of(book.id)
         out.my_rating = user_book.rating if user_book else None
         out.my_started_at = user_book.started_at if user_book else None
         out.my_finished_at = user_book.finished_at if user_book else None
         out.my_wants_to_discuss = bool(user_book.wants_to_discuss) if user_book else False
-        out.discuss_with = discussers.get(book.id, [])
+        out.discuss_with = discuss_with.get(book.id, [])
 
         progress = latest_progress.get(book.id)
         if progress is not None:
