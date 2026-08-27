@@ -33,7 +33,11 @@ import {
 } from "../../src/theme";
 import { PATTERNS } from "../../src/theme/patterns";
 
-const LIGHT: Appearance = { palette: "endpaper", mode: "light", wallpaper: null };
+const LIGHT: Appearance = {
+  palette: "endpaper",
+  mode: "light",
+  wallpaper: null,
+};
 
 interface Listeners {
   dark: (() => void) | null;
@@ -98,7 +102,9 @@ function Probe() {
       <button onClick={() => setAppearance({ mode: "system" })}>
         follow system
       </button>
-      <button onClick={() => setAppearance({ palette: "nord" })}>go nord</button>
+      <button onClick={() => setAppearance({ palette: "nord" })}>
+        go nord
+      </button>
       <button onClick={() => setAppearance({ wallpaper: WALLPAPER_OFF })}>
         no wallpaper
       </button>
@@ -159,7 +165,9 @@ describe("ThemeProvider", () => {
   it("switches the palette on request", async () => {
     renderTheme();
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "go nord" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go nord" }));
 
     expect(screen.getByTestId("palette")).toHaveTextContent("nord");
     expect(document.documentElement.dataset.theme).toBe("nord");
@@ -168,7 +176,9 @@ describe("ThemeProvider", () => {
   it("switches the mode on request", async () => {
     renderTheme();
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "go dark" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go dark" }));
 
     expect(screen.getByTestId("theme")).toHaveTextContent("dark");
     expect(document.documentElement).toHaveClass("dark");
@@ -178,7 +188,9 @@ describe("ThemeProvider", () => {
     // The write-through half. Nothing is cached until an account is named,
     // because a preference with no owner is what this replaced.
     renderTheme();
-    await userEvent.setup().click(screen.getByRole("button", { name: "adopt" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "adopt" }));
 
     expect(JSON.parse(localStorage.getItem("appearance") ?? "{}")).toEqual({
       last: "7",
@@ -210,7 +222,9 @@ describe("ThemeProvider", () => {
   it("stops following once a choice is made", async () => {
     // The opposite failure: being flipped back at sunrise having asked for dark.
     renderTheme({ ...LIGHT, mode: "system" });
-    await userEvent.setup().click(screen.getByRole("button", { name: "go dark" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go dark" }));
 
     expect(listeners.dark).toBeNull();
     expect(screen.getByTestId("theme")).toHaveTextContent("dark");
@@ -239,7 +253,9 @@ describe("ThemeProvider", () => {
     renderTheme();
     const light = document.body.style.backgroundImage;
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "go dark" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go dark" }));
 
     expect(document.body.style.backgroundImage).not.toBe(light);
   });

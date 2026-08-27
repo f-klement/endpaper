@@ -50,7 +50,9 @@ export function useCollections(): UseCollectionsResult {
   const collections = useSortedByName(query.data);
 
   const refreshList = () =>
-    void queryClient.invalidateQueries({ queryKey: getListCollectionsQueryKey() });
+    void queryClient.invalidateQueries({
+      queryKey: getListCollectionsQueryKey(),
+    });
 
   // A rename shows up inside every book payload as `collection_name`, and a
   // delete unfiles books outright, so both drop the book caches as well as the

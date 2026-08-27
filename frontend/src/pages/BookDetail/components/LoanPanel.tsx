@@ -37,8 +37,7 @@ const WILLINGNESS: { value: LendingWillingness; label: MessageKey }[] =
  * here means the impossible request cannot be assembled.
  */
 export type Borrower =
-  | { kind: "member"; userId: number }
-  | { kind: "external"; name: string };
+  { kind: "member"; userId: number } | { kind: "external"; name: string };
 
 type Kind = Borrower["kind"];
 
@@ -69,7 +68,8 @@ export default function LoanPanel({
   }, [book.id, book.lending, book.active_loan?.id]);
 
   const trimmedName = externalName.trim();
-  const hasBorrower = kind === "member" ? Boolean(target) : Boolean(trimmedName);
+  const hasBorrower =
+    kind === "member" ? Boolean(target) : Boolean(trimmedName);
   const canLend = hasBorrower && (!isNeverLent || acknowledged);
 
   function lend() {

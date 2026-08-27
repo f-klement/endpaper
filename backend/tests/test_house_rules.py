@@ -8,9 +8,12 @@ again".
 
 import ast
 import re
+from enum import StrEnum
 from pathlib import Path
+from typing import get_args
 
 import pytest
+from sqlalchemy import CheckConstraint
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -1371,3 +1374,172 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
         alone, and `on` starts with neither `off` nor a digit."""
         assert not self._turns_foreign_keys_off("PRAGMA foreign_keys=ON")
         assert not self._turns_foreign_keys_off("PRAGMA foreign_keys = 1")
+
+
+#: Enum columns deliberately without a `CheckConstraint`, and why.
+#:
+#: SQLite cannot ALTER a CHECK, so a constraint costs a batch table rebuild in a
+#: migration every time the enum grows. That is a fair price for an enum that is
+#: closed and a recurring tax on one that is not.
+#:
+#: **Each of these degrades at the read end instead**, in the shape
+#: `custom_fields._kind_of` uses: an unrecognised value becomes a safe default
+#: and is logged. That is quieter than a 500 on every read of the row, and it is
+#: still data loss nobody can see, which is why the degrade logs rather than
+#: passing silently.
+GROWING_ENUM_COLUMNS: dict[str, str] = {
+    "user_books.status": (
+        "ReadStatus has already grown once: WANT_TO_READ was added later and "
+        "kept distinct from UNREAD because a Goodreads export carries the "
+        "distinction."
+    ),
+    "classifications.scheme": (
+        "ClassificationScheme grows whenever a catalogue source is added, which "
+        "is an open issue rather than a hypothetical."
+    ),
+    "tags.category": (
+        "TagCategory is the seeded vocabulary's shape, and the bilingual tag "
+        "work touches it."
+    ),
+}
+
+
+def _enum_columns() -> dict[str, str]:
+    """Every mapped column whose Python type is a `StrEnum`, as `table.column`.
+
+    Read off the mapper rather than the source text, because an annotation can
+    be written several ways and a rule that reads one spelling of it enforces
+    nothing. That is the defect this repository has found in a guard eleven
+    times.
+    """
+    from sqlalchemy import Table
+
+    from database import Base
+
+    found: dict[str, str] = {}
+    for mapper in Base.registry.mappers:
+        table = mapper.local_table
+        if not isinstance(table, Table):
+            continue
+        for name, attr in mapper.column_attrs.items():
+            annotation = mapper.class_.__annotations__.get(name)
+            if annotation is None:
+                continue
+            # `get_args`, not a substring of `str(annotation)`. The annotation
+            # renders as `Mapped[enums.OwnershipStatus]`, so matching
+            # `[OwnershipStatus]` finds nothing while looking correct. This rule
+            # was written that way first, and the tripwire below is what caught
+            # it, which is the rule's own warning applied to itself.
+            for arg in get_args(annotation):
+                if isinstance(arg, type) and issubclass(arg, StrEnum):
+                    found[f"{table.name}.{attr.columns[0].name}"] = arg.__name__
+    return found
+
+
+def _has_check(qualified: str) -> bool:
+    from sqlalchemy import Table
+
+    from database import Base
+
+    table_name, column_name = qualified.split(".")
+    for mapper in Base.registry.mappers:
+        table = mapper.local_table
+        if not isinstance(table, Table) or table.name != table_name:
+            continue
+        for constraint in table.constraints:
+            if isinstance(constraint, CheckConstraint) and column_name in str(
+                constraint.sqltext
+            ):
+                return True
+    return False
+
+
+class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
+    """A value outside the enum 500s every read of the row that holds it.
+
+    `backup.restore` inserts through Core, where neither a Pydantic model nor a
+    `@validates` hook fires, so an archive decides the value. `custom_fields.kind`
+    shipped with its constraint **in the migration only**, so `create_all` built
+    the table without it and `--autogenerate` would have proposed dropping it.
+    Four migrations would have fixed that day and prevented nothing; this is what
+    prevents the next one.
+    """
+
+    def test_every_enum_column_is_constrained_or_named(self):
+        unaccounted = {
+            column: enum
+            for column, enum in _enum_columns().items()
+            if not _has_check(column) and column not in GROWING_ENUM_COLUMNS
+        }
+        assert not unaccounted, (
+            "These map a StrEnum and carry no CheckConstraint, so a restored row "
+            "outside the enum raises at read time. Add the constraint, or add the "
+            "column to GROWING_ENUM_COLUMNS with the reason it cannot have one: "
+            f"{sorted(unaccounted)}"
+        )
+
+    def test_the_exemption_list_names_only_real_columns(self):
+        """An exemption for a column that no longer exists is an exemption
+        nobody notices is doing nothing."""
+        stale = set(GROWING_ENUM_COLUMNS) - set(_enum_columns())
+        assert not stale, f"exempted columns that do not exist: {sorted(stale)}"
+
+    def test_the_reader_finds_the_columns_it_is_meant_to(self):
+        """A tripwire. An empty or half built mapping makes both tests above
+        pass while enforcing nothing, which is the shape of every guard defect
+        found in this repository."""
+        found = _enum_columns()
+        assert len(found) >= 5, f"the mapper walk found too little: {found}"
+        assert found.get("custom_fields.kind") == "CustomFieldKind"
+        assert found.get("books.ownership") == "OwnershipStatus"
+        assert found.get("user_books.status") == "ReadStatus"
+
+
+#: The one bot id a fixture may use. Real Telegram bot ids are eight to ten
+#: digits, so this satisfies `notifications._TELEGRAM_TOKEN` while being
+#: unmistakable to a reader and to a scanner.
+FAKE_BOT_ID = "0:"
+
+
+class TestNoFixtureLooksLikeACredential:
+    """A value that only **looks** like a secret costs the same to triage as one
+    that is, and on the public mirror somebody else does that triage.
+
+    GitHub's secret scanner flagged `test_notifications.py` for a Telegram bot
+    token: realistic bot id, realistic secret half, and shaped that way on
+    purpose because `_TELEGRAM_TOKEN` insists on the shape before the value goes
+    into a URL path. The fixture was never a live credential and that did not
+    matter, because nobody triaging an alert can tell from the outside.
+
+    Both test trees are published, so this is a rule about what ships rather
+    than about what is true.
+    """
+
+    #: Files allowed to contain the pattern, with the reason.
+    #:
+    #: Only this file, which has to write the pattern down in order to forbid it.
+    ALLOWED = {"tests/test_house_rules.py"}
+
+    def test_no_test_file_contains_a_realistic_bot_token(self):
+        pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
+        offenders: list[str] = []
+        for path in _test_sources():
+            relative = str(path.relative_to(BACKEND))
+            if relative in self.ALLOWED:
+                continue
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                if pattern.search(line):
+                    offenders.append(f"{relative}:{number}")
+
+        assert not offenders, (
+            "These carry a string shaped like a live Telegram bot token, and both "
+            f"test trees are published. Use {FAKE_BOT_ID!r} as the bot id: it "
+            "satisfies the validator and cannot be mistaken for a credential. "
+            f"{sorted(offenders)}"
+        )
+
+    def test_the_rule_reports_the_shape_it_exists_for(self):
+        """A rule nothing can fail is a rule nobody notices deleting."""
+        pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
+        assert pattern.search("123456789:AAHrealisticlookingsecrethalfhere")
+        assert not pattern.search("0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")

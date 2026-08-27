@@ -1,0 +1,13 @@
+# Commits that changed formatting and nothing else. `git blame` skips them with
+# `--ignore-revs-file`, so it names the author of the logic rather than the
+# author of the whitespace.
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub and GitLab both read this file by name with no configuration.
+#
+# Add a commit here only when it is provably formatting alone: same tests, same
+# count, no behaviour change stated in the message.
+
+# Apply Prettier to the frontend, and enforce it
+38f3e4e1db9cb2b32fd6a0cc3e27ec6d56f142d7

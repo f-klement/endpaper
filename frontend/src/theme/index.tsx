@@ -313,7 +313,9 @@ export function ThemeProvider({
 
     const contrast = window.matchMedia?.(CONTRAST_QUERY);
     const dark =
-      appearance.mode === "system" ? window.matchMedia?.(DARK_QUERY) : undefined;
+      appearance.mode === "system"
+        ? window.matchMedia?.(DARK_QUERY)
+        : undefined;
 
     const onChange = () => {
       const next = resolveTheme(appearance.mode);
@@ -342,14 +344,11 @@ export function ThemeProvider({
     });
   }, []);
 
-  const adopt = useCallback(
-    (next: Appearance, accountId: number | string) => {
-      account.current = accountId;
-      cacheAppearance(accountId, next);
-      setStoredAppearance(next);
-    },
-    [],
-  );
+  const adopt = useCallback((next: Appearance, accountId: number | string) => {
+    account.current = accountId;
+    cacheAppearance(accountId, next);
+    setStoredAppearance(next);
+  }, []);
 
   // This provider sits above the session gate and does not unmount when
   // somebody signs out, but the component that binds the account does. Without

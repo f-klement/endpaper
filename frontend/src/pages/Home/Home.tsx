@@ -47,20 +47,20 @@ export default function Home() {
         badge={library.total > 0 && <PageCount>{library.total}</PageCount>}
         actions={
           <>
-          {!selection.isSelecting && library.books.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={selection.start}>
-              {t("library.select")}
-            </Button>
-          )}
-          {/* A link that looks like the primary button, so the two agree.
+            {!selection.isSelecting && library.books.length > 0 && (
+              <Button variant="ghost" size="sm" onClick={selection.start}>
+                {t("library.select")}
+              </Button>
+            )}
+            {/* A link that looks like the primary button, so the two agree.
               Not <Button as={Link}>: a polymorphic prop is a lot of type
               machinery for one call site. */}
-          <Link
-            to="/scan"
-            className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-medium bg-accent-fill text-on-accent shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-fill-hover hover:shadow-[var(--shadow-lift)]"
-          >
-            {t("library.scanButton")}
-          </Link>
+            <Link
+              to="/scan"
+              className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-medium bg-accent-fill text-on-accent shadow-[var(--shadow-soft)] transition-[background-color,box-shadow,transform] duration-150 ease-[var(--ease-out-soft)] active:scale-[0.97] hover:bg-accent-fill-hover hover:shadow-[var(--shadow-lift)]"
+            >
+              {t("library.scanButton")}
+            </Link>
           </>
         }
       />

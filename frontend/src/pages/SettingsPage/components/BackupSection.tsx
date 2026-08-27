@@ -1,6 +1,11 @@
 import { useRef, useState } from "react";
 
-import { Button, CollapsibleSection, ErrorState, Icon } from "../../../components";
+import {
+  Button,
+  CollapsibleSection,
+  ErrorState,
+  Icon,
+} from "../../../components";
 import { useTranslation } from "../../../i18n";
 
 interface BackupSectionProps {
@@ -64,7 +69,10 @@ export default function BackupSection({
       </Button>
       {downloadError != null && (
         <div className="mt-2">
-          <ErrorState error={downloadError} fallback={t("backup.downloadFailed")} />
+          <ErrorState
+            error={downloadError}
+            fallback={t("backup.downloadFailed")}
+          />
         </div>
       )}
 
@@ -105,7 +113,10 @@ export default function BackupSection({
 
       {restoreError != null && (
         <div className="mt-2">
-          <ErrorState error={restoreError} fallback={t("backup.restoreFailed")} />
+          <ErrorState
+            error={restoreError}
+            fallback={t("backup.restoreFailed")}
+          />
         </div>
       )}
       {restored && (

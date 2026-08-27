@@ -214,7 +214,10 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
         </div>
 
         {priceError && (
-          <p role="alert" className="text-xs text-danger-600 dark:text-danger-300">
+          <p
+            role="alert"
+            className="text-xs text-danger-600 dark:text-danger-300"
+          >
             {t("copy.priceInvalid")}
           </p>
         )}

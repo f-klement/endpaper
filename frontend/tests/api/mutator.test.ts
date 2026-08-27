@@ -200,7 +200,9 @@ describe("a request that never got an answer", () => {
     // rejection from a response. Downstream it would be a guess from the text
     // of a string the browser vendor chooses.
     unreachable();
-    await expect(customFetch("/api/books")).rejects.toBeInstanceOf(NetworkError);
+    await expect(customFetch("/api/books")).rejects.toBeInstanceOf(
+      NetworkError,
+    );
   });
 
   it("keeps the original for the console", async () => {

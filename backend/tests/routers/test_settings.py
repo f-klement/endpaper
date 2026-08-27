@@ -699,7 +699,7 @@ class TestReminderSenderSettings:
         assert response.json()["mail_password_preview"].endswith("ery")
 
     def test_the_bot_token_comes_back_masked_and_never_in_full(self, client, admin):
-        token = "123456:AAaaBBbbCCccDDddEEeeFFffGGgg1234567"
+        token = "0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL"
         client.put(
             "/api/settings",
             json={"telegram_bot_token": token},
@@ -872,7 +872,7 @@ class TestTheEnvironmentWinsOverTheStoredValue:
         assert "mail_password" in body.json()["mail_from_env"]
 
     def test_a_pinned_bot_token_refuses_an_edit(self, client, admin, monkeypatch):
-        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:AAaaBBbbCCccDDddEEeeFFffGGgg12")
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")
         response = client.put(
             "/api/settings",
             json={"telegram_bot_token": "999:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"},

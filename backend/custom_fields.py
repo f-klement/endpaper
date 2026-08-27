@@ -156,9 +156,9 @@ served by their own route rather than on `BookOut`. And the modules it is
 compared against put a **scoped object** behind one name, so their operations
 are methods and do not count; here the scope is the `Book` handed in, so there
 is no object to construct and every operation is a function taking it.
-`dependencies.py`, which this repository's ADR calls deep, sits lower still at
-8.3 for the same reason. The full argument and the table are in
-`docs/adr/0008-deep-modules-behind-narrow-doors.md`.
+`dependencies.py`, which this repository treats as deep, sits lower still at
+8.3 for the same reason. So the ratio separates two module shapes rather than
+two depths, and a low one is a question to ask rather than a verdict.
 """
 
 import logging

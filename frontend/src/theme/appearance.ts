@@ -109,7 +109,9 @@ export function resolveAppearance(value: unknown): Appearance {
   const source = (value ?? {}) as Partial<Record<keyof Appearance, unknown>>;
   return {
     palette: resolvePalette(source.palette),
-    mode: isThemePreference(source.mode) ? source.mode : DEFAULT_APPEARANCE.mode,
+    mode: isThemePreference(source.mode)
+      ? source.mode
+      : DEFAULT_APPEARANCE.mode,
     // Not checked against `PATTERNS` here: this module knows nothing about
     // wallpapers, and an id it cannot resolve is handled where they are drawn.
     wallpaper: typeof source.wallpaper === "string" ? source.wallpaper : null,
@@ -129,7 +131,9 @@ function read(): Cache {
     return {
       last: typeof parsed?.last === "string" ? parsed.last : null,
       accounts:
-        accounts && typeof accounts === "object" ? (accounts as Cache["accounts"]) : {},
+        accounts && typeof accounts === "object"
+          ? (accounts as Cache["accounts"])
+          : {},
     };
   } catch {
     // A half-written entry, or a private window with no storage at all. Both
@@ -150,7 +154,9 @@ function read(): Cache {
  * device with nobody on it is the front door, which is fixed. Asking for an
  * account is what tells the two apart, so the caller does not have to.
  */
-export function readCachedAppearance(accountId?: number | string | null): Appearance {
+export function readCachedAppearance(
+  accountId?: number | string | null,
+): Appearance {
   const cache = read();
   const key = accountId != null ? String(accountId) : cache.last;
   const stored = key != null ? cache.accounts[key] : undefined;

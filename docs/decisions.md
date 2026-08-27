@@ -4460,9 +4460,9 @@ wrong. Widening the framing is free; widening the feature claims is not.
 **What was deliberately not rewritten.** `CHANGELOG.md`, because its entries record what shipped
 when and restating them in today's vocabulary makes the file lie.
 
-**Capitalisation follows the file.** `CONTEXT.md` and `docs/adr/` capitalise domain terms
-because they are definitional. Everywhere else, including code comments and the rest of this
-file, the register is lowercase: measured on 2026-08-26, `docs/` contained 61 instances of "a
+**Capitalisation follows the file.** A document whose job is to define a term capitalises
+it; everywhere else, including code comments and the rest of this file, the register is
+lowercase: measured on 2026-08-26, `docs/` contained 61 instances of "a
 book" and none of "a Book". A pass that capitalised them was reverted for that reason.
 
 ### The glossary names the operator only where it has to

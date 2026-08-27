@@ -355,11 +355,14 @@ function measure(tokens: Tokens, pairs: Pair[]): string[] {
   return pairs.flatMap(({ what, fg, bg, floor }) => {
     const foreground = tokens[fg];
     const background = tokens[bg];
-    if (!foreground || !background) return [`${what}: ${fg} or ${bg} is missing`];
+    if (!foreground || !background)
+      return [`${what}: ${fg} or ${bg} is missing`];
     const ratio = contrast(foreground, background);
     return ratio >= floor
       ? []
-      : [`${what}: ${ratio.toFixed(2)}:1 against ${floor} (${foreground} on ${background})`];
+      : [
+          `${what}: ${ratio.toFixed(2)}:1 against ${floor} (${foreground} on ${background})`,
+        ];
   });
 }
 
@@ -379,9 +382,9 @@ describe("the stylesheets are actually read", () => {
 describe("the catalogue and the stylesheet agree", () => {
   it("every palette but the default has both blocks", () => {
     const missing = THEMES.filter((id) => id !== "endpaper").flatMap((id) =>
-      MODES.filter((mode) => Object.keys(paletteBlock(id, mode)).length === 0).map(
-        (mode) => `${id} ${mode}`,
-      ),
+      MODES.filter(
+        (mode) => Object.keys(paletteBlock(id, mode)).length === 0,
+      ).map((mode) => `${id} ${mode}`),
     );
     expect(missing).toEqual([]);
   });
@@ -400,9 +403,9 @@ describe("the catalogue and the stylesheet agree", () => {
         (match) => match[1]!,
       ),
     );
-    expect([...declared].filter((id) => !THEMES.includes(id as PaletteId))).toEqual(
-      [],
-    );
+    expect(
+      [...declared].filter((id) => !THEMES.includes(id as PaletteId)),
+    ).toEqual([]);
   });
 
   it("every mode is offered by every palette", () => {
@@ -411,7 +414,9 @@ describe("the catalogue and the stylesheet agree", () => {
     // the catalogue records, but it exists.
     for (const palette of PALETTES) {
       for (const mode of MODES) {
-        expect(Object.keys(tokensFor(palette.id, mode)).length).toBeGreaterThan(30);
+        expect(Object.keys(tokensFor(palette.id, mode)).length).toBeGreaterThan(
+          30,
+        );
       }
     }
   });
@@ -425,7 +430,9 @@ describe("every palette block states every token", () => {
     for (const mode of MODES) {
       it(`${palette} ${mode}`, () => {
         const declared = Object.keys(paletteBlock(palette, mode));
-        expect(REQUIRED.filter((token) => !declared.includes(token))).toEqual([]);
+        expect(REQUIRED.filter((token) => !declared.includes(token))).toEqual(
+          [],
+        );
       });
     }
   }
@@ -490,7 +497,10 @@ describe("the body ink stays inside the anti-glare band", () => {
   for (const palette of THEMES) {
     it(`${palette} dark`, () => {
       const tokens = tokensFor(palette, "dark");
-      const ratio = contrast(tokens["--color-paper-200"]!, tokens["--color-paper-950"]!);
+      const ratio = contrast(
+        tokens["--color-paper-200"]!,
+        tokens["--color-paper-950"]!,
+      );
       expect(ratio).toBeGreaterThanOrEqual(8.5);
       expect(ratio).toBeLessThanOrEqual(16);
     });
@@ -551,7 +561,9 @@ describe("a ramp only ever goes one way", () => {
             const lighter = tokens[`--color-${ramp}-${steps[at - 1]}`]!;
             const darker = tokens[`--color-${ramp}-${steps[at]}`]!;
             if (luminance(darker) >= luminance(lighter)) {
-              reversals.push(`${ramp}-${steps[at - 1]} to ${ramp}-${steps[at]}`);
+              reversals.push(
+                `${ramp}-${steps[at - 1]} to ${ramp}-${steps[at]}`,
+              );
             }
           }
         };

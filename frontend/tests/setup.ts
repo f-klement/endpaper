@@ -48,11 +48,13 @@ if (typeof window !== "undefined" && !window.matchMedia) {
  * document at runtime rather than owning any hex, so without them the app under
  * test is one with no palette, which is not the app.
  */
-const INDEX_CSS = (import.meta.glob("../src/index.css", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>)["../src/index.css"];
+const INDEX_CSS = (
+  import.meta.glob("../src/index.css", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>
+)["../src/index.css"];
 
 /**
  * The six palette steps the wallpaper reads, taken from the stylesheet itself.

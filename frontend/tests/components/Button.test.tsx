@@ -17,7 +17,9 @@ import { renderLocalised } from "../utils";
 describe("Button", () => {
   it("renders its label", () => {
     renderLocalised(<Button>Add book</Button>);
-    expect(screen.getByRole("button", { name: "Add book" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add book" }),
+    ).toBeInTheDocument();
   });
 
   it("defaults to type=button", () => {

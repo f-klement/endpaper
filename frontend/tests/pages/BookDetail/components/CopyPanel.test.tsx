@@ -42,7 +42,9 @@ describe("CopyPanel", () => {
     const onSave = renderPanel();
     const user = userEvent.setup();
 
-    fireEvent.change(screen.getByLabelText("Price paid"), { target: { value: "12.99" } });
+    fireEvent.change(screen.getByLabelText("Price paid"), {
+      target: { value: "12.99" },
+    });
     await user.click(screen.getByRole("button", { name: "Save copy details" }));
 
     expect(onSave).toHaveBeenCalledWith(
@@ -54,7 +56,9 @@ describe("CopyPanel", () => {
     const onSave = renderPanel();
     const user = userEvent.setup();
 
-    fireEvent.change(screen.getByLabelText("Price paid"), { target: { value: "twelve quid" } });
+    fireEvent.change(screen.getByLabelText("Price paid"), {
+      target: { value: "twelve quid" },
+    });
     await user.click(screen.getByRole("button", { name: "Save copy details" }));
 
     expect(onSave).not.toHaveBeenCalled();
@@ -65,7 +69,9 @@ describe("CopyPanel", () => {
     const onSave = renderPanel();
     const user = userEvent.setup();
 
-    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "eur" } });
+    fireEvent.change(screen.getByLabelText("Currency"), {
+      target: { value: "eur" },
+    });
     await user.click(screen.getByRole("button", { name: "Save copy details" }));
 
     expect(onSave).toHaveBeenCalledWith(

@@ -119,8 +119,9 @@ describe("ReminderSendersSection", () => {
       renderSection();
       const options = screen.getAllByRole("radio");
       expect(options).toHaveLength(3);
-      expect(options.filter((option) => (option as HTMLInputElement).checked))
-        .toHaveLength(1);
+      expect(
+        options.filter((option) => (option as HTMLInputElement).checked),
+      ).toHaveLength(1);
     });
 
     it("sends the pair the server stores, never both true", () => {
@@ -145,7 +146,10 @@ describe("ReminderSendersSection", () => {
 
   describe("a setting the deployment pinned", () => {
     it("is shown, not editable, and says so", () => {
-      renderSection({ mail_server: "smtp.deployment.test", mail_from_env: ["mail_server"] });
+      renderSection({
+        mail_server: "smtp.deployment.test",
+        mail_from_env: ["mail_server"],
+      });
       expect(screen.getByLabelText("Mail server")).toBeDisabled();
       expect(screen.getByText(/mail_server/)).toBeInTheDocument();
     });

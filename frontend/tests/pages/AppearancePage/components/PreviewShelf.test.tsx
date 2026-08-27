@@ -11,9 +11,7 @@ beforeEach(resetIds);
 
 describe("PreviewShelf", () => {
   it("draws the books it is given", () => {
-    renderLocalised(
-      <PreviewShelf books={[makeBook({ title: "Dune" })]} />,
-    );
+    renderLocalised(<PreviewShelf books={[makeBook({ title: "Dune" })]} />);
 
     expect(screen.getByText("Dune")).toBeInTheDocument();
   });

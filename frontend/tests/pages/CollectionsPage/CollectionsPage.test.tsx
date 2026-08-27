@@ -45,7 +45,9 @@ describe("CollectionsPage", () => {
     await screen.findByText("No collections yet");
 
     await userEvent.type(screen.getByLabelText("Name"), "Sold");
-    await userEvent.click(screen.getByRole("button", { name: "Add collection" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add collection" }),
+    );
 
     expect(expectRequest(api, "/api/collections", "POST").body).toEqual({
       name: "Sold",
@@ -70,14 +72,19 @@ describe("CollectionsPage", () => {
     });
     api.on(
       "/api/collections",
-      { status: 409, body: { detail: "A collection with that name already exists." } },
+      {
+        status: 409,
+        body: { detail: "A collection with that name already exists." },
+      },
       "POST",
     );
     renderWithProviders(<CollectionsPage />);
     await screen.findByText("Ebooks");
 
     await userEvent.type(screen.getByLabelText("Name"), "ebooks");
-    await userEvent.click(screen.getByRole("button", { name: "Add collection" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add collection" }),
+    );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "A collection with that name already exists.",

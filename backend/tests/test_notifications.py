@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import smtplib
 import threading
 import time
@@ -485,9 +486,19 @@ def test_the_borrower_is_always_named(db, lend, admin):
 
 # ── The two senders added beside the webhook ─────────────────────────────────
 
-#: Shaped like a real bot token, which `_TELEGRAM_TOKEN` insists on before the
-#: value is put in a URL path.
-BOT_TOKEN = "123456:AAaaBBbbCCccDDddEEeeFFffGGgg1234567"
+#: Shaped like a bot token, because `_TELEGRAM_TOKEN` insists on the shape
+#: before the value is put in a URL path, and unmistakably not one.
+#:
+#: **The bot id is `0`.** A real Telegram bot id is eight to ten digits, so this
+#: satisfies `^[0-9]{1,20}:` while no reader and no secret scanner can mistake it
+#: for a credential. The previous fixture had a realistic id and a realistic
+#: secret half, and GitHub's scanner flagged it on the public mirror: a value
+#: that only *looks* like a secret costs exactly as much to triage as one that
+#: is, and the mirror is where somebody else has to do that triage.
+#:
+#: Overridable from the environment for anyone pointing this at a live bot. The
+#: default keeps the suite hermetic, which is why nothing in CI sets it.
+BOT_TOKEN = os.getenv("TEST_TELEGRAM_BOT_TOKEN", "0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")
 CHAT_ID = "-1001234567890"
 TELEGRAM_SEND = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 

@@ -100,7 +100,11 @@ describe("RapidQueue", () => {
         {
           isbn: "9780441013593",
           state: "failed",
-          draft: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+          draft: {
+            isbn: "9780441013593",
+            title: "Dune",
+            suggested_tag_ids: [],
+          },
           reason: "Book with this ISBN already in catalog",
         },
       ],

@@ -22,12 +22,16 @@ import { useExportLibrary } from "../hooks";
  * is a lookup by search box as often as by barcode; the camera is the odd one
  * out beside the two glyphs beside it.
  */
-const PRIMARY: { to: string; label: MessageKey; icon: IconName; end: boolean }[] =
-  [
-    { to: "/", label: "nav.library", icon: "library", end: true },
-    { to: "/scan", label: "nav.scan", icon: "search", end: false },
-    { to: "/loans", label: "nav.loans", icon: "handshake", end: false },
-  ];
+const PRIMARY: {
+  to: string;
+  label: MessageKey;
+  icon: IconName;
+  end: boolean;
+}[] = [
+  { to: "/", label: "nav.library", icon: "library", end: true },
+  { to: "/scan", label: "nav.scan", icon: "search", end: false },
+  { to: "/loans", label: "nav.loans", icon: "handshake", end: false },
+];
 
 /** Everything else. Navigation only: the actions below are written out. */
 const SECONDARY: { to: string; label: MessageKey }[] = [

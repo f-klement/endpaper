@@ -292,8 +292,11 @@ describe("the admission rule", () => {
     for (const pattern of PATTERNS) {
       for (const layer of pattern.layers) {
         const peak = peakCoverage(inkField(pattern, layer));
-        expect({ id: pattern.id, weight: layer.weight, thick: peak >= 0.9 })
-          .toEqual({ id: pattern.id, weight: layer.weight, thick: true });
+        expect({
+          id: pattern.id,
+          weight: layer.weight,
+          thick: peak >= 0.9,
+        }).toEqual({ id: pattern.id, weight: layer.weight, thick: true });
       }
     }
   });
@@ -333,9 +336,9 @@ describe("the primitives", () => {
   it("refuses a staggered lattice with an odd number of rows", () => {
     // The one that catches the real defect. The offset repeats every two rows,
     // so an odd count puts two unstaggered rows together across the seam.
-    expect(() => lattice(240, { x: 60, y: 80 }, draw, { stagger: true })).toThrow(
-      /even row count, not 3/,
-    );
+    expect(() =>
+      lattice(240, { x: 60, y: 80 }, draw, { stagger: true }),
+    ).toThrow(/even row count, not 3/);
     expect(() =>
       lattice(240, { x: 60, y: 60 }, draw, { stagger: true }),
     ).not.toThrow();
@@ -353,7 +356,8 @@ describe("the primitives", () => {
       { stagger: true },
     );
     const firstOfRow = [0, 1, 2, 3].map(
-      (row) => cells.filter((cell) => cell.row === row).map((cell) => cell.x)[0],
+      (row) =>
+        cells.filter((cell) => cell.row === row).map((cell) => cell.x)[0],
     );
     expect(firstOfRow).toEqual([0, 30, 0, 30]);
     // The property the even row count exists for: the tile's last row and the
@@ -521,10 +525,9 @@ describe("wallpaperWeights", () => {
       page: DARK_INK.page,
     })!;
     expect(dim.ground).toBeGreaterThan(bright.ground);
-    expect(markWeight(parseHex(DARK_INK.ink)!, page, bright.ground)).toBeCloseTo(
-      markWeight(parseHex("#3a6a62")!, page, dim.ground),
-      3,
-    );
+    expect(
+      markWeight(parseHex(DARK_INK.ink)!, page, bright.ground),
+    ).toBeCloseTo(markWeight(parseHex("#3a6a62")!, page, dim.ground), 3);
   });
 
   it("draws the dark page more strongly than the light one", () => {
@@ -629,7 +632,10 @@ describe("patternDataUri", () => {
       pattern.layers.forEach((_, index) => {
         const offsets = [
           ...uri.matchAll(
-            new RegExp(`<use href="#l${index}" x="(-?\\d+)" y="(-?\\d+)"/>`, "g"),
+            new RegExp(
+              `<use href="#l${index}" x="(-?\\d+)" y="(-?\\d+)"/>`,
+              "g",
+            ),
           ),
         ].map((match) => `${match[1]},${match[2]}`);
         expect(new Set(offsets)).toEqual(

@@ -8,10 +8,18 @@ const STATUS_OPTIONS: {
   icon: IconName;
 }[] = [
   { value: ReadStatus.unread, label: "status.unread", icon: "list" },
-  { value: ReadStatus.want_to_read, label: "status.want_to_read", icon: "bookmark" },
+  {
+    value: ReadStatus.want_to_read,
+    label: "status.want_to_read",
+    icon: "bookmark",
+  },
   { value: ReadStatus.reading, label: "status.reading", icon: "book" },
   { value: ReadStatus.read, label: "status.read", icon: "check" },
-  { value: ReadStatus.did_not_finish, label: "status.did_not_finish", icon: "ban" },
+  {
+    value: ReadStatus.did_not_finish,
+    label: "status.did_not_finish",
+    icon: "ban",
+  },
 ];
 
 interface StatusPickerProps {
@@ -44,9 +52,9 @@ export default function StatusPicker({ current, onChange }: StatusPickerProps) {
             className={`py-2 rounded-lg text-sm font-medium border transition-colors ${
               current === option.value
                 ? "bg-accent-fill border-accent-fill text-on-accent"
-                : "border-paper-200 text-paper-600 hover:border-accent-300 bg-paper-0 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 "
-                + "dark:hover:border-accent-700"
+                : "border-paper-200 text-paper-600 hover:border-accent-300 bg-paper-0 " +
+                  "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 " +
+                  "dark:hover:border-accent-700"
             }`}
           >
             <Icon name={option.icon} className="w-4 h-4" /> {t(option.label)}

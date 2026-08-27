@@ -50,7 +50,9 @@ export default function QuoteCard({ quote }: QuoteCardProps) {
           <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
             {[
               quote.book_author,
-              quote.page != null ? t("quotes.onPage", { page: quote.page }) : null,
+              quote.page != null
+                ? t("quotes.onPage", { page: quote.page })
+                : null,
               quote.author?.username,
             ]
               .filter(Boolean)

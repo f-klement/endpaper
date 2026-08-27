@@ -101,7 +101,10 @@ describe("the cache", () => {
     // The preference used to be a bare string under `theme`, per device. Read
     // once as a fallback so nobody's dark mode is forgotten by an upgrade.
     localStorage.setItem("theme", "dark");
-    expect(readCachedAppearance()).toEqual({ ...DOOR_APPEARANCE, mode: "dark" });
+    expect(readCachedAppearance()).toEqual({
+      ...DOOR_APPEARANCE,
+      mode: "dark",
+    });
   });
 
   it("prefers the account's own record over the old device one", () => {
@@ -135,6 +138,8 @@ describe("sameAppearance", () => {
   it("compares the three fields and nothing else", () => {
     expect(sameAppearance(GRUVBOX, { ...GRUVBOX })).toBe(true);
     expect(sameAppearance(GRUVBOX, { ...GRUVBOX, mode: "light" })).toBe(false);
-    expect(sameAppearance(GRUVBOX, { ...GRUVBOX, wallpaper: null })).toBe(false);
+    expect(sameAppearance(GRUVBOX, { ...GRUVBOX, wallpaper: null })).toBe(
+      false,
+    );
   });
 });

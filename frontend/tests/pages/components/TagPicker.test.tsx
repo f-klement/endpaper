@@ -95,17 +95,25 @@ describe("TagPicker", () => {
         <TagPicker tags={makeTagSet()} selectedIds={[]} onToggle={vi.fn()} />,
       );
       // The shape of the vocabulary stays visible while its contents do not.
-      expect(screen.getByRole("button", { name: /Genre 1/ })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Genre 1/ }),
+      ).toBeInTheDocument();
     });
 
     it("opens a category that holds a selection, unasked", () => {
       // A selection you cannot see is worse than a long list.
       const tags = makeTagSet();
       renderLocalised(
-        <TagPicker tags={tags} selectedIds={[tags[1]!.id]} onToggle={vi.fn()} />,
+        <TagPicker
+          tags={tags}
+          selectedIds={[tags[1]!.id]}
+          onToggle={vi.fn()}
+        />,
       );
 
-      expect(screen.getByRole("button", { name: "Fantasy" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Fantasy" }),
+      ).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Genre/ })).toHaveAttribute(
         "aria-expanded",
         "true",
@@ -115,7 +123,11 @@ describe("TagPicker", () => {
     it("counts the selection in the heading", () => {
       const tags = makeTagSet();
       renderLocalised(
-        <TagPicker tags={tags} selectedIds={[tags[1]!.id]} onToggle={vi.fn()} />,
+        <TagPicker
+          tags={tags}
+          selectedIds={[tags[1]!.id]}
+          onToggle={vi.fn()}
+        />,
       );
       expect(
         screen.getByRole("button", { name: /1 of 1/ }),
@@ -161,7 +173,9 @@ describe("TagPicker, inventing a tag", () => {
     );
 
     const user = userEvent.setup();
-    fireEvent.change(screen.getByLabelText("New tag"), { target: { value: "Holiday reads" } });
+    fireEvent.change(screen.getByLabelText("New tag"), {
+      target: { value: "Holiday reads" },
+    });
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(onCreate).toHaveBeenCalledWith("Holiday reads");
@@ -183,7 +197,9 @@ describe("TagPicker, inventing a tag", () => {
       </form>,
     );
 
-    await userEvent.setup().type(screen.getByLabelText("New tag"), "Loft{Enter}");
+    await userEvent
+      .setup()
+      .type(screen.getByLabelText("New tag"), "Loft{Enter}");
 
     expect(onCreate).toHaveBeenCalledWith("Loft");
     expect(onSubmit).not.toHaveBeenCalled();
@@ -201,7 +217,9 @@ describe("TagPicker, inventing a tag", () => {
     );
 
     const user = userEvent.setup();
-    fireEvent.change(screen.getByLabelText("New tag"), { target: { value: "  Loft  " } });
+    fireEvent.change(screen.getByLabelText("New tag"), {
+      target: { value: "  Loft  " },
+    });
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(onCreate).toHaveBeenCalledWith("Loft");
@@ -245,7 +263,9 @@ describe("TagPicker, inventing a tag", () => {
   it("groups a curated tag under its own heading", () => {
     renderLocalised(
       <TagPicker
-        tags={[makeTag({ name: "Holiday reads", category: TagCategory.custom })]}
+        tags={[
+          makeTag({ name: "Holiday reads", category: TagCategory.custom }),
+        ]}
         selectedIds={[]}
         onToggle={vi.fn()}
       />,
@@ -253,4 +273,3 @@ describe("TagPicker, inventing a tag", () => {
     expect(screen.getByText("Your tags")).toBeInTheDocument();
   });
 });
-

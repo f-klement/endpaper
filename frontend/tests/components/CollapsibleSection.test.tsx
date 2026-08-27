@@ -88,9 +88,7 @@ describe("CollapsibleSection", () => {
       </CollapsibleSection>,
     );
 
-    expect(
-      screen.getByDisplayValue("half a thought"),
-    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("half a thought")).toBeInTheDocument();
   });
 
   it("reports a click", async () => {
@@ -138,9 +136,10 @@ describe("CollapsibleSection", () => {
         </CollapsibleSection>,
       );
 
-      expect(
-        screen.getByRole("button", { name: "Backup" }),
-      ).toHaveAttribute("aria-expanded", "false");
+      expect(screen.getByRole("button", { name: "Backup" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
     });
 
     it("folds the same way the rows do", () => {

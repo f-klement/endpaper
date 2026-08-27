@@ -157,8 +157,7 @@ export function useSession(): Session {
     // the server's answer disagree, and offering "Return to my account" to
     // somebody who already is themselves is the same second opinion the
     // comment above `user` refuses.
-    isSwitched:
-      isProxy && storedUser !== null && me.data?.id === storedUser.id,
+    isSwitched: isProxy && storedUser !== null && me.data?.id === storedUser.id,
     signIn,
     signOut,
   };

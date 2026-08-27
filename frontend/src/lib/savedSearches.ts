@@ -46,7 +46,8 @@ export function readSavedSearches<TFilters>(): SavedSearch<TFilters>[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Stored<TFilters>;
-    if (parsed.version !== VERSION || !Array.isArray(parsed.searches)) return [];
+    if (parsed.version !== VERSION || !Array.isArray(parsed.searches))
+      return [];
     return parsed.searches.slice(0, MAX_SAVED);
   } catch {
     return [];

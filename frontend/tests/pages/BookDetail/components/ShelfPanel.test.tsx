@@ -42,7 +42,9 @@ describe("ShelfPanel", () => {
     const onSave = renderPanel({ location: null });
     const user = userEvent.setup();
 
-    fireEvent.change(screen.getByLabelText("Where it is"), { target: { value: "Kitchen" } });
+    fireEvent.change(screen.getByLabelText("Where it is"), {
+      target: { value: "Kitchen" },
+    });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).toHaveBeenCalledWith(
@@ -67,7 +69,9 @@ describe("ShelfPanel", () => {
     const onSave = renderPanel({ series_name: "Discworld" });
     const user = userEvent.setup();
 
-    fireEvent.change(screen.getByLabelText("No."), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("No."), {
+      target: { value: "2.5" },
+    });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).toHaveBeenCalledWith(

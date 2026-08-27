@@ -75,7 +75,9 @@ describe("deleteSearch", () => {
 
     deleteSearch(kept!.id);
 
-    expect(readSavedSearches<Filters>().map((s) => s.name)).toEqual(["Kitchen"]);
+    expect(readSavedSearches<Filters>().map((s) => s.name)).toEqual([
+      "Kitchen",
+    ]);
   });
 });
 
@@ -90,7 +92,10 @@ describe("when storage cannot be trusted", () => {
     // understand, which is a worse outcome than losing the saved views.
     localStorage.setItem(
       "savedSearches",
-      JSON.stringify({ version: 99, searches: [{ id: "1", name: "X", filters: {} }] }),
+      JSON.stringify({
+        version: 99,
+        searches: [{ id: "1", name: "X", filters: {} }],
+      }),
     );
     expect(readSavedSearches<Filters>()).toEqual([]);
   });

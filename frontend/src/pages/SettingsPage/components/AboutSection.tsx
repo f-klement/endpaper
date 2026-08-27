@@ -1,4 +1,3 @@
-
 import { CollapsibleSection } from "../../../components";
 import { useTranslation } from "../../../i18n";
 import AboutBadges from "./AboutBadges";

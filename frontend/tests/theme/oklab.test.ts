@@ -82,7 +82,6 @@ const DARK_PAGE: [number, number, number] = [16, 14, 12];
 const DARK_INK: [number, number, number] = [113, 216, 193];
 
 describe("markWeight", () => {
-
   it("moves nothing at zero alpha", () => {
     expect(markWeight(INK, PAGE, 0)).toBe(0);
   });

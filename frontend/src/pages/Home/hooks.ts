@@ -260,7 +260,10 @@ export function useBookSelection(): UseBookSelectionResult {
         if (variables.data.action === BulkAction.delete && result.updated > 0) {
           toast.show({
             message: t("trash.movedCount", { count: result.updated }),
-            action: { label: t("trash.open"), onClick: () => navigate("/trash") },
+            action: {
+              label: t("trash.open"),
+              onClick: () => navigate("/trash"),
+            },
           });
         }
       },
@@ -302,8 +305,7 @@ export function useBookSelection(): UseBookSelectionResult {
 
     // Ownership used to go to a second endpoint with an identical body and an
     // identical result. It is the same verb as the rest now.
-    apply: (ownership) =>
-      run(BulkAction.set_ownership, ownership),
+    apply: (ownership) => run(BulkAction.set_ownership, ownership),
     run,
     isApplying: general.isPending,
     result: (general.data ?? null) as BulkResult | null,

@@ -454,7 +454,8 @@ function grow(
           x,
           y,
           angle + lean * side,
-          Math.round(scales[cycle % scales.length]! * shrink * wobble * 100) / 100,
+          Math.round(scales[cycle % scales.length]! * shrink * wobble * 100) /
+            100,
         ),
       );
     }
@@ -570,7 +571,10 @@ export function lattice(
   const extent = typeof size === "number" ? { x: size, y: size } : size;
   const columns = extent.x / pitch.x;
   const rows = extent.y / pitch.y;
-  for (const [axis, count] of [["x", columns], ["y", rows]] as const) {
+  for (const [axis, count] of [
+    ["x", columns],
+    ["y", rows],
+  ] as const) {
     if (Math.abs(count - Math.round(count)) > 1e-9) {
       throw new Error(
         `lattice pitch ${axis}=${pitch[axis]} does not divide ${extent[axis]}`,
@@ -630,7 +634,13 @@ export function radial(
   for (let step = 0; step < count; step += 1) {
     const angle = first + spread * step;
     parts.push(
-      place(href, at.x, at.y, angle, (at.s ?? 1) * scales[step % scales.length]!),
+      place(
+        href,
+        at.x,
+        at.y,
+        angle,
+        (at.s ?? 1) * scales[step % scales.length]!,
+      ),
     );
   }
   return parts.join("");
@@ -653,7 +663,11 @@ export interface Harmonic {
  * the tangent is known everywhere, so each span is a Hermite segment and the
  * only error is in the curvature between samples.
  */
-export function flow(size: number, harmonics: Harmonic[], samples = 24): string {
+export function flow(
+  size: number,
+  harmonics: Harmonic[],
+  samples = 24,
+): string {
   for (const { cycles } of harmonics) {
     if (!Number.isInteger(cycles)) {
       throw new Error(`flow cycles ${cycles} is not periodic in the tile`);
@@ -775,7 +789,11 @@ export function ribbon(
  * `M`, `L`, `C`, `Q` and `Z`, and a command none of them handles would be
  * measured as nothing at all and quietly report a lighter tile than ships.
  */
-function arcPath(radius: number, fromDegrees: number, toDegrees: number): string {
+function arcPath(
+  radius: number,
+  fromDegrees: number,
+  toDegrees: number,
+): string {
   const total = ((toDegrees - fromDegrees) * Math.PI) / 180;
   const segments = Math.max(1, Math.ceil(Math.abs(total) / (Math.PI / 2)));
   const step = total / segments;
@@ -1059,9 +1077,7 @@ const STRAWBERRY_STEMS: Branch[] = [
   ],
 ];
 /** The second climbing stem is the first one mirrored, so it is said once. */
-STRAWBERRY_STEMS.push(
-  ...mirror([STRAWBERRY_STEMS[2]!], STRAWBERRY_SIZE, "x"),
-);
+STRAWBERRY_STEMS.push(...mirror([STRAWBERRY_STEMS[2]!], STRAWBERRY_SIZE, "x"));
 const STRAWBERRY_TWIGS: Branch[] = [
   twig([102, 112], [164, 140], 18),
   twig([198, 112], [136, 140], -18),
@@ -1207,8 +1223,7 @@ const ASANOHA_ROWS = 8;
  * stops being a hemp leaf and becomes a mesh. Fifteen is also odd, which the
  * row count may not be.
  */
-const ASANOHA_SQUASH =
-  ASANOHA_SIZE / ASANOHA_ROWS / (1.5 * ASANOHA_RADIUS);
+const ASANOHA_SQUASH = ASANOHA_SIZE / ASANOHA_ROWS / (1.5 * ASANOHA_RADIUS);
 
 /** A hexagon's six vertices, pointy top, at the given radius. */
 function hexagon(radius: number): Point[] {
@@ -1238,7 +1253,9 @@ function segment(a: Point, b: Point): string {
 }
 
 const ASANOHA_CELL = [0, 1, 2]
-  .map((index) => segment(ASANOHA_VERTICES[index]!, ASANOHA_VERTICES[index + 1]!))
+  .map((index) =>
+    segment(ASANOHA_VERTICES[index]!, ASANOHA_VERTICES[index + 1]!),
+  )
   .join("");
 
 const ASANOHA_LEAF = ASANOHA_VERTICES.map((vertex) =>
@@ -1740,7 +1757,10 @@ export const PATTERNS: Pattern[] = [
         );
       return [
         { weight: "ground", body: stroked(fans(SEIGAIHA_INNER), 2.4) },
-        { weight: "foliage", body: stroked(fans(SEIGAIHA_CREST), 2.4, "{bloom}") },
+        {
+          weight: "foliage",
+          body: stroked(fans(SEIGAIHA_CREST), 2.4, "{bloom}"),
+        },
       ];
     },
   }),
@@ -1751,7 +1771,7 @@ export const PATTERNS: Pattern[] = [
     size: ASANOHA_SIZE,
     build: (m) => {
       const pitch = {
-        x: (ASANOHA_SIZE / ASANOHA_COLUMNS),
+        x: ASANOHA_SIZE / ASANOHA_COLUMNS,
         y: 1.5 * ASANOHA_RADIUS,
       };
       const field = (shape: string) =>
@@ -1765,7 +1785,10 @@ export const PATTERNS: Pattern[] = [
         `</g>`;
       return [
         { weight: "ground", body: stroked(field(ASANOHA_CELL), 2.2) },
-        { weight: "foliage", body: stroked(field(ASANOHA_LEAF), 2.2, "{bloom}") },
+        {
+          weight: "foliage",
+          body: stroked(field(ASANOHA_LEAF), 2.2, "{bloom}"),
+        },
       ];
     },
   }),
@@ -1835,15 +1858,18 @@ export const PATTERNS: Pattern[] = [
       {
         weight: "foliage",
         body: stroked(
-          lattice(KHATAM_SIZE, { x: KHATAM_PITCH, y: KHATAM_PITCH }, ({ x, y }) =>
-            place(m.id(KHATAM_STAR), x, y, 0, 1) +
-            place(
-              m.id(KHATAM_CROSS),
-              x + KHATAM_PITCH / 2,
-              y + KHATAM_PITCH / 2,
-              45,
-              1,
-            ),
+          lattice(
+            KHATAM_SIZE,
+            { x: KHATAM_PITCH, y: KHATAM_PITCH },
+            ({ x, y }) =>
+              place(m.id(KHATAM_STAR), x, y, 0, 1) +
+              place(
+                m.id(KHATAM_CROSS),
+                x + KHATAM_PITCH / 2,
+                y + KHATAM_PITCH / 2,
+                45,
+                1,
+              ),
           ),
           2.6,
           "{bloom}",
@@ -1964,7 +1990,11 @@ export function wallpaperWeights(
   const solve = (weight: LayerWeight): number =>
     Math.min(
       ALPHA_CEILING,
-      solveAlpha(weight === "ground" ? ink : bloom, page, TARGETS[theme][weight]),
+      solveAlpha(
+        weight === "ground" ? ink : bloom,
+        page,
+        TARGETS[theme][weight],
+      ),
     );
 
   return {

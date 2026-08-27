@@ -38,7 +38,10 @@ vi.mock("@zxing/library", () => {
       UPC_E: "UPC_E",
       QR_CODE: "QR_CODE",
     },
-    DecodeHintType: { POSSIBLE_FORMATS: "POSSIBLE_FORMATS", TRY_HARDER: "TRY_HARDER" },
+    DecodeHintType: {
+      POSSIBLE_FORMATS: "POSSIBLE_FORMATS",
+      TRY_HARDER: "TRY_HARDER",
+    },
   };
 });
 

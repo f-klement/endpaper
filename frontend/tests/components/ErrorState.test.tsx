@@ -45,9 +45,13 @@ describe("errorText on a network failure", () => {
     // The browser's own words for this are "Failed to fetch": untranslated,
     // not a sentence, and no use to somebody on a phone. Reported live from a
     // mobile client behind a VPN that was black-holing large responses.
-    expect(errorText(new NetworkError(new TypeError("Failed to fetch")), "fallback", t)).toBe(
-      en["common.cannotReachServer"],
-    );
+    expect(
+      errorText(
+        new NetworkError(new TypeError("Failed to fetch")),
+        "fallback",
+        t,
+      ),
+    ).toBe(en["common.cannotReachServer"]);
   });
 
   it("never shows the browser's own message", () => {
@@ -61,9 +65,9 @@ describe("errorText on a network failure", () => {
 
   it("leaves a server-written message alone", () => {
     // That one is already a sentence meant for the reader.
-    expect(errorText(new ApiError("Book is already loaned out", 409), "fallback", t)).toBe(
-      "Book is already loaned out",
-    );
+    expect(
+      errorText(new ApiError("Book is already loaned out", 409), "fallback", t),
+    ).toBe("Book is already loaned out");
   });
 });
 

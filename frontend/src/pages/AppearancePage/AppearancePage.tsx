@@ -62,7 +62,11 @@ export default function AppearancePage() {
         </SettingsSection>
 
         <SettingsSection title={t("appearance.mode")} icon="lamp">
-          <div className="flex gap-2" role="group" aria-label={t("appearance.mode")}>
+          <div
+            className="flex gap-2"
+            role="group"
+            aria-label={t("appearance.mode")}
+          >
             {MODE_ORDER.map((mode) => (
               <button
                 key={mode}

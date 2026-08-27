@@ -51,7 +51,8 @@ export function useExportLibrary(): UseExportLibraryResult {
  * falling back to the browser's language, not an error screen.
  */
 export function useFeatureFlags(): FeatureFlagsOut | undefined {
-  return useGetFeatureFlags({ query: { retry: false, staleTime: 60_000 } }).data;
+  return useGetFeatureFlags({ query: { retry: false, staleTime: 60_000 } })
+    .data;
 }
 
 export interface UseStoredAppearanceResult {
@@ -80,7 +81,9 @@ export interface UseStoredAppearanceResult {
  * The choice is already applied and cached locally, so the worst case is that it
  * stays on this device.
  */
-export function useStoredAppearance(accountId: number): UseStoredAppearanceResult {
+export function useStoredAppearance(
+  accountId: number,
+): UseStoredAppearanceResult {
   const query = useGetMyAppearance({
     query: {
       queryKey: ["appearance", accountId],
@@ -99,7 +102,10 @@ export function useStoredAppearance(accountId: number): UseStoredAppearanceResul
 
   const stored = query.data;
   return {
-    stored: useMemo(() => (stored ? resolveAppearance(stored) : undefined), [stored]),
+    stored: useMemo(
+      () => (stored ? resolveAppearance(stored) : undefined),
+      [stored],
+    ),
     save,
   };
 }

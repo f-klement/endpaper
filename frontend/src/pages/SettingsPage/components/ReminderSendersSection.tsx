@@ -36,10 +36,9 @@ function encryptionOf(settings: SettingsOut): Encryption {
 }
 
 /** The pair the server stores. `tls` and `starttls` are never both true. */
-function flagsFor(choice: Encryption): Pick<
-  SettingsUpdate,
-  "mail_use_tls" | "mail_use_ssl"
-> {
+function flagsFor(
+  choice: Encryption,
+): Pick<SettingsUpdate, "mail_use_tls" | "mail_use_ssl"> {
   return {
     mail_use_tls: choice === "starttls",
     mail_use_ssl: choice === "tls",
@@ -325,9 +324,7 @@ export default function ReminderSendersSection({
               onClick={() => onSave({ telegram_chat_id: chat.trim() })}
               className={SAVE_CLASS}
             >
-              {isSaving
-                ? t("common.saving")
-                : t("settings.telegramChatSave")}
+              {isSaving ? t("common.saving") : t("settings.telegramChatSave")}
             </button>
           )}
         </div>
@@ -490,7 +487,9 @@ function MailBlock({
                 })
               : t("settings.mailPasswordMissing")
         }
-        saveLabel={isSaving ? t("common.saving") : t("settings.mailPasswordSave")}
+        saveLabel={
+          isSaving ? t("common.saving") : t("settings.mailPasswordSave")
+        }
         clearLabel={t("settings.mailPasswordClear")}
         hasStored={settings.has_mail_password === true}
         pinned={pinned.has("mail_password")}

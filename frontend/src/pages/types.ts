@@ -245,4 +245,8 @@ export const MODE_LABELS: Record<ThemePreference, MessageKey> = {
  * `system` last rather than first: it is the default, and a default reads
  * better as the thing you return to than the thing you start at.
  */
-export const MODE_ORDER: readonly ThemePreference[] = ["light", "dark", "system"];
+export const MODE_ORDER: readonly ThemePreference[] = [
+  "light",
+  "dark",
+  "system",
+];

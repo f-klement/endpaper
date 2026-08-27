@@ -92,7 +92,9 @@ describe("readFilters", () => {
   it("keeps a series, an author and a location verbatim", () => {
     // No guard is possible: any string is a plausible one, and the author may
     // be a display name or the folded key the authors endpoint issues.
-    const filters = read("?series=Dune&author=ursula%20k%20le%20guin&location=loft");
+    const filters = read(
+      "?series=Dune&author=ursula%20k%20le%20guin&location=loft",
+    );
     expect(filters.series).toBe("Dune");
     expect(filters.author).toBe("ursula k le guin");
     expect(filters.location).toBe("loft");
@@ -150,20 +152,21 @@ const CARRIED_BY_A_LINK: { [K in keyof BookFilters]?: [string, string] } = {
  * first version of this probed `?query=` and `?tagIds=`, which nothing emits,
  * so wiring `query` to `?q=` left it green. Measured.
  */
-const NOT_CARRIED_BY_A_LINK: Record<string, { params: string[]; why: string }> = {
-  query: {
-    params: ["q", "query"],
-    why:
-      "the search box's contents. A link naming somebody's half typed search " +
-      "is not something this app produces.",
-  },
-  tagIds: {
-    params: ["tags", "tagIds"],
-    why:
-      "a set of tag ids, which are this deployment's row ids. A link carrying " +
-      "them means something different in every library.",
-  },
-};
+const NOT_CARRIED_BY_A_LINK: Record<string, { params: string[]; why: string }> =
+  {
+    query: {
+      params: ["q", "query"],
+      why:
+        "the search box's contents. A link naming somebody's half typed search " +
+        "is not something this app produces.",
+    },
+    tagIds: {
+      params: ["tags", "tagIds"],
+      why:
+        "a set of tag ids, which are this deployment's row ids. A link carrying " +
+        "them means something different in every library.",
+    },
+  };
 
 describe("readFilters covers the fields a link carries", () => {
   it("accounts for every field in the shape", () => {
@@ -372,8 +375,9 @@ describe("the filters agree with the API", () => {
     const fields = Object.keys(SAMPLES) as (keyof BookFilters)[];
     const unsent = fields.filter(
       (field) =>
-        JSON.stringify(toParams({ ...DEFAULT_FILTERS, [field]: SAMPLES[field] })) ===
-        unfiltered,
+        JSON.stringify(
+          toParams({ ...DEFAULT_FILTERS, [field]: SAMPLES[field] }),
+        ) === unfiltered,
     );
 
     expect(unsent).toEqual([]);

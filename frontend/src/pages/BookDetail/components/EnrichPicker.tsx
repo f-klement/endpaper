@@ -59,7 +59,10 @@ export default function EnrichPicker({
       {isSearching && <Spinner label={t("enrich.working")} />}
 
       {error != null && (
-        <p role="alert" className="text-sm text-danger-600 dark:text-danger-300">
+        <p
+          role="alert"
+          className="text-sm text-danger-600 dark:text-danger-300"
+        >
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
@@ -104,7 +107,9 @@ export default function EnrichPicker({
                     {match.page_count
                       ? t("book.pages", { count: match.page_count })
                       : ""}
-                    {match.source ? ` · ${match.source.replace(/\+/g, ", ")}` : ""}
+                    {match.source
+                      ? ` · ${match.source.replace(/\+/g, ", ")}`
+                      : ""}
                   </span>
                   <span className="block mt-1 text-xs text-paper-600 dark:text-paper-400">
                     <span className="font-medium text-paper-700 dark:text-paper-300">
@@ -120,7 +125,9 @@ export default function EnrichPicker({
                         </span>
                       ))
                     ) : (
-                      <span className="block">{t("enrich.noClassifications")}</span>
+                      <span className="block">
+                        {t("enrich.noClassifications")}
+                      </span>
                     )}
                   </span>
                 </span>

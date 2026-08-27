@@ -1,6 +1,10 @@
 import { useState, type FormEvent } from "react";
 
-import type { QuoteCreate, QuoteOut, UserOut } from "../../../api/generated/model";
+import type {
+  QuoteCreate,
+  QuoteOut,
+  UserOut,
+} from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
 import { formatDate } from "./NoteList";
 

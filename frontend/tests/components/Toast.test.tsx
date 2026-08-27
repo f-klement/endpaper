@@ -11,7 +11,9 @@ afterEach(() => vi.useRealTimers());
 
 describe("Toast", () => {
   it("shows the message", () => {
-    renderLocalised(<Toast message="Moved to the trash." onDismiss={vi.fn()} />);
+    renderLocalised(
+      <Toast message="Moved to the trash." onDismiss={vi.fn()} />,
+    );
     expect(screen.getByText("Moved to the trash.")).toBeInTheDocument();
   });
 

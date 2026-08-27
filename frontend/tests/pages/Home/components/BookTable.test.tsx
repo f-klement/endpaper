@@ -41,9 +41,7 @@ const DUNE = () =>
     discuss_with: [makeUser({ username: "ana" })],
   });
 
-function renderTable(
-  props: Partial<Parameters<typeof BookTable>[0]> = {},
-) {
+function renderTable(props: Partial<Parameters<typeof BookTable>[0]> = {}) {
   return renderLocalised(
     <BookTable
       books={[DUNE()]}
@@ -122,7 +120,11 @@ describe("BookTable", () => {
 
     await userEvent
       .setup()
-      .click(within(screen.getByRole("columnheader", { name: /Title/ })).getByRole("button"));
+      .click(
+        within(screen.getByRole("columnheader", { name: /Title/ })).getByRole(
+          "button",
+        ),
+      );
 
     expect(onSortChange).toHaveBeenCalledWith(BookSort.title_desc);
   });
@@ -135,7 +137,9 @@ describe("BookTable", () => {
 
     const author = screen.getByRole("columnheader", { name: /Author/ });
     expect(author).toHaveAttribute("aria-sort", "none");
-    expect(within(author).getByRole("button").querySelector("svg")).not.toBeNull();
+    expect(
+      within(author).getByRole("button").querySelector("svg"),
+    ).not.toBeNull();
   });
 
   it("does not offer to sort a column the server cannot order by", () => {
@@ -149,7 +153,9 @@ describe("BookTable", () => {
   });
 
   it("leaves a cell empty rather than inventing a value", () => {
-    renderTable({ books: [makeBook({ title: "Bare", publisher: null, year: null })] });
+    renderTable({
+      books: [makeBook({ title: "Bare", publisher: null, year: null })],
+    });
 
     const row = screen.getAllByRole("row")[1]!;
     expect(within(row).getByRole("link")).toHaveTextContent("Bare");
@@ -175,7 +181,9 @@ describe("BookTable", () => {
     const onLoadMore = vi.fn();
     renderTable({ hasMore: true, onLoadMore });
 
-    await userEvent.setup().click(screen.getByRole("button", { name: /Load more/ }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Load more/ }));
 
     expect(onLoadMore).toHaveBeenCalledOnce();
   });

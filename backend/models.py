@@ -376,6 +376,19 @@ class Book(Base):
             unique=True,
             sqlite_where=text("copy_group IS NULL"),
         ),
+        # `backup.restore` inserts through Core, where no Pydantic model and no
+        # `@validates` fires, so an archive decides this value. A value outside
+        # the enum then raises in `OwnershipStatus(...)` at every read.
+        #
+        # Constrained rather than degraded because this enum is **closed**: owned,
+        # not owned, unknown is the whole of the question. SQLite cannot ALTER a
+        # CHECK, so a constraint costs a table rebuild every time the enum grows,
+        # and this one will not. `user_books.status` and `classifications.scheme`
+        # are the other way round and are exempt in `test_house_rules.py`.
+        CheckConstraint(
+            "ownership IN ('owned', 'not_owned', 'unknown')",
+            name="ck_books_ownership",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

@@ -214,7 +214,9 @@ function requestSchema(
   const body = schema.components.schemas[ref!.split("/").pop()!]!;
   // A schema whose properties moved behind a composition keyword would leave
   // both comparisons below asserting nothing.
-  expect(Object.keys(body.properties ?? {}).length).toBeGreaterThan(minimumProperties);
+  expect(Object.keys(body.properties ?? {}).length).toBeGreaterThan(
+    minimumProperties,
+  );
   return body;
 }
 
@@ -254,7 +256,12 @@ describe("the scan request agrees with the API", () => {
   it("sends no field the endpoint does not accept", () => {
     // A field the app sends and the API ignores is silent: a 201, a book, and
     // nothing in any log to say a column was never written.
-    const accepted = new Set(Object.keys(requestSchema("scan_add", "#/components/schemas/BookCreate", 10).properties ?? {}));
+    const accepted = new Set(
+      Object.keys(
+        requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
+          .properties ?? {},
+      ),
+    );
 
     expect(sentNames().filter((name) => !accepted.has(name))).toEqual([]);
   });
@@ -264,9 +271,10 @@ describe("the scan request agrees with the API", () => {
     // added to the API is something the scan flow cannot set until somebody
     // wires it up, and nothing else would say so.
     const sent = new Set(sentNames());
-    const missing = Object.keys(requestSchema("scan_add", "#/components/schemas/BookCreate", 10).properties ?? {}).filter(
-      (name) => !sent.has(name) && !(name in NOT_SENT_BY_THE_SCAN_FLOW),
-    );
+    const missing = Object.keys(
+      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
+        .properties ?? {},
+    ).filter((name) => !sent.has(name) && !(name in NOT_SENT_BY_THE_SCAN_FLOW));
 
     expect(missing).toEqual([]);
   });
@@ -275,9 +283,10 @@ describe("the scan request agrees with the API", () => {
     // A 422 on the last press of a scan, after the lookup and the tag picking,
     // is the most expensive place in the app to discover a missing field.
     const sent = new Set(sentNames());
-    const missing = (requestSchema("scan_add", "#/components/schemas/BookCreate", 10).required ?? []).filter(
-      (name) => !sent.has(name),
-    );
+    const missing = (
+      requestSchema("scan_add", "#/components/schemas/BookCreate", 10)
+        .required ?? []
+    ).filter((name) => !sent.has(name));
 
     expect(missing).toEqual([]);
   });
@@ -333,7 +342,8 @@ describe("the copy request agrees with the API", () => {
   it("sends no field the endpoint does not accept", () => {
     const accepted = new Set(
       Object.keys(
-        requestSchema("add_copy", "#/components/schemas/CopyCreate", 5).properties ?? {},
+        requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
+          .properties ?? {},
       ),
     );
     const sent = Object.keys(toCopyRequest(pending()));
@@ -343,7 +353,8 @@ describe("the copy request agrees with the API", () => {
 
   it("sends every field the endpoint accepts, or names why not", () => {
     const accepted = Object.keys(
-      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5).properties ?? {},
+      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
+        .properties ?? {},
     );
     const sent = new Set(Object.keys(toCopyRequest(pending())));
 
@@ -363,7 +374,8 @@ describe("the copy request agrees with the API", () => {
    * privacy from the book it copies and the tick is inert for that press.
    */
   const NOT_ON_THE_COPY: Record<string, string> = {
-    draft: "the bibliographic record, which the copy takes from the book it copies.",
+    draft:
+      "the bibliographic record, which the copy takes from the book it copies.",
     coverFile:
       "a follow-up upload that needs a book id. A cover taken here would be a " +
       "photo of the same edition anyway.",
@@ -398,7 +410,8 @@ describe("the copy request agrees with the API", () => {
     // out, and nothing else in the tree would say so.
     const sent = new Set(Object.keys(toCopyRequest(pending())));
     const missing = (
-      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5).required ?? []
+      requestSchema("add_copy", "#/components/schemas/CopyCreate", 5)
+        .required ?? []
     ).filter((name) => !sent.has(name));
 
     expect(missing).toEqual([]);

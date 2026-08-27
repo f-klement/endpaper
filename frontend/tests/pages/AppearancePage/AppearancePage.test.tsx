@@ -91,8 +91,9 @@ describe("the appearance picker", () => {
       "Everforest",
       "Nord",
     ]) {
-      expect(palettes.getByRole("button", { name: new RegExp(label) }))
-        .toBeInTheDocument();
+      expect(
+        palettes.getByRole("button", { name: new RegExp(label) }),
+      ).toBeInTheDocument();
     }
   });
 
@@ -154,7 +155,9 @@ describe("the appearance picker", () => {
         wallpapers.getByRole("button", { name: new RegExp(pattern.name) }),
       ).toBeInTheDocument();
     }
-    expect(wallpapers.getByRole("button", { name: /None/ })).toBeInTheDocument();
+    expect(
+      wallpapers.getByRole("button", { name: /None/ }),
+    ).toBeInTheDocument();
     expect(
       wallpapers.getByRole("button", { name: /Surprise me/ }),
     ).toBeInTheDocument();

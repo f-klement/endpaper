@@ -69,7 +69,10 @@ interface Handler {
    */
   respond:
     | StubResponse
-    | ((url: string, init: RequestInit) => StubResponse | Promise<StubResponse>);
+    | ((
+        url: string,
+        init: RequestInit,
+      ) => StubResponse | Promise<StubResponse>);
 }
 
 export interface MockApi {

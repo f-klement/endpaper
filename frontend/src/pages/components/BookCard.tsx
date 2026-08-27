@@ -96,7 +96,9 @@ function seriesText(book: BookOut, t: Translate): string | null {
 function priceText(book: BookOut): string | null {
   const amount = formatMinor(book.purchase_price_minor);
   if (!amount) return null;
-  return book.purchase_currency ? `${amount} ${book.purchase_currency}` : amount;
+  return book.purchase_currency
+    ? `${amount} ${book.purchase_currency}`
+    : amount;
 }
 
 function factsFor(book: BookOut, hiddenTags: TagOut[], t: Translate): Fact[] {
@@ -122,7 +124,9 @@ function factsFor(book: BookOut, hiddenTags: TagOut[], t: Translate): Fact[] {
     ["copy.purchaseSource", book.purchase_source],
   ];
   return candidates
-    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== "",
+    )
     .map(([label, value]) => ({ label, value: String(value) }));
 }
 

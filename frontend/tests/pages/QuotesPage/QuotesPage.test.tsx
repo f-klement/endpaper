@@ -23,7 +23,10 @@ describe("QuotesPage", () => {
   it("lists a passage with the book it came from", async () => {
     api.on("/api/books/quotes", {
       body: page([
-        makeQuoteWithBook({ text: "Fear is the mind-killer", book_title: "Dune" }),
+        makeQuoteWithBook({
+          text: "Fear is the mind-killer",
+          book_title: "Dune",
+        }),
       ]),
     });
     renderWithProviders(<QuotesPage />);
@@ -67,7 +70,9 @@ describe("QuotesPage", () => {
     renderWithProviders(<QuotesPage />);
     await screen.findByRole("link", { name: /Dune/ });
 
-    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Next" }),
+    ).not.toBeInTheDocument();
   });
 
   it("asks for the next page when the reader moves on", async () => {

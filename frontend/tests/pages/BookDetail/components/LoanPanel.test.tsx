@@ -36,9 +36,7 @@ function renderPanel(overrides = {}, props = {}) {
 }
 
 async function pickBorrower() {
-  await userEvent
-    .setup()
-    .selectOptions(screen.getByLabelText("Loan to"), "9");
+  await userEvent.setup().selectOptions(screen.getByLabelText("Loan to"), "9");
 }
 
 describe("the lending willingness", () => {
@@ -48,7 +46,9 @@ describe("the lending willingness", () => {
     const select = screen.getByLabelText("Lending");
 
     expect(
-      [...select.querySelectorAll("option")].map((option) => option.textContent),
+      [...select.querySelectorAll("option")].map(
+        (option) => option.textContent,
+      ),
     ).toEqual([
       "Not recorded",
       "Happy to lend",
@@ -78,9 +78,7 @@ describe("the lending willingness", () => {
       lending: LendingWillingness.never,
     });
 
-    await userEvent
-      .setup()
-      .selectOptions(screen.getByLabelText("Lending"), "");
+    await userEvent.setup().selectOptions(screen.getByLabelText("Lending"), "");
 
     expect(onSaveLending).toHaveBeenCalledWith({ lending: null });
   });
@@ -118,9 +116,7 @@ describe("lending a book marked never lent", () => {
     const { onLend } = renderPanel(neverLent);
     const user = userEvent.setup();
     await pickBorrower();
-    await user.click(
-      screen.getByRole("checkbox", { name: "Lend it anyway" }),
-    );
+    await user.click(screen.getByRole("checkbox", { name: "Lend it anyway" }));
 
     await user.click(screen.getByRole("button", { name: "Loan" }));
 

@@ -12,7 +12,13 @@ import {
   type BookOut,
 } from "../../../src/api/generated/model";
 import BookCard from "../../../src/pages/components/BookCard";
-import { makeBook, makeLoan, makeTag, makeUser, resetIds } from "../../factories";
+import {
+  makeBook,
+  makeLoan,
+  makeTag,
+  makeUser,
+  resetIds,
+} from "../../factories";
 
 beforeEach(resetIds);
 
@@ -185,23 +191,24 @@ describe("BookCard fold out", () => {
 
   it("starts closed", () => {
     renderCard(detailed());
-    expect(screen.getByRole("button", { name: /Details for Dune/ })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(
+      screen.getByRole("button", { name: /Details for Dune/ }),
+    ).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Chilton")).not.toBeInTheDocument();
   });
 
   it("opens without leaving the grid", async () => {
     renderCard(detailed());
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /Details for Dune/ }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
 
     expect(screen.getByText("Chilton")).toBeInTheDocument();
     expect(screen.getByText("Loft box 3")).toBeInTheDocument();
-    expect(screen.getByText("The Oxfam on the high street")).toBeInTheDocument();
+    expect(
+      screen.getByText("The Oxfam on the high street"),
+    ).toBeInTheDocument();
   });
 
   it("says it is open, without pointing at an id that is not there", async () => {
@@ -230,7 +237,9 @@ describe("BookCard fold out", () => {
   it("offers nothing to open on a book with no other facts", () => {
     renderCard(makeBook({ title: "Bare", publisher: null, year: null }));
 
-    expect(screen.queryByRole("button", { name: /Details for Bare/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Details for Bare/ }),
+    ).toBeNull();
   });
 
   it("shows the tags the face of the card left out", async () => {
@@ -246,9 +255,9 @@ describe("BookCard fold out", () => {
       }),
     );
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /Details for Dune/ }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
 
     expect(screen.getByText("Reference")).toBeInTheDocument();
   });
@@ -258,7 +267,9 @@ describe("BookCard fold out", () => {
     // ticking twenty boxes is not reading page counts.
     renderSelectable(detailed());
 
-    expect(screen.queryByRole("button", { name: /Details for Dune/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Details for Dune/ }),
+    ).toBeNull();
   });
 });
 

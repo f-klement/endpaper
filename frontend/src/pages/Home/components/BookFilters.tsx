@@ -69,8 +69,8 @@ export default function BookFilters({
               className={`shrink-0 text-sm px-3 py-1 rounded-full border transition-colors ${
                 filters.status === option.value
                   ? "bg-accent-fill border-accent-fill text-on-accent"
-                  : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+                  : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
+                    "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
               }`}
             >
               {t(option.label)}
@@ -108,8 +108,8 @@ export default function BookFilters({
               className={`px-2.5 py-1 text-sm transition-colors first:rounded-l-md last:rounded-r-md ${
                 view === option.value
                   ? "bg-accent-fill text-on-accent"
-                  : "bg-paper-0 text-paper-600 hover:text-accent-700 "
-                    + "dark:bg-paper-900 dark:text-paper-300 dark:hover:text-accent-300"
+                  : "bg-paper-0 text-paper-600 hover:text-accent-700 " +
+                    "dark:bg-paper-900 dark:text-paper-300 dark:hover:text-accent-300"
               }`}
             >
               {t(option.label)}
@@ -137,8 +137,8 @@ export default function BookFilters({
             className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
               filters.ownership === option.value
                 ? "bg-amber-500 border-amber-500 text-white"
-                : "border-paper-200 text-paper-600 bg-paper-0 hover:border-amber-300 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+                : "border-paper-200 text-paper-600 bg-paper-0 hover:border-amber-300 " +
+                  "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
             }`}
           >
             {t(option.label)}
@@ -193,8 +193,8 @@ export default function BookFilters({
           className={`shrink-0 text-xs px-2.5 py-1 rounded-full border transition-colors ${
             filters.discuss
               ? "bg-accent-fill border-accent-fill text-on-accent"
-              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
+                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
           }`}
         >
           {t("discuss.badge")}
@@ -254,7 +254,9 @@ export default function BookFilters({
         <div className="mt-2">
           <select
             value={filters.location ?? ""}
-            onChange={(event) => onFilterChange({ location: event.target.value || null })}
+            onChange={(event) =>
+              onFilterChange({ location: event.target.value || null })
+            }
             aria-label={t("location.label")}
             className="text-xs px-2 py-1 rounded-lg border border-paper-200 bg-paper-0 text-paper-600 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300"
           >
@@ -313,11 +315,12 @@ export default function BookFilters({
           className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
             activeTagCount > 0
               ? "bg-accent-fill border-accent-fill text-on-accent"
-              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 "
-                + "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
+                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
           }`}
         >
-          <Icon name="tag" className="w-3.5 h-3.5" /> {t("library.tags")} {activeTagCount > 0 && `(${activeTagCount})`}
+          <Icon name="tag" className="w-3.5 h-3.5" /> {t("library.tags")}{" "}
+          {activeTagCount > 0 && `(${activeTagCount})`}
           <Icon
             name="chevron"
             className={`w-3 h-3 opacity-70 transition-transform duration-150 ${

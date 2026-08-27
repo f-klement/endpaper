@@ -227,9 +227,7 @@ describe("LoginPage", () => {
       // Otherwise a directory member with no local password is looking at a
       // form with nothing saying which credentials it wants.
       renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
-      expect(
-        await screen.findByText(/directory/i),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/directory/i)).toBeInTheDocument();
     });
 
     it("posts to the same login endpoint", async () => {

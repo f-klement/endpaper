@@ -112,7 +112,12 @@ describe("CoversSection", () => {
       <CoversSection
         isOpen
         onToggle={() => {}}
-        result={{ ...NOTHING_LEFT, stored: 0, unreachable: 12, still_missing: 0 }}
+        result={{
+          ...NOTHING_LEFT,
+          stored: 0,
+          unreachable: 12,
+          still_missing: 0,
+        }}
         isRunning={false}
         error={null}
         onRun={() => {}}
@@ -136,7 +141,9 @@ describe("CoversSection", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).not.toHaveTextContent(/could not be downloaded/);
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      /could not be downloaded/,
+    );
   });
 
   it("reports a failure rather than looking like it worked", () => {

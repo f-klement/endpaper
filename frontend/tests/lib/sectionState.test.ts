@@ -61,9 +61,15 @@ describe("readSectionChoices", () => {
     // reader last said rather than a fresh default.
     localStorage.setItem(
       STORE,
-      JSON.stringify({ version: 1, sections: { gone: "open", shelf: "closed" } }),
+      JSON.stringify({
+        version: 1,
+        sections: { gone: "open", shelf: "closed" },
+      }),
     );
-    expect(readSectionChoices(STORE)).toEqual({ gone: "open", shelf: "closed" });
+    expect(readSectionChoices(STORE)).toEqual({
+      gone: "open",
+      shelf: "closed",
+    });
   });
 
   it("returns nothing when the stored value is not JSON", () => {

@@ -116,7 +116,9 @@ describe("QuoteList", () => {
   it("does not save when the edit is cancelled", async () => {
     // Cancel sits inside the edit `<form>` now, so without `type="button"` it
     // defaults to submit and cancelling would save.
-    const { onEdit } = renderList([makeQuote({ id: 7, user_id: 1, text: "Typo" })]);
+    const { onEdit } = renderList([
+      makeQuote({ id: 7, user_id: 1, text: "Typo" }),
+    ]);
 
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -142,14 +144,16 @@ describe("QuoteList", () => {
     // `<input type="text">` cannot hold a newline at all, and `note` renders
     // as a paragraph. It was an input when adding and a textarea when editing.
     renderList();
-    expect(
-      screen.getByLabelText("What you want to say about it").tagName,
-    ).toBe("TEXTAREA");
+    expect(screen.getByLabelText("What you want to say about it").tagName).toBe(
+      "TEXTAREA",
+    );
   });
 
   it("offers no edit on somebody else's quote", () => {
     renderList([makeQuote({ user_id: 99 })], { id: 1, is_admin: true });
-    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument();
   });
 
   it("lets an admin delete somebody else's quote", () => {

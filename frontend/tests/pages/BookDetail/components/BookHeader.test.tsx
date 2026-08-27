@@ -59,9 +59,7 @@ describe("the credit line", () => {
   it("falls back to the credit line when the payload predates the split", () => {
     // A response cached before `authors` existed still has to show who wrote
     // the book, as one link rather than as none.
-    renderHeader(
-      makeBook({ author: "Frank Herbert", authors: undefined }),
-    );
+    renderHeader(makeBook({ author: "Frank Herbert", authors: undefined }));
 
     expect(
       screen.getByRole("link", { name: "Frank Herbert" }),

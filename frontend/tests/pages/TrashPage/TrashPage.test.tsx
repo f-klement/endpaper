@@ -38,7 +38,11 @@ function stubTrash(items: ReturnType<typeof makeBook>[]) {
 describe("TrashPage", () => {
   it("lists what was deleted", async () => {
     stubTrash([
-      makeBook({ id: 7, title: "Deleted Book", deleted_at: "2026-08-19T10:00:00" }),
+      makeBook({
+        id: 7,
+        title: "Deleted Book",
+        deleted_at: "2026-08-19T10:00:00",
+      }),
     ]);
     renderWithProviders(<TrashPage />);
 
@@ -61,9 +65,7 @@ describe("TrashPage", () => {
     stubTrash([makeBook({ id: 7, deleted_at: "2026-08-19T10:00:00" })]);
     renderWithProviders(<TrashPage />);
 
-    expect(
-      await screen.findByText(/until you empty it/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/until you empty it/)).toBeInTheDocument();
   });
 
   it("shows an empty state when nothing has been deleted", async () => {
@@ -85,7 +87,13 @@ describe("TrashPage", () => {
 
   describe("putting a book back", () => {
     it("restores without asking", async () => {
-      stubTrash([makeBook({ id: 7, title: "Deleted Book", deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([
+        makeBook({
+          id: 7,
+          title: "Deleted Book",
+          deleted_at: "2026-08-19T10:00:00",
+        }),
+      ]);
       api.on("/api/books/7/restore", { body: makeBook({ id: 7 }) });
       const confirmSpy = vi.spyOn(window, "confirm");
       renderWithProviders(<TrashPage />);
@@ -103,7 +111,13 @@ describe("TrashPage", () => {
 
   describe("deleting for good", () => {
     it("asks first, because this one cannot be undone", async () => {
-      stubTrash([makeBook({ id: 7, title: "Deleted Book", deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([
+        makeBook({
+          id: 7,
+          title: "Deleted Book",
+          deleted_at: "2026-08-19T10:00:00",
+        }),
+      ]);
       const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
       renderWithProviders(<TrashPage />);
 
@@ -116,7 +130,13 @@ describe("TrashPage", () => {
     });
 
     it("destroys the book once confirmed", async () => {
-      stubTrash([makeBook({ id: 7, title: "Deleted Book", deleted_at: "2026-08-19T10:00:00" })]);
+      stubTrash([
+        makeBook({
+          id: 7,
+          title: "Deleted Book",
+          deleted_at: "2026-08-19T10:00:00",
+        }),
+      ]);
       api.on("/api/books/7/permanent", { status: 204 }, "DELETE");
       vi.spyOn(window, "confirm").mockReturnValue(true);
       renderWithProviders(<TrashPage />);

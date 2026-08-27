@@ -83,8 +83,7 @@ export function lightness([r, g, b]: Rgb): number {
  */
 function over(foreground: Rgb, background: Rgb, alpha: number): Rgb {
   return [0, 1, 2].map(
-    (index) =>
-      alpha * foreground[index]! + (1 - alpha) * background[index]!,
+    (index) => alpha * foreground[index]! + (1 - alpha) * background[index]!,
   ) as Rgb;
 }
 

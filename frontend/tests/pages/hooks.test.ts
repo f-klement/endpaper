@@ -40,7 +40,9 @@ function renderSession() {
 
 /** A cached listing belonging to whoever is signed in at the time. */
 const BOOKS_KEY = ["/api/books", { page: 1 }];
-const BOOKS = { items: [{ id: 1, title: "A private diary", is_private: true }] };
+const BOOKS = {
+  items: [{ id: 1, title: "A private diary", is_private: true }],
+};
 
 /** Configure the server's reported auth mode. */
 function serverMode(mode: AuthMode, registrationEnabled = true) {
@@ -120,7 +122,9 @@ describe("useSession in local mode", () => {
 
     act(() => result.current.signOut());
 
-    await waitFor(() => expect(api.lastCall("/auth/logout", "POST")).toBeDefined());
+    await waitFor(() =>
+      expect(api.lastCall("/auth/logout", "POST")).toBeDefined(),
+    );
   });
 
   it("signs out locally even when that request fails", async () => {
@@ -267,12 +271,17 @@ describe("useSession in proxy mode", () => {
     // upstream names, so treating "not known yet" as an identity change made
     // the app clear the cache, refetch the identity, and clear it again. The
     // config request is the one to count: clearing the cache drops it too.
-    localStorage.setItem("user", JSON.stringify(makeUser({ username: "stale" })));
+    localStorage.setItem(
+      "user",
+      JSON.stringify(makeUser({ username: "stale" })),
+    );
     api.on("/auth/me", { body: makeUser({ username: "kim" }) });
 
     const { result } = renderSession();
     await waitFor(() => expect(result.current.user?.username).toBe("kim"));
-    const settled = api.calls.filter((call) => call.url.includes("/auth/config")).length;
+    const settled = api.calls.filter((call) =>
+      call.url.includes("/auth/config"),
+    ).length;
     await waitFor(() => expect(result.current.isResolving).toBe(false));
 
     expect(settled).toBe(1);
@@ -312,14 +321,18 @@ describe("useSession in proxy mode", () => {
    * passes whatever the effect does. Measured: without the hold, both tests
    * below passed with the guard they exist for deleted.
    */
-  async function forgetTheIdentity(client: QueryClient, release: Promise<void>) {
+  async function forgetTheIdentity(
+    client: QueryClient,
+    release: Promise<void>,
+  ) {
     api.on("/auth/me", async () => {
       await release;
       return { body: heldAnswer };
     });
     await act(async () => {
       void client.resetQueries({
-        predicate: (query) => JSON.stringify(query.queryKey).includes("/auth/me"),
+        predicate: (query) =>
+          JSON.stringify(query.queryKey).includes("/auth/me"),
       });
     });
   }
@@ -518,10 +531,13 @@ describe("useGoBack", () => {
    * the first entry, which is exactly the case `navigate(-1)` cannot handle.
    */
   function renderGoBack(entries: string[]) {
-    return renderHook(() => ({ goBack: useGoBack(), location: useLocation() }), {
-      wrapper: ({ children }: { children: ReactNode }) =>
-        createElement(MemoryRouter, { initialEntries: entries }, children),
-    });
+    return renderHook(
+      () => ({ goBack: useGoBack(), location: useLocation() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(MemoryRouter, { initialEntries: entries }, children),
+      },
+    );
   }
 
   it("goes back when there is somewhere to go back to", () => {
@@ -547,7 +563,11 @@ describe("useGoBack", () => {
       () => ({ goBack: useGoBack("/loans"), location: useLocation() }),
       {
         wrapper: ({ children }: { children: ReactNode }) =>
-          createElement(MemoryRouter, { initialEntries: ["/book/1"] }, children),
+          createElement(
+            MemoryRouter,
+            { initialEntries: ["/book/1"] },
+            children,
+          ),
       },
     );
 

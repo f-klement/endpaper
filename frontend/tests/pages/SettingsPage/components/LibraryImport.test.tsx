@@ -17,9 +17,7 @@ import type {
 import LibraryImport from "../../../../src/pages/SettingsPage/components/LibraryImport";
 import { renderLocalised } from "../../../utils";
 
-function outcome(
-  overrides: Partial<ImportResultOut> = {},
-): ImportResultOut {
+function outcome(overrides: Partial<ImportResultOut> = {}): ImportResultOut {
   return {
     rows_read: 10,
     matched: 6,
@@ -47,7 +45,9 @@ function preview(overrides: Partial<ImportPreviewOut> = {}): ImportPreviewOut {
     distinct_tags: 3,
     total_rows: 10,
     skipped: 0,
-    rows: [{ title: "Dune", author: "Frank Herbert", isbn: null, status: "read" }],
+    rows: [
+      { title: "Dune", author: "Frank Herbert", isbn: null, status: "read" },
+    ],
     ...overrides,
   };
 }
@@ -82,7 +82,9 @@ describe("LibraryImport", () => {
   it("previews rather than importing when a file is chosen", async () => {
     const props = renderImport();
 
-    await userEvent.setup().upload(screen.getByLabelText("Choose a file"), FILE);
+    await userEvent
+      .setup()
+      .upload(screen.getByLabelText("Choose a file"), FILE);
 
     expect(props.onChoose).toHaveBeenCalledWith(FILE);
     expect(props.onConfirm).not.toHaveBeenCalled();

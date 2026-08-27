@@ -98,9 +98,7 @@ describe("the bar itself", () => {
     renderNav();
     const bar = screen.getByRole("navigation");
     for (const name of ["Stats", "Settings", "Trash"]) {
-      expect(
-        within(bar).queryByRole("link", { name }),
-      ).not.toBeInTheDocument();
+      expect(within(bar).queryByRole("link", { name })).not.toBeInTheDocument();
     }
   });
 
@@ -283,7 +281,9 @@ describe("the account entries", () => {
       const onSignOut = renderNav(AuthMode.proxy, vi.fn(), true);
       const { user, menu } = await openMenu();
 
-      await user.click(menu.getByRole("menuitem", { name: "Return to my account" }));
+      await user.click(
+        menu.getByRole("menuitem", { name: "Return to my account" }),
+      );
 
       expect(onSignOut).toHaveBeenCalled();
     });

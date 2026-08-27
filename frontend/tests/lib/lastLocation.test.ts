@@ -29,7 +29,9 @@ describe("normaliseLocation", () => {
   });
 
   it("caps at the column's length", () => {
-    expect(normaliseLocation("x".repeat(500))).toHaveLength(MAX_LOCATION_LENGTH);
+    expect(normaliseLocation("x".repeat(500))).toHaveLength(
+      MAX_LOCATION_LENGTH,
+    );
   });
 
   it("does not leave a trailing space when the cap falls on one", () => {

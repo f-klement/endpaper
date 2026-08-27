@@ -104,7 +104,10 @@ export default function SearchPanel({
       )}
 
       {error != null && (
-        <p role="alert" className="text-sm text-danger-600 mt-2 dark:text-danger-300">
+        <p
+          role="alert"
+          className="text-sm text-danger-600 mt-2 dark:text-danger-300"
+        >
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
@@ -123,7 +126,9 @@ export default function SearchPanel({
               // Library rows have no volume id at all. Two printings of one
               // book differ only by year, so the index is the only key that
               // cannot collapse two rows into one.
-              <li key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}>
+              <li
+                key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}
+              >
                 <button
                   type="button"
                   onClick={() => onChoose(match)}

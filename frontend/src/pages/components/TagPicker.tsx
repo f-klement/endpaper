@@ -134,7 +134,9 @@ export default function TagPicker({
                     <span
                       key={tag.id}
                       className={`inline-flex items-center rounded-full border text-xs transition-colors ${
-                        selected ? TAG_CHIP_SELECTED : TAG_CHIP_CLASSES[category]
+                        selected
+                          ? TAG_CHIP_SELECTED
+                          : TAG_CHIP_CLASSES[category]
                       }`}
                     >
                       <button

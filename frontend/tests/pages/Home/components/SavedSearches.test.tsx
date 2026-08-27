@@ -5,7 +5,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import SavedSearches from "../../../../src/pages/Home/components/SavedSearches";
-import { DEFAULT_FILTERS, type BookFilters } from "../../../../src/pages/Home/types";
+import {
+  DEFAULT_FILTERS,
+  type BookFilters,
+} from "../../../../src/pages/Home/types";
 import { renderLocalised } from "../../../utils";
 
 const LOFT = {
@@ -14,7 +17,9 @@ const LOFT = {
   filters: { ...DEFAULT_FILTERS, location: "Loft" } as BookFilters,
 };
 
-function renderSaved(overrides: Partial<React.ComponentProps<typeof SavedSearches>> = {}) {
+function renderSaved(
+  overrides: Partial<React.ComponentProps<typeof SavedSearches>> = {},
+) {
   const props = {
     searches: [LOFT],
     canSave: true,
@@ -72,7 +77,9 @@ describe("SavedSearches", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Save this view" }));
-    fireEvent.change(screen.getByLabelText("Name for this view"), { target: { value: "Kitchen" } });
+    fireEvent.change(screen.getByLabelText("Name for this view"), {
+      target: { value: "Kitchen" },
+    });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(props.onSave).toHaveBeenCalledWith("Kitchen");
@@ -83,7 +90,10 @@ describe("SavedSearches", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Save this view" }));
-    await user.type(screen.getByLabelText("Name for this view"), "Kitchen{Enter}");
+    await user.type(
+      screen.getByLabelText("Name for this view"),
+      "Kitchen{Enter}",
+    );
 
     expect(props.onSave).toHaveBeenCalledWith("Kitchen");
   });

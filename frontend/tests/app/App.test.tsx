@@ -148,7 +148,9 @@ describe("App under proxy auth", () => {
     api.on("/auth/me", { body: makeUser({ username: "kim" }) });
     renderApp();
 
-    expect(await screen.findByRole("button", { name: /kim/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /kim/ }),
+    ).toBeInTheDocument();
   });
 
   it("reports an unidentified caller rather than a login form", async () => {

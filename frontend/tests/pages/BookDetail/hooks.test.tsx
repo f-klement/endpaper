@@ -35,7 +35,9 @@ describe("sectionDefaults", () => {
   });
 
   it("hides the loan on a book nobody has", () => {
-    expect(sectionDefaults(makeBook({ active_loan: null })).lending).toBe(false);
+    expect(sectionDefaults(makeBook({ active_loan: null })).lending).toBe(
+      false,
+    );
   });
 
   it("shows the loan on a book somebody has", () => {
@@ -131,7 +133,9 @@ describe("useBookSections", () => {
     act(() => first.result.current.toggle("writing"));
     first.unmount();
 
-    const second = renderHookWithProviders(() => useBookSections(1, defaults()));
+    const second = renderHookWithProviders(() =>
+      useBookSections(1, defaults()),
+    );
 
     expect(second.result.current.isOpen("writing")).toBe(true);
   });

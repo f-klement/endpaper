@@ -104,7 +104,9 @@ describe("paper-400 and paper-500 are not text in light mode", () => {
     const offenders = entries().flatMap(([path, source]) =>
       [...source.matchAll(/[\w:./[\]-]*text-paper-[45]00/g)]
         .map((match) => match[0])
-        .filter((token) => !token.includes("dark:") && !token.includes("disabled:"))
+        .filter(
+          (token) => !token.includes("dark:") && !token.includes("disabled:"),
+        )
         .map((token) => `${path}: ${token}`),
     );
 
@@ -133,9 +135,11 @@ describe("no control draws its own focus ring", () => {
     // `sr-only`, so the shared ring lands on something with no size and the
     // visible track has to draw its own.
     const offenders = entries().flatMap(([path, source]) =>
-      [...source.matchAll(
-        /[\w:./[\]-]*focus(-visible)?:(outline-none|ring-[\w./#%[\]-]+)/g,
-      )]
+      [
+        ...source.matchAll(
+          /[\w:./[\]-]*focus(-visible)?:(outline-none|ring-[\w./#%[\]-]+)/g,
+        ),
+      ]
         .map((match) => match[0])
         .filter((token) => !token.includes("peer-focus-visible:"))
         .map((token) => `${path}: ${token}`),

@@ -44,9 +44,7 @@ describe("BookList", () => {
 
     const row = screen.getByRole("listitem");
     expect(within(row).getByText("Dune")).toBeInTheDocument();
-    expect(
-      within(row).getByText(/Frank Herbert/),
-    ).toBeInTheDocument();
+    expect(within(row).getByText(/Frank Herbert/)).toBeInTheDocument();
     expect(within(row).getByText(/1965/)).toBeInTheDocument();
     expect(within(row).getByText("Reading")).toBeInTheDocument();
   });
@@ -73,7 +71,9 @@ describe("BookList", () => {
     /** Both are the minority of a shelf, which is what makes them a signal
      * rather than a colour field. */
     renderList({
-      books: [makeBook({ ownership: OwnershipStatus.owned, active_loan: null })],
+      books: [
+        makeBook({ ownership: OwnershipStatus.owned, active_loan: null }),
+      ],
     });
 
     expect(screen.queryByText("Loaned")).not.toBeInTheDocument();
@@ -90,7 +90,14 @@ describe("BookList", () => {
     /** A row with holes reads as missing data rather than as data a book
      * does not have. */
     renderList({
-      books: [makeBook({ title: "Untitled", author: null, year: null, series_name: null })],
+      books: [
+        makeBook({
+          title: "Untitled",
+          author: null,
+          year: null,
+          series_name: null,
+        }),
+      ],
     });
 
     const row = screen.getByRole("listitem");
@@ -101,7 +108,10 @@ describe("BookList", () => {
     /** A list fits roughly three times as many rows on a screen as the grid
      * fits cards, so a page of them would otherwise fetch every image at once. */
     const { container } = renderList({
-      books: [DUNE(), makeBook({ cover_url: "https://covers.example/other.jpg" })],
+      books: [
+        DUNE(),
+        makeBook({ cover_url: "https://covers.example/other.jpg" }),
+      ],
     });
 
     const covers = container.querySelectorAll("img");

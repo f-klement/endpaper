@@ -1,4 +1,10 @@
-import { Button, EmptyState, ErrorState, Icon, Spinner } from "../../components";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Icon,
+  Spinner,
+} from "../../components";
 import { useTranslation } from "../../i18n";
 import { Page, PageCount, PageHeader } from "../components";
 import TrashRow from "./components/TrashRow";

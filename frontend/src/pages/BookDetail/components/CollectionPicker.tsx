@@ -53,7 +53,9 @@ export default function CollectionPicker({
         value={book.collection_id === null ? "" : String(book.collection_id)}
         disabled={isSaving}
         onChange={(event) =>
-          onChange(event.target.value === "" ? null : Number(event.target.value))
+          onChange(
+            event.target.value === "" ? null : Number(event.target.value),
+          )
         }
         aria-label={t("collections.label")}
         className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm bg-paper-0 disabled:opacity-50 dark:border-paper-700 dark:bg-paper-900"

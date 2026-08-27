@@ -88,7 +88,9 @@ describe("OverdueSection", () => {
     const user = userEvent.setup();
     const { onSave } = renderSection();
 
-    fireEvent.change(screen.getByLabelText("Webhook address"), { target: { value: "https://a.test/h" } });
+    fireEvent.change(screen.getByLabelText("Webhook address"), {
+      target: { value: "https://a.test/h" },
+    });
     expect(onSave).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Save address" }));
@@ -267,7 +269,12 @@ describe("the per channel rows", () => {
 
   it("names every channel that was tried", () => {
     withSenders([
-      { sender: OverdueSender.webhook, sent: true, loans: 1, skipped_private: 0 },
+      {
+        sender: OverdueSender.webhook,
+        sent: true,
+        loans: 1,
+        skipped_private: 0,
+      },
       { sender: OverdueSender.email, sent: true, loans: 1, skipped_private: 0 },
       {
         sender: OverdueSender.telegram,
@@ -291,7 +298,12 @@ describe("the per channel rows", () => {
         skipped_private: 0,
         reason: OverdueNotifyReason.unreachable,
       },
-      { sender: OverdueSender.telegram, sent: true, loans: 1, skipped_private: 0 },
+      {
+        sender: OverdueSender.telegram,
+        sent: true,
+        loans: 1,
+        skipped_private: 0,
+      },
     ]);
 
     expect(screen.getByRole("status")).toHaveTextContent("Sent, covering 1");

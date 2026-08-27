@@ -87,7 +87,10 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
           {rows.map((row, index) => (
             // The index keys these: two rows of one export can be the same
             // book on two shelves, and a title is not a key.
-            <li key={index} className="truncate text-paper-600 dark:text-paper-300">
+            <li
+              key={index}
+              className="truncate text-paper-600 dark:text-paper-300"
+            >
               {row.title}
               {row.author && (
                 <span className="text-paper-600 dark:text-paper-400">

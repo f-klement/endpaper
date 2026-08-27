@@ -77,8 +77,6 @@ describe("CollectionPicker", () => {
   it("says filing a book changes nothing about who can see it", () => {
     renderPicker();
 
-    expect(
-      screen.getByText(/never hides them/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/never hides them/i)).toBeInTheDocument();
   });
 });

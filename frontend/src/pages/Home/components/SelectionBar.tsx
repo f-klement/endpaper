@@ -230,13 +230,19 @@ export default function SelectionBar({
         )}
 
         {error != null && (
-          <p role="alert" className="text-xs text-danger-600 dark:text-danger-300">
+          <p
+            role="alert"
+            className="text-xs text-danger-600 dark:text-danger-300"
+          >
             {errorText(error, t("common.somethingWentWrong"), t)}
           </p>
         )}
 
         {result && (
-          <p role="status" className="text-xs text-paper-600 dark:text-paper-400">
+          <p
+            role="status"
+            className="text-xs text-paper-600 dark:text-paper-400"
+          >
             {t("ownership.bulkResult", {
               updated: result.updated,
               unchanged: result.unchanged,

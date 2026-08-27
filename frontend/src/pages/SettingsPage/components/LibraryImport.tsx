@@ -149,7 +149,10 @@ export default function LibraryImport({
       )}
 
       {error != null && (
-        <p role="alert" className="text-sm text-danger-600 dark:text-danger-300">
+        <p
+          role="alert"
+          className="text-sm text-danger-600 dark:text-danger-300"
+        >
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}

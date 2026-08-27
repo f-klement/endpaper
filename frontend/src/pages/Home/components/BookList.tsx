@@ -86,7 +86,10 @@ export default function BookList({
 
   if (isLoading) {
     return (
-      <div className="card divide-y divide-paper-100 dark:divide-paper-800" data-testid="book-list-skeletons">
+      <div
+        className="card divide-y divide-paper-100 dark:divide-paper-800"
+        data-testid="book-list-skeletons"
+      >
         {Array.from({ length: SKELETON_ROWS }).map((_, index) => (
           <div key={index} className="flex items-center gap-3 px-3 py-2">
             <Skeleton className="h-12 w-8 shrink-0 rounded" />

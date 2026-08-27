@@ -31,7 +31,9 @@ function Probe({
       {signedIn && <AppearanceSync accountId={accountId} />}
       <p data-testid="palette">{appearance.palette}</p>
       <p data-testid="mode">{appearance.mode}</p>
-      <button onClick={() => setAppearance({ palette: "nord" })}>go nord</button>
+      <button onClick={() => setAppearance({ palette: "nord" })}>
+        go nord
+      </button>
     </>
   );
 }
@@ -61,14 +63,20 @@ describe("AppearanceSync", () => {
     renderWithProviders(<Probe />);
 
     await waitFor(() =>
-      expect(JSON.parse(localStorage.getItem("appearance") ?? "{}").last).toBe("1"),
+      expect(JSON.parse(localStorage.getItem("appearance") ?? "{}").last).toBe(
+        "1",
+      ),
     );
   });
 
   it("paints this account's cached appearance before the server answers", async () => {
     // Two members on one laptop. Signing in as the second must not leave the
     // first one's palette on screen while the request is in flight.
-    cacheAppearance(2, { palette: "solarized", mode: "light", wallpaper: null });
+    cacheAppearance(2, {
+      palette: "solarized",
+      mode: "light",
+      wallpaper: null,
+    });
     api.on(APPEARANCE, {
       body: { palette: "solarized", mode: "light", wallpaper: null },
     });
@@ -85,7 +93,9 @@ describe("AppearanceSync", () => {
     renderWithProviders(<Probe />);
     await waitFor(() => expect(api.lastCall(APPEARANCE, "GET")).toBeDefined());
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "go nord" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go nord" }));
 
     await waitFor(() => {
       const call = api.lastCall(APPEARANCE, "PUT");
@@ -166,7 +176,9 @@ describe("AppearanceSync", () => {
     );
 
     renderWithProviders(<Probe />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "go nord" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go nord" }));
     answer();
 
     await waitFor(() =>
@@ -219,7 +231,9 @@ describe("AppearanceSync", () => {
     );
 
     rerender(<Probe signedIn={false} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "go nord" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "go nord" }));
 
     const cache = JSON.parse(localStorage.getItem("appearance") ?? "{}");
     expect(cache.accounts["1"].palette).toBe("gruvbox");

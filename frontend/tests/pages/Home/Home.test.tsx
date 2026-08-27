@@ -182,7 +182,9 @@ describe("Home's view toggle", () => {
     renderWithProviders(<Home />);
     await screen.findByText("Dune");
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "Table" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Table" }));
 
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText("Chilton")).toBeInTheDocument();
@@ -194,7 +196,9 @@ describe("Home's view toggle", () => {
     renderWithProviders(<Home />);
     await screen.findByText("Dune");
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "Table" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Table" }));
 
     expect(localStorage.getItem("libraryView")).toBe("table");
   });
@@ -217,7 +221,9 @@ describe("Home's view toggle", () => {
     renderWithProviders(<Home />);
     await screen.findByRole("table");
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "Select" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Select" }));
 
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -230,7 +236,9 @@ describe("Home's view toggle", () => {
     renderWithProviders(<Home />);
     await screen.findByRole("list");
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "Select" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Select" }));
 
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
   });
@@ -253,7 +261,9 @@ describe("Home as the wishlist", () => {
     api.on(/\/api\/books\?/, { body: makeBookPage([]) });
     renderWithProviders(<Home />, { route: WISHLIST });
 
-    expect(await screen.findByText("Nothing on the wishlist")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Nothing on the wishlist"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText("Scan a barcode to add your first book"),
     ).not.toBeInTheDocument();

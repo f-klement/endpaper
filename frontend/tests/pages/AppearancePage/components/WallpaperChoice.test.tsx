@@ -59,7 +59,9 @@ describe("WallpaperChoice", () => {
   it("chooses one on a click", async () => {
     renderLocalised(<WallpaperChoice />);
 
-    await userEvent.setup().click(screen.getByRole("button", { name: /Plait/ }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Plait/ }));
 
     expect(screen.getByRole("button", { name: /Plait/ })).toHaveAttribute(
       "aria-pressed",

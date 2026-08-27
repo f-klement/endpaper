@@ -42,7 +42,9 @@ describe("the collection filter", () => {
       collections: [makeCollection({ id: 3, name: "Ebooks", book_count: 12 })],
     });
 
-    expect(screen.getByRole("option", { name: "Ebooks (12)" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Ebooks (12)" }),
+    ).toBeInTheDocument();
   });
 
   it("offers the unfiled books last, as their own answer", () => {
@@ -73,9 +75,14 @@ describe("the collection filter", () => {
       collections: [makeCollection({ id: 3, name: "Ebooks" })],
     });
 
-    await userEvent.selectOptions(screen.getByLabelText("Collection"), "unfiled");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Collection"),
+      "unfiled",
+    );
 
-    expect(props.onFilterChange).toHaveBeenCalledWith({ collection: "unfiled" });
+    expect(props.onFilterChange).toHaveBeenCalledWith({
+      collection: "unfiled",
+    });
   });
 
   it("stays on screen when the list empties under an active filter", () => {

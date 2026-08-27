@@ -56,9 +56,9 @@ describe("AboutBadges", () => {
   it("draws every badge as markup, never as an image", () => {
     const { container } = renderLocalised(<AboutBadges />);
 
-    expect(container.querySelectorAll("img, svg, picture, object")).toHaveLength(
-      0,
-    );
+    expect(
+      container.querySelectorAll("img, svg, picture, object"),
+    ).toHaveLength(0);
     expect(container.querySelectorAll("[src], [srcset]")).toHaveLength(0);
   });
 

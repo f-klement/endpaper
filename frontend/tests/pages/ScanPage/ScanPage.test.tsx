@@ -196,7 +196,9 @@ describe("ScanPage", () => {
       renderWithProviders(<ScanPage />);
 
       const user = userEvent.setup();
-      fireEvent.change(screen.getByLabelText("ISBN"), { target: { value: "9780441013593" } });
+      fireEvent.change(screen.getByLabelText("ISBN"), {
+        target: { value: "9780441013593" },
+      });
       await user.click(screen.getByRole("button", { name: "Look up" }));
 
       expect(await screen.findByText("Dune")).toBeInTheDocument();
@@ -466,7 +468,9 @@ describe("ScanPage", () => {
       renderWithProviders(<ScanPage />);
 
       await scan();
-      fireEvent.change(await screen.findByLabelText("Title *"), { target: { value: "Untracked Book" } });
+      fireEvent.change(await screen.findByLabelText("Title *"), {
+        target: { value: "Untracked Book" },
+      });
 
       expect(
         screen.getByRole("button", { name: "Add to Library" }),

@@ -321,7 +321,10 @@ export function coverage(pattern: Pattern, layer: Layer): number {
       ink += polylineLength(mark.points) * mark.width;
     } else {
       const areas = mark.rings.map(ringArea).sort((a, b) => b - a);
-      ink += areas.reduce((total, area, index) => total + (index === 0 ? area : -area), 0);
+      ink += areas.reduce(
+        (total, area, index) => total + (index === 0 ? area : -area),
+        0,
+      );
     }
   }
   return ink / (pattern.size * pattern.size);
@@ -563,4 +566,3 @@ export function tintContrast(field: Float32Array, size: number): number {
   for (const value of seen) variance += (value - mean) ** 2;
   return Math.sqrt(variance / seen.length) / mean;
 }
-
