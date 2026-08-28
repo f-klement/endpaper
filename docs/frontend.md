@@ -55,7 +55,11 @@ src/
 │   ├── QuotesPage/         index.ts · QuotesPage.tsx · hooks.ts · components/
 │   ├── TrashPage/          index.ts · TrashPage.tsx · hooks.ts · components/
 │   ├── DuplicatesPage/     index.ts · DuplicatesPage.tsx · hooks.ts · components/
-│   ├── SettingsPage/       index.ts · SettingsPage.tsx · hooks.ts · components/
+│   ├── SettingsPage/       index.ts · SettingsPage.tsx (the index of six) · types.ts
+│   │                       hooks.ts · components/ · one folder per settings route:
+│   │                       AppearanceSettingsPage/ CatalogueSettingsPage/
+│   │                       LibrarySettingsPage/ LendingSettingsPage/
+│   │                       DataSettingsPage/ AboutSettingsPage/
 │   ├── StatsPage/          index.ts · StatsPage.tsx · hooks.ts · components/
 │   └── errors/             NotFoundPage · ForbiddenPage · ErrorPage + ErrorBoundary
 └── main.tsx
@@ -323,7 +327,8 @@ All three preferences live on the **account**, not the device, with a write-thro
 the rule that generated them, the picker and the storage design are in
 [theming.md](theming.md).
 
-The picker is `pages/AppearancePage/` at `/settings/appearance`, and it is **inside the
+The picker is `pages/AppearancePage/` at `/settings/appearance/theme`, a child of the
+Appearance settings route rather than a sibling, and it is **inside the
 signed-in route table on purpose**. `ThemeProvider` sits above the session gate and does not
 unmount on sign-out, so a picker the login screen could reach would write a choice into the
 cache of the member who left. That is what `ThemeProvider.release` exists to prevent, and
@@ -424,44 +429,105 @@ last exactly until the next visit. The entries are per section and not per book,
 reader's first tap on a section ends its conditional default on every book on that
 device.
 
-**The store is a parameter, and the reason is a real collision.** Both folding pages have
-a section called `about`, so one shared key would let closing a book's blurb close the
+**The store is a parameter, and the reason was a real collision.** Both folding pages had
+a section called `about`, so one shared key would have let closing a book's blurb close the
 app's own about card. `readSectionChoices` and `writeSectionChoice` take a `SectionStore`,
-which is a union of the two key names rather than a `string`: a third folding page has to
-name its store there, and a typo is a compile error instead of a silently shared entry.
+which is a union of the key names rather than a `string`: a page has to name its store
+there, and a typo is a compile error instead of a silently shared entry. The settings page
+stopped folding on 2026-08-27 and `settingsSections` is now written by nothing, but the
+name stays in the union: old entries are still in readers' browsers, so a later folding
+page must not reuse the key, and the merge that stops one page's write clearing another's
+can only be tested against two stores.
 
-## The settings page folds too
+## Settings is a route tree, and folds nothing
 
-Eleven cards, the same disclosure and the same storage, with one difference: settings has
-no equivalent of a book to key a default on, so `SETTINGS_SECTION_DEFAULTS` in the page's
-`hooks.ts` is a fixed table. The rule it encodes: **open when the current setting is the
-whole of the card and reading it is why you are here, closed when it starts a job or holds
-a form.** Language, appearance, the Goodreads toggle, the default language and About
-arrive open; import, the cover backfill, overdue reminders, test accounts and backup
-arrive closed. **Google Books is a stated exception**: by the rule it belongs with the
-closed group, since it holds a key field with save and clear, and it is open because the
-toggle is the setting and closing it would put five closed handles in a row mid-page.
+It was one route with thirteen collapsible sections, about 3,270 lines across
+`SettingsPage.tsx`, `hooks.ts` and eleven section components. That stopped being a page and
+became a namespace: two features built on one night had to be told in advance which section
+each owned, so they would not collide in those two files.
 
-**A member who is not an admin sees five of the eleven, three of them open**, and that is
-the case the defaults are really tuned for. Folding the language switch as well would
-leave that reader four closed handles and nothing to read, and the six open cards an admin
-counts are no defence there, because three of them are admin only. On that page the only
-thing that keeps the About card from dominating is its own height, which is why it is two
-short lines and a button: the version and the source link on one line, one sentence
-asking, and the Ko-fi button. Measured from the class list at `max-w-2xl`, 210px of 712px
-of painted card, against 170px for the language card.
+**Six routes since 2026-08-27**, and `/settings` is the index to them: a heading, one
+sentence saying what is behind the link, and nothing else.
 
-The ids are named after what a card is rather than after its title (`appearance`, not
-`theme.label`; `overdue`, not `reminders`), because the id is what reaches storage and a
-title is free to change.
+| Route | Sections |
+|---|---|
+| `/settings/appearance` | the palette and wallpaper link, language, default language |
+| `/settings/catalogue` | Google Books, Goodreads |
+| `/settings/library` | import, covers, custom fields |
+| `/settings/lending` | overdue reminders, mail and chat senders |
+| `/settings/data` | backup, test accounts |
+| `/settings/about` | about |
 
-**The chrome is the settings card, not the book page's rows.** `CollapsibleSection` takes
-a `variant`, and `card` draws the same surface and icon badge `SettingsSection` does; the
-badge itself is `components/SectionIcon.tsx` so the two cannot drift. `SettingsSection`
-stays for `/settings/appearance`, which does not fold: it is arrived at deliberately, from
-a link that already says what is set.
+The table is `pages/SettingsPage/types.ts` and it is data rather than JSX: the index draws
+it and `app/routes.tsx` mounts a component at each of its paths, so `types.test.ts` reads
+the router's source and fails if the two disagree.
 
-**One fold made a duplicate accessible name.** The panel is a `role="group"` labelled by
-its handle, so the two language pickers' own `role="group"` wrappers became a second
-element answering to the same name and `getByRole` found two. The wrappers went; the
-panel is the group.
+**The collapse state is gone rather than kept beside the navigation.** It was doing a
+route's job, and an app that keeps both has two answers to "where did that go". The rule it
+encoded, open when the setting is the whole of the card and closed when it starts a job,
+survives only for the book page, which folds against a condition and has no route to fold
+into. `SETTINGS_SECTION_DEFAULTS` and `useSettingsSections` are gone with it.
+
+**The sentences on the index are the whole value of that page.** Six headings alone would
+make a household open three screens to find one setting, which is worse than the long page
+this replaced.
+
+**`hooks.ts` split along the same lines**, because moving the JSX out does not split it. It
+was 554 lines and nine hooks; it is now 76 and one, `useSettings`, which is the admin
+record four of the six routes read and write. Everything belonging to a single route moved
+beside it: `LibrarySettingsPage/hooks.ts`, `LendingSettingsPage/hooks.ts`,
+`DataSettingsPage/hooks.ts`.
+
+**Three components are shared by the routes and live in `SettingsPage/components/`.**
+`SettingsSubPage` is the frame: the width, the header and the way back, in one place so six
+screens cannot drift into six slightly different settings pages. `AdminSettings` is the gate
+and the save banner, and it exists because the same four states surround the same record on
+four routes and one of them is easy to get subtly wrong: **a 403 is a legitimate answer
+here, not a failure**, so it is a sentence rather than an error page. `ToggleField` is the
+switch, drawn by the catalogue and lending screens.
+
+**Three routes hold nothing for a member, and the index leaves them out.** Catalogue
+sources, Lending and Data and accounts render their entire body inside `AdminSettings`, so
+a member who followed one of those links would get a sentence and nothing else, after a tap,
+from an entry whose sentence promised content. The long page this replaced refused **in
+place, once**, beside the cards it was refusing. `SETTINGS_ROUTES` carries an `adminOnly`
+flag and the index filters on `currentUser.is_admin`, a prop threaded from `AppRoutes` the
+same way `BookDetail` takes it. It costs no request, so the index stays a static map.
+
+**Not `localStorage["user"]`, and the reason is proxy auth.** That key is written only by
+`signIn`, which under proxy fires only on a switch into a test account, and a test account
+is never an admin, so it is null for a proxy admin always: reading it dropped catalogue,
+lending and data off a proxy admin's own index, reachable only by typing the URL. The
+identity under proxy is `me.data`, which is what `AppRoutes` already holds. `LoginPage` is
+the one place that legitimately reads storage, because it renders outside a resolved session
+and has no prop to read.
+
+**The routes stay mounted**: the flag decides what is offered, never what is allowed, a
+deep link still lands and still meets `AdminSettings`, and every endpoint behind those
+screens is `require_admin`. So this filter may only ever fail by under-offering. It is held
+by the type system first, since removing it leaves `currentUser` unread and `noUnusedLocals`
+refuses the build; the tests are the second line, and the regression test for the proxy case
+is in `tests/app/App.test.tsx`, because with the account a prop a unit test can only assert
+what it passed in.
+
+**The `/settings/data` gate is the weakest of the six**, because it is the only route whose
+whole body is gated by where a JSX tag sits. On the other admin screens every card consumes
+`settings`, so moving one out of `AdminSettings` does not compile; neither `BackupSection`
+nor `TestAccounts` takes that prop, so there the same mistake typechecks. Measured by making
+it: `bun run typecheck` clean and 182 of 182 tests green, with a member then shown Download
+and Restore above the refusal. `DataSettingsPage.test.tsx::draws no card a member would be
+refused` is the one test that fails on it.
+
+**The chrome is `SettingsSection`, the card that does not fold.** `CollapsibleSection` used
+to carry a `card` variant so folding settings did not mean drawing a settings card a second
+way; nothing folds there now, the variant had no caller left, and it was removed. The icon
+badge is still `components/SectionIcon.tsx`, drawn by the card and by every entry on the
+index.
+
+**The language pickers' `role="group"` wrappers came back with the fold's removal**, and
+the round trip is worth recording. A folded panel is itself a `role="group"` labelled by
+its handle, so while settings folded, a wrapper of its own made a second element answer to
+the same name and `getByRole` found two; the wrappers went. `SettingsSection` labels
+nothing, so without them the two pickers were unnamed groups, and the test that asks for
+the default language picker by name asks for exactly that. Each carries its own
+`aria-label` again, which is what `AppearancePage` has always done.

@@ -954,7 +954,7 @@ def _http_exception_aliases(tree: ast.Module) -> set[str]:
     """Every local name in one module that means an HTTP exception class.
 
     Resolves `from fastapi import HTTPException as HE` the way
-    `test_shelf.py::_book_aliases` resolves the `Book` model, which is the
+    `test_shelf.py::_entity_aliases` resolves a guarded model, which is the
     resolver this one is copied from. The attribute form
     (`fastapi.HTTPException(...)`) is handled at the call instead, since it
     binds no local name.

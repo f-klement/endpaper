@@ -1,4 +1,11 @@
-/** Tests for src/components/CollapsibleSection.tsx. */
+/**
+ * Tests for src/components/CollapsibleSection.tsx.
+ *
+ * One framing since 2026-08-27. The `card` variant and its two tests went with
+ * the settings fold: settings is a route tree now, nothing there folds, and the
+ * book page is the only caller left. `SettingsSection` is the settings card,
+ * and `SectionIcon.test.tsx` covers the badge both of them used to share.
+ */
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -117,46 +124,5 @@ describe("CollapsibleSection", () => {
     expect(
       screen.getByRole("heading", { name: "Lending this copy" }),
     ).toBeInTheDocument();
-  });
-
-  describe("as a settings card", () => {
-    it("keeps the icon out of the handle's name", () => {
-      // The badge is decoration beside a title that already says what the
-      // section is. Announcing it would make the name differ from the label.
-      renderLocalised(
-        <CollapsibleSection
-          variant="card"
-          icon="inbox"
-          id="backup"
-          title="Backup"
-          isOpen={false}
-          onToggle={vi.fn()}
-        >
-          <p>a whole library</p>
-        </CollapsibleSection>,
-      );
-
-      expect(screen.getByRole("button", { name: "Backup" })).toHaveAttribute(
-        "aria-expanded",
-        "false",
-      );
-    });
-
-    it("folds the same way the rows do", () => {
-      renderLocalised(
-        <CollapsibleSection
-          variant="card"
-          icon="inbox"
-          id="backup"
-          title="Backup"
-          isOpen={false}
-          onToggle={vi.fn()}
-        >
-          <p>a whole library</p>
-        </CollapsibleSection>,
-      );
-
-      expect(screen.getByText("a whole library")).not.toBeVisible();
-    });
   });
 });

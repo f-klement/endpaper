@@ -79,7 +79,7 @@ export default function GoogleBooksHelp({
       {/* The modal closes on navigate, because leaving a dialog open behind a
           route change strands focus in something no longer on screen. */}
       <Link
-        to="/settings"
+        to="/settings/catalogue"
         onClick={onClose}
         className="inline-block mt-1 px-4 py-2 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover transition-colors"
       >

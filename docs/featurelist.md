@@ -151,13 +151,16 @@ tested for it.
 
 The book page folds into sections whose defaults follow the book: a loan section
 opens on a book that is out, copies on a book with more than one, and your own
-choice to open or close one is remembered. Settings folds the same way against a
-fixed rule instead: a card that answers "what is this set to" arrives open, a
-card that starts a job arrives closed.
+choice to open or close one is remembered.
 
-**An About card** names the version it is running, links the source, and asks
-once, in one sentence, whether you want to buy the author a coffee. Last on the
-page, and nothing else in the app asks at all.
+**Settings is an index of six screens**, each with a sentence saying what is
+behind it: appearance, catalogue sources, your library, lending, data and
+accounts, and about. Nothing there folds. Every screen has its own address, so a
+setting can be linked to rather than described as "third card down".
+
+**An About screen** names the version it is running, links the source, and asks
+once, in one sentence, whether you want to buy the author a coffee. Nothing else
+in the app asks at all.
 
 ## Deliberately not built
 

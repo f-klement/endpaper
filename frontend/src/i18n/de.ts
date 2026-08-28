@@ -380,7 +380,24 @@ export const de: Messages = {
   "settings.couldNotLoad": "Die Einstellungen konnten nicht geladen werden.",
   "settings.adminOnly": "Nur Administratoren können das ändern.",
 
-  "theme.label": "Darstellung",
+  "settings.appearance.title": "Darstellung",
+  "settings.appearance.summary":
+    "Das Farbschema, hell oder dunkel, das Hintergrundmuster und die Sprache der App.",
+  "settings.catalogue.title": "Katalogquellen",
+  "settings.catalogue.summary":
+    "Woher die Angaben zu einem Buch stammen, wenn es gescannt oder gesucht wird.",
+  "settings.library.title": "Deine Bibliothek",
+  "settings.library.summary":
+    "Bücher aus einem anderen Dienst übernehmen, fehlende Cover nachholen und Angaben ergänzen, für die Endpaper keine Spalte hat.",
+  "settings.lending.title": "Ausleihe",
+  "settings.lending.summary":
+    "Erinnerungen an überfällige Bücher, und wohin sie gehen.",
+  "settings.data.title": "Daten und Konten",
+  "settings.data.summary":
+    "Die ganze Bibliothek sichern und zurückspielen, und Konten, um sie wie ein gewöhnliches Mitglied zu sehen.",
+  "settings.about.summary":
+    "Welche Version läuft, wo der Quelltext liegt und wie sich das Projekt unterstützen lässt.",
+
   "theme.hint": "Wird in deinem Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
@@ -392,7 +409,7 @@ export const de: Messages = {
   "theme.summary": "{palette}, {mode}, {wallpaper}",
   "theme.change": "Farbwelt, hell oder dunkel und ein Hintergrundmuster wählen",
 
-  "appearance.title": "Darstellung",
+  "appearance.title": "Farbschema und Hintergrund",
   "appearance.intro":
     "Alles hier gilt sofort und wird in deinem Konto gespeichert.",
   "appearance.preview": "Deine Bibliothek in dieser Darstellung",

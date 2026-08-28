@@ -59,10 +59,10 @@ that found fourteen endpoints with no check at all, and nothing owned it for **m
 which is exactly where the leaks were. `list_tags` counted books unfiltered and disclosed
 which tags existed only on somebody's private books.
 
-What replaced it is `test_shelf.py::TestTheShelfIsTheOnlyWayIn`: three flat `ast` passes
+What replaced it is `test_shelf.py::TestTheShelfIsTheOnlyWayIn`: four flat `ast` passes
 asking who imports the predicate, who builds a query naming `Book`, and who reaches `books`
 through a join. It resolves which local names mean `Book` first, so an alias or a rebinding
-is caught, and it carries two short allowlists rather than five opt-out comments. What it
+is caught, and it carries five short allowlists rather than five opt-out comments. What it
 does not need is the scope and binding machinery the old guard was built from, and the
 reason is structural rather than clever: outside `shelf.py` the correct answer is zero, so
 there is no "was a predicate applied here" question left to answer.
@@ -3207,6 +3207,55 @@ in the guard's own docstring rather than left to be discovered, because the
 previous version claimed to catch "all the cheap spellings" and that was false
 when written.
 
+### The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it
+
+`TestTheShelfIsTheOnlyWayIn` asked three questions and all three named `Book`, so
+a query over `classifications`, `custom_field_values` or `book_tags` was invisible
+to every one of them. The shape to worry about is an **index**: "every DDC number
+in the library, with a count" names no `Book` anywhere and publishes numbers from
+books the viewer may not see. That is the `list_tags` disclosure again by a
+different door.
+
+**The fourth pass reports every read of those tables and decides nothing.** Which
+statements are safe is a hand written allowlist of ten, each a source fragment and
+a reason, with a test asserting the fragment appears in the statement at the line
+it is matched to. Two of the ten are correct queries reported anyway, and a test
+keeps them reported so the cost is not quietly removed.
+
+**Deciding correctness was tried first and abandoned on evidence.** Five versions
+of a rule that judged whether a join was safe, four of them shown to leak by the
+next review round:
+
+| Version | Rule | The shape that broke it |
+|---|---|---|
+| 1 | a join must be present | a shelf select with no join at all |
+| 2 | the join must reach `Book` | an onclause naming `Book` and joining another table |
+| 3 | the onclause must name the entity too | the wrong column, `Classification.id == Book.id` |
+| 4 | it must name the entity's key column | `!=`, `>`, and an `or_` that is always true |
+| 5 | it must equate the key outside a disjunction | not built |
+
+Through all five, the hand written list of readers never changed. So the rule
+that decided things is deleted: `_shelf_rooted`, the chain, join and onclause
+analysis, and the write gate are gone, and `_book_owned_offences` judges nothing.
+**Over reporting is the behaviour, not a defect.** A correct query on these tables
+is reported and goes on the list with its reason.
+
+**Two derivations, both pinned.** Which tables are children of `books` comes from
+the foreign keys, and which of those carry a member of their own is asserted, so a
+ninth child fails a test rather than defaulting to unguarded. The reading methods
+come from `dir(Query) | dir(Select)` rather than a list, which caught a leak an
+enumeration would have missed, since `select` is itself a method on `Select`. A
+floor of 38 names is asserted against that set: a derivation that can grow
+silently can shrink silently, and 21 real reading paths were droppable with the
+suite green.
+
+**What it cost, recorded because it is the argument for the shape.** Five leak
+families over six review rounds, **none found by mutation testing**, whose score
+was high throughout: three came from running the query against a database, two
+from a reader asking what the rule required rather than what it said. Three of
+the four fixes a reviewer proposed were themselves a step short of the family
+they were for. `CLAUDE.md` carries the general lessons.
+
 ## Frontend
 
 ### Page-centric colocation
@@ -3859,7 +3908,8 @@ authorize and no way to ask for somebody else's.
 
 ### The wallpaper picker is a route, and the wallpaper is not a switch
 
-`/settings/appearance`, not a section of the settings list and not a dialog. The reason is
+`/settings/appearance/theme`, its own route and a child of the Appearance settings
+screen, rather than a section of that screen and rather than a dialog. The reason is
 the one the design turns on: the only honest preview of a wallpaper is the page. The
 pattern is painted on `body`, so the picker is the app surface with the controls laid over
 it, a choice shows itself the moment it is made, and there is no Save button because there
@@ -4202,6 +4252,15 @@ The ids are named after what a card is, not after its title: `appearance`, not
 `theme.label`; `overdue`, not `reminders`. The id is what reaches storage, so a renamed
 title is free and a renamed id forgets what every reader said.
 
+**Retired 2026-08-27, when Settings became six routes.** The fold was doing a
+route's job: the page held thirteen sections, and two features built on one night
+had to be told in advance which section each owned to avoid colliding in
+`SettingsPage.tsx` and `hooks.ts`. `SETTINGS_SECTION_DEFAULTS`, `SETTINGS_SECTIONS`
+and `useSettingsSections` are gone. Keeping the collapse state beside the
+navigation would have given a household two ways to hide the same thing. The rule
+survives for the book page, which folds against a condition and has no route to
+fold into.
+
 ### The section store is a parameter, because two pages have an `about`
 
 `readSectionChoices` and `writeSectionChoice` take a `SectionStore`. One shared
@@ -4210,7 +4269,7 @@ with nothing wrong on either page. `SectionStore` is a union of the two key name
 than a `string`, so a third folding page has to name its store and a typo is a compile
 error.
 
-### Folding settings kept the card, and that is why `CollapsibleSection` has a variant
+### Folding settings kept the card, and removing the fold removed the variant
 
 `SettingsSection`'s whole reason for being shared is that `/settings/appearance` must not
 look like a different app from the page that links to it. Folding by adopting the book
@@ -4669,6 +4728,49 @@ A Book holds at most one value per definition (`uq_custom_field_values_book_fiel
 bounding the definitions at 25 bounds every Book's payload, every rename's blast radius and
 every row this feature can add. It is also what makes `define` cheap enough to fold a name by
 scanning the whole table in Python, which is what `create_tag` does and why.
+
+### Settings is an index of six routes, and the descriptions are the page
+
+Grouping settled by the owner, 2026-08-27: six routes, About its own, and
+"definitely fewer and larger groupings". Two placements came from reading the
+strings rather than the section names. **`defaultLanguage` is Appearance, not
+Catalogue**: its string is "Default language for new visitors", which is the
+interface language for somebody who has not chosen one, not a cataloguing
+decision. **`covers` is Your library, not Catalogue sources**: its own text names
+the import as the thing that creates work for it.
+
+The weakest group is `backup` with `testAccounts`, recorded as weak rather than
+argued into soundness: both are things only an admin touches, which is a thinner
+thread than the other five have.
+
+**The sentence under each heading is the whole value of the index.** Six headings
+alone would make a household open three screens to find one setting, which is
+worse than the long page this replaced. The test asserts that as a property of all
+six rather than by quoting one, so a seventh route with no description fails.
+
+**A member is offered three of the six, and the routes stay mounted.** The three
+whose whole body is admin only carry an `adminOnly` flag and are filtered off the
+index by `currentUser.is_admin`, a prop threaded from `AppRoutes`, which costs no
+request. **Not `localStorage["user"]`**: under proxy authentication that key is
+not the identity and is never written, so reading it dropped three entries off a
+proxy admin's own index, permanently. The page this replaced refused **in place,
+once**, beside the cards it was refusing; six unmarked links would have turned
+that into three dead ends, each a tap away and each advertised with a sentence
+promising content.
+
+**The flag decides what is offered, never what is allowed.** A deep link still
+lands and still meets the admin gate, every endpoint behind those screens is
+`require_admin`, and a forged cached account restores the links and then meets the
+same refusal. It may only ever fail by under offering.
+
+**`/settings/data` is the weakest gate of the six and is tested as one.** It is
+the only route whose entire body is gated by where a JSX tag sits: on the other
+admin screens every card consumes `settings`, so moving one out of the gate does
+not compile, while neither `BackupSection` nor `TestAccounts` takes that prop.
+Measured by making that mutation: typecheck clean, 182 of 182 green, and a member
+shown Download and Restore above "Only an admin can change these". Both endpoints
+are `require_admin`, so it is an offer the API refuses rather than a leak, and an
+offer the API refuses is still a defect.
 
 ## Tooling
 

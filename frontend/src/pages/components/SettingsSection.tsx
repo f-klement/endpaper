@@ -11,15 +11,19 @@ interface SettingsSectionProps {
 /**
  * A titled card that does not fold. Dumb: layout only, no state and no data.
  *
- * Shared rather than Settings' own, because `/settings/appearance` is a second
- * screen of the same settings and drawing its sections a second way would make
- * one setting look like it belongs to a different app than the one beside it.
+ * Shared rather than any one page's, because settings is eight screens now (an
+ * index, six detail routes and the palette picker) and drawing a section a
+ * second way on one of them would make one setting look like it belongs to a
+ * different app than the one beside it.
  *
- * The settings page itself now folds, so it draws the same card through
- * `CollapsibleSection variant="card"` instead. That is the same chrome, not a
- * second one: both use the `card` class and `SectionIcon`, which is why the
- * badge lives in its own component. Appearance is arrived at deliberately, from
- * a link that says what is set, so nothing there folds and this stays.
+ * **This is the only titled settings card, since 2026-08-27.** The list used to
+ * fold, through `CollapsibleSection`'s `card` variant, and folding was retired
+ * when each group became a route: navigation is the state now, and keeping both
+ * would give a household two ways to hide the same thing. Two places still
+ * write `.card` by hand and neither wants a heading: the settings index, whose
+ * entries are links rather than sections, and the About screen, where a card
+ * titled "About Endpaper" under a page titled "About Endpaper" would be the
+ * same sentence twice.
  */
 export default function SettingsSection({
   title,

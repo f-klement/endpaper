@@ -8,7 +8,7 @@ Seven palettes, two modes each, and the rule that generated every rung of them.
 | `frontend/src/theme/palettes.css` | The other six palettes, as `data-theme` blocks |
 | `frontend/src/theme/palettes.ts` | The catalogue: the list, the attributions, and which member was constructed |
 | `frontend/src/theme/appearance.ts` | The per account preference and its write-through cache |
-| `frontend/src/pages/AppearancePage/` | The picker at `/settings/appearance` |
+| `frontend/src/pages/AppearancePage/` | The picker at `/settings/appearance/theme` |
 | `frontend/tests/theme/palettes.test.ts` | The contract below, measured against the shipped stylesheets |
 
 ## The seven
@@ -506,7 +506,8 @@ away, is in [decisions.md](decisions.md).
 
 ## Choosing one
 
-`/settings/appearance`, its own route. The settings list keeps a summary and a link.
+`/settings/appearance/theme`, its own route and a child of the Appearance settings screen,
+which keeps a summary and a link.
 
 The reason for a route rather than a section or a dialog is the design's own: **the only
 honest preview of a wallpaper is the page.** The pattern is painted on `body`, so the picker

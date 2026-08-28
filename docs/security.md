@@ -58,6 +58,29 @@ both rather than letting either pass quietly. `backup.py` needs naming most, bec
 builds its query from a loop variable and no rule reading the arguments to `query()` can
 see it at all.
 
+A fourth pass covers the tables that hang off a book and carry no user of their own:
+`classifications`, `custom_field_values` and `book_tags`. Their privacy is entirely the
+book's, and an index over one of them ("every DDC number in the library, with a count")
+publishes a name and a count over every member's private books while naming no `Book`
+anywhere, so the three passes above cannot see it.
+
+The pass reports **every** statement that reads one of those tables and decides nothing
+about whether the query is scoped. `Shelf.select()` anchors the FROM at the filtered books
+and has never claimed to supply the join condition, so an index written through it with no
+join is a cartesian product: measured against a two-book database, it hands one member the
+classification of another member's private book. Five successive versions of the rule tried
+to recognise a correct join and each was shown to leak by the next review round, while the
+list of statements a person had checked stayed put. So the judgement is a person's, recorded
+once in an allowlist of ten statements across four modules with a reason beside each. Two of
+those ten are correct indexes reported anyway, which is the cost of not guessing.
+
+Which tables are children of `books` is derived from the foreign keys. Which of those
+children have a viewer of their own is pinned by hand, because a foreign key to `users` is
+not the answer: three tables here carry a `created_by_user_id` no query consults. A new child
+fails a test until somebody classifies it, so it cannot default to unguarded. Every read is
+counted, including the two written through the Shelf, so one more statement is a decision
+rather than an edit.
+
 ### A reading record is private in a second, separate way
 
 A book being visible says nothing about whose reading of it the caller may see. Two members

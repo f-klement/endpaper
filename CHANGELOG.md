@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+**Internal: the privacy rule now covers the tables that hang off a book.** A book
+can be private, and one function decides who may see which books. That rule is
+enforced by a test which reads the source of every backend file, and it only
+noticed queries naming a book directly. A query over a book's classifications,
+custom field values or tags names no book at all, so a page listing every Dewey
+number in the library with a count would have included numbers from other
+people's private books, and nothing would have failed.
+
+The test now covers those tables. It reports every read of them and judges none:
+which statements are safe is written down by hand, ten of them, each with a
+reason. Which tables belong to a book is read from the schema rather than listed,
+so a new one is covered the day it is added.
+
+**Internal: Settings is a route tree.** Six sections, each a heading and a line
+saying what it routes to, with a page of its own behind it. A section only an
+admin can use is not offered to a member, and still refuses them if they follow a
+link to it directly.
+
 ## v0.10.1
 
 _2026-08-27_

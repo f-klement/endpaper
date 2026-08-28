@@ -66,6 +66,43 @@ thing a backup must never do, so it is unfiltered on purpose and admin only for
 that reason. It is also **invisible to every rule that reads the arguments to
 `query()`**, this module's included, which is why the house rule asserts it
 separately instead of counting on being able to see it.
+
+## The tables that belong only to a Book
+
+`classifications`, `custom_field_values` and `book_tags` carry a Book and no
+user, so they have no viewer of their own and their privacy is entirely the
+Book's. An **index** over one of them ("every DDC number in the Library, with a
+count") publishes a name and a count over every Member's Private Books, which
+is the `list_tags` disclosure again by a different door, and it names no `Book`
+anywhere, so nothing above sees it.
+
+`select()` is the door, **and going through it does not satisfy the guard**. It
+anchors the FROM at the filtered `books` and does not supply the join, exactly
+as its own docstring says: `Shelf.seen_by(db, bob).select(Classification.number,
+func.count())` compiles to `FROM books, classifications` with no join
+condition, and against a two-Book database Bob reads the DDC number of Alice's
+Private Book.
+
+`tests/test_shelf.py` therefore reports **every** statement that reads one of
+these tables, including the two correct indexes that exist,
+`routers/stats.py`'s Tag counts and `routers/books.py`'s Tag index. It used to
+try to recognise a correct join instead, in five successive versions, and each
+was demonstrated to leak by the next review round while the list of statements
+a person had checked did not move. So the judgement is a person's and is
+recorded once, in `BOOK_OWNED_READERS`, which holds ten statements across four
+modules with a reason each. Writing a new query over one of these tables turns
+that test red on purpose: the comment block above that list says what is being
+asked.
+
+Which tables count as children of `books` is derived from the foreign keys.
+Which of those children have a viewer of their own is **pinned**, because a
+foreign key to `users` does not answer it: `collections`, `author_aliases` and
+`author_identifiers` each carry a `created_by_user_id` that no query consults.
+A ninth child fails a test until somebody classifies it.
+
+Not `books.added_by_user_id`, which is the opposite case and is the column
+`visible_to` is built on. `books` is outside the derivation for being the
+parent table.
 """
 
 from collections.abc import Collection, Sequence
@@ -298,8 +335,8 @@ class Shelf:
         # boundary production has.
         #
         # The one place that differs is a bare `uv run` on a developer's
-        # machine: SQLite 3.50.4, **32,766**. `CLAUDE.md` forbids running the
-        # suites there anyway, but it is worth the sentence, because a
+        # machine: SQLite 3.50.4, **32,766**. The suites are not run there
+        # anyway, but it is worth the sentence, because a
         # debugging session on this query can raise `OperationalError` at
         # 32,767 rows for a clause neither CI nor production would refuse, and
         # the obvious conclusion from that is the wrong one.

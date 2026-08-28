@@ -271,7 +271,7 @@ describe("a write names what it made stale", () => {
 
     expect(callers).toEqual([
       "pages/DuplicatesPage/hooks.ts",
-      "pages/SettingsPage/hooks.ts",
+      "pages/SettingsPage/DataSettingsPage/hooks.ts",
     ]);
   });
 
@@ -311,7 +311,7 @@ describe("a dark hover state is stated, never inherited", () => {
     // concatenation chain and asking which put the plain hover and the dark one
     // in different segments: `components/Button.tsx`,
     // `app/components/NavBar.tsx`, `pages/Home/components/BookFilters.tsx`,
-    // `pages/SettingsPage/components/AboutBadges.tsx`. This comment said "two"
+    // `pages/SettingsPage/AboutSettingsPage/components/AboutBadges.tsx`. This comment said "two"
     // while there were three, which is why the count is now dated and the files
     // named: a claim that there are exactly N is worth nothing without them.
     //

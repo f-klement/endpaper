@@ -88,7 +88,7 @@ describe("App", () => {
     // of the member who left and move `last` to them. That is the failure
     // `ThemeProvider.release` exists to prevent, and the route table is what
     // keeps it out of reach: every path renders the login page signed out.
-    window.history.pushState({}, "", "/settings/appearance");
+    window.history.pushState({}, "", "/settings/appearance/theme");
     renderApp();
     await screen.findByRole("button", { name: "Sign In" });
 
@@ -102,7 +102,7 @@ describe("App", () => {
 
   it("reaches the appearance picker once there is a session", async () => {
     signIn(makeUser({ username: "kim" }));
-    window.history.pushState({}, "", "/settings/appearance");
+    window.history.pushState({}, "", "/settings/appearance/theme");
     renderApp();
 
     expect(
@@ -151,6 +151,41 @@ describe("App under proxy auth", () => {
     expect(
       await screen.findByRole("button", { name: /kim/ }),
     ).toBeInTheDocument();
+  });
+
+  it("offers a proxy admin every settings screen", async () => {
+    // The regression this exists for: the settings index took `is_admin` from
+    // `localStorage["user"]` for one round. Under proxy that key is written
+    // only by `signIn`, which fires only on a switch into a test account, and
+    // a test account is never an admin, so it is null for a proxy admin
+    // always. They were offered three of the six entries, the other three
+    // reachable only by typing the URL.
+    //
+    // It has to be asserted here rather than in `SettingsPage.test.tsx`,
+    // because the account is a prop now and a unit test can only assert what
+    // it passed in. What was wrong was where `AppRoutes` reads the identity,
+    // and under proxy that is `me.data`.
+    api.on("/auth/me", { body: makeUser({ username: "kim", is_admin: true }) });
+    window.history.pushState({}, "", "/settings");
+    renderApp();
+
+    await screen.findByRole("heading", { name: "Settings" });
+    // Scoped to the index's own nav: the whole app is rendered here, so the
+    // bar's links are on the page too.
+    const index = screen.getByRole("navigation", { name: "Settings" });
+    expect(
+      within(index)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      "/settings/appearance",
+      "/settings/catalogue",
+      "/settings/library",
+      "/settings/lending",
+      "/settings/data",
+      "/settings/about",
+    ]);
+    expect(localStorage.getItem("user")).toBeNull();
   });
 
   it("reports an unidentified caller rather than a login form", async () => {

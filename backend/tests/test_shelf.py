@@ -13,16 +13,45 @@ exceptions.
 **This rule is smaller for one structural reason, not because it is cleverer.**
 Outside `shelf.py` the correct number of Book queries is zero, so there is
 nothing to decide: no predicate to find, no binding to follow, no scope to
-resolve. Three `ast` passes ask three flat questions.
+resolve. Four `ast` passes ask four flat questions.
 
 | Pass | Question | Allowed in |
 |---|---|---|
 | `_imported_names` | who imports `visible_to` / `in_trash_for` | `PREDICATE_IMPORTERS` |
 | `_query_offences` | who builds a query naming `Book` | `QUERY_BUILDERS` |
 | `_join_offences` | who reaches `books` through a join | `QUERY_BUILDERS`, `JOIN_CALLERS` |
+| `_book_owned_offences` | who reads a Book-owned table at all | `QUERY_BUILDERS`, `BOOK_OWNED_READERS` |
 
-`_book_aliases` resolves which local names mean `Book` first, so an import alias,
-a rebinding or an `aliased()` entity is caught rather than looked past.
+`_entity_aliases` resolves which local names mean the guarded entity first, so
+an import alias, a rebinding or an `aliased()` entity is caught rather than
+looked past. The first three passes hand it `Book`; the fourth hands it
+`BOOK_OWNED`.
+
+**The fourth pass is the newest and asks a blunter question than the other
+three.** They ask whether a statement names `Book`, so a query over
+`classifications` or `book_tags` is invisible to every one of them, whatever it
+selects, and an *index* over such a table ("every DDC number in the library,
+with a count") publishes a name and a count over every Member's Private Books.
+That is the disclosure `list_tags` made and the reason this module exists.
+
+**It reports every read and decides nothing.** No join, no scope, no viewer, no
+Shelf: naming one of those entities in a reading call is the whole rule, and
+`BOOK_OWNED_READERS` is where a person records why a given statement is safe.
+That is a deliberate retreat from five earlier versions which each tried to
+recognise a correct query and were each demonstrated to leak by the following
+review round, against an allowlist that did not move while they came and went.
+The table in `BOOK_OWNED_READERS` is the record, and the block above it is what
+to do when this rule turns your build red. **Do not reintroduce the cleverness**;
+that comment exists because the instinct to is strong and was wrong five times.
+
+The guarded set is half derived and half pinned, and the split is where an
+earlier version was wrong. Which tables are **children** of `books` is a foreign
+key, so `_children_of_books` derives it. Whether a child has a viewer of its own
+is **not** a foreign key to `users`: `collections`, `author_aliases` and
+`author_identifiers` each carry a `created_by_user_id` that no query consults,
+so that predicate would have dropped `classifications` out of the guard the day
+somebody added `catalogued_by_user_id`. `BOOK_CHILDREN` is therefore pinned, and
+a ninth child fails a test until a person classifies it.
 
 **It is wider than the old guard**, which was blind to a query reaching `books`
 through `.join(Book, ...)` while naming no `Book` inside `query()`: its own
@@ -34,10 +63,14 @@ the rule: once every legitimate query goes through one module, the exceptions ar
 few enough to name.
 
 **The blind spots, because a guard whose limits are undocumented is read as a
-guarantee it never made.** Five rounds of review found **nineteen** shapes that
-evaded earlier versions of this rule; `EVASIONS` holds every one, and each is
-asserted against the specific pass that must catch it. What is *still* not
-caught:
+guarantee it never made.** `EVASIONS` holds every shape that evaded an earlier
+version of this rule, and each is asserted against the specific pass that must
+catch it. **The counts are stated once, in that dict's own docstring, and a
+test derives them from the dict**: this sentence used to carry its own copy and
+was wrong in three consecutive review rounds. `BOOK_OWNED_EVASIONS` holds the
+fourth pass's, and each of those is asserted to be
+invisible to the other three as well, because a shape an older pass already
+caught would prove nothing about the new one. What is *still* not caught:
 
 * **A variable this resolver cannot trace back to `Book`.** It follows
   `X = Book`, `X = models.Book` and `X = aliased(Book)`, in both the plain and
@@ -46,51 +79,107 @@ caught:
   rule reading the arguments to `query()` can see it. Asserted separately by
   name instead, and listed in `INDIRECT_READERS`.
 * **Raw SQL.** `db.execute(text("SELECT location, count(*) FROM books ..."))`
-  names no `Book` anywhere and evades all three passes. `text()` is already used
-  in the tree (`main.py:451`), and a location index with a count is exactly the
-  shape the child-table bullet below warns about.
+  names no `Book` and no book-owned entity anywhere, and evades all four
+  passes. `text()` is already used in the tree (`main.py:451`), and a location
+  index with a count is exactly the shape these rules exist for.
 * **A join through a relationship**, `db.query(Loan).join(Loan.book)`, which
   names no `Book` at all.
-* **A child table carrying book-derived data.** A query over `quotes`,
-  `notes` or `classifications` names no `Book` and is invisible here. The one to
-  watch for is an *index* over such a table, which is the shape that publishes a
-  name and a count.
+* **A child table that carries a user.** `notes`, `quotes`, `user_books`,
+  `reading_progress` and `loans` are outside the fourth pass on purpose: each
+  has a viewer of its own. Measured by running this pass over the tree with
+  that entity set, they are read in **45 statements across 8 modules**, or 40
+  across 7 outside `shelf.py`, against **10 across 4** for the book-owned
+  tables, out of the 60 modules `_source_modules()` returns. Both halves of that comparison are this
+  pass's own output, on the same day; an earlier statement of it compared two
+  different methods and neither number reproduced. What holds those five is the
+  per-row ownership `reading.py` and the routers apply. **That is a description
+  of the tree, not a guarantee**: all 33 were read, and every one is narrowed
+  to a resolved Book, to ids a route resolved, or to the caller's own
+  `user_id`. `routers/books.py:2495` is already a library-wide index over
+  `quotes`, written correctly through the Shelf with a join, so the class is
+  live on a user-carrying table and nothing here would catch it written wrong.
+* **A Python-side aggregate off a Shelf.** `Shelf.select()` is anchored at the
+  filtered `books`, so counting its rows in Python is safe; counting the rows
+  of an *allowlisted* book-owned read is not, which is why every entry in
+  `BOOK_OWNED_READERS` carries a reason rather than a count.
+* **`.select()` on any receiver is taken to be the Shelf's own method** by
+  `_builds_a_query`, so pass 2 does not report `shelf.select(Book.author)`.
+  The fourth pass makes no such exception: `select` is a method on
+  SQLAlchemy's `Select`, so it arrives in `_READING_METHODS` with everything
+  else and `shelf.select(Classification.number)` is reported like any other
+  read. That it is covered at all is an accident of deriving the set from the
+  library rather than writing it out, which is the argument for deriving it.
 * Importing `Book` for a `db.get(Book, id)` or a type annotation is not
   distinguished from importing it to build a listing, which is why the rule tests
   query shapes rather than that import.
-* **`select` under an import alias.** `from sqlalchemy import select as sel`,
-  then `sel(Book.location)`. Catching it means alias-resolving the *function*
-  name the way `_book_aliases` resolves the model, doubling the resolver to guard
-  a spelling the tree does not use: `serialisation.py` imports `select` bare.
+* **A read through a relationship attribute.** `book.classifications` in
+  Python issues a SELECT the ORM writes, and no rule reading source for a
+  query call can see it. It is scoped by construction when the `Book` came
+  from `dependencies.py` or a Shelf, which is why it is listed rather than
+  chased, but a loop over an unfiltered list of Books would not be.
+* **An allowlist entry added without thinking.** This rule now decides nothing
+  about whether a query is safe, so a wrong entry is a hole it cannot see. That
+  is the cost of the collapse and it is paid in review, which is why every
+  entry carries an argument rather than a description.
 * **`Query([Book], session=db)`**, constructing `orm.Query` directly. Not how a
   query is written anywhere in this codebase.
-* **An implicit FROM through a clause rather than an entity position.**
+* **An implicit FROM through a clause, on `books` itself.**
   `db.query(Loan.id).filter(Book.is_private.is_(True))` compiles to
-  `SELECT loans.id FROM loans, books WHERE ...`, and `.order_by(Book.title)` and
-  `.group_by(Book.location)` do the same: a real cartesian read of `books` with
-  no predicate. Refused a pass deliberately, and this is the one worth
-  understanding. `Book` appears in a clause position on every **correct** caller
-  too, `routers/stats.py`'s `join(User, Book.added_by_user_id == User.id)` among
-  them, so separating the two means knowing whether the query is rooted at
-  `books`, which is the flow analysis this rule exists to avoid. It also leaks by
-  row existence and count rather than by content, which makes it the weakest
-  member of the family. Named rather than caught.
+  `SELECT loans.id FROM loans, books WHERE ...`, and `.order_by(Book.title)`
+  and `.group_by(Book.location)` do the same: a real cartesian read of `books`
+  with no predicate. Not caught by passes 1 to 3, and **the reason is a cost,
+  measured**: `Book` in a narrowing clause is **14 statements across 5 modules**
+  outside `shelf.py` and off a shelf-rooted chain, and **22 across 9** counting
+  those, against the **7 across 3** the fourth pass carries. Extending the
+  clause rule to `Book` means classifying every one of them by hand.
 
-Both critic seats reviewed that list and called it complete at these eight
-entries. It is the deliverable for everything the rule does not catch: a shape
-that is named here has been decided about, and a shape that is neither caught nor
-named is an oversight.
+  That number replaces an example, and the example was wrong. This bullet used
+  to name `routers/stats.py`'s `join(User, Book.added_by_user_id == User.id)`
+  as a correct caller no clause rule could separate. It is a **join** onclause,
+  which such a rule would never have looked at. Corrected under this list's own
+  closing sentence: a shape named here is a claim about the tree, and a claim
+  about the tree is a measurement rather than an instance somebody remembered.
+
+  **For the book-owned tables it is caught, and for free.** `filter`, `where`,
+  `having`, `group_by` and `order_by` are methods on `Query` and `Select`, so
+  they arrive in `_READING_METHODS` with the rest and get no separate handling:
+  `shelf.select(Book.title).filter(Classification.number == "616.89")` is a
+  statement naming a guarded entity, and that is all the rule asks. An earlier
+  version of this bullet argued the shape could not be separated without flow
+  analysis and that it leaked existence rather than content. Both were wrong,
+  and what actually removed the problem was deleting the machinery that made
+  it a separate question.
+
+Both critic seats reviewed the first eight of these and called that list
+complete. The fourth pass then replaced one of them with five of its own,
+later rounds removed three that a fix had closed or that the collapse to an
+allowlist dissolved, and added two the collapse created. Eleven bullets,
+counted. The list is the deliverable for everything the rules
+do not catch: a shape that is named here has been decided about, and a shape
+that is neither caught nor named is an oversight. **A shape listed here is a
+claim about the tree and has to be re-measured, not re-read**: the entry above
+about user-carrying tables carried a number that did not reproduce by any
+method, and the entry this one replaced described a hole that a later round
+closed in eight lines.
 
 The rest of the file tests the Shelf's behaviour.
 """
 
 import ast
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Select, event, func
+from sqlalchemy import Column, ForeignKey, Integer, MetaData, Select, Table, event, func
+from sqlalchemy.orm import Query
 
+import models
+
+# `Base` from `database`, which defines it, rather than from `models`,
+# which re-exports it. mypy refuses an implicit re-export and is right to:
+# the two would drift the day `models` stopped importing it.
+from database import Base
 from enums import BookSort, ReadStatus
 from models import Book, Collection, Tag, User, UserBook, book_tags
 from shelf import (
@@ -143,12 +232,348 @@ JOIN_CALLERS = {"notifications.py"}
 #: that, since this rule structurally cannot.
 INDIRECT_READERS = {"backup.py"}
 
+#: The entity the first three passes guard.
+_BOOK = frozenset({"Book"})
 
-def _book_aliases(tree: ast.Module) -> set[str]:
-    """Every local name bound to the `Book` model in one module.
+
+def _children_of_books(metadata: MetaData) -> set[str]:
+    """Every table with a foreign key to `books`.
+
+    Derived, because a foreign key is a structural fact the schema can answer.
+    What it cannot answer is the next question, so that one is pinned instead:
+    see `BOOK_CHILDREN`.
+
+    Takes a `MetaData` rather than reading `Base` itself so the derivation can
+    be tested against a synthetic schema. That test is what says this half is a
+    rule and not a list.
+    """
+    books = metadata.tables.get("books")
+    if books is None:
+        return set()
+    # Identity against the `books` table object, not its name. A foreign key's
+    # target is typed `FromClause` because a key can point into a join or a
+    # subquery, so reading `.name` off it is unsound as well as unchecked.
+    # Comparing the object is both narrower and stronger: a second table that
+    # happened to be called "books" in another MetaData would not match.
+    return {
+        table.name
+        for table in metadata.tables.values()
+        if table is not books
+        and any(fk.column.table is books for fk in table.foreign_keys)
+    }
+
+
+#: Every child of `books`, pinned rather than only derived.
+#:
+#: **The pin is the guard.** A ninth child added tomorrow fails
+#: `test_every_child_of_books_is_classified` until somebody says which half of
+#: `BOOK_OWNED_TABLES` it belongs to, so a new table cannot default to
+#: unguarded. That is the whole reason this constant exists beside a
+#: derivation that could have produced it.
+BOOK_CHILDREN = frozenset(
+    {
+        "book_tags",
+        "classifications",
+        "custom_field_values",
+        "loans",
+        "notes",
+        "quotes",
+        "reading_progress",
+        "user_books",
+    }
+)
+
+#: The children whose rows have no viewer of their own.
+#:
+#: **Classified by hand, and an earlier version of this rule computed it: a
+#: child with no foreign key to `users` was taken to have no viewer.** That
+#: predicate is wrong in this schema and the counter-examples are already
+#: documented in `models.py`. `collections.created_by_user_id` is "provenance
+#: and nothing else. No query consults it" (`models.py:118`),
+#: `author_aliases.created_by_user_id` says the same (`models.py:259`), and so
+#: does `author_identifiers`. Three tables, and they carry the argument on
+#: their own. So a `catalogued_by_user_id` on `classifications` would have
+#: dropped it out of the guard silently, which is the failure this file exists
+#: to prevent.
+#:
+#: **`books.added_by_user_id` is not a fourth example and was cited as one.**
+#: It is the column `visible_to` and `in_trash_for` are built on, read at six
+#: sites; `books` was excluded from the derivation because it is the parent
+#: table, not because its user column is inert.
+#:
+#: A table here has no user to be scoped by, so its privacy is entirely the
+#: Book's and the only correct scoping is the Shelf's. The other five have a
+#: member on every row and their own ownership rule: `reading.py` owns
+#: `user_books` and `reading_progress` the same way this module owns `books`,
+#: and the routers own the rest per row.
+BOOK_OWNED_TABLES = frozenset({"book_tags", "classifications", "custom_field_values"})
+
+
+def _book_owned_entities() -> tuple[frozenset[str], frozenset[str]]:
+    """The Python names `BOOK_OWNED_TABLES` corresponds to, and what is left.
+
+    A rule that reads source has to know the name the source writes, which is
+    the mapped class for most tables and the module-level variable for an
+    association table (`book_tags` is a `Table`, not a class, and no mapper
+    owns it).
+
+    The leftovers are returned rather than swallowed. A book-owned table with
+    no name any module could refer to would drop out of the guard silently,
+    which is the failure this whole file exists to make impossible, so
+    `test_every_book_owned_table_has_a_name_this_rule_can_look_for` asserts the
+    mapping is total instead.
+    """
+    remaining = set(BOOK_OWNED_TABLES)
+    names = set()
+
+    def take(name: str, table: Table) -> None:
+        names.add(name)
+        remaining.discard(table.name)
+
+    for mapper in Base.registry.mappers:
+        # `local_table` is typed `FromClause` because a class can be mapped to
+        # a join or a select. Every model here maps to a `Table`, and the
+        # isinstance is what says so rather than assuming it. A mapping that
+        # was not a Table would leave its table in `remaining`, which
+        # `test_every_book_owned_table_has_a_name_this_rule_can_look_for`
+        # fails on: unguarded and silent is the one outcome not available.
+        table = mapper.local_table
+        if isinstance(table, Table) and table.name in remaining:
+            take(mapper.class_.__name__, table)
+    for attribute, value in vars(models).items():
+        if isinstance(value, Table) and value.name in remaining:
+            take(attribute, value)
+    return frozenset(names), frozenset(remaining)
+
+
+#: The entities the fourth pass guards, and the tables it could not name.
+BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
+
+# ── The allowlist, and how to add to it ──────────────────────────────────────
+#
+# **You are probably reading this because the build went red on a query you
+# just wrote.** What follows is what is being asked of you. It is a decision,
+# not a form to fill in, and it should take a few minutes.
+#
+# ## What the rule does
+#
+# `classifications`, `custom_field_values` and `book_tags` hang off a Book and
+# carry no member of their own, so nothing about a row in them says who may
+# read it: the answer is entirely "whoever may read its Book". The three passes
+# above cannot see a query over them, because such a query names no `Book`
+# anywhere. This pass reports **any** statement that reads one of these tables.
+# It asks nothing about whether your query is scoped, joined or correct.
+#
+# ## Why it is this blunt, since your first instinct will be to fix that
+#
+# It used to ask. Five times, each version a little cleverer, and each was
+# demonstrated to leak by the following review round:
+#
+# | Version | What it accepted | What got past it |
+# |---|---|---|
+# | 1 | any chain rooted at `Shelf.select()` | no join at all: `FROM books, classifications` |
+# | 2 | ...that also joins the table | `join(Classification, Tag.id == Book.id)` |
+# | 3 | ...whose onclause names `Book` | `join(Classification, Classification.book_id == Tag.id)` |
+# | 4 | ...and names the entity too | `join(Classification, Classification.id == Book.id)` |
+# | 5 | ...and names its foreign key | `!=`, `>`, `or_(...)` and three more |
+#
+# Every one was measured against a real database returning another member's
+# private Book, and every one had passed a mutation matrix scoring above 95%.
+# Meanwhile this allowlist did not move: **7 statements across 3 modules
+# through all five versions**, including the two rounds that added narrowing
+# clauses and write gating. The clever rule was the part that kept being
+# wrong; the list of statements a human had looked at was the part that held.
+#
+# So the machinery is gone, on the owner's decision of 2026-08-27. There is no
+# sixth version to wait for.
+#
+# ## What it costs, stated because it is a real cost
+#
+# A **new correct caller does not pass on its merits.** Writing a perfectly
+# scoped index over `classifications` turns this build red and you have to come
+# here. That is the trade: correctness of these statements is a human judgement
+# recorded once, rather than a property re-derived on every run. Two of the ten
+# below are correct, carefully written queries that the rule reports anyway,
+# and they are on the list for exactly that reason. (This sentence said
+# **three** for one review round, while four other places said two. Both
+# critics counted the markers. Fifth time this file has hit its own rule that a
+# claim of "exactly N" gets counted, and the fourth time the correction was
+# noted while the wrong number was left standing above it.)
+#
+# **It can also report plain Python**, and this is the case most likely to look
+# like a bug rather than a rule. Six ordinary method names collide with
+# SQLAlchemy's: `count`, `get`, `join`, `union`, `update` and `values`. So
+# `'; '.join(c.number for c in rows)` and `d.get(Classification.number)` are
+# both reported if they name a guarded entity, because nothing here knows what
+# the receiver is. There are none in the tree today, which is why the count is
+# exactly ten and all ten are real queries, and `_entity_aliases` not following
+# `book = Book(...)` is what keeps it that way. If you have met one: it is not
+# a bug, the answer is the same as for any other entry, and a reason saying
+# "this is a string join, not a query" is a perfectly good one.
+#
+# ## What to do
+#
+# **First, decide whether the query is actually safe**, which means: can a
+# member see a row here whose Book they could not see? Work through it in this
+# order, because the first two are where the real answers are.
+#
+# 1. **Is it scoped to Books somebody already resolved?** A route that took a
+#    `Book` through `dependencies.py`, or ids that came out of a `Shelf`, has
+#    already had the privacy rule applied to it. This is what most of the list
+#    below is.
+# 2. **Does it publish a set of values rather than rows?** "Every DDC number in
+#    the library, with a count" is the dangerous shape and the reason this pass
+#    exists: it discloses what is on other people's private Books without ever
+#    returning one. A `filter` on such a column is the same disclosure asked one
+#    value at a time.
+# 3. **If it is a join to `books`, do not trust the shape of it.** Read the
+#    table above. Four spellings that look like a correct join are in it.
+#    Run the query against two Books, one private, as the other member. That
+#    is how every one of those five versions was broken, and it takes ten
+#    minutes.
+# 4. **If it writes rather than reads**, say so and move on. A `delete` or an
+#    `insert` publishes nothing. Two entries below are writes.
+#
+# **Then add an entry**, in the module's list, saying what the statement does
+# and why that is safe. An entry is a pair: a fragment of the statement, and
+# the reason. **The fragment is checked**, so an entry cannot end up describing
+# a different statement than the one it was written for. The entries are in
+# line order, so a new statement goes in the position its line number puts it,
+# and moving a statement means moving its entry. **Pick a fragment that is
+# distinctive within the module**: the check is positional, so it cannot tell
+# two adjacent statements apart if both contain the fragment. `.one_or_none()`
+# is the weakest of the ten on that count and would need replacing if a second
+# statement in `custom_fields.py` grew one. Without that check the reasons
+# were a list beside a list, lined up by counting and verified by nothing,
+# which under this rule is the one fact stored twice with no enforcement left:
+# the reasons **are** the guarantee now. A reason, not a restatement: "narrowed to a Book the
+# route resolved" is a reason, "queries custom_field_values" is not. The
+# entries are what the next person reads to see where the bar is, so an entry
+# that does not carry an argument lowers it for everybody after you.
+#
+# **If you cannot write that sentence, the query is the thing to change**, not
+# this list. Route it through `Shelf.select()` with a join to `books` and it is
+# still reported, but it is at least a statement you can defend in one line.
+#
+# ## What not to do
+#
+# Do not add an entry to get a green build without reading step 1. Do not
+# delete or weaken this test; if it is wrong, say why here in a comment beside
+# the change. And do not reintroduce a rule that decides whether the join is
+# correct: that is what the table above is a record of.
+#
+# ## The list
+#
+# Keyed by module, one entry per statement, and the count comes from `len()` so
+# a reason and a count cannot drift apart.
+BOOK_OWNED_READERS = {
+    "backup.py": [
+        (
+            "book_tags.select()",
+            "reads the whole `book_tags` table into the archive manifest. Not "
+            "scoped to anything and deliberately so: an archive that omitted "
+            "another member's rows would restore a library missing them. Admin "
+            "only, which is what holds it, and `backup.py` is already named "
+            "above as the third way past a viewer.",
+        ),
+    ],
+    "custom_fields.py": [
+        (
+            ".filter(CustomFieldValue.field_id == field.id).delete()",
+            "deletes every value of a custom field the admin is removing, keyed "
+            "on `field_id`. A write, and the count it returns describes rows "
+            "that no longer exist.",
+        ),
+        (
+            "db.query(CustomFieldValue, CustomField)",
+            "reads one Book's values with their field definitions joined on. "
+            "The function takes a `Book` object, never an id, which is the "
+            "module's own privacy rule: a `Book` can only have come from "
+            "`dependencies.py` or the Shelf.",
+        ),
+        (
+            ".one_or_none()",
+            "reads one `(book, field)` value to decide insert or update. Takes "
+            "a `Book`, as above.",
+        ),
+        (
+            "CustomFieldValue.book_id == keeper_id",
+            "reads the keeper's field ids during a Book merge, to know which of "
+            "the losers' values would collide. The ids came from a route that "
+            "resolved every Book in the merge.",
+        ),
+        (
+            "CustomFieldValue.book_id.in_(ids)",
+            "reads the losing Books' values in the same merge, to move them "
+            "onto the keeper. Same ids, same route.",
+        ),
+    ],
+    "routers/books.py": [
+        (
+            "func.count(book_tags.c.book_id)",
+            "the Tag index: every Tag with a count of the Books carrying it, "
+            "written through `Shelf.select()` and joined to `books`. "
+            "**Correct, and reported anyway**, which is the cost this list pays "
+            "for not trying to recognise a correct join. Verified by reading "
+            "the SQL: the FROM is the filtered `books` and the join is on "
+            "`book_tags.book_id == books.id`.",
+        ),
+        (
+            "book_tags.delete()",
+            "deletes the association rows for a Tag being removed. A write, and "
+            "reported for the `where` clause on it rather than for being one.",
+        ),
+        (
+            "Classification.book_id.in_(loser_ids)",
+            "moves the losing Books' classifications onto the keeper during a "
+            "merge, keyed on ids the route resolved.",
+        ),
+    ],
+    "routers/stats.py": [
+        (
+            "Book.id == book_tags.c.book_id",
+            "Tag counts for the statistics page, written through "
+            "`Shelf.select()` and joined to `books`. **Correct, and reported "
+            "anyway**, for the same reason as the Tag index above and verified "
+            "the same way.",
+        ),
+    ],
+}
+
+
+def _statement_at(source: str, line: int) -> str:
+    """The source of the statement beginning at this line, whitespace flattened.
+
+    So an entry in `BOOK_OWNED_READERS` can be tied to the statement it claims
+    to describe. Without that the reasons were a list beside a list, matched by
+    position and checked by nothing: the one fact stored twice with no
+    enforcement left.
+    """
+    tree = ast.parse(source)
+    widest = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.stmt)
+            and node.lineno == line
+            and (widest is None or (node.end_lineno or 0) > (widest.end_lineno or 0))
+        ):
+            widest = node
+    if widest is None:
+        return ""
+    return " ".join((ast.get_source_segment(source, widest) or "").split())
+
+
+def _entity_aliases(tree: ast.Module, roots: frozenset[str]) -> set[str]:
+    """Every local name bound to one of `roots` in one module.
 
     Resolved rather than assumed, because `from models import Book as B` binds
     a name this rule would otherwise never look for.
+
+    **One resolver for both rules**, and it takes the entities rather than
+    naming `Book`, for the reason `_bindings` gives one paragraph down: a
+    second implementation of "which names mean this model" is a second thing to
+    get the `AnnAssign` half of wrong. `_BOOK` is what the three original
+    passes hand it; `BOOK_OWNED` is what the fourth does.
 
     Three assignment forms are followed as well: `X = Book`, `X = models.Book`
     and `X = aliased(Book)`. The third is not hypothetical here,
@@ -161,16 +586,16 @@ def _book_aliases(tree: ast.Module) -> set[str]:
     `"; ".join(tag.name for tag in book.tags)` is then a join offence. The
     three literal forms give zero.
     """
-    names = set()
+    names = set(roots)
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "models":
-            names |= {a.asname or a.name for a in node.names if a.name == "Book"}
+            names |= {a.asname or a.name for a in node.names if a.name in roots}
 
     # A second pass, because an alias may be assigned above or below the import
     # in file order and this rule does not care which.
     for node in ast.walk(tree):
         for target, value in _bindings(node):
-            if isinstance(target, ast.Name) and _is_book_entity(value, names):
+            if isinstance(target, ast.Name) and _is_guarded_entity(value, names):
                 names.add(target.id)
     return names
 
@@ -213,12 +638,12 @@ def _bindings(node: ast.AST) -> list[tuple[ast.expr, ast.expr]]:
     return pairs
 
 
-def _is_book_entity(value: ast.expr, names: set[str]) -> bool:
-    """Whether an assigned value rebinds the Book entity under a new name.
+def _is_guarded_entity(value: ast.expr, names: set[str]) -> bool:
+    """Whether an assigned value rebinds a guarded entity under a new name.
 
     `X = Book`, `X = models.Book`, `X = aliased(Book)`, and nothing else.
     """
-    if _names_book(value, names):
+    if _names_entity(value, names):
         return True
     if not isinstance(value, ast.Call):
         return False
@@ -230,30 +655,49 @@ def _is_book_entity(value: ast.expr, names: set[str]) -> bool:
     )
     # Keyword arguments too: `aliased(element=Book)` passes Book by name.
     arguments = [*value.args, *(k.value for k in value.keywords)]
-    return named_aliased and any(_names_book(a, names) for a in arguments)
+    return named_aliased and any(_names_entity(a, names) for a in arguments)
 
 
-def _names_book(node: ast.AST, aliases: set[str]) -> bool:
-    """Whether an expression is the Book entity itself, not a column of it."""
+def _names_entity(node: ast.AST, aliases: set[str]) -> bool:
+    """Whether an expression is a guarded entity itself, not a column of it.
+
+    **`Classification.__table__` is the same entity**, and it is the Core
+    handle every mapped class carries. Without this hop the Core-select arm
+    below missed `Classification.__table__.select()` while catching the
+    identical `book_tags.select()`, and the rule that then existed read the
+    same statement as a Shelf and forgave it. Found by attacking the rule, not
+    by reading it.
+    """
+    if isinstance(node, ast.Attribute) and node.attr == "__table__":
+        return _names_entity(node.value, aliases)
     if isinstance(node, ast.Name):
         return node.id in aliases
-    return isinstance(node, ast.Attribute) and node.attr == "Book"
+    return isinstance(node, ast.Attribute) and node.attr in aliases
 
 
-def _mentions_book(node: ast.AST, aliases: set[str]) -> bool:
-    """Whether an expression names the Book model or any column of it.
+def _entities_named_in(node: ast.AST, aliases: set[str]) -> set[str]:
+    """Which guarded entities an expression names, model or column alike.
 
     Both shapes count. `query(Book)` returns rows; `query(Book.author)` returns
     a column out of the same rows, and publishing which authors, locations or
     series exist is the same leak by a narrower door. The attribute form also
     catches `models.Book`, which a name-only check would miss.
+
+    The names rather than a yes or no, because the fourth pass has to ask
+    whether the entity a chain **reads** is the entity that chain **joins**.
     """
+    found = set()
     for child in ast.walk(node):
         if isinstance(child, ast.Name) and child.id in aliases:
-            return True
-        if isinstance(child, ast.Attribute) and child.attr == "Book":
-            return True
-    return False
+            found.add(child.id)
+        elif isinstance(child, ast.Attribute) and child.attr in aliases:
+            found.add(child.attr)
+    return found
+
+
+def _mentions_entity(node: ast.AST, aliases: set[str]) -> bool:
+    """Whether an expression names a guarded model or any column of it."""
+    return bool(_entities_named_in(node, aliases))
 
 
 def _query_offences(source: str) -> list[int]:
@@ -268,7 +712,7 @@ def _query_offences(source: str) -> list[int]:
     This is **not** the guard it replaced. That one walked scopes and tracked
     bindings through `symtable` in order to decide whether a predicate had been
     applied. Here the answer outside `shelf.py` is always zero, so there is no
-    such decision to make: `_book_aliases` resolves which names mean `Book`, and
+    such decision to make: `_entity_aliases` resolves which names mean `Book`, and
     everything after that is a flat walk with no scopes and no exemption
     comments.
 
@@ -276,13 +720,14 @@ def _query_offences(source: str) -> list[int]:
     method, and reporting it would report every correct caller.
     """
     tree = ast.parse(source)
-    aliases = _book_aliases(tree)
+    aliases = _entity_aliases(tree, _BOOK)
+    select_names, module_names = _sqlalchemy_names(tree)
     offences = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if _builds_a_query(node.func) and any(
-            _mentions_book(arg, aliases) for arg in node.args
+        if _builds_a_query(node.func, select_names, module_names) and any(
+            _mentions_entity(arg, aliases) for arg in node.args
         ):
             offences.append(node.lineno)
     return sorted(offences)
@@ -312,7 +757,81 @@ _QUERY_BUILDERS = frozenset(
 _JOIN_METHODS = frozenset({"join", "outerjoin", "join_from", "outerjoin_from"})
 
 
-def _builds_a_query(func: ast.expr) -> bool:
+def _sqlalchemy_names(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """The local names in one module for SQLAlchemy's `select` and its package.
+
+    Resolved from the imports, **the same way `_entity_aliases` resolves the
+    model**, and for the same reason: a rule that lists spellings guards the
+    spellings it thought of. Both holes this closes were measured, and the
+    second is worse than a miss.
+
+    `from sqlalchemy import select as sel` then `sel(Book.location)` was an
+    unfiltered location index clean on every pass, and was listed as a blind
+    spot on the grounds that resolving it would double the resolver to guard a
+    spelling the tree does not use. It costs eight lines and it is shared.
+
+    `import sqlalchemy as sq` was worse. The rule of the day excluded `sa` and
+    `sqlalchemy` by name, so `sq.select(Tag.id).join_from(Tag, book_tags)` was
+    read as **the Shelf's** method and forgiven, while the identical `sa.`
+    spelling was caught. A hard-coded list did not just miss a shape there; it
+    turned one into a licence. Both spellings are reported now for the ordinary
+    reason, and `select_names` still earns its place in pass 2.
+
+    **The package is matched by prefix, not by string**, which is the same
+    lesson a third time. The first version of this function resolved the alias
+    and then listed the path, so `from sqlalchemy.sql import select` and
+    `from sqlalchemy.future import select` were clean on every pass and
+    `import sqlalchemy.sql as sq` was forgiven as a Shelf again. `select` is
+    re-exported from several modules of one package, and submodule imports are
+    already an idiom here: `notifications.py` and `models.py` both import from
+    `sqlalchemy.sql.elements`.
+    """
+    select_names: set[str] = set()
+    module_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _is_sqlalchemy(alias.name):
+                    # `import sqlalchemy.sql` binds the top package, not the
+                    # submodule, so the bound name is the part before the dot
+                    # unless the import gave it one of its own.
+                    module_names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and _is_sqlalchemy(node.module):
+            for alias in node.names:
+                if alias.name == "select":
+                    select_names.add(alias.asname or alias.name)
+    return select_names, module_names
+
+
+def _is_sqlalchemy(module: str | None) -> bool:
+    """Whether a dotted module path is SQLAlchemy or something inside it.
+
+    The prefix, so no list of submodules has to be kept current. `None` is a
+    relative import, which cannot reach the package.
+    """
+    return module is not None and (
+        module == "sqlalchemy" or module.startswith("sqlalchemy.")
+    )
+
+
+def _rooted_at_module(node: ast.expr, module_names: set[str]) -> bool:
+    """Whether an attribute chain starts at one of these module names.
+
+    `sqlalchemy.sql.select(...)` puts an `Attribute` where the two checks that
+    consume this used to require a `Name`, so the dotted receiver got past both
+    while `sq.select(...)` did not. Walking to the root closes the family
+    rather than the two spellings that were measured, which is the rule this
+    file has paid to learn twice: `outerjoin` without `outerjoin_from`, and
+    `with_entities` without `add_columns`.
+    """
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return isinstance(node, ast.Name) and node.id in module_names
+
+
+def _builds_a_query(
+    func: ast.expr, select_names: set[str], module_names: set[str]
+) -> bool:
     """Whether this call is one that starts a query.
 
     `db.query(...)`, the bare `select(...)` `serialisation.py` imports from
@@ -334,13 +853,12 @@ def _builds_a_query(func: ast.expr) -> bool:
     # `SELECT books.location FROM books`, an unfiltered index.
     if isinstance(func, ast.Attribute) and func.attr in _QUERY_BUILDERS:
         return True
-    if isinstance(func, ast.Name) and func.id == "select":
+    if isinstance(func, ast.Name) and func.id in select_names:
         return True
     return (
         isinstance(func, ast.Attribute)
         and func.attr == "select"
-        and isinstance(func.value, ast.Name)
-        and func.value.id in {"sa", "sqlalchemy"}
+        and _rooted_at_module(func.value, module_names)
     )
 
 
@@ -352,7 +870,7 @@ def _join_offences(source: str) -> list[int]:
     `.join(Book, ...)` anyway, whatever it selects.
     """
     tree = ast.parse(source)
-    aliases = _book_aliases(tree)
+    aliases = _entity_aliases(tree, _BOOK)
     offences = []
     for node in ast.walk(tree):
         if not (
@@ -373,8 +891,155 @@ def _join_offences(source: str) -> list[int]:
             *node.args[:entity_positions],
             *(k.value for k in node.keywords if k.arg == "target"),
         ]
-        if any(_mentions_book(t, aliases) for t in targets):
+        if any(_mentions_entity(t, aliases) for t in targets):
             offences.append(node.lineno)
+    return sorted(offences)
+
+
+#: Every method on SQLAlchemy's `Query` and `Select` that a caller can hand a
+#: column or an entity to, plus `query` itself, which lives on `Session`.
+#:
+#: **Derived from the library, not written down here.** The one enumeration
+#: this rule still needs is the set of ways a table gets read, and this file
+#: has been wrong about that twice by hand: `outerjoin` was covered while
+#: `outerjoin_from` was not, `with_entities` while `add_columns` and
+#: `add_entity` were not. `dir()` cannot forget a sibling. It is deliberately
+#: over-broad, because a method wrongly counted as a read costs one allowlist
+#: entry with a reason beside it, and a method wrongly missed costs a
+#: disclosure.
+#:
+#: `filter`, `where`, `having`, `group_by` and `order_by` arrive here with the
+#: rest and get no special handling, which is the whole point: a narrowing
+#: clause naming a guarded entity is a statement naming a guarded entity.
+_READING_METHODS = frozenset(
+    {name for cls in (Query, Select) for name in dir(cls) if not name.startswith("_")}
+    | {"query"}
+)
+
+#: The reading paths `_READING_METHODS` must contain, whatever SQLAlchemy does.
+#:
+#: **A derivation is trusted and its coverage is asserted**, which is the
+#: pattern the two derivations above already follow:
+#: `test_every_child_of_books_is_classified` and
+#: `test_every_book_owned_table_has_a_name_this_rule_can_look_for` exist for the
+#: same reason. This was the only derived set in the file without that second
+#: half, and it is the one the whole pass rests on.
+#:
+#: What it defends against is **shrinking**, which is silent where growing is
+#: not. Measured by dropping one name at a time and re-running: of the 130
+#: names in the derived set, **8 were pinned by some existing test and 122 could
+#: be removed with the suite still green**, among them `group_by`, `having`,
+#: `distinct`, `union`, `subquery` and `exists`. A SQLAlchemy release that
+#: trimmed `Query` or renamed a `Select` method would have taken a real reading
+#: path out of the guard and said nothing.
+#:
+#: Two things already backstop part of it and neither is enough. `_QUERY_BUILDERS`
+#: independently covers the five methods history proved dangerous here, which is
+#: why dropping `with_entities` alone changes nothing; and if `Query` vanished
+#: entirely the import would fail, which is loud. The exposure is the quiet
+#: middle: a version that keeps the class and trims it.
+#:
+#: Growing is still free and still unlisted. A method added to `Select`
+#: tomorrow is covered the day it appears, which is the whole reason the set is
+#: derived rather than written out.
+_READING_FLOOR = frozenset(
+    {
+        # The five a hand-written version of this set got wrong twice.
+        "query", "select_from", "with_entities", "add_columns", "add_entity",
+        # Joining.
+        "join", "outerjoin", "join_from", "outerjoin_from",
+        # Choosing and narrowing.
+        "select", "filter", "where", "having", "group_by", "order_by",
+        "distinct", "with_only_columns", "column", "values", "correlate",
+        # Slicing, which publishes a sample rather than the whole table.
+        "limit", "offset", "slice",
+        # Composition, each of which reads the table into something else.
+        "union", "union_all", "intersect", "except_", "subquery", "cte",
+        "lateral", "alias", "scalar_subquery", "exists", "from_statement",
+        # Terminals that return rows or a count of them.
+        "get", "count", "delete", "update",
+    }
+)
+
+
+def _enclosing_statements(tree: ast.Module) -> dict[int, ast.stmt]:
+    """Which statement each node belongs to.
+
+    So a chain spread over five lines is reported once, at the statement, and
+    an allowlist entry counts a thing a person wrote rather than a line the
+    formatter chose. `routers/stats.py`'s Tag index is one statement over eight
+    lines and three reading calls.
+    """
+    owner: dict[int, ast.stmt] = {}
+
+    def walk(node: ast.AST, statement: ast.stmt | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            here = child if isinstance(child, ast.stmt) else statement
+            if here is not None:
+                owner[id(child)] = here
+            walk(child, here)
+
+    walk(tree, None)
+    return owner
+
+
+def _book_owned_offences(source: str) -> list[int]:
+    """Statement line numbers where this module reads a book-owned table.
+
+    The fourth pass, and the one the other three cannot take: they all ask
+    whether a statement names `Book`, and
+    `db.query(Classification.number, func.count(Classification.id))
+    .group_by(Classification.number)` names no `Book` at all.
+
+    **It asks nothing about whether the query is correct.** Naming one of these
+    entities in a reading call is the whole rule; there is no notion here of a
+    join, a scope, a viewer or a Shelf. What decides safety is the allowlist,
+    and `BOOK_OWNED_READERS` says why that is so and what it costs.
+
+    Three things are a read, and the first covers almost everything: a call to
+    a method on SQLAlchemy's `Query` or `Select` with a guarded entity among
+    its arguments, the bare and qualified `select()` functions, and
+    `<Table>.select()`, which is the Core spelling reached through an
+    association table or through a mapped class's `__table__`.
+
+    **A write is reported when a clause on it names the entity, and not
+    otherwise.** That is an accident of where SQLAlchemy puts things rather
+    than a policy, and it cuts both ways, so it is written down instead of
+    tidied. `book_tags.delete().where(book_tags.c.tag_id == tag_id)` at
+    `routers/books.py:259` is reported, because `delete` and `where` are both
+    `Query` methods. `db.execute(book_tags.insert(), associations)` at
+    `backup.py:548` is **not**: `insert` lives on `Table`, so it is in no
+    derived set, and the rows are a plain list naming nothing.
+
+    Neither is a disclosure, so nothing is being missed that this rule cares
+    about. What would be missed is a reader concluding that every write is
+    reported and that a green build means their insert was looked at. It was
+    not.
+    """
+    tree = ast.parse(source)
+    aliases = _entity_aliases(tree, BOOK_OWNED)
+    select_names, module_names = _sqlalchemy_names(tree)
+    owner = _enclosing_statements(tree)
+
+    offences = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        arguments = [*node.args, *(keyword.value for keyword in node.keywords)]
+        named = any(_entities_named_in(a, aliases) for a in arguments)
+        core_select = (
+            isinstance(func, ast.Attribute)
+            and func.attr == "select"
+            and _names_entity(func.value, aliases)
+        )
+        reading_method = isinstance(func, ast.Attribute) and func.attr in _READING_METHODS
+        if core_select or (
+            named
+            and (reading_method or _builds_a_query(func, select_names, module_names))
+        ):
+            statement = owner.get(id(node))
+            offences.add(statement.lineno if statement is not None else node.lineno)
     return sorted(offences)
 
 
@@ -479,6 +1144,89 @@ class TestTheShelfIsTheOnlyWayIn:
         )
         assert offenders == [], (
             f"These statements reach books through a join outside the Shelf: {offenders}"
+        )
+
+    def test_only_the_counted_statements_read_a_table_that_belongs_only_to_a_book(self):
+        """The fourth pass, over the tables the three above structurally cannot
+        see.
+
+        `classifications`, `custom_field_values` and `book_tags` carry no
+        member, so their privacy is entirely the Book's, and a query over one
+        of them names no `Book` anywhere. An index is the shape that matters:
+        "every DDC number in the library, with a count" publishes what is on
+        every member's Private Books without returning one.
+
+        **Every read is reported and the allowlist is what decides.** The
+        failure message is the documentation most people will meet, so it
+        carries the reason and the next step rather than a verdict.
+        """
+        sources = {
+            name: source
+            for name, source in _source_modules().items()
+            if name not in QUERY_BUILDERS
+        }
+        found = {
+            name: _book_owned_offences(source)
+            for name, source in sources.items()
+        }
+        found = {name: lines for name, lines in found.items() if lines}
+        allowed = {name: len(entries) for name, entries in BOOK_OWNED_READERS.items()}
+        counted = {name: len(lines) for name, lines in found.items()}
+
+        report = []
+        for name in sorted(set(found) | set(allowed)):
+            lines = found.get(name, [])
+            entries = BOOK_OWNED_READERS.get(name, [])
+            body = sources.get(name, "").splitlines()
+            if len(lines) != len(entries):
+                shown = [
+                    f"      {name}:{line}  {body[line - 1].strip()[:70]}"
+                    for line in lines
+                    if line - 1 < len(body)
+                ]
+                report.append(
+                    f"  {name}: {len(lines)} reading statements, "
+                    f"{len(entries)} allowed\n" + "\n".join(shown)
+                )
+                continue
+            # The entries are positional, in line order, so each one has to be
+            # tied to the statement it claims to describe or the reasons drift
+            # out from under the statements as the module is edited.
+            for line, (fragment, _) in zip(lines, entries, strict=True):
+                statement = _statement_at(sources.get(name, ""), line)
+                if fragment not in statement:
+                    report.append(
+                        f"  {name}:{line} does not contain the fragment its "
+                        f"allowlist entry is keyed on.\n"
+                        f"      entry expects: {fragment}\n"
+                        f"      statement is:  {statement[:100]}"
+                    )
+        if not report and counted == allowed:
+            return
+
+        raise AssertionError(
+            "A statement reads a table that belongs only to a Book, and either "
+            "is not on the allowlist or does not match the entry describing "
+            "it.\n\n"
+            + "\n".join(report)
+            + f"\n\n  The tables are {', '.join(sorted(BOOK_OWNED))}. They carry no "
+            "member of their own, so nothing in a row says who may read it: the "
+            "answer is whoever may read its Book. Publishing a set of values out "
+            "of one of them (\"every DDC number in the library, with a count\") "
+            "discloses what is on other members' Private Books without ever "
+            "returning one.\n\n"
+            "  This rule reports every read and asks nothing about whether yours "
+            "is scoped or joined. Five versions that did ask were each shown to "
+            "leak by the next review round, so the judgement is a person's and it "
+            "is recorded once.\n\n"
+            "  If your query is genuinely safe, and the usual reason is that it "
+            "is scoped to Books somebody already resolved, add an entry to "
+            "BOOK_OWNED_READERS in this file: a fragment of the statement, and "
+            "why it is safe. The entries are in line order and are keyed on that "
+            "fragment, so moving a statement means moving its entry. The comment "
+            "block above the list is the checklist, including the four join "
+            "spellings that look correct and are not. If you cannot write the "
+            "reason in a sentence, change the query rather than the list."
         )
 
     #: Shapes that must be reported, and by which rule.
@@ -603,6 +1351,29 @@ class TestTheShelfIsTheOnlyWayIn:
             "def f(db):\n    return db.query(E).all()\n",
             "query",
         ),
+        "qualified rebinding": (
+            "import models\nM = models.Book\ndef f(db):\n    return db.query(M.location).all()\n",
+            "query",
+        ),
+        "select under an import alias": (
+            "from sqlalchemy import select as sel\n"
+            "from models import Book\n"
+            "def f(db):\n    return db.execute(sel(Book.location)).all()\n",
+            "query",
+        ),
+        "select from a package submodule": (
+            "from sqlalchemy.sql import select\n"
+            "from models import Book\n"
+            "def f(db):\n    return db.execute(select(Book.location).distinct()).all()\n",
+            "query",
+        ),
+        "dotted sqlalchemy receiver": (
+            "import sqlalchemy.sql\n"
+            "from models import Book\n"
+            "def f(db):\n"
+            "    return db.execute(sqlalchemy.sql.select(Book.location)).all()\n",
+            "query",
+        ),
     }
 
     @pytest.mark.parametrize("shape", sorted(EVASIONS))
@@ -611,8 +1382,12 @@ class TestTheShelfIsTheOnlyWayIn:
         rule clean, and each is a location or author index publishing a name and
         a count over every Member's Private Books.
 
-        **Sixteen shapes, from four rounds of review**, and the count is here
-        rather than in prose elsewhere because this dict is what defines it.
+        **The table below is the count**, and
+        `test_the_evasion_table_counts_what_the_dict_holds` derives it from the
+        dict rather than trusting it. Three review rounds in a row found a
+        stated total disagreeing with this table or with `len(EVASIONS)`, so
+        the number is no longer written anywhere a person has to remember to
+        update.
 
         | Round | What broke the rule that round | Shapes |
         |---|---|---|
@@ -621,6 +1396,44 @@ class TestTheShelfIsTheOnlyWayIn:
         | 3 | alias resolution, verifying shapes already listed | 0 |
         | 4 | `with_entities` and `join_from`, plus five binding forms | 7 |
         | 5 | `add_columns`, `add_entity`, `outerjoin_from` | 3 |
+        | 6 | `qualified rebinding`, found by mutating the resolver | 1 |
+        | 7 | `select under an import alias`, moved off the blind spots | 1 |
+        | 8 | the package matched by string rather than by prefix | 2 |
+
+        This paragraph said **sixteen** while the table below it summed to
+        nineteen, because round 5 added three shapes and left the sentence
+        alone. Recounted rather than adjusted, which is the standing rule here
+        for a comment that claims "there are exactly N".
+
+        **Round 6 came from attacking the rule, not reading it.** `M =
+        models.Book` is resolved by `_names_entity`'s attribute arm, and
+        nothing failed when that arm was reverted to a bare `Book` check: every
+        listed shape wrote the rebinding unqualified, so a correct half of the
+        resolver was untested. `_mentions_entity` has its own attribute arm and
+        covered the direct `db.query(models.Book.location)` spelling, which is
+        what made the gap invisible.
+
+        **Round 7 is a blind spot that stopped being one.** `from sqlalchemy
+        import select as sel` was listed as not caught, on the reasoning that
+        resolving the function name would double the resolver to guard a
+        spelling the tree does not use. `_sqlalchemy_names` is eight lines and
+        is shared with the fourth pass, where the same hard-coded list was
+        worse than a miss: it read `sq.select(...)` as the **Shelf's** method
+        and forgave it. A listed blind spot is a claim about cost, and a cost
+        is worth re-measuring when a second caller appears.
+
+        **Round 8 is round 7 not going far enough**, which is this file's
+        oldest mistake wearing new clothes. Resolving the alias but matching
+        the package by string left `from sqlalchemy.sql import select` and
+        `from sqlalchemy.future import select` clean on every pass, and
+        `import sqlalchemy.sql as sq` forgiven as a Shelf, one round after that
+        exact licence was written up as the reason not to hard-code a list.
+        `select` is re-exported from several modules of one package, and
+        `notifications.py` and `models.py` both already import from
+        `sqlalchemy.sql.elements`. Matched by prefix now, and
+        `_rooted_at_module` walks a dotted receiver to its root so
+        `sqlalchemy.sql.select(...)` is caught with the other three rather than
+        left as the next round's finding.
 
         Round 4's seven: `with_entities`, `join_from`, `annotated rebinding`,
         `annotated aliased entity`, `tuple rebinding`, `qualified aliased`,
@@ -656,6 +1469,503 @@ class TestTheShelfIsTheOnlyWayIn:
         )
         assert _query_offences(correct) == []
         assert _join_offences(correct) == []
+
+    #: Index shapes over a book-owned table, none of which names `Book`.
+    #:
+    #: Every one is "every heading in the library, with a count" in a different
+    #: spelling, and every one is invisible to the three passes above: the
+    #: parametrised test below asserts that invisibility as well as the catch,
+    #: because a shape the old rules already caught would prove nothing about
+    #: the new one. That is the mistake this file made once with `_join_offences`,
+    #: whose fixture also named `Book` inside `query()`.
+    BOOK_OWNED_EVASIONS = {
+        "index with a count": (
+            "from sqlalchemy import func\n"
+            "from models import Classification\n"
+            "def f(db):\n"
+            "    return (db.query(Classification.number, func.count(Classification.id))\n"
+            "        .group_by(Classification.number).all())\n"
+        ),
+        "distinct column": (
+            "from sqlalchemy import select\n"
+            "from models import Classification\n"
+            "def f(db):\n"
+            "    return db.execute(select(Classification.number).distinct()).all()\n"
+        ),
+        "whole entity, counted in python": (
+            "from collections import Counter\n"
+            "from models import Classification\n"
+            "def f(db):\n"
+            "    return Counter(c.number for c in db.query(Classification).all())\n"
+        ),
+        "join from another table": (
+            "from sqlalchemy import func\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return (db.query(Tag.name, func.count())\n"
+            "        .join(book_tags, book_tags.c.tag_id == Tag.id)\n"
+            "        .group_by(Tag.name).all())\n"
+        ),
+        "outer join from another table": (
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.query(Tag.name).outerjoin(book_tags, book_tags.c.tag_id == Tag.id).all()\n"
+        ),
+        "core select on the association table": (
+            "from models import book_tags\n"
+            "def f(db):\n    return db.execute(book_tags.select()).all()\n"
+        ),
+        "select_from": (
+            "from models import Classification, Tag\n"
+            "def f(db):\n    return db.query(Tag.name).select_from(Classification).all()\n"
+        ),
+        "with_entities": (
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.query(Tag).with_entities(book_tags.c.tag_id).all()\n"
+        ),
+        "add_columns": (
+            "from models import Classification, Tag\n"
+            "def f(db):\n"
+            "    return db.query(Tag.id).add_columns(Classification.number).all()\n"
+        ),
+        "add_entity": (
+            "from models import Classification, Tag\n"
+            "def f(db):\n    return db.query(Tag).add_entity(Classification).all()\n"
+        ),
+        "sqlalchemy select": (
+            "import sqlalchemy as sa\n"
+            "from models import CustomFieldValue\n"
+            "def f(db):\n"
+            "    return db.execute(sa.select(CustomFieldValue.value)).all()\n"
+        ),
+        "join_from": (
+            "import sqlalchemy as sa\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.execute(sa.select(Tag.id).join_from(Tag, book_tags)).all()\n"
+        ),
+        "outerjoin_from": (
+            "import sqlalchemy as sa\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.execute(\n"
+            "        sa.select(Tag.id).outerjoin_from(Tag, book_tags)\n"
+            "    ).all()\n"
+        ),
+        "import alias": (
+            "from models import Classification as C\n"
+            "def f(db):\n    return db.query(C.number).distinct().all()\n"
+        ),
+        "qualified name": (
+            "import models\n"
+            "def f(db):\n    return db.query(models.Classification.number).all()\n"
+        ),
+        "rebound name": (
+            "from models import Classification\n"
+            "M = Classification\n"
+            "def f(db):\n    return db.query(M.number).all()\n"
+        ),
+        "annotated rebinding": (
+            "from typing import Any\n"
+            "from models import Classification\n"
+            "M: Any = Classification\n"
+            "def f(db):\n    return db.query(M.number).all()\n"
+        ),
+        "aliased entity": (
+            "from sqlalchemy.orm import aliased\n"
+            "from models import Classification\n"
+            "E = aliased(Classification)\n"
+            "def f(db):\n    return db.query(E).all()\n"
+        ),
+        "join by keyword": (
+            "from models import Classification, Tag\n"
+            "def f(db):\n"
+            "    return db.query(Tag).join(target=Classification, onclause=Tag.id == 1).all()\n"
+        ),
+        "qualified rebinding": (
+            "import models\n"
+            "M = models.Classification\n"
+            "def f(db):\n    return db.query(M.number).all()\n"
+        ),
+        # Round 7. Written through the door this rule tells authors to use, and
+        # measured leaking against a real database rather than argued from the
+        # source: `FROM books, classifications` with no join condition, so Bob
+        # reads the DDC number of Alice's Private Book.
+        "unjoined shelf select": (
+            "from sqlalchemy import func\n"
+            "from models import Classification\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Classification.number, func.count())\n"
+            "        .group_by(Classification.number).all())\n"
+        ),
+        "a bare shelf select and nothing else": (
+            "from models import Classification\n"
+            "def f(shelf):\n    return shelf.select(Classification.number).all()\n"
+        ),
+        "unjoined shelf select through with_entities": (
+            "from models import Book, Classification\n"
+            "def f(shelf):\n"
+            "    return shelf.select(Book.id).with_entities(Classification.number).all()\n"
+        ),
+        "core select through __table__": (
+            "from models import Classification\n"
+            "def f(db):\n"
+            "    return db.execute(Classification.__table__.select()).all()\n"
+        ),
+        "__table__ rebinding": (
+            "from models import CustomFieldValue\n"
+            "T = CustomFieldValue.__table__\n"
+            "def f(db):\n    return db.execute(T.select()).all()\n"
+        ),
+        "sqlalchemy under another module alias": (
+            "import sqlalchemy as sq\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.execute(sq.select(Tag.id).join_from(Tag, book_tags)).all()\n"
+        ),
+        # Round 8. `select` is re-exported from several modules of one package,
+        # and a submodule import is already an idiom here.
+        "select from a package submodule": (
+            "from sqlalchemy.future import select\n"
+            "from models import Classification\n"
+            "def f(db):\n"
+            "    return db.execute(select(Classification.label).distinct()).all()\n"
+        ),
+        "package submodule under an alias": (
+            "import sqlalchemy.sql as sq\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.execute(sq.select(Tag.id).join_from(Tag, book_tags)).all()\n"
+        ),
+        "dotted sqlalchemy receiver": (
+            "import sqlalchemy.sql\n"
+            "from models import Tag, book_tags\n"
+            "def f(db):\n"
+            "    return db.execute(\n"
+            "        sqlalchemy.sql.select(Tag.id).join_from(Tag, book_tags)\n"
+            "    ).all()\n"
+        ),
+        # Round 9. A join that is present and reaches nothing, and two shapes
+        # that pin how `read` is compared against `joined`. All three were
+        # clean, and none was named anywhere.
+        "a join that does not reach books": (
+            "from models import Book, Classification, Tag\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Classification.number)\n"
+            "        .join(Classification, Tag.id == Book.id).all())\n"
+        ),
+        "a join whose target is not the entity read": (
+            "from models import Classification, Tag\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Classification.number)\n"
+            "        .join(Tag, Tag.id == Classification.id).all())\n"
+        ),
+        # One expression naming two entities, one joined and one not. The
+        # shape matters: with the two in separate arguments, comparing by
+        # intersection and comparing by subset give the same answer, so a
+        # fixture written that way pins neither.
+        # Round 10. A bare `db.query` joined to `books` correctly, and
+        # therefore with no privacy predicate anywhere: the `list_tags`
+        # disclosure in its original form. It was found by a mutation that
+        # showed the rootedness test had stopped being pinned by anything;
+        # that test is gone now and the shape is still worth holding.
+        "a bare query joined to books, with no predicate": (
+            "from sqlalchemy import func\n"
+            "from models import Book, Tag, book_tags\n"
+            "def f(db):\n"
+            "    return (db.query(Tag.name, func.count())\n"
+            "        .join(book_tags, book_tags.c.book_id == Book.id)\n"
+            "        .group_by(Tag.name).all())\n"
+        ),
+        # Round 11. The onclause names the entity and `Book` and relates
+        # neither: `classifications.id = books.id` reads whichever rows happen
+        # to collide, which against a two-Book database is Alice's Private one.
+        # Both critic seats reached this independently.
+        "an onclause that names both and relates neither": (
+            "from models import Book, Classification\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Classification.number)\n"
+            "        .join(Classification, Classification.id == Book.id).all())\n"
+        ),
+        # The other half of the same rule, and it was unpinned: no fixture
+        # named the entity's key in an onclause without also naming `Book`.
+        "an onclause that names the key and relates to another table": (
+            "from models import Classification, Tag\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Classification.number)\n"
+            "        .join(Classification, Classification.book_id == Tag.id).all())\n"
+        ),
+        # Round 11 also. A narrowing clause reads the table as surely as the
+        # SELECT list does, one value at a time, and `.like` enumerates.
+        "a filter oracle on a shelf select": (
+            "from models import Book, Classification\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Book.title)\n"
+            "        .filter(Classification.number == \"616.89\").all())\n"
+        ),
+        "a filter oracle with no viewer at all": (
+            "from models import Classification, Tag\n"
+            "def f(db):\n"
+            "    return db.query(Tag.name).filter(Classification.number.like(\"6%\")).all()\n"
+        ),
+        # Round 12. `filter` and `order_by` were pinned by the two above;
+        # `having` and `group_by` were not, because every other fixture that
+        # used them also named the entity somewhere a different method would
+        # catch. Removing the pair from the derived set left the suite green.
+        # These two mention a guarded entity **only** inside the clause named.
+        "a having clause and nothing else": (
+            "from sqlalchemy import func\n"
+            "from models import Book, Classification\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(func.count())\n"
+            "        .group_by(Book.id)\n"
+            "        .having(Classification.number == \"616.89\").all())\n"
+        ),
+        "a group_by clause and nothing else": (
+            "from sqlalchemy import func\n"
+            "from models import Classification\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(func.count())\n"
+            "        .group_by(Classification.number).all())\n"
+        ),
+        "an order_by that reaches the table": (
+            "from models import Book, Classification\n"
+            "def f(shelf):\n"
+            "    return shelf.select(Book.title).order_by(Classification.number).all()\n"
+        ),
+        "join_from re-roots the chain off books": (
+            "from models import Tag, book_tags\n"
+            "def f(shelf):\n"
+            "    return shelf.select(Tag.name).join_from(Tag, book_tags).all()\n"
+        ),
+        "one expression, only one of its entities joined": (
+            "from sqlalchemy import func\n"
+            "from models import Book, Classification, CustomFieldValue\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(\n"
+            "        func.coalesce(CustomFieldValue.value, Classification.label))\n"
+            "        .join(Classification, Classification.book_id == Book.id).all())\n"
+        ),
+    }
+
+    @pytest.mark.parametrize("shape", sorted(BOOK_OWNED_EVASIONS))
+    def test_the_fourth_pass_catches_an_index_over_a_book_owned_table(self, shape):
+        """Each shape publishes a heading, a value or a tag over every Member's
+        Private Books.
+
+        Most name no `Book` at all. The three round 9 added do, in a join or an
+        onclause, which is the point of them: naming `Book` somewhere is not
+        the same as reaching `books`. The assertion below is what keeps that
+        honest, by requiring every fixture here to be invisible to the three
+        passes that do look for `Book`.
+        """
+        source = self.BOOK_OWNED_EVASIONS[shape]
+        assert _book_owned_offences(source), f"{shape} evades the book-owned rule"
+        assert _query_offences(source) == [] and _join_offences(source) == [], (
+            f"{shape} is caught by an older pass, so it proves nothing about "
+            "the fourth one"
+        )
+
+    def test_the_derived_reading_methods_still_cover_every_known_path(self):
+        """The floor under the derivation, and the half it was missing.
+
+        `_READING_METHODS` is derived so that a method added to SQLAlchemy is
+        covered without an edit here. The cost of deriving it is that a method
+        **removed** from SQLAlchemy is uncovered without an edit either, and
+        silently: measured by dropping one name at a time, 122 of the 130 could
+        go with this suite still green.
+
+        If this fails, SQLAlchemy has renamed or removed something. Do not just
+        delete the name from the floor: work out which reading path it was, and
+        whether the pass still reports that path under its new spelling.
+        """
+        assert len(_READING_FLOOR) >= 30, (
+            "The floor has been emptied or gutted, which makes the assertion "
+            "below vacuous. It held 38 names when it was written, measured "
+            "against the reading paths in SQLAlchemy 2.x."
+        )
+        missing = sorted(_READING_FLOOR - _READING_METHODS)
+        assert not missing, (
+            "These reading paths are no longer in the set derived from "
+            "SQLAlchemy's Query and Select, so a query using one of them no "
+            "longer reports. Find out what each was renamed to, and add the "
+            f"new spelling rather than removing the old one: {missing}"
+        )
+
+    def test_the_evasion_table_counts_what_the_dict_holds(self):
+        """The round table in the docstring above is prose that claims a total.
+
+        Three review rounds in a row found that total disagreeing with either
+        the table under it or the dict itself, each time because a round added
+        shapes and left a sentence alone. Parsed and compared rather than
+        proof-read, which is the only fix that survives a fourth round.
+        """
+        docstring = (
+            self.test_the_rule_catches_the_shapes_that_defeated_its_earlier_versions.__doc__
+            or ""
+        )
+        table = re.findall(r"^\s*\|\s*(\d+)\s*\|.*?\|\s*(\d+)\s*\|\s*$", docstring, re.M)
+        assert table, "the round table is gone from the docstring"
+        assert [int(r) for r, _ in table] == list(range(1, len(table) + 1)), (
+            f"the rounds are not numbered 1..N: {[r for r, _ in table]}"
+        )
+        assert sum(int(n) for _, n in table) == len(self.EVASIONS), (
+            f"the table claims {sum(int(n) for _, n in table)} shapes and the "
+            f"dict holds {len(self.EVASIONS)}"
+        )
+
+    def test_a_correct_index_through_the_shelf_is_reported_too(self):
+        """The cost of the rule, asserted rather than left in a comment.
+
+        Both of these are correct. The FROM is the filtered `books`, the join
+        is on the association table's foreign key, and neither can return a row
+        of an invisible Book. Both are reported, and both are on the allowlist
+        with that written beside them.
+
+        **This test exists so the cost cannot be quietly removed.** The
+        instinct on reading the rule is to make it recognise these two, and
+        that instinct is what produced five versions, each shown to leak by the
+        next review round. If somebody makes them pass, this fails and they
+        have to come and argue with the table in `BOOK_OWNED_READERS`.
+        """
+        stats = (
+            "from sqlalchemy import func\n"
+            "from models import Book, Tag, book_tags\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Tag.name, func.count(book_tags.c.book_id))\n"
+            "        .join(book_tags, Book.id == book_tags.c.book_id)\n"
+            "        .join(Tag, Tag.id == book_tags.c.tag_id)\n"
+            "        .group_by(Tag.name).all())\n"
+        )
+        headings = (
+            "from sqlalchemy import func\n"
+            "from models import Book, Classification\n"
+            "from shelf import Shelf\n"
+            "def f(db, uid):\n"
+            "    return (Shelf.seen_by(db, uid)\n"
+            "        .select(Classification.number, func.count(Book.id))\n"
+            "        .join(Classification, Classification.book_id == Book.id)\n"
+            "        .group_by(Classification.number).all())\n"
+        )
+        assert _book_owned_offences(stats), "a correct index stopped being reported"
+        assert _book_owned_offences(headings), "a correct index stopped being reported"
+
+    def test_a_statement_is_reported_once_however_many_lines_it_takes(self):
+        """An allowlist entry counts something a person wrote.
+
+        `routers/stats.py`'s Tag index is one statement over eight lines with
+        three reading calls in it. Counting calls or lines would make the
+        allowlist a function of the formatter, and a reason written beside an
+        entry would stop lining up with anything.
+        """
+        source = (
+            "from sqlalchemy import func\n"
+            "from models import Book, Tag, book_tags\n"
+            "def f(shelf):\n"
+            "    return (shelf.select(Tag.name, func.count(book_tags.c.book_id))\n"
+            "        .join(book_tags, Book.id == book_tags.c.book_id)\n"
+            "        .group_by(Tag.name)\n"
+            "        .order_by(func.count(book_tags.c.book_id).desc())\n"
+            "        .all())\n"
+        )
+        assert _book_owned_offences(source) == [4]
+
+    def test_a_query_scoped_by_a_shelf_may_still_not_join_books_back_in(self):
+        """Pass 3 reports `Book` in a join from every root, this one included.
+
+        `aliased(Book)` joined into a query already rooted at a Shelf is a
+        second, unfiltered copy of the table, so being scoped somewhere in the
+        statement says nothing about it. The fourth pass used to carry an
+        asymmetry here and no longer decides anything at all, but pass 3 still
+        does, and this is what holds it.
+        """
+        source = (
+            "from sqlalchemy.orm import aliased\n"
+            "from models import Book\n"
+            "from shelf import Shelf\n"
+            "def f(db, uid):\n"
+            "    other = aliased(Book)\n"
+            "    return (Shelf.seen_by(db, uid).select(other.location)\n"
+            "        .join(other, other.isbn == Book.isbn).all())\n"
+        )
+        assert _join_offences(source) != []
+
+    def test_a_child_of_books_is_recognised_from_the_schema_alone(self):
+        """The derived half, asked of a schema built here, because asking it of
+        the real one only re-states the eight tables that already exist and
+        would pass with the derivation replaced by that list."""
+        metadata = MetaData()
+        Table("books", metadata, Column("id", Integer, primary_key=True))
+        Table("users", metadata, Column("id", Integer, primary_key=True))
+        Table(
+            "shelf_marks",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("book_id", Integer, ForeignKey("books.id")),
+        )
+        Table(
+            "scribbles",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("book_id", Integer, ForeignKey("books.id")),
+            Column("user_id", Integer, ForeignKey("users.id")),
+        )
+        Table("publishers", metadata, Column("id", Integer, primary_key=True))
+
+        assert _children_of_books(metadata) == {"shelf_marks", "scribbles"}
+
+    def test_every_child_of_books_is_classified(self):
+        """The pinned half, and the one that stops a new table defaulting to
+        unguarded.
+
+        An earlier version of this rule computed the classification: a child
+        with no foreign key to `users` was taken to have no viewer of its own.
+        That predicate is wrong in this schema, and `models.py` already said so
+        in three places. `collections.created_by_user_id` is "provenance and
+        nothing else. No query consults it"; `author_aliases` and
+        `author_identifiers` say the same. A `catalogued_by_user_id` on
+        `classifications` would have dropped that table out of the guard with
+        nothing failing.
+
+        **`books.added_by_user_id` is not a fourth example**, and an earlier
+        draft of this docstring called it one. It is the column `visible_to`
+        and `in_trash_for` are built on, read at six sites; `books` is outside
+        the derivation for being the parent table. Three counter-examples carry
+        the argument, and the wrong fourth was in a published file.
+
+        So the question the schema cannot answer is asked of a person, once,
+        the first time a table appears.
+        """
+        derived = _children_of_books(Base.metadata)
+        assert derived == BOOK_CHILDREN, (
+            "A table gained or lost a foreign key to `books`. Add it to "
+            "BOOK_CHILDREN, and to BOOK_OWNED_TABLES as well if its rows carry "
+            "no member of their own, because a child that is in neither is not "
+            f"guarded by anything here: {sorted(derived ^ BOOK_CHILDREN)}"
+        )
+        assert BOOK_OWNED_TABLES <= BOOK_CHILDREN, (
+            f"BOOK_OWNED_TABLES names a table that is not a child of books: "
+            f"{sorted(BOOK_OWNED_TABLES - BOOK_CHILDREN)}"
+        )
+
+    def test_the_book_owned_set_is_the_entities_those_tables_map_to(self):
+        """The three the docstrings name, measured rather than asserted in
+        prose."""
+        assert set(BOOK_OWNED) == {"Classification", "CustomFieldValue", "book_tags"}, (
+            "The guarded entities no longer match BOOK_OWNED_TABLES. If a table "
+            "was renamed, rename it there; do not update this constant to make "
+            "the test green, because that is how a table leaves the guard."
+        )
+
+    def test_every_book_owned_table_has_a_name_this_rule_can_look_for(self):
+        """A table with no mapped class and no module-level `Table` variable
+        would be book-owned, unguarded and invisible, which is the exact
+        failure mode this file exists to prevent."""
+        assert not UNNAMEABLE_BOOK_OWNED, (
+            "These tables are book-owned and no module could name them, so the "
+            f"fourth pass cannot see a read of them: {sorted(UNNAMEABLE_BOOK_OWNED)}"
+        )
 
     def test_the_predicates_are_defined_where_this_rule_says_they_are(self):
         """The rules above are name checks, so it is worth proving the names

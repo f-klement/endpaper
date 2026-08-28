@@ -19,18 +19,28 @@
  * One entry per section, not one for the page: a single flag could only ever
  * mean "collapse everything", which throws away the conditional defaults.
  *
- * **The store is a parameter because two pages fold, and their ids collide.**
- * Both the book page and the settings page have a section called `about`. One
- * shared key would make closing the blurb on a book close the app's own about
- * card, and neither page would show anything wrong. `SectionStore` is a union
- * rather than a `string`, so a third page has to name its store here and a typo
- * is a compile error rather than a silently shared entry.
+ * **The store is a parameter because two pages folded, and their ids collided.**
+ * Both the book page and the settings page had a section called `about`. One
+ * shared key would have made closing the blurb on a book close the app's own
+ * about card, and neither page would have shown anything wrong. `SectionStore`
+ * is a union rather than a `string`, so a page has to name its store here and a
+ * typo is a compile error rather than a silently shared entry.
+ *
+ * **The settings page stopped folding on 2026-08-27** and nothing writes
+ * `settingsSections` any more: settings is a route tree, and navigation is the
+ * state. The name is kept in the union deliberately rather than tidied away.
+ * Two reasons, and the second is the load bearing one: entries written by older
+ * builds are still in readers' browsers, so the key is spoken for and a later
+ * folding page must not reuse it and inherit them; and the merge in
+ * `writeSectionChoice`, which is what stops one page's write clearing another's
+ * entries, can only be tested against two stores. Deleting the name would
+ * delete that test with it.
  */
 
 /** Bumped when the stored shape changes. Anything else is dropped, not read. */
 const VERSION = 1;
 
-/** One localStorage key per folding page. See the note above about `about`. */
+/** One localStorage key per store. See the note above about `about`. */
 export type SectionStore = "bookDetailSections" | "settingsSections";
 
 /** What a reader said about one section. Absence is the third state. */

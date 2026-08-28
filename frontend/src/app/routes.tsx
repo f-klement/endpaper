@@ -13,7 +13,14 @@ import LoginPage from "../pages/LoginPage";
 import QuotesPage from "../pages/QuotesPage";
 import ScanPage from "../pages/ScanPage";
 import SeriesPage from "../pages/SeriesPage";
-import SettingsPage from "../pages/SettingsPage";
+import SettingsPage, {
+  AboutSettingsPage,
+  AppearanceSettingsPage,
+  CatalogueSettingsPage,
+  DataSettingsPage,
+  LendingSettingsPage,
+  LibrarySettingsPage,
+} from "../pages/SettingsPage";
 import StatsPage from "../pages/StatsPage";
 import TrashPage from "../pages/TrashPage";
 
@@ -44,15 +51,27 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       <Route path="/quotes" element={<QuotesPage />} />
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
-      <Route
-        path="/settings"
-        element={<SettingsPage mode={mode} onSignIn={onSignIn} />}
-      />
-      {/* Inside the signed-in table, deliberately. `ThemeProvider` sits above
+      {/* Settings is an index of six routes rather than one long page. The
+          order here is the order `SETTINGS_ROUTES` draws them in, and that
+          table is what the index page reads: a route added in one place and
+          not the other is a link to a 404, or a screen nothing reaches. */}
+      <Route path="/settings" element={<SettingsPage currentUser={user} />} />
+      <Route path="/settings/appearance" element={<AppearanceSettingsPage />} />
+      {/* A child of Appearance rather than a sibling, because that is what it
+          is: the palette and wallpaper picker the Appearance screen links to.
+          Inside the signed-in table, deliberately. `ThemeProvider` sits above
           the session gate and does not unmount on sign-out, so a picker the
           login screen could reach would write a choice into the account that
           left. See `ThemeProvider.release`. */}
-      <Route path="/settings/appearance" element={<AppearancePage />} />
+      <Route path="/settings/appearance/theme" element={<AppearancePage />} />
+      <Route path="/settings/catalogue" element={<CatalogueSettingsPage />} />
+      <Route path="/settings/library" element={<LibrarySettingsPage />} />
+      <Route path="/settings/lending" element={<LendingSettingsPage />} />
+      <Route
+        path="/settings/data"
+        element={<DataSettingsPage mode={mode} onSignIn={onSignIn} />}
+      />
+      <Route path="/settings/about" element={<AboutSettingsPage />} />
       <Route path="/trash" element={<TrashPage />} />
       {/* Reachable while signed in so "Switch Account" can show the form
           without ending the current session first. */}

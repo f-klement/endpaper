@@ -387,7 +387,27 @@ export const en = {
   "settings.couldNotLoad": "Could not load the settings.",
   "settings.adminOnly": "Only an admin can change these.",
 
-  "theme.label": "Appearance",
+  // The settings index. A heading and one sentence per route: the sentences
+  // are the whole value of that page, because six headings alone would make a
+  // household open three screens to find one setting.
+  "settings.appearance.title": "Appearance",
+  "settings.appearance.summary":
+    "The palette, light or dark, the wallpaper, and the language the app speaks.",
+  "settings.catalogue.title": "Catalogue sources",
+  "settings.catalogue.summary":
+    "Where a book's details come from when you scan or search for one.",
+  "settings.library.title": "Your library",
+  "settings.library.summary":
+    "Bringing books in from another service, the covers they arrived without, and facts this library keeps that Endpaper has no column for.",
+  "settings.lending.title": "Lending",
+  "settings.lending.summary":
+    "Reminders for books that are late, and where they are sent.",
+  "settings.data.title": "Data and accounts",
+  "settings.data.summary":
+    "The whole library out and back in again, and accounts for seeing it the way an ordinary member does.",
+  "settings.about.summary":
+    "Which version is running, where the source is, and how to support the project.",
+
   "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
   "theme.dark": "Dark",
@@ -398,7 +418,7 @@ export const en = {
   "theme.summary": "{palette}, {mode}, {wallpaper}",
   "theme.change": "Choose a palette, light or dark, and a wallpaper",
 
-  "appearance.title": "Appearance",
+  "appearance.title": "Palette and wallpaper",
   "appearance.intro":
     "Everything here applies as you pick it and saves to your account.",
   "appearance.preview": "Your library, with this look",

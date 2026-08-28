@@ -7,10 +7,10 @@ interface SectionIconProps {
 /**
  * The rounded badge that carries a section heading's icon.
  *
- * Its own component because two things draw that heading: `SettingsSection`
- * for a card that does not fold, and `CollapsibleSection`'s card variant for
- * one that does. The same badge from two class lists is the kind of difference
- * nobody notices until the two sit next to each other on one page.
+ * Its own component because two things draw it: `SettingsSection`, on every
+ * settings card, and the settings index, on every entry that links to one. The
+ * same badge from two class lists is the kind of difference nobody notices
+ * until the two sit next to each other, which here is one click apart.
  *
  * Decorative, and left to `Icon` to say so: it is `aria-hidden` unless given a
  * title, so repeating that on the badge would state the same fact twice.

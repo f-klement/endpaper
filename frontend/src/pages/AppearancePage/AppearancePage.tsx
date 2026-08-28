@@ -44,11 +44,14 @@ export default function AppearancePage() {
         icon="theme"
         title={t("appearance.title")}
         actions={
+          /* Appearance, not the settings index: this screen is a child of that
+             route, and a way back that skips a level leaves a reader who came
+             through it unable to reach the two language settings beside it. */
           <Link
-            to="/settings"
+            to="/settings/appearance"
             className="text-sm font-medium text-accent-700 dark:text-accent-300"
           >
-            {t("nav.settings")}
+            {t("settings.appearance.title")}
           </Link>
         }
       />

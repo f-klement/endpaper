@@ -127,11 +127,20 @@ describe("resolveOpen", () => {
   });
 });
 
-describe("two folding pages", () => {
+/**
+ * One page folds now, and there are still two stores.
+ *
+ * The settings page stopped folding on 2026-08-27, so nothing writes
+ * `settingsSections` any more. The name stays in the union and these two tests
+ * stay with it, which is the whole reason it was not tidied away: old entries
+ * are in readers' browsers, so a later folding page must not reuse the key, and
+ * the merge below cannot be tested against one store.
+ */
+describe("keeping two stores apart", () => {
   it("keeps the same section id apart", () => {
-    // Both the book page and the settings page have an `about` section. One
-    // shared key would make closing the blurb on a book close the app's own
-    // about card, and nothing on either page would look wrong.
+    // Both the book page and the settings page had an `about` section. One
+    // shared key would have made closing the blurb on a book close the app's
+    // own about card, and nothing on either page would have looked wrong.
     writeSectionChoice("bookDetailSections", "about", false);
 
     expect(readSectionChoices("settingsSections")).toEqual({});
@@ -140,7 +149,7 @@ describe("two folding pages", () => {
     });
   });
 
-  it("does not lose the other page's entries when one is written", () => {
+  it("does not lose the other store's entries when one is written", () => {
     writeSectionChoice("settingsSections", "backup", true);
     writeSectionChoice("bookDetailSections", "lending", true);
 
