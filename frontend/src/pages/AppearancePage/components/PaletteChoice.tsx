@@ -17,7 +17,7 @@ import ChoiceTile from "./ChoiceTile";
  * Page, card, ink and the two accents, which is the smallest set that tells one
  * palette from another: half of what separates Gruvbox from Everforest is how
  * far the card stands off the page, so a single colour chip would make several
- * of the seven look alike.
+ * of the ten look alike.
  *
  * Nothing here is a hex. The values come from the shipped stylesheet through
  * `readPaletteColours`, so a tile cannot disagree with the palette it applies.
@@ -61,7 +61,7 @@ function Swatch({ colours }: { colours: PaletteColours | undefined }) {
 }
 
 /**
- * The seven palettes.
+ * The ten palettes.
  *
  * The colours are read once per mode rather than per render, in a layout
  * effect: `readPaletteColours` puts each palette on the document in turn to

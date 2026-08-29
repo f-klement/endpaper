@@ -301,6 +301,36 @@
         "title": "AuthorSuggestionOut",
         "type": "object"
       },
+      "AuthorWikipediaOut": {
+        "description": "Where to send a reader who wants to read about one author.\n\n**A link and never a biography.** `docs/featurelist.md` refuses author\nbiographies and portraits, and this is the outward link half of #89's\ndecision rather than an exception to it: nothing is fetched but the list of\nwhich language editions exist, nothing is stored, and no prose, description\nor image reaches this model. A field here carrying an extract would be that\nrefusal reversed.\n\n**Offered only for an author carrying a confirmed Wikidata identifier**, so\n\"if it is available\" is a property of the data rather than of the network.\n#87 measured why: two GND records are spelled `Stevenson, Robert Louis` and\nonly one has a Wikidata item, and an article about the wrong one of them is\nworse than none.\n\n`language` is the Wikipedia edition `url` points at, and **null means the\nURL is the Wikidata item's own page**: either no edition holds an article,\nor Wikidata could not be reached. A client renders both the same way and can\nsay which language it landed on when that is not the reader's own.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "url"
+        ],
+        "title": "AuthorWikipediaOut",
+        "type": "object"
+      },
       "AuthorityCandidateOut": {
         "description": "One person an authority file holds, offered for a Member to choose.\n\n**Nothing here is stored, and there is nowhere to store most of it.** The\ndescription and the dates exist so somebody can tell two same named people\napart at the moment they confirm, and the only column this whole path can\nwrite is an identifier. `docs/featurelist.md` refuses author biographies and\nportraits, and this is the identity and disambiguation half of that line\nrather than an exception to it.\n\n`certain` says which route produced the row, and it is the **only** bit\nsaying it. True where this Library already holds the identifier and it was\nresolved as a key, so there is exactly one record behind it and `name` is a\nspelling that can be offered with confidence. False where a name search\nproduced it, which is a guess: two authors share a name. A client offers\nconfirmation on exactly the false ones.\n\n**There was a second field, `stored`, and it carried the same bit.**\n`resolve` set `certain` true unconditionally and only ran for identifiers\nalready held, so the two agreed on every reachable path. Their one\ndivergence was a defect rather than information: a **superseded** GND\nresolves to the current record, whose `gndIdentifier` differs from the\nnumber stored, and the pair then read `certain=True, stored=False` while the\nLibrary did hold one.\n\n`wikidata_id` being null is a **hint**, not a verdict. Of the two GND\nrecords spelled `Stevenson, Robert Louis`, only one has a Wikidata item.\nThat is worth showing to whoever is confirming and is exactly the wrong\nthing to resolve on automatically.",
         "properties": {
@@ -440,9 +470,19 @@
         "type": "string"
       },
       "AuthorityScheme": {
-        "description": "Authority files a person's identifier may come from.\n\nNot `ClassificationScheme`, and the split is the point rather than tidiness.\nEvery member of that enum answers \"what is this book about\"; every member of\nthis one answers \"which record in a file of *people* is this author\". The\nDNB writes both in the same MARC `$0`, which is exactly why they need two\nclosed sets: `4203576-4` is a subject heading and `118181505` is a person,\nand one column holding both would make a heading and an author the same kind\nof row.\n\n**One member, and the count is the honest state of the supply rather than a\nstub.** Counted 2026-08-27: the DNB is the only catalogue this app reads for\na person's identifier (`100 $0` and `700 $0`), and it writes GND. K10plus\ncarries the same subfield and is deliberately not read for it, which\n`_k10plus_record` records. VIAF would be the second member and is not one:\nnothing in this app queries it, and until something does, an enum member for\nit would be a value no writer can produce.\n\nAdding a member costs one line here, one value in\n`ck_author_identifiers_scheme`, and a migration to widen that constraint.\nThat last one is why the set is closed: a scheme nobody recognises is an\nidentifier with no file to look it up in.",
+        "description": "Authority files a person's identifier may come from.\n\nNot `ClassificationScheme`, and the split is the point rather than tidiness.\nEvery member of that enum answers \"what is this book about\"; every member of\nthis one answers \"which record in a file of *people* is this author\". The\nDNB writes both in the same MARC `$0`, which is exactly why they need two\nclosed sets: `4203576-4` is a subject heading and `118181505` is a person,\nand one column holding both would make a heading and an author the same kind\nof row.\n\n**Eleven members, and only one of them is ever the entry point.** GND is the\nonly scheme a catalogue writes here: the DNB is the only source this app\nreads a person's identifier from (`100 $0` and `700 $0`), and K10plus\ncarries the same subfield and is deliberately not read for it, which\n`_k10plus_record` records. The other ten arrive as cross references on a GND\nrecord that a Member confirmed, four of them free in that record's `sameAs`\nthrough `authority.cross_references` and six from the VIAF cluster it names\nthrough `authority.national_identifiers`. None of them arrives on its own.\nSo a search still starts with a name and a GND.\n\nThis docstring used to say \"one member, and the count is the honest state of\nthe supply rather than a stub\", and that sentence was true while nothing\nstored a second scheme. Storing the cross references is what retired it, and\nit is replaced rather than deleted because the reasoning is still the rule:\na member here has to be a value some writer can produce.\n\n**`ISNI` is the spine.** ISO 27729, deliberately language neutral, and it\nidentifies a person rather than a cluster of records about one, which is the\ndifference between it and `VIAF`. Measured 2026-08-28 over fourteen GND\nrecords spanning Spanish, Portuguese, Brazilian, Argentine, Uruguayan and\nItalian authors: all fourteen carried ISNI, LCNAF, VIAF and Wikidata in\n`sameAs`.\n\n**`LCNAF` rather than `LC`**, because the file has a name and the\nabbreviation for the library is not it: `id.loc.gov` serves several\nauthority files and this is the one about people.\n\n**The six national files are spelled as VIAF spells them**, in `v:sid` as\n`BLBNB|000560509`, because that source code is what the parser matches on and\na second spelling here would be a second name for one fact. Lowercased for\nthe stored value, like every other member.\n\n## Storing an identifier and resolving one are different acts\n\nThis docstring used to argue the six out on the ground that \"nothing in this\napp can look one up, so a member for it would be a value no reader can use\".\n**That conflated two acts, and the correction is the reason they are members\nnow.** A scheme has to be a value some writer can produce, which was the rule\nthe old sentence was reaching for and which these pass: the identifier\narrives free from a VIAF cluster this app already has a reason to read.\nBeing able to *resolve* one is a separate and later question, and it is what\nmakes the argument run the other way: Brazil and Argentina answer 403 to\nevery agent tried and have no open Z39.50 port, so an adapter for them is\nblocked on a transport rather than on this list, and the identifier stored\ntoday is what makes that adapter cheap on the day the transport lands.\n\nSo the closed set is still closed for the same reason: a member has to be\nsomething a writer here produces. What changed is that six more things are.\n\nAdding a member costs one line here, one value in\n`ck_author_identifiers_scheme`, and a migration to widen that constraint.\n**`SUDOC` is deliberately still absent**, though a cluster carries it: it is\na French union catalogue rather than one of the six national files named\nhere, and nothing has asked for it. It goes in when somebody asks, in the\nnext migration.",
         "enum": [
-          "gnd"
+          "gnd",
+          "isni",
+          "lcnaf",
+          "viaf",
+          "wikidata",
+          "blbnb",
+          "arbabn",
+          "bne",
+          "ptbnp",
+          "iccu",
+          "bnchl"
         ],
         "title": "AuthorityScheme",
         "type": "string"
@@ -2046,6 +2086,33 @@
         "title": "CollectionUpdate",
         "type": "object"
       },
+      "ConfirmedIdentifierOut": {
+        "description": "What one confirmation wrote: the number asked for, and what came with it.\n\n**A person confirms a record, not a number.** The GND record a Member picks\nalready carries that person's ISNI, LCNAF number, VIAF cluster and Wikidata\nitem, and until this existed all four were shown once and dropped.\n`identifier` is what the request named and `cross_references` is what the\nsame record asserted beside it.\n\n**`refused` is not an error and the request that produced it succeeded.**\nA cross reference colliding with a value this Library already holds is\nreported rather than raised, because the confirmation is what the Member\nasked for and a fact arriving alongside it must not undo one. A collision on\nthe confirmed identifier itself is the opposite case and is a 409.\n\nEmpty lists are the ordinary answer, not a failure: they mean the authority\nfile was not reachable in the moment, or the confirmed scheme is not one\nthis app can resolve, or the record carried nothing new. Nothing in this\nfeature is blocked by any of the three.",
+        "properties": {
+          "cross_references": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorIdentifierOut"
+            },
+            "title": "Cross References",
+            "type": "array"
+          },
+          "identifier": {
+            "$ref": "#/components/schemas/AuthorIdentifierOut"
+          },
+          "refused": {
+            "items": {
+              "$ref": "#/components/schemas/RefusedAssertionOut"
+            },
+            "title": "Refused",
+            "type": "array"
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "title": "ConfirmedIdentifierOut",
+        "type": "object"
+      },
       "CopyCreate": {
         "description": "Another copy of a book already in the catalogue.\n\nCarries only what differs between two copies of one title. Everything about\nthe *work* (title, author, ISBN, cover, series, description) is taken from\nthe book being copied rather than accepted here, because a payload that\ncould restate them is a payload that can disagree with them, and two rows\nclaiming to be copies of each other while naming different books is a state\nnothing else in this app knows how to render.\n\n`is_private` is absent for a sharper reason: it is inherited from the\nsource. A copy of somebody's private book that came back public would\ndisclose the book, and this is the one field where the caller getting their\nway is a privacy leak rather than a preference. The copy belongs to whoever\nadded it, so `PATCH /api/books/{id}/privacy` can change it afterwards.",
         "properties": {
@@ -2347,6 +2414,25 @@
         "title": "DuplicateGroup",
         "type": "object"
       },
+      "EmailUpdate": {
+        "description": "An address, or null to clear it.\n\nChecked with `mailer.looks_like_address`, the rule the household address\nalready passes, so this app has one answer to \"is that an address\" rather\nthan two that drift. It is also the header injection control: it refuses\nwhitespace anywhere, **a trailing newline included**, every control and non\nprinting character, and the comma and semicolon that turn one `To` header\ninto two.\n\nThe trailing newline is named because it is the one spelling this rule used\nto accept: `looks_like_address` was anchored with `$` under `match`, which\nmatches before a final newline. The `.strip()` below happened to hide it and\nis not what stops it. See `mailer.looks_like_address`.\n\nAn empty or blank string is stored as null rather than refused. A member\nclearing the field types nothing into it, and a 422 for \"\" would make\n\"remove my address\" the one edit the form could not express.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "EmailUpdate",
+        "type": "object"
+      },
       "ExportFormat": {
         "enum": [
           "csv",
@@ -2372,6 +2458,11 @@
           "google_books_ready": {
             "default": false,
             "title": "Google Books Ready",
+            "type": "boolean"
+          },
+          "public_catalogue_published": {
+            "default": false,
+            "title": "Public Catalogue Published",
             "type": "boolean"
           }
         },
@@ -2803,6 +2894,41 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MemberEmailOut": {
+        "description": "One member's address, on the only routes that serve one.\n\n**One model for the caller's own address and for an admin reading\nsomebody's**, rather than two. The two differ in who may ask, which is the\nroute's business, and not in what an address is. Two models would be two\nentries in the guard above and two places for the next field to be added to\none of.\n\n`id` and `username` are on it even for `GET /me/email`, where the caller\nalready knows both. They cost nothing there and they are what makes the\nadmin list a list of members rather than a list of strings.\n\n`editable` is per row, not per deployment: `auth_backends.directory_owns_email`\nreads that member's own `auth_source`, so a local test account stays\neditable in a library running LDAP. The client draws a read only field with\n\"from your directory\" when it is false; the server refuses the write\nregardless, because a client is not a control.",
+        "properties": {
+          "editable": {
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "editable"
+        ],
+        "title": "MemberEmailOut",
+        "type": "object"
+      },
       "MergeRequest": {
         "description": "Fold several books into one.\n\n`keep_id` survives and must appear in `book_ids`, spelled out rather than\ninferred so a mistyped request fails instead of silently keeping whichever\nrow sorted first.",
         "properties": {
@@ -2849,6 +2975,26 @@
           "count"
         ],
         "title": "MonthStat",
+        "type": "object"
+      },
+      "MyOverdueOut": {
+        "description": "What the in app reminder tells one member, which is a number.\n\n**A count and no titles, and that is a design decision rather than a\nshortcut.** The banner it feeds says how many and links onward, which is the\nshape `UnconfirmedBanner` already uses on the same page. Titles would put\ncatalogue content, including the reader's own private books, into a second\nresponse for no gain: the list one click away already renders them, already\nthrough the Shelf, and already knows how to page.\n\n**The list is `GET /api/loans/overdue`, not the loans list.** Both were once\ncalled the same thing here, and they are two different sets: only the first\napplies `overdue_for_viewer`, which is what this number is counted with.\n\n`enabled` is here so a household that switched the channel off sees nothing\nrather than a banner it cannot explain, and so the frontend does not have to\nread the admin-only settings record to find out.",
+        "properties": {
+          "count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "MyOverdueOut",
         "type": "object"
       },
       "NoteCreate": {
@@ -2923,7 +3069,8 @@
           "no_url",
           "nothing_due",
           "unreachable",
-          "misconfigured"
+          "misconfigured",
+          "in_app_only"
         ],
         "title": "OverdueNotifyReason",
         "type": "string"
@@ -2983,6 +3130,7 @@
       "OverdueSender": {
         "description": "Which channel a reminder went out on.\n\nA closed set because the result reports one outcome per sender and the\nclient renders each: a string would let a new sender arrive on screen with\nno label and no test noticing.",
         "enum": [
+          "in_app",
           "webhook",
           "email",
           "telegram"
@@ -3080,6 +3228,41 @@
           "page_size"
         ],
         "title": "Page[LoanOut]",
+        "type": "object"
+      },
+      "Page_PublicBookOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicBookOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[PublicBookOut]",
         "type": "object"
       },
       "Page_QuoteWithBookOut_": {
@@ -3251,6 +3434,263 @@
           "recorded_at"
         ],
         "title": "ProgressOut",
+        "type": "object"
+      },
+      "PublicBookOut": {
+        "description": "One catalogue record, as published.\n\nEvery field here is a fact about the work or about the object as a\ncatalogue record. Nothing on it depends on who is asking, which is the\nproperty that makes a public response cacheable and `BookOut` not: see the\nwarning at the top of `serialisation.py`.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "authors": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "classifications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PublicClassificationOut"
+            },
+            "title": "Classifications",
+            "type": "array"
+          },
+          "cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "series_index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Index"
+          },
+          "series_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Name"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PublicTagOut"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "PublicBookOut",
+        "type": "object"
+      },
+      "PublicBookSort": {
+        "description": "How a public reader may order the catalogue.\n\n**A subset of `BookSort`, declared separately rather than reused**, and for\nthe same reason `PublicBookOut` is a separate model rather than an exclusion\nlist: an ordering is a read of the column it orders by, and it returns the\nwhole ordering in one request where a filter reads the column one query at a\ntime. `BookSort.NEWEST` sorts on `added_at`, which is withheld because it\nsays when this household acquired the book.\n\n**That one member is a weaker case than it first looked, and saying so is\nthe point of the paragraph.** `id` is published, `id` is the insert order,\nand `order_for` appends `Book.id.asc()` to every ordering, so acquisition\norder already comes back with no `sort` parameter at all. Excluding `NEWEST`\ntherefore withholds the `added_at` **column** and not the order it implies.\nWhat the subset is actually for is the next member: a `BookSort` over a\nprice, a condition or a location would be publicly sortable the day it was\nadded.\n\nDeclaring the subset means a member added to `BookSort` tomorrow is not\npublicly sortable until somebody puts it here.\n`tests/schemas/test_public.py::TestEveryPublicSortOrdersByAPublishedColumn`\nis the half that decides whether it should be: it compiles the clauses\n`order_for` produces and fails on any column the public payload does not\ncarry, so the judgement is made against the model rather than by eye.",
+        "enum": [
+          "title_asc",
+          "title_desc",
+          "author",
+          "year_asc",
+          "year_desc",
+          "series"
+        ],
+        "title": "PublicBookSort",
+        "type": "string"
+      },
+      "PublicClassificationOut": {
+        "description": "A published scheme heading: the call number and what it was captioned.\n\n**Its own model rather than `ClassificationOut`**, which is the rule applied\nto `PublicTagOut` beside it and which the first draft did not apply here. A\nfield added to `ClassificationOut` would otherwise reach a public reader\nwith nothing failing, and the library mode epic extends classifications\nnext.\n`tests/schemas/test_public.py::TestThePublicPayloadIsBuiltOnlyFromPublicModels`\nmakes that structural rather than a habit: every model reachable from\n`PublicBookOut` has to be declared in this module.\n\nIdentical to `ClassificationOut` today, and being identical is not an\nargument for sharing it. What differs is who may change it without a review.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/ClassificationScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "number"
+        ],
+        "title": "PublicClassificationOut",
+        "type": "object"
+      },
+      "PublicTagOut": {
+        "description": "A tag as a public reader sees it: the library's own word for the work.\n\nNarrower than `TagOut`, which also carries `is_predefined` and a\n`book_count`. Neither means anything here: one drives a delete control no\npublic reader has, and the other is a count over the whole catalogue that\nwould have to be recomputed against the public shelf to be true.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/TagCategory"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagKey"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category"
+        ],
+        "title": "PublicTagOut",
         "type": "object"
       },
       "PurgeResult": {
@@ -3595,8 +4035,88 @@
         "title": "RestoreResult",
         "type": "object"
       },
+      "SenderHealth": {
+        "description": "What one switched-on channel last did, as a standing record.\n\n#82. The per run report above says what happened on the run you are looking\nat; this says what has been happening. Without it a household running mail\nand Telegram whose bot token expires gets mail delivered, the loan stamped,\neverything apparently normal, and Telegram failing hourly with nothing\nanywhere but the container log.\n\nOnly channels that are switched on are reported: a line about a webhook\nsomebody turned off a month ago is a line about nothing.",
+        "properties": {
+          "broken": {
+            "default": false,
+            "title": "Broken",
+            "type": "boolean"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "failing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failing Since"
+          },
+          "failures": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Failures",
+            "type": "integer"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverdueNotifyReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sender": {
+            "$ref": "#/components/schemas/OverdueSender"
+          },
+          "sent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent"
+          }
+        },
+        "required": [
+          "sender"
+        ],
+        "title": "SenderHealth",
+        "type": "object"
+      },
       "SenderOutcome": {
-        "description": "What one channel did with the digest.\n\n**The withheld count is here rather than only at the top, and that is the\npoint of the shape.** All three senders withhold the same private books\ntoday, because all three go to a channel rather than to a person, so the\nthree numbers agree. They are reported per sender anyway: the moment one\nsender's audience differs, a single figure would be a lie on the other two,\nand a reader has no way to tell a shared number from a coincidence.",
+        "description": "What one channel did with the digest.\n\n**The withheld count is here rather than only at the top, and the case it\nwas written for has now arrived.** The three senders that push outward\nwithhold the same private books, because each goes to a channel rather than\nto a person, so their three numbers agree. The in app channel reports **0**,\nbecause its audience is a member and nothing is withheld from it. A single\nfigure at the top would now be wrong on one row of four.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -3716,6 +4236,11 @@
             "title": "Has Telegram Bot Token",
             "type": "boolean"
           },
+          "library_mode": {
+            "default": false,
+            "title": "Library Mode",
+            "type": "boolean"
+          },
           "mail_default_sender": {
             "default": "",
             "title": "Mail Default Sender",
@@ -3758,6 +4283,11 @@
             "title": "Mail Username",
             "type": "string"
           },
+          "overdue_in_app_enabled": {
+            "default": true,
+            "title": "Overdue In App Enabled",
+            "type": "boolean"
+          },
           "overdue_mail_enabled": {
             "default": false,
             "title": "Overdue Mail Enabled",
@@ -3794,6 +4324,21 @@
             "default": "",
             "title": "Overdue Webhook Url",
             "type": "string"
+          },
+          "public_catalogue_enabled": {
+            "default": false,
+            "title": "Public Catalogue Enabled",
+            "type": "boolean"
+          },
+          "public_catalogue_indexing_enabled": {
+            "default": false,
+            "title": "Public Catalogue Indexing Enabled",
+            "type": "boolean"
+          },
+          "public_catalogue_published": {
+            "default": false,
+            "title": "Public Catalogue Published",
+            "type": "boolean"
           },
           "telegram_bot_token_from_env": {
             "default": false,
@@ -3872,6 +4417,17 @@
               }
             ],
             "title": "Google Books Enabled"
+          },
+          "library_mode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Library Mode"
           },
           "mail_default_sender": {
             "anyOf": [
@@ -3955,6 +4511,17 @@
             ],
             "title": "Mail Username"
           },
+          "overdue_in_app_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue In App Enabled"
+          },
           "overdue_mail_enabled": {
             "anyOf": [
               {
@@ -4036,6 +4603,28 @@
               }
             ],
             "title": "Overdue Webhook Url"
+          },
+          "public_catalogue_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Catalogue Enabled"
+          },
+          "public_catalogue_indexing_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Catalogue Indexing Enabled"
           },
           "telegram_bot_token": {
             "anyOf": [
@@ -4416,7 +5005,7 @@
         "type": "object"
       },
       "UserOut": {
-        "description": "A member as seen by other members. Deliberately has no password field.",
+        "description": "A member as seen by other members. Deliberately has no password field.\n\n**And deliberately no address.** This is served inside every book payload\nand by the member list, so a field here is disclosed to every member who can\nsee a book. `MemberEmailOut` is where an address is served, on the four\nroutes named in `routers/users.py` and nowhere else;\n`tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed` fails\nif **any** other model puts one in front of a caller, and it asks pydantic\nfor the wire name, so an alias does not get past it.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -4636,6 +5225,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 400,
                   "type": "string"
                 },
                 {
@@ -5070,7 +5660,7 @@
     },
     "/api/books/authors/identifiers": {
       "post": {
-        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier on the\nrecord a catalogue returned for a Book's own ISBN is a cataloguer's\nassertion about that Book and is stored without asking, by `refresh` and\n`enrich`. One found by searching an authority file by name is a candidate:\ntwo authors share a name and one author has five spellings, so storing it\nsilently would merge two people behind somebody's back. It reaches the store\nonly through here, and the row records that a person chose it.\n\n**409, not 422, where the spelling already carries a different value.** The\nrequest is well formed and the state is what refuses it. Retyping an\nidentifier is the one operation this store has no verb for: correcting a\nwrong one is `DELETE`, and a re-import may put it back.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.",
+        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier on the\nrecord a catalogue returned for a Book's own ISBN is a cataloguer's\nassertion about that Book and is stored without asking, by `refresh` and\n`enrich`. One found by searching an authority file by name is a candidate:\ntwo authors share a name and one author has five spellings, so storing it\nsilently would merge two people behind somebody's back. It reaches the store\nonly through here, and the row records that a person chose it.\n\n**409, not 422, where the spelling already carries a different value.** The\nrequest is well formed and the state is what refuses it. Retyping an\nidentifier is the one operation this store has no verb for: correcting a\nwrong one is `DELETE`, and a re-import may put it back.\n\n**Confirming a GND number stores the cross references that came with it.**\nA person confirms a *record*, and that record already asserts this person's\nISNI, LCNAF number, VIAF cluster and Wikidata item. All four used to be\nshown once by `GET /authors/authority` and dropped. They are re-read from\nthe record here rather than taken from the request, which is the only shape\nthat keeps a client from writing its own.\n\n**And the six national library numbers, which cost the extra requests.** The\nGND record carries none of them; the VIAF cluster it names carries all six.\n\n**A confirmation is up to eight outbound requests**, and the count is worth\nstating because `ratelimit.AUTHORITY_LIMIT` is sized against it: one lobid\nrecord, **four to Wikidata** (`resolve` compares `P214` and `P213` on this\nbranch, so `_cross_check` is the item lookup, the description and two\nclaims), and up to three to VIAF. Only the last three are new here; the\nfirst five are what confirming already cost. The third VIAF call is paid\nonly on a 5xx, so the ordinary confirmation is seven.\n\nAn earlier version of this paragraph said \"one lobid request plus up to\nthree VIAF ones\", which counted two of the three hosts. See\n`authority.national_identifiers`, and `authority.DEADLINE_SECONDS` for the\ntime budget all of it shares.\n\n**Only for `gnd`.** It is the one scheme this app can resolve, and a\nconfirmation under any other is a number a Member typed with no record\nbehind it to read cross references off. Nothing is fetched for those and\n`cross_references` comes back empty.\n\n**A cross reference colliding with a stored value is reported, not raised.**\nThe confirmation succeeded and is what the Member asked for; refusing it\nafterwards because a fact that arrived alongside it disagrees would undo the\nthing they came to do. A collision on the confirmed identifier itself is the\nopposite case and is the 409 above.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.",
         "operationId": "confirm_author_identifier",
         "requestBody": {
           "content": {
@@ -5087,7 +5677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthorIdentifierOut"
+                  "$ref": "#/components/schemas/ConfirmedIdentifierOut"
                 }
               }
             },
@@ -5231,6 +5821,58 @@
           }
         ],
         "summary": "List Author Suggestions",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/authors/wikipedia": {
+      "get": {
+        "description": "An outward Wikipedia link per author, in the reader's language.\n\n**Declared before `/authors/{...}` would be**, the same route ordering trap\nthe comment above records: FastAPI matches in declaration order.\n\n## The gate is identity, not language\n\nOne row per author that carries a **confirmed Wikidata identifier**, and no\nrow for anybody else. That is what makes \"if it is available\" a property of\nthe shelf rather than of the network, and it is the whole reason this is\nsafe: #87 measured two GND records spelled `Stevenson, Robert Louis` of\nwhich only one has a Wikidata item, and a biography attached to the wrong\none is worse than no biography. `Authorship.listing()` is what filters the\nidentifiers by `visible_to`, so this cannot announce an author only visible\non somebody else's private book.\n\n## `lang` is the app's locale and never the browser's\n\nA `Locale`, so the closed set is the server's and an unknown value is a 422\nrather than a `sitefilter` this app did not write. It is what the reader\nchose in Settings, which is the owner's first rule on #89 and is exactly\nwhat `Accept-Language` would get wrong: a German browser reading the app in\nEnglish would be sent to German Wikipedia.\n\nThe other locale follows it, so a reader gets their own language, then the\napp's other one, then any edition at all, then the Wikidata item.\n\n## What it costs, and it is bounded rather than proportional to the shelf\n\n**At most ten requests**, and the two halves are sized separately because\nthey are different shapes. Five filtered, `ceil(n / 50)` where `n` is the\nconfirmed authors capped by `authority.MAX_WIKIPEDIA_ITEMS` at 250: fifty\nids with `sitefilter=dewiki|enwiki` measured 15,034 bytes and 0.89s on\n2026-08-28. Five unfiltered, for the authors with no article in either app\nlocale, at two ids each because one unfiltered entity reaches 64,449 bytes,\nwhich is `Q692` and 336 sitelinks. About **720 KB** all told. A library that\nhas confirmed nobody makes **no\nrequest at all**, and the client is expected not to call this then.\n\n**The same limiter as the authority lookups, on purpose.** It is the counter\nfor \"this member is asking authority services things\", and sharing it means\nsomebody reloading this page cannot also be spending the confirmation\nbudget. The alternative, a counter of its own, would let the two add up\nagainst one supplier.\n\nNever 503, and that is the difference between this and\n`GET /authors/authority`. Nothing here is a supplier: a Wikidata outage\nturns every row into a link to the Wikidata item, which still names the\nright person, so the button is present either way. See\n`authority.wikipedia_articles`.",
+        "operationId": "author_wikipedia",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Locale",
+              "default": "en"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuthorWikipediaOut"
+                  },
+                  "title": "Response Author Wikipedia",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Author Wikipedia",
         "tags": [
           "books"
         ]
@@ -8534,6 +9176,100 @@
         ]
       }
     },
+    "/api/loans/overdue": {
+      "get": {
+        "description": "The overdue loans themselves, for the page the banner links to (#102).\n\n**The same rule as the banner's count, because it is the same audience.**\n`notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a\nprivate book somebody else added cannot reach here, and `sees_every_loan`\ndecides the rest: a member reads the loans they lent or borrowed, staff\nread every overdue loan on their shelf.\n\n**Not `list_loans(overdue_only=True)`, which is a wider set.** That one is\nrooted at the Shelf and stops there: it has no lender-or-borrower arm, so a\nmember sees every overdue loan over a book they can see, housemates'\nincluded. Pointing this page at it would list more rows than the banner\ncounted, which is the same fact disagreeing with itself on two screens.\nThe loans page keeps that endpoint, because a loans list is a list of the\nhousehold's loans by design.\n\n**Honours the in app channel's switch**, exactly as `my_overdue` does. That\nsetting is spelled \"show overdue loans in the app\", and this page is what\nit shows; a page that went on listing them when the channel was off would\nmake the switch a lie about half its surface. The loans page is not\naffected: a loan list is not the reminder channel.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a literal\nfirst segment declared after a path parameter is a segment the parameter can\nswallow. `/overdue` and `/overdue/mine` cannot collide with each other,\nbecause they differ in segment count rather than in a parameter's value.\n\nEager loading here and none in `overdue_for_viewer`, which is the seam that\nfunction's docstring describes: it hands out the query so the count caller\ncan stay at one statement and no ORM objects, and a caller that renders\ntitles adds the loads it needs.",
+        "operationId": "list_overdue",
+        "parameters": [
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_LoanOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Overdue",
+        "tags": [
+          "loans"
+        ]
+      }
+    },
+    "/api/loans/overdue/mine": {
+      "get": {
+        "description": "The in app reminder, for the member asking.\n\n#86. Every other channel needs something the household has to obtain first:\na receiver they run, an SMTP account, a bot token. A household with none of\nthose was told nothing at all, which is the problem the reminder feature was\nfiled to solve. This is the one channel that works on a fresh install with\nnothing configured.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a literal\nfirst segment declared after a path parameter is a segment the parameter can\nswallow.\n\n**Not admin only, and that is the point.** It is per member, and what each\nmember may see is decided by `notifications.overdue_for_viewer`, which roots\nthe query at `Shelf.seen_by`. A member reads the loans they are party to; an\nadmin, and later a library's staff, read every overdue loan on their shelf.\nNeither arm can reach another member's private book, because the Shelf\napplies `visible_to` before either clause is added.\n\nA count and no titles. The banner it feeds says how many and links to\n`GET /api/loans/overdue`, which lists them **through this same function**.\n\n**It used to say the loans list, and that sentence was wrong on both\nhalves.** The loans list is `list_loans`, which is rooted at the Shelf and\napplies no lender-or-borrower arm, so it is a wider set than this counts:\nfor any non admin member the banner said one number and the screen it\nopened showed another. #102 moved the link and added the endpoint above,\nwhich is the one that shares this rule.",
+        "operationId": "my_overdue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyOverdueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "My Overdue",
+        "tags": [
+          "loans"
+        ]
+      }
+    },
     "/api/loans/overdue/notify": {
       "post": {
         "description": "Run the overdue digest now, and report what it sent.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a\nliteral first segment that comes after a path parameter is a segment the\nparameter can swallow. It does not today (the second segment differs, and\nso does the verb), and the ordering is what keeps that true when somebody\nadds `POST /{loan_id}/notify`.\n\nAdmin only, for the same reason the settings behind it are: it posts\ncatalogue content to a destination with no session behind it.\n\nThis is what makes the feature testable by a person, and it is the endpoint\nan external cron would call instead of the in-process ticker. Running it by\nhand stamps `notified_at` exactly as a tick does, so a manual run also\nquiets the next scheduled one for the interval.",
@@ -8608,6 +9344,193 @@
         "summary": "Return Loan",
         "tags": [
           "loans"
+        ]
+      }
+    },
+    "/api/public/books": {
+      "get": {
+        "description": "One page of the published catalogue.\n\n**The filters here are a subset of the signed in listing's, and the ones\nleft out are left out by construction rather than by omission.** `status`,\n`unrated` and `discuss`, and `ownership` and `lending`, are all facts about\na member or about the household's relationship to the object. The first\nthree would raise on this shelf anyway, because it has no viewer to read\nthem against; the last two are columns this payload does not carry, and a\nfilter over a column nobody can see is a way to read that column one query\nat a time.\n\n`collection_id` is **not** accepted, although it was in the first draft on\nthe argument that a library wants to link to one shelf. It was cut: the ids\nare consecutive, so the filter is enumerable, and what it enumerates is the\nhousehold's own grouping of its shelves, which `PublicBookOut` withholds. A\npublic way to link to one shelf wants a published name to link by.\n\n**`sort` is `PublicBookSort`, a subset**, for the same reason the filters\nare a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and\na sort over a withheld column hands back the whole ordering of that column\nin one request. See `schemas/public.py`.",
+        "operationId": "list_public_books",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Comma-separated tag ids",
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated tag ids",
+              "title": "Tags"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BookFormat"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Series"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PublicBookSort",
+              "default": "title_asc"
+            }
+          },
+          {
+            "description": "1-based page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number",
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Rows per page",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Rows per page",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PublicBookOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search the published catalogue",
+        "tags": [
+          "public",
+          "public"
+        ]
+      }
+    },
+    "/api/public/books/{book_id}": {
+      "get": {
+        "description": "One record, or 404.\n\n**404 for every reason**, and that is the house rule rather than laziness:\na Book that does not exist, one somebody trashed, and one a member marked\nPrivate are all the same answer, because a 403 on the third would confirm\nthe id exists and let a stranger count through the catalogue to learn how\nmany private books this library holds.\n\n`dependencies.book_for_read` is the signed in counterpart and cannot be\nreused: it depends on `get_current_user`, so it 401s before it ever reaches\na Book. This is the same shape written against the shelf that has no viewer.",
+        "operationId": "get_public_book",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicBookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "One record from the published catalogue",
+        "tags": [
+          "public",
+          "public"
         ]
       }
     },
@@ -8770,6 +9693,37 @@
         ]
       }
     },
+    "/api/settings/sender-health": {
+      "get": {
+        "description": "What each switched-on reminder channel last did.\n\nDeclared **before** nothing, and that is worth saying: this prefix has no\npath parameter, so the route order rule has no work to do here. It is a\nseparate endpoint rather than a field on `SettingsOut` because the banner\nthat reads it lives on the library page, and pulling the whole admin\nsettings record, four secrets' previews included, to render one line would\nbe the wrong payload on the wrong screen.\n\nAdmin only, like the settings it reports on and for the same reason: it\nnames channels, their failures and the sentences those failures produced.\nAn ordinary member can do nothing with any of it, since only an admin can\nreach the screen that fixes it.",
+        "operationId": "get_sender_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SenderHealth"
+                  },
+                  "title": "Response Get Sender Health",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Sender Health",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/stats": {
       "get": {
         "description": "Collection statistics, scoped to what this member may see.\n\n**Every aggregation is rooted at the same shelf**, which is what makes the\nscoping structural rather than repeated. Each one used to apply a predicate\nbound to a local, and omitting it from any single aggregation would leak\nanother member's private books as a count: quieter than leaking a title,\nand a leak all the same.\n\nEvery join here is written **outward from `books`**, which is the direction\n`Shelf.select` anchors. Written the other way round, a query naming another\ntable and forgetting the join is a cartesian product SQLite answers rather\nthan refuses.",
@@ -8823,6 +9777,37 @@
           }
         ],
         "summary": "List Users",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/emails": {
+      "get": {
+        "description": "Every member's address. Admin only.\n\n**Reading was the half of this that was argued about**, and the refused\nalternative was write only, where nobody sees an address including an admin.\nIt was refused because a household whose reminders silently go nowhere needs\nsomebody able to see the typo, and a per sender delivery record tells you a\nsend failed rather than that the address is wrong. Recorded on issue #80.\n\nA whole list rather than one member at a time, because the screen behind it\nis a list: a household has a handful of accounts and the admin is looking\nfor the empty row.",
+        "operationId": "list_emails",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberEmailOut"
+                  },
+                  "title": "Response List Emails",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Emails",
         "tags": [
           "users"
         ]
@@ -8900,6 +9885,78 @@
         ]
       }
     },
+    "/api/users/me/email": {
+      "get": {
+        "description": "The caller's own address.\n\nNo path parameter and no member id, so there is no object to authorize: the\nonly address reachable here is the caller's. That is the same shape as\n`/me/appearance` and it is the reason neither is a field on `UserOut`.",
+        "operationId": "get_my_email",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get My Email",
+        "tags": [
+          "users"
+        ]
+      },
+      "put": {
+        "description": "Set or clear the caller's own address.",
+        "operationId": "set_my_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set My Email",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/users/test-accounts": {
       "get": {
         "description": "The accounts an admin may switch into, and no others.\n\n`switch_targets()`, not the flag alone, so that sentence is true of every\nrow returned. The two differ only for a row nothing here writes (a flagged\naccount whose `auth_source` was edited to a directory, or whose hash was\ncleared), and on that row the flag alone would put a Switch button in front\nof an admin that `/auth/switch` then answers 404 to, with nothing the UI\ncould usefully say.\n\nFiltering is presentation either way: `/auth/switch` refuses a bad target\nwhatever the client sends. Admin only because who exists for testing is\nnobody else's business, and because every account on this list is one\nsomebody holds the password to.",
@@ -8971,6 +10028,66 @@
           }
         ],
         "summary": "Create Test Account",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/{user_id}/email": {
+      "put": {
+        "description": "Set or clear any member's address. Admin only.",
+        "operationId": "set_member_email",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberEmailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Member Email",
         "tags": [
           "users"
         ]

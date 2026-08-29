@@ -1,5 +1,5 @@
 /**
- * The seven palettes, and how one is put on the page.
+ * The ten palettes, and how one is put on the page.
  *
  * The values are not here: they are `--color-*` blocks in `palettes.css`,
  * selected by `data-theme` on the document element. This module holds only what
@@ -72,6 +72,37 @@ export const PALETTES = [
     // independent axis: a palette that cannot supply one does not go in
     // the list.
     constructed: ["light"],
+  },
+  {
+    id: "kanagawa",
+    label: "Kanagawa",
+    attribution: "Tommaso Laurenzi, MIT",
+    // Kanagawa names its themes rather than its colour groups, which is the
+    // other way round from Nord: Wave is the dark one, Lotus the light one, and
+    // a third, Dragon, is not ported.
+    modes: { light: "Lotus", dark: "Wave" },
+    constructed: [],
+  },
+  {
+    id: "tokyonight",
+    label: "Tokyo Night",
+    attribution: "Enkia, MIT",
+    // Upstream ships three themes and names them Tokyo Night, Tokyo Night Storm
+    // and Tokyo Night Light. The two ported here are the first and the third, so
+    // what upstream calls each member is the palette's own name plus the word
+    // for the mode, which is not a title and is not printed. Storm is a name,
+    // and Storm is not what is here.
+    modes: { light: null, dark: null },
+    constructed: [],
+  },
+  {
+    id: "ayu",
+    label: "Ayu",
+    attribution: "Konstantin Pschera, MIT",
+    // Light, Mirage and Dark upstream. Two of the three are ported and neither
+    // carries a name of its own, the same case as Gruvbox.
+    modes: { light: null, dark: null },
+    constructed: [],
   },
 ] as const satisfies readonly PaletteEntry[];
 
@@ -210,7 +241,7 @@ const COLOUR_TOKENS: Record<PaletteMode, PaletteColours> = {
  * than no tile: it is a preview that lies. `wallpaperColours` in `patterns.ts`
  * resolves its inks the same way and for the same reason.
  *
- * The read costs one forced style recalculation per palette, so seven, and it
+ * The read costs one forced style recalculation per palette, so ten, and it
  * happens once per mode change rather than per render. Call it from a layout
  * effect: the attribute is restored inside the same synchronous block, so no
  * frame is ever painted with the wrong palette on the document, but a caller
@@ -243,7 +274,7 @@ export function readPaletteColours(
 /**
  * Read something off the document as if `palette` were the one in force.
  *
- * The picker needs it because it draws seven palettes on a page that can only
+ * The picker needs it because it draws ten palettes on a page that can only
  * have one, and because it must not wait for the provider to apply a choice:
  * a child's effect runs before its parent's, so a component that read the
  * tokens after asking for a palette change would read the previous palette

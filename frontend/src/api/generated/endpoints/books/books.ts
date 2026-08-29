@@ -28,11 +28,12 @@ import type {
 import type {
   ApplyEnrichmentParams,
   AuthorAuthorityParams,
-  AuthorIdentifierOut,
   AuthorIdentifierRequest,
   AuthorMergeRequest,
   AuthorOut,
   AuthorSuggestionOut,
+  AuthorWikipediaOut,
+  AuthorWikipediaParams,
   AuthorityCandidateOut,
   BackfillCoversParams,
   BodyUploadCover,
@@ -48,6 +49,7 @@ import type {
   BulkRequest,
   BulkResult,
   CollectionAssign,
+  ConfirmedIdentifierOut,
   CopyCreate,
   CoverBackfillOut,
   CustomFieldCreate,
@@ -1003,14 +1005,48 @@ export const getConfirmAuthorIdentifierUrl = () => {
  * identifier is the one operation this store has no verb for: correcting a
  * wrong one is `DELETE`, and a re-import may put it back.
  *
+ * **Confirming a GND number stores the cross references that came with it.**
+ * A person confirms a *record*, and that record already asserts this person's
+ * ISNI, LCNAF number, VIAF cluster and Wikidata item. All four used to be
+ * shown once by `GET /authors/authority` and dropped. They are re-read from
+ * the record here rather than taken from the request, which is the only shape
+ * that keeps a client from writing its own.
+ *
+ * **And the six national library numbers, which cost the extra requests.** The
+ * GND record carries none of them; the VIAF cluster it names carries all six.
+ *
+ * **A confirmation is up to eight outbound requests**, and the count is worth
+ * stating because `ratelimit.AUTHORITY_LIMIT` is sized against it: one lobid
+ * record, **four to Wikidata** (`resolve` compares `P214` and `P213` on this
+ * branch, so `_cross_check` is the item lookup, the description and two
+ * claims), and up to three to VIAF. Only the last three are new here; the
+ * first five are what confirming already cost. The third VIAF call is paid
+ * only on a 5xx, so the ordinary confirmation is seven.
+ *
+ * An earlier version of this paragraph said "one lobid request plus up to
+ * three VIAF ones", which counted two of the three hosts. See
+ * `authority.national_identifiers`, and `authority.DEADLINE_SECONDS` for the
+ * time budget all of it shares.
+ *
+ * **Only for `gnd`.** It is the one scheme this app can resolve, and a
+ * confirmation under any other is a number a Member typed with no record
+ * behind it to read cross references off. Nothing is fetched for those and
+ * `cross_references` comes back empty.
+ *
+ * **A cross reference colliding with a stored value is reported, not raised.**
+ * The confirmation succeeded and is what the Member asked for; refusing it
+ * afterwards because a fact that arrived alongside it disagrees would undo the
+ * thing they came to do. A collision on the confirmed identifier itself is the
+ * opposite case and is the 409 above.
+ *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
  * @summary Confirm Author Identifier
  */
 export const confirmAuthorIdentifier = async (
   authorIdentifierRequest: AuthorIdentifierRequest,
   options?: Parameters<typeof customFetch>[1],
-): Promise<AuthorIdentifierOut> => {
-  return customFetch<AuthorIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
+): Promise<ConfirmedIdentifierOut> => {
+  return customFetch<ConfirmedIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -1452,6 +1488,231 @@ export function useListAuthorSuggestions<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getListAuthorSuggestionsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAuthorWikipediaUrl = (params?: AuthorWikipediaParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/authors/wikipedia?${stringifiedParams}`
+    : `/api/books/authors/wikipedia`;
+};
+
+/**
+ * An outward Wikipedia link per author, in the reader's language.
+ *
+ * **Declared before `/authors/{...}` would be**, the same route ordering trap
+ * the comment above records: FastAPI matches in declaration order.
+ *
+ * ## The gate is identity, not language
+ *
+ * One row per author that carries a **confirmed Wikidata identifier**, and no
+ * row for anybody else. That is what makes "if it is available" a property of
+ * the shelf rather than of the network, and it is the whole reason this is
+ * safe: #87 measured two GND records spelled `Stevenson, Robert Louis` of
+ * which only one has a Wikidata item, and a biography attached to the wrong
+ * one is worse than no biography. `Authorship.listing()` is what filters the
+ * identifiers by `visible_to`, so this cannot announce an author only visible
+ * on somebody else's private book.
+ *
+ * ## `lang` is the app's locale and never the browser's
+ *
+ * A `Locale`, so the closed set is the server's and an unknown value is a 422
+ * rather than a `sitefilter` this app did not write. It is what the reader
+ * chose in Settings, which is the owner's first rule on #89 and is exactly
+ * what `Accept-Language` would get wrong: a German browser reading the app in
+ * English would be sent to German Wikipedia.
+ *
+ * The other locale follows it, so a reader gets their own language, then the
+ * app's other one, then any edition at all, then the Wikidata item.
+ *
+ * ## What it costs, and it is bounded rather than proportional to the shelf
+ *
+ * **At most ten requests**, and the two halves are sized separately because
+ * they are different shapes. Five filtered, `ceil(n / 50)` where `n` is the
+ * confirmed authors capped by `authority.MAX_WIKIPEDIA_ITEMS` at 250: fifty
+ * ids with `sitefilter=dewiki|enwiki` measured 15,034 bytes and 0.89s on
+ * 2026-08-28. Five unfiltered, for the authors with no article in either app
+ * locale, at two ids each because one unfiltered entity reaches 64,449 bytes,
+ * which is `Q692` and 336 sitelinks. About **720 KB** all told. A library that
+ * has confirmed nobody makes **no
+ * request at all**, and the client is expected not to call this then.
+ *
+ * **The same limiter as the authority lookups, on purpose.** It is the counter
+ * for "this member is asking authority services things", and sharing it means
+ * somebody reloading this page cannot also be spending the confirmation
+ * budget. The alternative, a counter of its own, would let the two add up
+ * against one supplier.
+ *
+ * Never 503, and that is the difference between this and
+ * `GET /authors/authority`. Nothing here is a supplier: a Wikidata outage
+ * turns every row into a link to the Wikidata item, which still names the
+ * right person, so the button is present either way. See
+ * `authority.wikipedia_articles`.
+ * @summary Author Wikipedia
+ */
+export const authorWikipedia = async (
+  params?: AuthorWikipediaParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorWikipediaOut[]> => {
+  return customFetch<AuthorWikipediaOut[]>(getAuthorWikipediaUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAuthorWikipediaQueryKey = (params?: AuthorWikipediaParams) => {
+  return [`/api/books/authors/wikipedia`, ...(params ? [params] : [])] as const;
+};
+
+export const getAuthorWikipediaQueryOptions = <
+  TData = Awaited<ReturnType<typeof authorWikipedia>>,
+  TError = HTTPValidationError,
+>(
+  params?: AuthorWikipediaParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorWikipedia>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAuthorWikipediaQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof authorWikipedia>>> = ({
+    signal,
+  }) => authorWikipedia(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof authorWikipedia>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type AuthorWikipediaQueryResult = NonNullable<
+  Awaited<ReturnType<typeof authorWikipedia>>
+>;
+export type AuthorWikipediaQueryError = HTTPValidationError;
+
+export function useAuthorWikipedia<
+  TData = Awaited<ReturnType<typeof authorWikipedia>>,
+  TError = HTTPValidationError,
+>(
+  params: undefined | AuthorWikipediaParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorWikipedia>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof authorWikipedia>>,
+          TError,
+          Awaited<ReturnType<typeof authorWikipedia>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAuthorWikipedia<
+  TData = Awaited<ReturnType<typeof authorWikipedia>>,
+  TError = HTTPValidationError,
+>(
+  params?: AuthorWikipediaParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorWikipedia>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof authorWikipedia>>,
+          TError,
+          Awaited<ReturnType<typeof authorWikipedia>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAuthorWikipedia<
+  TData = Awaited<ReturnType<typeof authorWikipedia>>,
+  TError = HTTPValidationError,
+>(
+  params?: AuthorWikipediaParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorWikipedia>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Author Wikipedia
+ */
+
+export function useAuthorWikipedia<
+  TData = Awaited<ReturnType<typeof authorWikipedia>>,
+  TError = HTTPValidationError,
+>(
+  params?: AuthorWikipediaParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof authorWikipedia>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getAuthorWikipediaQueryOptions(params, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

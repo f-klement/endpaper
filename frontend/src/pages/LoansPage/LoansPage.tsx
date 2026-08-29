@@ -1,7 +1,8 @@
-import { Button, EmptyState, ErrorState, Skeleton } from "../../components";
-import { Page, PageHeader } from "../components";
+import { Link } from "react-router-dom";
+
+import { Button, EmptyState, ErrorState } from "../../components";
+import { LoanRow, LoanRowSkeleton, Page, PageHeader } from "../components";
 import { useTranslation } from "../../i18n";
-import LoanRow from "./components/LoanRow";
 import { useLoans } from "./hooks";
 
 /** Placeholder rows rendered while the list loads. */
@@ -45,20 +46,29 @@ export default function LoansPage() {
         }
       />
 
-      {/* Hidden while already filtered to overdue: the nudge would be asking
-          for something the reader is already looking at. */}
+      {/* Hidden while already filtered to overdue, and the reason changed with
+          the destination (#102). It used to be that the nudge was asking for
+          something the reader was already looking at. It is now that the two
+          count different sets: this sentence counts the loans this member is
+          chased about, and the filter shows every overdue loan over a book
+          they can see. One screen must not carry two numbers both called
+          overdue. */}
       {loans.overdueCount > 0 && !loans.overdueOnly && (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-danger-300 bg-danger-100 px-3 py-2.5 dark:border-danger-700 dark:bg-danger-700">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-danger-300 bg-danger-100 px-3 py-2.5 dark:border-danger-300 dark:bg-danger-700">
           <p className="text-sm text-danger-700 dark:text-danger-100">
             {t("loans.overdueBanner", { count: loans.overdueCount })}
           </p>
-          <button
-            type="button"
-            onClick={() => loans.setOverdueOnly(true)}
+          {/* A link to the overdue page rather than a second spelling of the
+              "Overdue only" button two lines above it (#102). The two did the
+              same thing, and the page is where the delivery status is. The
+              count beside it is read through the page's own rule, so the
+              sentence and the screen it opens cannot disagree. */}
+          <Link
+            to="/loans/overdue"
             className="shrink-0 text-xs font-medium text-danger-700 underline hover:no-underline dark:text-danger-100"
           >
             {t("loans.chaseThem")}
-          </button>
+          </Link>
         </div>
       )}
 
@@ -73,22 +83,7 @@ export default function LoansPage() {
       )}
 
       {loans.isLoading ? (
-        <div className="space-y-3" data-testid="loan-skeletons">
-          {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
-            <div
-              key={index}
-              className="bg-paper-0 rounded-xl p-4 border border-paper-100 animate-pulse dark:bg-paper-900 dark:border-paper-800"
-            >
-              <div className="flex gap-3">
-                <Skeleton className="w-12 h-16" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <LoanRowSkeleton count={SKELETON_COUNT} testId="loan-skeletons" />
       ) : loans.loans.length === 0 ? (
         <EmptyState
           icon="check"

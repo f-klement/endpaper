@@ -10,16 +10,22 @@ import { NotFoundPage } from "../pages/errors";
 import Home from "../pages/Home";
 import LoansPage from "../pages/LoansPage";
 import LoginPage from "../pages/LoginPage";
+import OverduePage from "../pages/OverduePage";
+import PublicCataloguePage, {
+  PublicBookPage,
+} from "../pages/PublicCataloguePage";
 import QuotesPage from "../pages/QuotesPage";
 import ScanPage from "../pages/ScanPage";
 import SeriesPage from "../pages/SeriesPage";
 import SettingsPage, {
   AboutSettingsPage,
+  AccountSettingsPage,
   AppearanceSettingsPage,
   CatalogueSettingsPage,
   DataSettingsPage,
   LendingSettingsPage,
   LibrarySettingsPage,
+  PublicCatalogueSettingsPage,
 } from "../pages/SettingsPage";
 import StatsPage from "../pages/StatsPage";
 import TrashPage from "../pages/TrashPage";
@@ -45,6 +51,12 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       <Route path="/scan" element={<ScanPage />} />
       <Route path="/book/:id" element={<BookDetail currentUser={user} />} />
       <Route path="/loans" element={<LoansPage />} />
+      {/* A child path of `/loans` rather than a sibling at the root, because
+          that is what it is: the same records, narrowed to the ones worth
+          chasing. React Router matches whole paths, so the order of these two
+          does not decide anything; the nesting is for the reader's address
+          bar and their back button. */}
+      <Route path="/loans/overdue" element={<OverduePage />} />
       <Route path="/series" element={<SeriesPage />} />
       <Route path="/authors" element={<AuthorsPage />} />
       <Route path="/collections" element={<CollectionsPage />} />
@@ -64,8 +76,16 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
           login screen could reach would write a choice into the account that
           left. See `ThemeProvider.release`. */}
       <Route path="/settings/appearance/theme" element={<AppearancePage />} />
+      <Route
+        path="/settings/account"
+        element={<AccountSettingsPage currentUser={user} />}
+      />
       <Route path="/settings/catalogue" element={<CatalogueSettingsPage />} />
       <Route path="/settings/library" element={<LibrarySettingsPage />} />
+      <Route
+        path="/settings/public"
+        element={<PublicCatalogueSettingsPage />}
+      />
       <Route path="/settings/lending" element={<LendingSettingsPage />} />
       <Route
         path="/settings/data"
@@ -73,6 +93,15 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       />
       <Route path="/settings/about" element={<AboutSettingsPage />} />
       <Route path="/trash" element={<TrashPage />} />
+      {/* The published catalogue, mounted here **as well as** above the
+          session gate in `App.tsx`. A member following a link to a public
+          record would otherwise land on the 404 page, and an admin who has
+          just switched publishing on has no way to look at what they
+          published. The two screens are identical either way: they read the
+          public endpoints, which attach no token and answer the same to
+          everybody. */}
+      <Route path="/catalogue" element={<PublicCataloguePage />} />
+      <Route path="/catalogue/:id" element={<PublicBookPage />} />
       {/* Reachable while signed in so "Switch Account" can show the form
           without ending the current session first. */}
       <Route path="/login" element={<LoginPage onSignIn={onSignIn} />} />

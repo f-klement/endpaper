@@ -38,6 +38,19 @@ A column rather than "`auth_source` is local", because a local account from befo
 deployment moved to a directory is also local and belongs to a real person. See
 [security.md](security.md) and [decisions.md](decisions.md).
 
+`email` is where a reminder addressed to this member would go. Nullable, and NULL is every
+row before it existed: no address means the household mailbox, which is the only mode the
+mail sender has, so the column changes nothing until somebody fills a field in. It is
+deliberately absent from `UserOut` for the same reason the appearance columns are, and it
+is served only by the four routes in `routers/users.py` that exist for it. Who may write
+it is not a property of the row but of the deployment: with `LDAP_EMAIL_ATTRIBUTE` or
+`PROXY_EMAIL_HEADER` set, the directory owns the value and re-applies it at each sign in
+exactly as it re-applies `is_admin`, and the field is read only for everybody including an
+admin; unset, a member writes their own and an admin writes anybody's. There is no second
+column recording which of those applies, because the answer is a configuration lookup:
+`auth_backends.directory_owns_email` is the one place it is decided, and three call sites in
+two modules ask it.
+
 `appearance_palette`, `appearance_mode` and `appearance_wallpaper` are the member's own
 look, nullable, with NULL meaning "has not chosen" rather than a value. Columns rather than
 a `user_preferences` table: it is a one-to-one with no history, and a side table would add a
@@ -476,8 +489,11 @@ person with no decision required of anybody, while `JRR Tolkien` is not: that fo
 spaces dropped too, which also folds `Ann Aker` into `Anna Ker`, so it is offered as a
 suggestion instead. See [decisions.md](decisions.md), *Three keys*.
 
-**`author_aliases`** is the one stored table in the feature, and it holds decisions rather
-than data:
+**Two stored tables, and they answer different questions about the same key.** That
+sentence used to read "`author_aliases` is the one stored table in the feature", which
+stopped being true when `author_identifiers` arrived.
+
+**`author_aliases`** holds decisions rather than data:
 
 | Column | |
 |---|---|
@@ -490,6 +506,27 @@ makes it survive: a spelling no book carries any more leaves an alias that match
 and costs one row, and the same alias starts working again by itself the day an import
 re-creates that spelling. Merging never writes to `books`, so undoing one is deleting the
 row and the credit lines still say what the covers say.
+
+**`author_identifiers`** holds which record in an external authority file a spelling
+means:
+
+| Column | |
+|---|---|
+| `author_key` | the key of the spelling, the same fold `author_aliases.alias_key` uses |
+| `scheme` | which file. The closed set is `enums.AuthorityScheme` and it is the only place that states how many there are: `gnd`, `isni`, `lcnaf`, `viaf`, `wikidata`, and one per national library for Brazil, Argentina, Spain, Portugal, Italy and Chile |
+| `identifier` | the number, stored bare without MARC's `(DE-588)` wrapper |
+| `provenance` | `catalogue` where a record for this book's own ISBN asserted it, `member` where a person confirmed a candidate |
+| `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint |
+
+**Per spelling, not per person**, which is the same shape as the aliases and for a sharper
+reason: two spellings a member folded into one author may carry different numbers, and that
+disagreement is evidence rather than noise. One row per person would have to pick a winner
+at write time with nothing left to inspect, so both are stored and the author listing
+reports the conflict. `(author_key, scheme)` is unique, so an identifier cannot be retyped;
+correcting a wrong one is a delete, and a later import may write it back.
+
+Like the aliases, nothing here is a foreign key to an author, for the same reason: there is
+no author row to point at.
 
 **Splitting is on the comma, and that is not the rule `categories` uses.** Categories are
 semicolon joined because Google's category names contain commas; author names contain commas

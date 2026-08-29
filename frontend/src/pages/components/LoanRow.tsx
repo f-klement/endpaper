@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
 
-import type { LoanOut } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
-import { Button } from "../../../components";
-import { CoverImage } from "../../components";
+import type { LoanOut } from "../../api/generated/model";
+import { useTranslation } from "../../i18n";
+import { Button } from "../../components";
+import CoverImage from "./CoverImage";
 
 interface LoanRowProps {
   loan: LoanOut;
@@ -11,7 +11,31 @@ interface LoanRowProps {
   onMarkReturned: (loanId: number) => void;
 }
 
-/** One lending record. Presentational, used only by LoansPage. */
+/**
+ * One lending record. Presentational, drawn by the loans page and the overdue
+ * page (#102), which is why it lives here rather than in either of them.
+ *
+ * **An overdue row is marked twice, and neither mark is colour alone.** The
+ * whole card is outlined in `danger-500` with the left side four times as
+ * thick, and the badge below the borrower names the date the book was due. A
+ * reader who cannot tell the two frames apart still reads the badge.
+ *
+ * `border-l-4 border-danger-500` reads as a left bar and is not one: the width
+ * applies to the left, the colour applies to all four sides. Calling it an edge
+ * bar is what the comment said before, and it would have sent somebody looking
+ * for the three sides they thought were missing.
+ *
+ * `danger-500` rather than the `danger-300` / `danger-700` pair this card
+ * carried before, and the reason is measured: on the default palette that pair
+ * is **1.89:1** on the light card and **2.18:1** on the dark one, against the
+ * 3.0 WCAG 1.4.11 asks of a non-text indicator. It was an edge nobody could
+ * see doing the whole job of saying which loans to chase, which is the same
+ * defect `OverdueBanner` records in its own dark border. `danger-500` measures
+ * 4.70:1 and 4.51:1 on the same two surfaces, and it is a pairing
+ * `frontend/tests/theme/palettes.test.ts` already asserts at 4.5 for **every**
+ * palette in **both** modes (`danger-500 text on the card`), so a palette added
+ * later cannot quietly drop it below the floor.
+ */
 export default function LoanRow({
   loan,
   isReturning,
@@ -26,7 +50,7 @@ export default function LoanRow({
         isReturned
           ? "opacity-60"
           : loan.is_overdue
-            ? "border-danger-300 dark:border-danger-700"
+            ? "border-l-4 border-danger-500 dark:border-danger-500"
             : "border-amber-200 dark:border-amber-900/70"
       }`}
     >

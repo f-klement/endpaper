@@ -19,8 +19,10 @@
  *   having to decide which marks are parallel, and it applies to a foliage
  *   repeat and a lattice alike. A grating at exactly the 12px floor measures
  *   0.196 through it, which is where the floor is set; at 4px it measures 0.018
- *   and at 30px 1.140. Those three are the calibration, and they are
- *   measurements rather than a formula: see `BLUR_RADIUS`.
+ *   and at 30px 1.140. Those three are the calibration, they are measurements
+ *   rather than a formula, and each is at its own stroke width: `BLUR_RADIUS`
+ *   states which, because the figure does not reproduce without it. The first
+ *   two are asserted in `patterns.test.ts`.
  * - **Peak coverage.** The single most inked pixel of a layer. A pattern built
  *   from sub-pixel hairlines can pass the tint test and still be invisible,
  *   because nowhere does it lay down a mark that reaches the weight its layer is
@@ -299,20 +301,24 @@ function polylineLength(points: Point[]): number {
  * lengths and areas, so ink laid twice on one pixel is counted twice; and it
  * takes a stroke as length times width, so the round cap at each end is not
  * counted at all. The two errors run in opposite directions and which one wins
- * depends on the pattern. Measured across the ten, weighted identically and
+ * depends on the pattern. Measured across the sixteen, weighted identically and
  * compared against the same tiles rasterised:
  *
  * ```
- * lily +17.7%   acanthus +10.1%   asanoha +6.5%   willow +3.3%
- * plait -1.1%   seigaiha -2.6%    nonpareil -12.7%
+ * lily +17.7%   acanthus +10.1%  trellis +8.8%   marigold +7.2%
+ * asanoha +6.5% meander +4.4%    willow +3.3%    strawberry +3.0%
+ * shippo +2.7%  khatam +2.1%     pimpernel +1.9% jasmine +1.1%
+ * plait -1.1%   seigaiha -2.6%   curl -8.9%      nonpareil -12.7%
  * ```
  *
  * A dense foliage tile overlaps constantly and reads heavy; a tile of sixteen
- * long thin strokes is nearly all cap and edge and reads light. All ten sit
- * inside the ink budget under either measure, so nothing is mis-admitted. The
- * **spread** across the set is not measure independent: 1.122x this way and
- * 1.235x from the field. Budgeting from the field is the better instrument and
- * is a retune rather than an edit, so it is not this change.
+ * long thin strokes is nearly all cap and edge and reads light, which is why
+ * Nonpareil and Curl, the same comb worked twice, are the two at that end. All
+ * sixteen sit inside the ink budget under either measure, so nothing is
+ * mis-admitted. The **spread** across the set is not measure independent:
+ * 1.138x this way and 1.235x from the field. Budgeting from the field is the
+ * better instrument and is a retune rather than an edit, so it is not this
+ * change.
  */
 export function coverage(pattern: Pattern, layer: Layer): number {
   let ink = 0;
@@ -337,7 +343,7 @@ export function coverage(pattern: Pattern, layer: Layer): number {
  *
  * Four puts the peak coverage on a sixteenth, which is finer than the 0.9 floor
  * needs, and it is deliberately not finer than that because this runs over
- * every mark of every layer of ten tiles.
+ * every mark of every layer of sixteen tiles.
  *
  * Its limit, said out loud: a sample grid cannot resolve a mark thinner than
  * its own spacing, so a stroke between about 0.75px and 1px reports as fully
@@ -392,9 +398,9 @@ const FIELDS = new WeakMap<Layer, Float32Array>();
 
 export function inkField(pattern: Pattern, layer: Layer): Float32Array {
   // Memoised on the layer, which is built once at module load and never
-  // mutated. Two assertions want the same fields and rasterising ten tiles
-  // twice is the difference between a fast test and one that times out under
-  // the coverage provider's instrumentation.
+  // mutated. Several assertions want the same fields and rasterising sixteen
+  // tiles more than once is the difference between a fast test and one that
+  // times out under the coverage provider's instrumentation.
   const cached = FIELDS.get(layer);
   if (cached) return cached;
 
@@ -476,6 +482,63 @@ export function tileField(pattern: Pattern): Float32Array {
   return total;
 }
 
+/**
+ * The widest run of wholly empty rows or columns, on the wrapped tile.
+ *
+ * A third thing a tile can get wrong, and neither of the two above can see it: a
+ * region of the repeat with no design in it at all. Marigold shipped a round
+ * with 68 empty columns of a 300px tile, one contiguous run on the torus,
+ * because it was built with one mirror axis where a turnover has two. **The tint
+ * measure scored it the highest of the sixteen**, being RMS contrast against the
+ * tile's own mean, which a void raises; the blur is 3.46px against a 68px hole,
+ * so the filter never resolved it. Peak coverage asks only that some mark
+ * somewhere reaches full weight.
+ *
+ * The run wraps, because the tile does: a gap at the left edge continues into
+ * the one at the right.
+ *
+ * **There is no threshold on this that is derived from anything, which is why
+ * the assertion is scoped rather than tuned.** The obvious candidate is the 12px
+ * acuity pitch, on the grounds that it is the one calibrated length here and
+ * shares the unit. It does not survive: the pitch governs the gap between
+ * adjacent *marks*, and a field of parallel lines at a 16px pitch and 3.2px wide
+ * measures 0.488 through the tint filter, two and a half times the admission
+ * floor, while leaving a 12px empty run. A bound at 12 would refuse it. So the
+ * number is stricter than the rule it borrows from, in exactly the family that
+ * rule was calibrated on. Anything larger is chosen rather than derived.
+ *
+ * What is derived is the scope. Every gap of this kind in the shipped set
+ * belongs to a *paper*: Meander and Curl read 11, which is their 15px comb pitch
+ * less a 3.2px stroke, and every other paper reads 0. **No Morris repeat has an
+ * empty row or column at all**, because a repeat grown along curves has no
+ * grating structure to leave one. So `patterns.test.ts` asserts zero for the
+ * `morris` family and nothing for `papers`, which needs no threshold, has no
+ * counterexample in the grating family, and would have caught the 68.
+ */
+export function widestEmptyRun(field: Float32Array, size: number): number {
+  const lines = (down: boolean) =>
+    Array.from({ length: size }, (_, a) => {
+      for (let b = 0; b < size; b += 1) {
+        if (field[down ? b * size + a : a * size + b]! > 0) return false;
+      }
+      return true;
+    });
+
+  let worst = 0;
+  for (const empty of [lines(true), lines(false)]) {
+    if (empty.every((e) => e)) return size;
+    let run = 0;
+    // Twice round, so a run spanning the seam is counted once and whole.
+    for (let index = 0; index < size * 2; index += 1) {
+      if (empty[index % size]) {
+        run += 1;
+        worst = Math.max(worst, Math.min(run, size));
+      } else run = 0;
+    }
+  }
+  return worst;
+}
+
 /** The most inked pixel. Below 1 the pattern nowhere lays down a whole mark. */
 export function peakCoverage(field: Float32Array): number {
   let peak = 0;
@@ -505,16 +568,26 @@ export function peakCoverage(field: Float32Array): number {
  * moving the pitch floor should re-measure the same way rather than re-derive
  * a sigma.
  *
- * **That is prose, and prose is not a mechanism.** The same diff that wrote
- * this replaced six literals in `tests/setup.ts` with an extraction, on exactly
- * that reasoning, and left this one as a paragraph. Ten lines would pin it: a
- * calibration test building the 12px pitch, 2.4px wide grating and asserting it
- * measures the floor, and the 4px, 1.2px one and asserting it falls well under.
- * Both numbers are already measured and are in the header. It is not built now
- * because the filter and the floor have moved together exactly once and a test
- * written in the same hour as the thing it checks tends to encode the mistake;
- * **the moment to add it is when the eleventh pattern is admitted**, which is
- * the first time anyone will have a reason to touch either number.
+ * **A grating is a pitch and a stroke width, and the three calibration figures
+ * do not share a duty cycle**, which is worth stating because the number does
+ * not reproduce without it: 0.196 is a 12px pitch at 2.4px, 0.018 is 4px at
+ * 1.2px, and 1.140 is 30px at **3px**. At 30px and the 12px figure's own duty
+ * cycle, which is 6px, it measures 1.071 instead. Recounted 2026-08-29 while
+ * building the test below, on a tree that reproduced the other two exactly.
+ *
+ * **That prose is now a mechanism.** It said the moment to pin it was when an
+ * eleventh pattern was admitted, being the first time anybody would have reason
+ * to touch either number; six arrived at once on 2026-08-29, and
+ * `patterns.test.ts` builds both gratings and asserts both figures under "the
+ * admission rule".
+ *
+ * What that buys is narrow and worth knowing. It pins the **filter**, not the
+ * floor: `BLUR_RADIUS` and the three passes decide what "12px apart" means, and
+ * changing either moves every pattern's headroom while the floor still reads
+ * 0.196, so nothing else here would fail. Attacked with six mutations of the
+ * pair, radius 1, 2 and 4 and one, two and four passes, every one is caught by
+ * both assertions; the nearest miss moves the 12px figure to 0.104 against a
+ * tolerance of 0.0005.
  */
 const BLUR_RADIUS = 3;
 

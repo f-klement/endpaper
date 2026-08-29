@@ -17,7 +17,8 @@ resolve. Four `ast` passes ask four flat questions.
 
 | Pass | Question | Allowed in |
 |---|---|---|
-| `_imported_names` | who imports `visible_to` / `in_trash_for` | `PREDICATE_IMPORTERS` |
+| `_imported_predicates` | who imports `visible_to` / `in_trash_for` | `PREDICATE_IMPORTERS` |
+| `_predicate_calls` | who **calls** one, under any name | `PREDICATE_IMPORTERS` |
 | `_query_offences` | who builds a query naming `Book` | `QUERY_BUILDERS` |
 | `_join_offences` | who reaches `books` through a join | `QUERY_BUILDERS`, `JOIN_CALLERS` |
 | `_book_owned_offences` | who reads a Book-owned table at all | `QUERY_BUILDERS`, `BOOK_OWNED_READERS` |
@@ -166,6 +167,7 @@ The rest of the file tests the Shelf's behaviour.
 """
 
 import ast
+import importlib
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1043,14 +1045,147 @@ def _book_owned_offences(source: str) -> list[int]:
     return sorted(offences)
 
 
-def _imported_names(source: str) -> set[str]:
-    """Every name one module binds by importing it."""
-    return {
+#: Modules a `from ... import *` can launder a predicate out of.
+#:
+#: Derived from `PREDICATE_IMPORTERS` rather than written down, for the reason
+#: `test_reading.py` derives its own from its allowlist: the set of modules that
+#: may hold a predicate **is** the set a star can carry it out of, so a third
+#: entry cannot reopen the hole by being forgotten here. Measured: `dir(models)`
+#: and `dir(shelf)` both contain both predicates, and neither declares `__all__`,
+#: which is what makes `dir()` the right expansion. If one ever does, a star
+#: binds that list instead and this over-reports rather than under-, which is the
+#: safe direction for a guard.
+_STAR_SOURCES = {name.removesuffix(".py") for name in PREDICATE_IMPORTERS}
+
+
+def _imported_predicates(source: str) -> set[str]:
+    """Which visibility predicates one module imports, whatever it calls them.
+
+    **`alias.name`, not `alias.asname or alias.name`, and that one word is the
+    rule.** The question here is "does this module reach a predicate", and the
+    answer to that is the name it imported; the local alias is the answer to a
+    different question, "which local names mean this thing", which is what
+    `_entity_aliases` asks. Measured against the expression this replaced:
+    `from models import Book, visible_to` was reported and
+    `from models import visible_to as _v` was not, so one rename evaded the guard
+    entirely.
+
+    **A star import is expanded, and this file used to assert the opposite.**
+    `from models import *` binds `visible_to` exactly as a named import does, so
+    a rule about reaching a predicate has to see it. An earlier version of this
+    helper had a fixture asserting a star reports **nothing**, which put this
+    file in silent disagreement with `test_reading.py`, whose rule expands a star
+    for precisely this laundering path. `test_reading.py` was right and the
+    fixture here was wrong; it is now in the positive parametrisation, and what
+    the expansion changed is held by
+    `test_the_superseded_expression_let_the_aliases_and_the_stars_past` rather
+    than counted in this paragraph.
+
+    `test_reading.py` also keeps the local alias, because its star expansion
+    binds names rather than importing them; this one has no such second use, so
+    it takes `alias.name` alone. Measured on 2026-08-28 against
+    `from models import UserBook as UB`: `test_reading.py:86` and
+    `test_custom_fields.py:141` both report `UserBook` and are **correct as they
+    stand**. This file was the only one with the `asname or name` defect.
+    """
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        for alias in node.names:
+            if alias.name == "*":
+                if node.module in _STAR_SOURCES:
+                    names |= set(dir(importlib.import_module(node.module)))
+                continue
+            names.add(alias.name)
+    return names & set(PREDICATES)
+
+
+def _predicate_calls(source: str) -> set[str]:
+    """Every visibility predicate this module **calls**, however it named it.
+
+    A companion to `_imported_predicates`, and it is the half that closes
+    `import models` followed by `models.visible_to(1)`: that statement imports
+    the module rather than the predicate, which is legal everywhere and which
+    every rule reading import statements is therefore right to let past.
+
+    Three shapes reach a predicate and all three are resolved here:
+
+    * `visible_to(1)`, a bare call;
+    * `models.visible_to(1)`, dotted, which binds no predicate name at all;
+    * `from models import visible_to as vt` then `vt(1)`, resolved through the
+      import that bound it.
+
+    **Its blind spots, listed rather than left to be found**, which is the
+    contract `TestTheShelfIsTheOnlyWayIn` states for its own rules.
+
+    **No count is written here, and that is deliberate.** This paragraph stated
+    one three times and was wrong three times: 13, then 5, then 11 against a
+    table of 10. The shapes are generated as a product of two tuples in
+    `test_the_two_rules_together_leave_exactly_the_dotted_indirections_open`,
+    and those two tuples are asserted against **literals**, so a family or a
+    spelling cannot leave the table quietly. The first attempt at that guard
+    compared the generated keys against the identical generating expression and
+    could not fail at all.
+
+    Four indirection families defeat this pass, because it reads the callee and
+    none of them puts a predicate there: rebinding to a local
+    (`vis = visible_to` then `vis(1)`), `getattr`, a dict indexed at the call
+    site, and `functools.partial`. Each can be written three ways, and the
+    **spelling** decides whether anything catches it:
+
+    * `from models import visible_to`, and `from models import *`, both bind a
+      predicate name, so `_imported_predicates` reports the module whatever it
+      then does with it. Every indirection written either way is caught.
+    * `import models` and `models.visible_to` binds no predicate name and puts
+      none in a callee. **These are the four shapes that escape both rules**,
+      one per family.
+
+    So the discriminator is `import models`. Two earlier versions of this
+    sentence were wrong about that: one said the rebinding was the common factor
+    and only `getattr` escaped, and the next missed the star spelling entirely,
+    which at the time escaped as well. The star is now expanded by
+    `_imported_predicates`, which is what makes the sentence true rather than
+    nearly true. The set that escapes is the `escaping` literal in that test; it
+    is not repeated here, because every time it has been repeated here it has
+    been wrong.
+
+    **Do not chase the remaining four with more arms.** Every one needs the value
+    tracking the guard this file replaced carried through `symtable`, and the
+    open set of ways to rebind a name is the shape that took another guard here
+    four rewrites. What is left uncovered is a module that imports `models` and
+    then reaches a predicate through an indirection, which is several statements
+    of deliberate trouble and no way to write by accident.
+
+    **Ruff refuses the star spelling independently**, and that is a second line
+    rather than the reason this rule expands it. `backend/pyproject.toml` selects
+    `F`, so `from models import *` is F403 and every name reached through it is
+    F405; measured on a scratch file, 3 errors. Ruff is in the gate, so that
+    spelling cannot reach `main` whatever this file says. It is expanded here
+    anyway, because a guard whose blind spot list is right only because another
+    tool happens to be configured a certain way is a guard that goes quiet when
+    somebody edits a lint config.
+
+    What it deliberately does **not** report is prose. The substring form this
+    replaced failed on a docstring sentence explaining why the Shelf is used,
+    which is the opposite of what a guard should do to a comment arguing for the
+    rule it enforces.
+    """
+    tree = ast.parse(source)
+    bound = {
         alias.asname or alias.name
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Import | ast.ImportFrom)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
         for alias in node.names
+        if alias.name in PREDICATES
     }
+    named = set(PREDICATES) | bound
+    return {
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name | ast.Attribute)
+    } & named
 
 
 def _source_modules() -> dict[str, str]:
@@ -1108,7 +1243,7 @@ class TestTheShelfIsTheOnlyWayIn:
             f"{name}:{predicate}"
             for name, source in _source_modules().items()
             if name not in PREDICATE_IMPORTERS
-            for predicate in _imported_names(source) & set(PREDICATES)
+            for predicate in _imported_predicates(source)
         )
         assert offenders == [], (
             "These modules import a visibility predicate instead of asking the "
@@ -1978,21 +2113,323 @@ class TestTheShelfIsTheOnlyWayIn:
     def test_notifications_reads_books_and_is_deliberately_not_a_shelf(self):
         """Named rather than left as a silent pass.
 
-        The overdue digest runs for the Library on a schedule, so it has no
+        The overdue **digest** runs for the Library on a schedule, so it has no
         viewer to be scoped to, and its two halves **partition** on privacy
         rather than filter by it: `is_(False)` for the reminders it sends and
         `is_(True)` for the count of what privacy held back. A Shelf would have
         to mean both at once, which is what `in_trash_for` being a separate
         function from `visible_to` exists to avoid.
 
-        This fails if that module ever starts applying a viewer predicate,
-        because at that point it has a viewer and belongs behind the seam.
+        **The exemption is the digest's and does not cover the module.** The in
+        app channel added for #86 has a viewer, and it does not get to inherit a
+        note written about a scheduled job: `overdue_for_viewer` is rooted at
+        `Shelf.seen_by`, which is the door, and its own tests pin who sees what.
+        So this asserts both halves rather than one: the digest still
+        partitions, and the half with a viewer still goes through the Shelf.
+
+        This fails if that module ever applies a viewer predicate **itself**,
+        because at that point it has stopped using the seam.
+
+        Read with `ast` and not as text, and the reason is not hypothetical: the
+        substring form of this check failed on the sentence "`visible_to()` has
+        always said a private book is visible to the member who added it",
+        written in a docstring explaining why the Shelf is used. A guard that
+        reddens on the comment arguing for the rule it enforces is one somebody
+        deletes.
+
+        **What the substring form did and did not catch, measured rather than
+        asserted**, because this docstring said something false about it once.
+        `"visible_to(" in "models.visible_to(1)"` is **True**, so it caught both
+        dotted shapes. The one call shape it missed is the local alias,
+        `from models import visible_to as vt` then `vt(1)`, which contains
+        neither predicate name followed by a bracket. So the rewrite buys one
+        call shape and the end of the false positive on prose; it does not buy
+        the dotted call, and saying it did was a measurement nobody had taken.
         """
         source = (BACKEND / "notifications.py").read_text()
         assert "Book.is_private.is_(False)" in source
         assert "Book.is_private.is_(True)" in source
-        for predicate in PREDICATES:
-            assert f"{predicate}(" not in source
+        assert "Shelf.seen_by(" in source
+
+        assert _predicate_calls(source) == set(), (
+            "notifications.py applies a visibility predicate itself. Its viewer "
+            "scoped half belongs behind Shelf.seen_by, and its viewerless half "
+            "partitions rather than filters."
+        )
+
+    def test_no_module_but_the_shelf_calls_a_visibility_predicate(self):
+        """The other half of the import rule, and it is a separate pass because
+        the two are evaded differently.
+
+        Importing a predicate is caught by `_imported_predicates`. **Importing
+        the module is not, and must not be**: `import models` is legal
+        everywhere and dozens of modules do it. What that leaves is
+        `models.visible_to(1)`, which binds no predicate name and so is invisible
+        to every rule reading import statements. This is the pass that sees it,
+        and it is run over the whole tree rather than over `notifications.py`
+        alone, because the hole was tree-wide.
+        """
+        offenders = sorted(
+            f"{name}:{called}"
+            for name, source in _source_modules().items()
+            if name not in PREDICATE_IMPORTERS
+            for called in _predicate_calls(source)
+        )
+        assert offenders == [], (
+            f"These modules apply a visibility predicate themselves: {offenders}. "
+            "Ask the Shelf for one instead."
+        )
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("bare", "from models import visible_to\nq.filter(visible_to(1))\n"),
+            ("dotted", "import models\nq.filter(models.visible_to(1))\n"),
+            (
+                "aliased",
+                "from models import visible_to as vt\nq.filter(vt(1))\n",
+            ),
+            ("dotted alias", "import models as m\nq.filter(m.in_trash_for(1))\n"),
+        ],
+    )
+    def test_the_predicate_call_rule_reports_every_way_of_reaching_one(
+        self, shape, source
+    ):
+        """Attacked rather than read, which is what this file's own header says
+        about every guard in it.
+
+        One of these four evaded the substring check that stood here before: the
+        local alias. The two dotted shapes did **not**, and this docstring said
+        they did until somebody measured `"visible_to(" in "models.visible_to(1)"`
+        and got True.
+        """
+        assert _predicate_calls(source), f"the {shape} shape is not reported"
+
+    #: Every way a module can import a predicate, one source per spelling.
+    #:
+    #: One list, read by the rule's own parametrisation **and** by the test that
+    #: pins what the superseded expression missed, so the two cannot disagree
+    #: about what the spellings are. It was two lists, and the docstring on one
+    #: of them described the other.
+    _IMPORT_SPELLINGS = (
+        ("bare", "from models import visible_to\n"),
+        ("aliased", "from models import visible_to as _v\n"),
+        ("aliased, second name", "from models import in_trash_for as trashed\n"),
+        ("beside another name", "from models import Book, visible_to\n"),
+        # Binds the predicate exactly as a named import does. This file asserted
+        # the opposite until 2026-08-28; see `_imported_predicates`.
+        ("a star from the module that holds one", "from models import *\n"),
+        ("a star from the module that re-exports one", "from shelf import *\n"),
+    )
+
+    @pytest.mark.parametrize(("shape", "source"), _IMPORT_SPELLINGS)
+    def test_the_predicate_import_rule_reports_every_spelling(self, shape, source):
+        """Every spelling binds a predicate, so every one must be reported.
+
+        `alias.name` is the whole of it, and it is the idiom `test_reading.py`
+        and `test_custom_fields.py` already use for the same question, both
+        verified correct on 2026-08-28 rather than assumed.
+
+        Which of these the expression this replaced let past is **not stated
+        here**. It is measured, in the test below, off this same list. A
+        docstring saying "of these four only the first and the last" stood here
+        against a list of six whose last entry it named wrongly, which is the
+        fourth wrong count this one file produced in one wave.
+        """
+        assert _imported_predicates(source), f"the {shape} spelling is not reported"
+
+    def test_the_superseded_expression_let_the_aliases_and_the_stars_past(self):
+        """What the rewrite bought, derived from the spellings rather than
+        recalled about them.
+
+        `alias.asname or alias.name` answers "what does this module bind", which
+        is the right answer to a different question and the wrong one to this.
+        It is reconstructed here rather than described, so the claim is a
+        measurement that fails when it stops being true instead of a sentence
+        nothing checks.
+
+        The `Import | ImportFrom` walk is the superseded form verbatim, plain
+        `import` included, which is why a reader should not take this as a
+        second implementation of the rule: it is a fixture of a deleted one.
+        """
+
+        def superseded(source: str) -> set[str]:
+            return {
+                alias.asname or alias.name
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Import | ast.ImportFrom)
+                for alias in node.names
+            } & set(PREDICATES)
+
+        missed = {
+            shape for shape, source in self._IMPORT_SPELLINGS if not superseded(source)
+        }
+
+        assert missed == {
+            "aliased",
+            "aliased, second name",
+            "a star from the module that holds one",
+            "a star from the module that re-exports one",
+        }, (
+            "The set of spellings the superseded expression let past has moved. "
+            "Every one of these is reported by the rule that replaced it, which "
+            f"the parametrisation above holds: {sorted(missed)}"
+        )
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("the module itself", "import models\n"),
+            ("another name from it", "from models import Book\n"),
+            ("a name that contains one", "from models import visible_to_all\n"),
+            # A star from a module **outside `_STAR_SOURCES`**, which is what
+            # this pins: the gate, not the contents. It short-circuits before
+            # `dir()` is called, so it would report nothing even if `enums`
+            # exported a predicate. The star from a module inside the gate is in
+            # the positive parametrisation, where it belongs.
+            ("a star from outside the laundering set", "from enums import *\n"),
+        ],
+    )
+    def test_the_predicate_import_rule_reports_nothing_else(self, shape, source):
+        """`& set(PREDICATES)` is what makes this a rule about two names rather
+        than a rule about importing, and nothing pinned it: with the
+        intersection dropped, `_imported_predicates` reports every name any
+        module imports, and every module in the tree becomes an offender.
+
+        `import models` is the load bearing case. It imports the module and not
+        the predicate, which is legal everywhere and which most of the backend
+        does; the **call** through it is `_predicate_calls`' job. The two rules
+        divide the work, and this is what stops them overlapping into a false
+        positive that would flag the whole tree.
+        """
+        assert _imported_predicates(source) == set(), f"{shape} is reported"
+
+    #: The ways a module can reach a predicate, as a product rather than a list.
+    #:
+    #: **A product, because a list describes itself.** The first version of this
+    #: table was a dict of ten hand-written rows and the assertions drew their
+    #: domain from it, so deleting a row shrank the domain and an `all()` over
+    #: fewer items could not fail: six of the ten deleted green, and with both
+    #: `direct` rows gone `_predicate_calls` could return `set()` unconditionally
+    #: and still pass. That is the shape `CLAUDE.md` records as "a stated bound
+    #: can stop guarding without ever failing", and it is the same defect the
+    #: prose had, one level in.
+    #:
+    #: So the rows are generated from these two tuples and the test asserts the
+    #: keys are exactly their product, which is the check this file already
+    #: applies to `BOOK_OWNED_READERS`. It also derives the count, so the
+    #: paragraph on `_predicate_calls` cannot state a fourth wrong number: it
+    #: stated 13, then 5, then 11 against a table of 10, in three rounds, in a
+    #: paragraph calling itself a measurement.
+    _FAMILIES = ("direct", "rebind", "getattr", "dict", "partial")
+    _SPELLINGS = ("from", "dotted", "star")
+
+    @staticmethod
+    def _shape(family: str, spelling: str) -> str:
+        """One module, reaching a predicate one way."""
+        head = {
+            "from": "from models import visible_to\n",
+            "dotted": "import models\n",
+            "star": "from models import *\n",
+        }[spelling]
+        # The dotted spelling never binds a predicate name, which is the whole
+        # difference between it and the other two.
+        ref = "models.visible_to" if spelling == "dotted" else "visible_to"
+        holder = "models" if spelling == "dotted" else "m"
+        body = {
+            "direct": f"q.filter({ref}(1))\n",
+            "rebind": f"vis = {ref}\nq.filter(vis(1))\n",
+            "getattr": f'q.filter(getattr({holder}, "visible_to")(1))\n',
+            "dict": f'd = {{"v": {ref}}}\nq.filter(d["v"](1))\n',
+            "partial": f"p = partial({ref}, 1)\nq.filter(p())\n",
+        }[family]
+        return head + body
+
+    def test_the_two_rules_together_leave_exactly_the_dotted_indirections_open(self):
+        """The blind spot list in `_predicate_calls`, executed rather than
+        recalled.
+
+        That paragraph has been wrong three times, on the count and once on the
+        reason, which is what a list of blind spots kept as prose does. This is
+        the same list as a table, so it fails when it stops being true: a shape
+        that starts being caught, or one that stops being, moves a row.
+
+        The shape of the answer is the finding. Two of the three spellings bind
+        a predicate name, so the import rule carries every indirection written
+        with them; the dotted one binds nothing and puts nothing in a callee, so
+        neither rule sees it. **The discriminator is `import models`.**
+        """
+        # **The two tuples against literals**, which is the precedent
+        # `test_the_book_owned_set_is_the_entities_those_tables_map_to` sets four
+        # hundred lines up. What stood here compared the generated keys against
+        # the identical generating expression, so it could not fail: run
+        # verbatim, dropping the whole `star` spelling passed, dropping `from`
+        # passed, dropping both non-dotted spellings passed, and dropping a
+        # family passed. Only the `escaping` literal below pinned anything, and
+        # it pinned families only.
+        #
+        # Do not edit these two literals to make a red build green. That is how
+        # a spelling leaves the guard, and this table exists because one already
+        # had.
+        assert self._FAMILIES == ("direct", "rebind", "getattr", "dict", "partial"), (
+            "An indirection family left the table. Every one of them defeats "
+            "`_predicate_calls`, so removing a row removes a claim rather than "
+            "a redundancy."
+        )
+        assert self._SPELLINGS == ("from", "dotted", "star"), (
+            "A spelling left the table. `star` in particular was added because "
+            "it escaped both rules and was absent from the list that claimed to "
+            "enumerate what escapes."
+        )
+
+        shapes = {
+            (family, spelling): self._shape(family, spelling)
+            for family in self._FAMILIES
+            for spelling in self._SPELLINGS
+        }
+
+        escaping = sorted(
+            key
+            for key, source in shapes.items()
+            if not (_imported_predicates(source) or _predicate_calls(source))
+        )
+
+        assert escaping == [
+            ("dict", "dotted"),
+            ("getattr", "dotted"),
+            ("partial", "dotted"),
+            ("rebind", "dotted"),
+        ], (
+            "The set of shapes that escape both rules has moved. Update the "
+            "blind spot paragraph on `_predicate_calls` with the measurement, "
+            "not with a recollection of it."
+        )
+
+        # Every row is asserted about, not only the escaping ones, so a row
+        # cannot be deleted for being uninteresting. `direct` is the row that
+        # pins the call pass: with it gone, `_predicate_calls` returning an
+        # empty set passes everything above.
+        for (family, spelling), source in shapes.items():
+            caught = bool(_imported_predicates(source) or _predicate_calls(source))
+            assert caught is (spelling != "dotted" or family == "direct"), (
+                f"{family} written {spelling} changed side"
+            )
+
+    def test_the_predicate_import_rule_leaves_the_module_import_alone(self):
+        """The one sentence both rules depend on, kept as its own assertion so
+        deleting the parametrisation above cannot take it with them."""
+        assert _imported_predicates("import models\n") == set()
+
+    def test_the_predicate_rule_does_not_report_prose_about_it(self):
+        """The failure that produced this test. A docstring arguing **for** the
+        rule is not a use of it, and a guard that reddens on the comment
+        explaining itself is one somebody deletes."""
+        source = (
+            '"""Rooted at the Shelf, because `visible_to()` says a private book\n'
+            'is visible to the member who added it. See `in_trash_for()`."""\n'
+            "rows = Shelf.seen_by(db, viewer.id).select(Loan).all()\n"
+        )
+        assert _predicate_calls(source) == set()
 
     def test_the_backup_is_the_third_way_past_a_viewer_and_says_so(self):
         """`backup.py` is invisible to every rule in this file, so it is
@@ -2502,3 +2939,352 @@ class TestTheNamedWaysPastTheShelf:
         assert rereading_filtered_rows(db, [private.id]).count() == 1
         # Given no ids it reads nothing. There is no argument that widens it.
         assert rereading_filtered_rows(db, []).count() == 0
+
+
+# ── The public shelf ──────────────────────────────────────────────────────────
+#
+# `Shelf.seen_by_the_public` is the one constructor with no viewer, and the
+# whole safety argument for it is one property: the ownership arm does not
+# exist in that path. `TestThePublicShelfHasNoOwnershipArm` is what pins it.
+
+#: The column an ownership arm would have to be built on.
+#:
+#: A name rather than a literal at three assertion sites, and
+#: `test_the_column_this_rule_names_is_still_a_column_on_books` is what stops it
+#: going vacuous: a rename would otherwise leave every check below searching for
+#: a string that appears nowhere and passing clean.
+OWNER_COLUMN = "added_by_user_id"
+
+#: The two modules the AST pass may follow a call into.
+#:
+#: `shelf.py` because that is where the constructor lives, and `models.py`
+#: because `visible_to` and `in_trash_for` live there and are exactly what a
+#: future edit would reach for. A call out of these two is not followed, which
+#: is a stated blind spot rather than a claim: see the class docstring.
+_FOLLOWED_MODULES = ("shelf.py", "models.py")
+
+
+def _definitions(source: str) -> dict[str, list[ast.FunctionDef]]:
+    """Every `def` in a module, keyed by the name a call site would write.
+
+    Methods are keyed by their own name, so `Shelf.seen_by_the_public` and a
+    module level `seen_by_the_public` would collide. Collisions are kept as a
+    list and all of them are followed, which over-approximates: a guard that
+    visits too much reports a leak that is not there, and a guard that visits
+    too little misses one that is.
+
+    A class name maps to that class's `__init__`, which is what makes
+    `cls(...)` inside a classmethod resolve to the constructor rather than to
+    nothing. Without it the body of `Shelf.__init__` would be outside the
+    closure while every `seen_by*` call site goes straight through it.
+    """
+    tree = ast.parse(source)
+    found: dict[str, list[ast.FunctionDef]] = {}
+
+    def record(name: str, node: ast.FunctionDef) -> None:
+        found.setdefault(name, []).append(node)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            record(node.name, node)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, ast.FunctionDef) and member.name == "__init__":
+                    record(node.name, member)
+    return found
+
+
+def _enclosing_class_of(source: str, function: str) -> str | None:
+    """Which class holds `function`, so `cls(...)` inside it can be resolved."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and any(
+            isinstance(member, ast.FunctionDef) and member.name == function
+            for member in node.body
+        ):
+            return node.name
+    return None
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    """The names a body calls, however the call is spelled.
+
+    `f()` and `x.f()` are both `f`, because the receiver is not knowable from
+    the source and following the name is the conservative choice.
+    """
+    return {
+        call.func.id if isinstance(call.func, ast.Name) else call.func.attr
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name | ast.Attribute)
+    }
+
+
+def _reachable_from(entry: str) -> dict[str, ast.FunctionDef]:
+    """The transitive closure of definitions `entry` can call, by name.
+
+    Keyed `module:qualifier:name` so the report says where a body came from,
+    and so two definitions of one name are two entries rather than one.
+    """
+    sources = _source_modules()
+    tables = {name: _definitions(sources[name]) for name in _FOLLOWED_MODULES}
+
+    # `cls` inside a classmethod is the class it is defined on, which is how
+    # `cls(db, ...)` reaches `__init__`. Resolved per module rather than
+    # assumed, because the entry point could move.
+    aliases: dict[str, dict[str, str]] = {}
+    for module in _FOLLOWED_MODULES:
+        holder = _enclosing_class_of(sources[module], entry)
+        aliases[module] = {"cls": holder} if holder else {}
+
+    visited: dict[str, ast.FunctionDef] = {}
+    pending = [entry]
+    while pending:
+        name = pending.pop()
+        for module in _FOLLOWED_MODULES:
+            for index, node in enumerate(tables[module].get(name, [])):
+                key = f"{module}:{index}:{name}"
+                if key in visited:
+                    continue
+                visited[key] = node
+                for called in _called_names(node):
+                    pending.append(aliases[module].get(called, called))
+    return visited
+
+
+def _mentions(node: ast.AST, token: str) -> bool:
+    """Whether a body names `token` as an attribute, a bare name or a string.
+
+    The string arm is what catches `getattr(Book, "added_by_user_id")`. What it
+    does not catch is a name assembled at runtime, which is why the SQL
+    assertions below exist beside this one and are the stronger half.
+    """
+    for child in ast.walk(node):
+        if isinstance(child, ast.Attribute) and child.attr == token:
+            return True
+        if isinstance(child, ast.Name) and child.id == token:
+            return True
+        if isinstance(child, ast.Constant) and child.value == token:
+            return True
+    return False
+
+
+def _sql_after_the_projection(query) -> str:
+    """Everything a compiled query says **after** its select list.
+
+    The select list is not the subject and including it made the first version
+    of this rule fail on its own correct code: an ORM query selects every mapped
+    column, so `books.added_by_user_id` is named in every `SELECT` whatever the
+    predicate says. Reading the column is not the leak. **Matching on it is**,
+    so what is checked is the FROM, the joins and the WHERE.
+
+    Wider than `statement.whereclause`, deliberately: an ownership arm can sit
+    in a join onclause as easily as in a WHERE, and a rule that read only the
+    WHERE would forgive `join(User, Book.added_by_user_id == User.id)`.
+    """
+    sql = str(query.statement.compile(compile_kwargs={"literal_binds": False}))
+    # The split is asserted rather than assumed. SQLAlchemy compiles a newline
+    # before FROM today; if that ever changes, this returns the whole statement
+    # including the select list and every assertion below fails loudly rather
+    # than going quiet.
+    _, separator, rest = sql.partition("\nFROM ")
+    assert separator, f"No FROM clause found in the compiled statement:\n{sql}"
+    return rest
+
+
+class TestThePublicShelfHasNoOwnershipArm:
+    """The property `Shelf.seen_by_the_public` is safe by, asserted two ways.
+
+    `visible_to(viewer_id)` is `deleted_at IS NULL AND (is_private IS false OR
+    added_by_user_id = :viewer)`. The public constructor is that predicate with
+    the second disjunct **removed**, not that predicate with an argument, and
+    the argument for it over a sentinel viewer id is entirely that there is no
+    value any input can take that makes a Private Book match. So the thing to
+    pin is that the column which could make one match is never named.
+
+    Two independent checks, because each covers what the other cannot.
+
+    * **The AST pass** reads the source: the closure of everything
+      `seen_by_the_public` can call inside `shelf.py` and `models.py`, and none
+      of it may name the column. That catches a helper added later, an import
+      of `visible_to`, and a `getattr` by string.
+    * **The SQL assertions** read the compiled statement, which is what the
+      database actually receives. That catches a name this pass cannot see: a
+      string assembled at runtime, a call out to a third module, a column
+      reached through a relationship.
+
+    Neither is enough alone, and a check that only says "the owner column is
+    absent" is satisfied by a query with **no predicate at all**, which is the
+    worse bug. So the presence of both surviving clauses is asserted beside its
+    absence.
+
+    Stated blind spots, because a guard whose limits are undocumented is read
+    as a guarantee it never made:
+
+    * The AST closure follows a call by **name**, so a function reached
+      through a variable, a dict of handlers or a decorator is not followed.
+      The SQL check is what covers that class.
+    * The SQL assertions are over the constructor and the narrowings a public
+      caller uses. A caller that adds its own `.where(Book.added_by_user_id ==
+      ...)` afterwards has written an ownership arm of its own, which is a
+      different rule and is not this one's to catch.
+    """
+
+    def test_the_column_this_rule_names_is_still_a_column_on_books(self):
+        """Without this every check below could pass by searching for a string
+        that no longer appears anywhere.
+
+        The mapped attribute **and** the SQL column, because the AST pass reads
+        the first and the SQL assertions read the second, and a rename that
+        moved only one of them would leave half this class vacuous.
+        """
+        assert hasattr(Book, OWNER_COLUMN), (
+            f"{OWNER_COLUMN} is no longer an attribute of Book. Every check in "
+            "this class searches for that name, so they now all pass by "
+            "finding nothing. Rename the constant with the column."
+        )
+        assert OWNER_COLUMN in Book.__table__.c, (
+            f"{OWNER_COLUMN} is no longer a column of the books table."
+        )
+
+    def test_the_constructor_this_rule_guards_exists(self):
+        """A guard whose subject has been deleted passes clean, which has
+        happened twice in this repository. This is the check that does not."""
+        found = [
+            key
+            for key in _reachable_from("seen_by_the_public")
+            if key.endswith(":seen_by_the_public")
+        ]
+        assert found, (
+            "Shelf.seen_by_the_public was not found in shelf.py. Either it was "
+            "renamed, in which case rename it here too, or it was removed, in "
+            "which case the public catalogue has lost the only query path that "
+            "has no ownership arm."
+        )
+
+    def test_nothing_the_public_constructor_can_call_names_the_owner_column(self):
+        """The AST half: the closure, not just the body.
+
+        The body alone would be satisfied by `predicate = visible_to(0)`, which
+        is precisely the sentinel shape that was refused.
+        """
+        offenders = sorted(
+            key
+            for key, node in _reachable_from("seen_by_the_public").items()
+            if _mentions(node, OWNER_COLUMN)
+        )
+        assert offenders == [], (
+            f"These bodies are reachable from Shelf.seen_by_the_public and name "
+            f"{OWNER_COLUMN}: {offenders}.\n\n"
+            "That column is the ownership arm. The public constructor is safe "
+            "because the arm does not exist in its path, not because the value "
+            "compared against it is chosen carefully: a sentinel id is a real "
+            "comparison against a real column and is safe only while no account "
+            "holds that id, which nothing enforces. If a public reader needs to "
+            "be told which books are theirs, they are not a public reader."
+        )
+
+    def test_the_public_query_does_not_mention_the_owner_column(self, db):
+        public = Shelf.seen_by_the_public(db)
+        assert OWNER_COLUMN not in _sql_after_the_projection(public._query)
+
+    def test_the_public_query_still_applies_both_surviving_clauses(self, db):
+        """The half that stops the check above being satisfied by no predicate
+        at all, which would be the worse bug and would read as a pass."""
+        sql = _sql_after_the_projection(Shelf.seen_by_the_public(db)._query)
+        assert "is_private" in sql and "deleted_at" in sql
+
+    def test_the_owner_column_survives_neither_the_filter_chain_nor_a_select(self, db):
+        """Every narrowing a public caller reaches for, not only the
+        constructor. `matching` is the whole filter chain and `select` rebuilds
+        the query from the stored criteria, so either could reintroduce it."""
+        shelf = Shelf.seen_by_the_public(db).matching(
+            BookFilters(q="dune", series="Dune", location="study")
+        )
+        assert OWNER_COLUMN not in _sql_after_the_projection(shelf._query)
+        assert OWNER_COLUMN not in _sql_after_the_projection(shelf.select(Book.location))
+
+    def test_seen_by_still_has_the_arm_this_one_lacks(self, db, user):
+        """The diagonal. Without it every assertion above would pass on a
+        `visible_to` that had quietly stopped scoping to a member at all, and
+        on a `_sql_after_the_projection` that returned the empty string."""
+        member = Shelf.seen_by(db, user.id)
+        assert OWNER_COLUMN in _sql_after_the_projection(member._query)
+
+
+class TestThePublicShelfShowsOnlyWhatWasPublished:
+    """What the constructor actually returns, against rows in a database."""
+
+    def test_a_public_book_on_the_shelf_is_shown(self, db, user):
+        db.add(Book(title="Public", added_by_user_id=user.id))
+        db.commit()
+        assert Shelf.seen_by_the_public(db).count() == 1
+
+    def test_a_private_book_is_absent_whoever_added_it(self, db, user, other):
+        db.add(Book(title="Mine", added_by_user_id=user.id, is_private=True))
+        db.add(Book(title="Theirs", added_by_user_id=other.id, is_private=True))
+        db.commit()
+        assert Shelf.seen_by_the_public(db).count() == 0
+
+    def test_a_trashed_public_book_is_absent(self, db, user):
+        db.add(_trashed(title="Trashed", added_by_user_id=user.id))
+        db.commit()
+        assert Shelf.seen_by_the_public(db).count() == 0
+
+    def test_a_book_with_no_member_behind_it_is_still_shown(self, db):
+        """`added_by_user_id` is nullable, and a restore or an import can leave
+        it null. A predicate built on that column would have to decide what
+        null means; this one never asks."""
+        db.add(Book(title="Orphan"))
+        db.commit()
+        assert Shelf.seen_by_the_public(db).count() == 1
+
+    def test_it_is_stricter_than_any_member_shelf(self, db, user, other):
+        """The fail safe direction, asserted rather than argued: an
+        authenticated request wrongly routed through here sees less."""
+        db.add(Book(title="Public", added_by_user_id=other.id))
+        db.add(Book(title="Mine", added_by_user_id=user.id, is_private=True))
+        db.commit()
+        assert Shelf.seen_by(db, user.id).count() == 2
+        assert Shelf.seen_by_the_public(db).count() == 1
+
+
+class TestAShelfWithNoViewerRefusesAPerMemberNarrowing:
+    """The two narrowings that read a member, on a shelf that has none.
+
+    Two rather than three, counted: `_with_read_status` and `_unrated` read
+    `_viewer`, and `_offered_for_discussion` reads anybody's flag rather than
+    the viewer's, which is why the last test here asserts it is **allowed**.
+    Three of the four cases below drive `_with_read_status`, because its two
+    arms fail in opposite directions.
+
+    Silently they would be answered rather than refused, and the answer would
+    be wrong rather than empty: `UserBook.user_id == None` compiles to `IS
+    NULL`, so the outer join in `_with_read_status` matches nothing and
+    `status=unread`, whose branch also accepts a missing row, returns the whole
+    public catalogue.
+    """
+
+    def test_narrowing_by_read_status_is_refused(self, db):
+        with pytest.raises(ValueError, match="no viewer"):
+            Shelf.seen_by_the_public(db).matching(BookFilters(status=ReadStatus.READ))
+
+    def test_narrowing_to_unread_is_refused_too(self, db, user):
+        """The arm that would have returned everything rather than nothing, so
+        the one a test asserting emptiness would have missed."""
+        db.add(Book(title="Public", added_by_user_id=user.id))
+        db.commit()
+        with pytest.raises(ValueError, match="no viewer"):
+            Shelf.seen_by_the_public(db).matching(BookFilters(status=ReadStatus.UNREAD))
+
+    def test_narrowing_to_unrated_is_refused(self, db):
+        with pytest.raises(ValueError, match="no viewer"):
+            Shelf.seen_by_the_public(db).matching(BookFilters(unrated=True))
+
+    def test_a_narrowing_that_reads_no_member_is_allowed(self, db, user):
+        """`discuss` is anybody's flag rather than the viewer's, which is why
+        it is not in the list above. Asserted so the refusal is known to be
+        about the viewer rather than about the public shelf."""
+        db.add(Book(title="Public", added_by_user_id=user.id))
+        db.commit()
+        assert Shelf.seen_by_the_public(db).matching(BookFilters(discuss=True)).count() == 0

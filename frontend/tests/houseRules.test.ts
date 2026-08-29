@@ -404,3 +404,114 @@ describe("a tag reaches a reader through tagName", () => {
     expect(callers.length).toBeGreaterThan(4);
   });
 });
+
+describe("no fixture or string carries an address outside reserved space", () => {
+  // The frontend half of
+  // `backend/tests/test_house_rules.py::TestNoFixtureLooksLikeACredential`.
+  // That arm walks the backend test tree only, and its own reason for existing
+  // is that **both** trees are published: this repository mirrors `src/`,
+  // `tests/` and `docs/` to public GitHub. `src/i18n/en.ts` ships a placeholder
+  // address in published source, which the backend rule cannot see at all.
+  //
+  // RFC 2606 reserves `example.com`, `example.net` and `example.org`, and RFC
+  // 6761 the `.test`, `.example`, `.invalid` and `.localhost` names. Anything
+  // outside them is registrable, and a stranger reading the mirror cannot tell
+  // a placeholder from somebody's real mailbox.
+  const RESERVED = [
+    "example.com",
+    "example.net",
+    "example.org",
+    "test",
+    "example",
+    "invalid",
+    "localhost",
+  ];
+
+  // A label boundary, not a suffix. The backend arm shipped for one round
+  // comparing with `endsWith` against bare names, which accepted
+  // `notexample.com`, `myexample.org` and `fakeexample.net`.
+  const isReserved = (domain: string) =>
+    RESERVED.some((base) => domain === base || domain.endsWith(`.${base}`));
+
+  // Deliberately looser than any address validator: this looks for what a
+  // reader would take for an address, and nobody triaging the mirror runs our
+  // rules over it first.
+  const ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+  const TESTS = import.meta.glob("./**/*.{ts,tsx}", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  // This file writes the shapes down in order to forbid them, so it is filtered
+  // out. **Measured: today that filter removes nothing**, because Vite excludes
+  // the importing module from its own `import.meta.glob`. A probe run from a
+  // sibling file saw `./houseRules.test.ts` among 131 keys; run from here it is
+  // absent. The filter stays because it is one line and it is what keeps the
+  // rule working if that ever changes, and the assertion below pins the fact so
+  // that nobody reads the filter as evidence of something it is not doing.
+  const SELF = "./houseRules.test.ts";
+
+  function everything(): [string, string][] {
+    return [
+      ...entries(),
+      ...Object.entries(TESTS)
+        .filter(([path]) => path !== SELF)
+        .map(([path, source]): [string, string] => [
+          path.replace("./", "tests/"),
+          source,
+        ]),
+    ];
+  }
+
+  it("finds none", () => {
+    const offenders = everything().flatMap(([path, source]) =>
+      source.split("\n").flatMap((line, index) =>
+        [...line.matchAll(ADDRESS)]
+          .map((match) => match[0])
+          .filter(
+            (address) => !isReserved(address.split("@")[1]!.toLowerCase()),
+          )
+          .map((address) => `${path}:${index + 1} (${address})`),
+      ),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("reads both trees, not just one", () => {
+    // The backend arm walks one tree while its docstring named two, which is
+    // why this one exists. A glob that matched nothing would make the rule
+    // above pass forever.
+    const paths = everything().map(([path]) => path);
+
+    expect(paths.some((path) => path.startsWith("tests/"))).toBe(true);
+    expect(paths.some((path) => path.startsWith("i18n/"))).toBe(true);
+  });
+
+  it("is not scanning itself, and the exclusion above is not what stops it", () => {
+    // Pointing `SELF` at a name that does not exist changes nothing, which is
+    // how this was found: Vite already keeps the importing module out of its
+    // own glob. Pinned rather than left implicit, because if that behaviour
+    // changes the honest failure is this line saying so, not the rule above
+    // failing on this file's own deliberately unreserved fixture.
+    expect(Object.keys(TESTS)).not.toContain(SELF);
+  });
+
+  it("reports the shapes it exists for", () => {
+    expect(isReserved("mail.example.org")).toBe(true);
+    expect(isReserved("example.org")).toBe(true);
+    expect(isReserved("anything.invalid")).toBe(true);
+    // The three a bare suffix comparison lets through.
+    expect(isReserved("notexample.com")).toBe(false);
+    expect(isReserved("myexample.org")).toBe(false);
+    expect(isReserved("fakeexample.net")).toBe(false);
+    expect(isReserved("gmail.com")).toBe(false);
+
+    const found = [
+      ..."write to kim.jones@gmail.com or sam@example.org".matchAll(ADDRESS),
+    ].map((match) => match[0]);
+    expect(found).toEqual(["kim.jones@gmail.com", "sam@example.org"]);
+  });
+});

@@ -257,7 +257,12 @@ class TestEveryModelCarryingATagKeyAgreesAboutAnUnknownOne:
             for _name, field in model.model_fields.items()
             if TagKey in get_args(field.annotation)
         ]
-        assert sorted(guarded) == ["TagOut", "TagStat"]
+        # `PublicTagOut` joined on 2026-08-28 with the public catalogue. It is
+        # here because it carries a `TagKey` and is served to a reader with no
+        # session, so it is the one place an unknown key would be shown to a
+        # stranger. Verified rather than assumed: it raises on
+        # `key="quantum_gardening"` exactly as the other two do.
+        assert sorted(guarded) == ["PublicTagOut", "TagOut", "TagStat"]
 
 
 class TestSmallSchemas:

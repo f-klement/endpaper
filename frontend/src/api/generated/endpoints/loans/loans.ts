@@ -24,8 +24,10 @@ import type {
 import type {
   HTTPValidationError,
   ListLoansParams,
+  ListOverdueParams,
   LoanCreate,
   LoanOut,
+  MyOverdueOut,
   OverdueNotifyResult,
   PageLoanOut,
 } from "../../model";
@@ -309,6 +311,355 @@ export const useCreateLoan = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getCreateLoanMutationOptions(options), queryClient);
 };
+export const getListOverdueUrl = (params?: ListOverdueParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/loans/overdue?${stringifiedParams}`
+    : `/api/loans/overdue`;
+};
+
+/**
+ * The overdue loans themselves, for the page the banner links to (#102).
+ *
+ * **The same rule as the banner's count, because it is the same audience.**
+ * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
+ * private book somebody else added cannot reach here, and `sees_every_loan`
+ * decides the rest: a member reads the loans they lent or borrowed, staff
+ * read every overdue loan on their shelf.
+ *
+ * **Not `list_loans(overdue_only=True)`, which is a wider set.** That one is
+ * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
+ * member sees every overdue loan over a book they can see, housemates'
+ * included. Pointing this page at it would list more rows than the banner
+ * counted, which is the same fact disagreeing with itself on two screens.
+ * The loans page keeps that endpoint, because a loans list is a list of the
+ * household's loans by design.
+ *
+ * **Honours the in app channel's switch**, exactly as `my_overdue` does. That
+ * setting is spelled "show overdue loans in the app", and this page is what
+ * it shows; a page that went on listing them when the channel was off would
+ * make the switch a lie about half its surface. The loans page is not
+ * affected: a loan list is not the reminder channel.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow. `/overdue` and `/overdue/mine` cannot collide with each other,
+ * because they differ in segment count rather than in a parameter's value.
+ *
+ * Eager loading here and none in `overdue_for_viewer`, which is the seam that
+ * function's docstring describes: it hands out the query so the count caller
+ * can stay at one statement and no ORM objects, and a caller that renders
+ * titles adds the loads it needs.
+ * @summary List Overdue
+ */
+export const listOverdue = async (
+  params?: ListOverdueParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PageLoanOut> => {
+  return customFetch<PageLoanOut>(getListOverdueUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListOverdueQueryKey = (params?: ListOverdueParams) => {
+  return [`/api/loans/overdue`, ...(params ? [params] : [])] as const;
+};
+
+export const getListOverdueQueryOptions = <
+  TData = Awaited<ReturnType<typeof listOverdue>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListOverdueParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listOverdue>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListOverdueQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listOverdue>>> = ({
+    signal,
+  }) => listOverdue(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listOverdue>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListOverdueQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listOverdue>>
+>;
+export type ListOverdueQueryError = HTTPValidationError;
+
+export function useListOverdue<
+  TData = Awaited<ReturnType<typeof listOverdue>>,
+  TError = HTTPValidationError,
+>(
+  params: undefined | ListOverdueParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listOverdue>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOverdue>>,
+          TError,
+          Awaited<ReturnType<typeof listOverdue>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListOverdue<
+  TData = Awaited<ReturnType<typeof listOverdue>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListOverdueParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listOverdue>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOverdue>>,
+          TError,
+          Awaited<ReturnType<typeof listOverdue>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListOverdue<
+  TData = Awaited<ReturnType<typeof listOverdue>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListOverdueParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listOverdue>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Overdue
+ */
+
+export function useListOverdue<
+  TData = Awaited<ReturnType<typeof listOverdue>>,
+  TError = HTTPValidationError,
+>(
+  params?: ListOverdueParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listOverdue>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListOverdueQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getMyOverdueUrl = () => {
+  return `/api/loans/overdue/mine`;
+};
+
+/**
+ * The in app reminder, for the member asking.
+ *
+ * #86. Every other channel needs something the household has to obtain first:
+ * a receiver they run, an SMTP account, a bot token. A household with none of
+ * those was told nothing at all, which is the problem the reminder feature was
+ * filed to solve. This is the one channel that works on a fresh install with
+ * nothing configured.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow.
+ *
+ * **Not admin only, and that is the point.** It is per member, and what each
+ * member may see is decided by `notifications.overdue_for_viewer`, which roots
+ * the query at `Shelf.seen_by`. A member reads the loans they are party to; an
+ * admin, and later a library's staff, read every overdue loan on their shelf.
+ * Neither arm can reach another member's private book, because the Shelf
+ * applies `visible_to` before either clause is added.
+ *
+ * A count and no titles. The banner it feeds says how many and links to
+ * `GET /api/loans/overdue`, which lists them **through this same function**.
+ *
+ * **It used to say the loans list, and that sentence was wrong on both
+ * halves.** The loans list is `list_loans`, which is rooted at the Shelf and
+ * applies no lender-or-borrower arm, so it is a wider set than this counts:
+ * for any non admin member the banner said one number and the screen it
+ * opened showed another. #102 moved the link and added the endpoint above,
+ * which is the one that shares this rule.
+ * @summary My Overdue
+ */
+export const myOverdue = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MyOverdueOut> => {
+  return customFetch<MyOverdueOut>(getMyOverdueUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getMyOverdueQueryKey = () => {
+  return [`/api/loans/overdue/mine`] as const;
+};
+
+export const getMyOverdueQueryOptions = <
+  TData = Awaited<ReturnType<typeof myOverdue>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getMyOverdueQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof myOverdue>>> = ({
+    signal,
+  }) => myOverdue({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof myOverdue>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type MyOverdueQueryResult = NonNullable<
+  Awaited<ReturnType<typeof myOverdue>>
+>;
+export type MyOverdueQueryError = unknown;
+
+export function useMyOverdue<
+  TData = Awaited<ReturnType<typeof myOverdue>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof myOverdue>>,
+          TError,
+          Awaited<ReturnType<typeof myOverdue>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useMyOverdue<
+  TData = Awaited<ReturnType<typeof myOverdue>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof myOverdue>>,
+          TError,
+          Awaited<ReturnType<typeof myOverdue>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useMyOverdue<
+  TData = Awaited<ReturnType<typeof myOverdue>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary My Overdue
+ */
+
+export function useMyOverdue<
+  TData = Awaited<ReturnType<typeof myOverdue>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof myOverdue>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getMyOverdueQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getNotifyOverdueUrl = () => {
   return `/api/loans/overdue/notify`;
 };

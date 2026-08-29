@@ -464,3 +464,78 @@ class TestDerivedPercent:
         from serialisation import derived_percent
 
         assert derived_percent(205, None, 200) == 100
+
+
+class TestThePublicSerialiserCannotAskWhoIsAsking:
+    """`books_to_public_out` takes no `Session` and no `User`.
+
+    That is a property of the **signature**, and the signature is the only place
+    it can be read off, so it is asserted here rather than argued in a comment.
+    `books_to_out` beside it needs both, because half of `BookOut` depends on who
+    is asking; nothing on `PublicBookOut` does, so this one structurally cannot
+    issue a per member query. There is no viewer to scope one by and no argument
+    a caller could use to supply one.
+    """
+
+    @staticmethod
+    def _annotations() -> dict:
+        import inspect
+
+        from serialisation import books_to_public_out
+
+        return {
+            name: parameter.annotation
+            for name, parameter in inspect.signature(books_to_public_out).parameters.items()
+        }
+
+    def test_it_takes_exactly_one_argument(self):
+        assert list(self._annotations()) == ["books"]
+
+    def test_no_parameter_is_a_session_or_a_member(self):
+        """Named types rather than a count, so a second argument that happened
+        to be harmless would not be needed to keep this true, and a `Session`
+        smuggled in as the second element of a tuple still fails."""
+        rendered = " ".join(str(a) for a in self._annotations().values())
+        assert "Session" not in rendered and "User" not in rendered
+
+    def test_the_signed_in_serialiser_still_takes_both(self):
+        """The diagonal. Without it the assertions above would pass on a
+        `books_to_out` that had quietly stopped scoping to a member."""
+        import inspect
+
+        from serialisation import books_to_out
+
+        assert list(inspect.signature(books_to_out).parameters) == [
+            "books",
+            "current_user",
+            "db",
+        ]
+
+    def test_it_serialises_rows_after_the_session_is_closed(self):
+        """The behavioural half of the same claim.
+
+        The rows are loaded exactly as `Loading.PUBLISHED` loads them and the
+        session is then **closed**, so any lazy load this serialiser attempted
+        would raise `DetachedInstanceError` rather than quietly issuing a
+        statement. That is a stronger statement than counting statements: it
+        fails on the attempt rather than on the cost of it.
+        """
+        from sqlalchemy.orm import selectinload
+
+        from database import SessionLocal
+        from models import Book
+        from serialisation import books_to_public_out
+
+        session = SessionLocal()
+        try:
+            session.add(Book(title="Public", author="A Writer"))
+            session.commit()
+            books = (
+                session.query(Book)
+                .options(selectinload(Book.tags), selectinload(Book.classifications))
+                .all()
+            )
+        finally:
+            session.close()
+
+        assert [out.title for out in books_to_public_out(books)] == ["Public"]

@@ -26,6 +26,7 @@ import type {
   FeatureFlagsOut,
   HTTPValidationError,
   LoginImageOut,
+  SenderHealth,
   SettingsOut,
   SettingsUpdate,
 } from "../../model";
@@ -661,3 +662,166 @@ export const useSetLoginImage = <
 > => {
   return useMutation(getSetLoginImageMutationOptions(options), queryClient);
 };
+export const getGetSenderHealthUrl = () => {
+  return `/api/settings/sender-health`;
+};
+
+/**
+ * What each switched-on reminder channel last did.
+ *
+ * Declared **before** nothing, and that is worth saying: this prefix has no
+ * path parameter, so the route order rule has no work to do here. It is a
+ * separate endpoint rather than a field on `SettingsOut` because the banner
+ * that reads it lives on the library page, and pulling the whole admin
+ * settings record, four secrets' previews included, to render one line would
+ * be the wrong payload on the wrong screen.
+ *
+ * Admin only, like the settings it reports on and for the same reason: it
+ * names channels, their failures and the sentences those failures produced.
+ * An ordinary member can do nothing with any of it, since only an admin can
+ * reach the screen that fixes it.
+ * @summary Get Sender Health
+ */
+export const getSenderHealth = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<SenderHealth[]> => {
+  return customFetch<SenderHealth[]>(getGetSenderHealthUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSenderHealthQueryKey = () => {
+  return [`/api/settings/sender-health`] as const;
+};
+
+export const getGetSenderHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSenderHealth>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getSenderHealth>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSenderHealthQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSenderHealth>>> = ({
+    signal,
+  }) => getSenderHealth({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSenderHealth>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetSenderHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSenderHealth>>
+>;
+export type GetSenderHealthQueryError = unknown;
+
+export function useGetSenderHealth<
+  TData = Awaited<ReturnType<typeof getSenderHealth>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSenderHealth>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSenderHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getSenderHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetSenderHealth<
+  TData = Awaited<ReturnType<typeof getSenderHealth>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSenderHealth>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSenderHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getSenderHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetSenderHealth<
+  TData = Awaited<ReturnType<typeof getSenderHealth>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSenderHealth>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Sender Health
+ */
+
+export function useGetSenderHealth<
+  TData = Awaited<ReturnType<typeof getSenderHealth>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getSenderHealth>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetSenderHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}

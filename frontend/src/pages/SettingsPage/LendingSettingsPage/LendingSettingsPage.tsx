@@ -4,7 +4,7 @@ import SettingsSubPage from "../components/SettingsSubPage";
 import { useSettings } from "../hooks";
 import OverdueSection from "./components/OverdueSection";
 import ReminderSendersSection from "./components/ReminderSendersSection";
-import { useOverdueDigest } from "./hooks";
+import { useOverdueDigest, useSenderHealth } from "./hooks";
 
 /**
  * Loans, and how somebody gets told about one that is late.
@@ -20,6 +20,10 @@ export default function LendingSettingsPage() {
   const { t } = useTranslation();
   const state = useSettings();
   const overdue = useOverdueDigest();
+  // One request for the whole card, split per channel below. Each section
+  // draws its own line, and a channel that is switched off is absent from the
+  // map rather than carrying a flag saying it is.
+  const health = useSenderHealth();
 
   return (
     <SettingsSubPage icon="handshake" title={t("settings.lending.title")}>
@@ -34,12 +38,14 @@ export default function LendingSettingsPage() {
               isSending={overdue.isSending}
               sendResult={overdue.result}
               sendError={overdue.error}
+              health={health.webhook}
             />
 
             <ReminderSendersSection
               settings={settings}
               isSaving={state.isSaving}
               onSave={state.save}
+              health={health}
             />
           </>
         )}

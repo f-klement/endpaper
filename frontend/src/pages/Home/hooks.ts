@@ -18,6 +18,8 @@ import {
   useListTags,
 } from "../../api/generated/endpoints/books/books";
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
+import { useMyOverdue as useMyOverdueQuery } from "../../api/generated/endpoints/loans/loans";
+import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
 import {
   readLibraryView,
   writeLibraryView,
@@ -30,6 +32,8 @@ import {
   type BulkResult,
   type CollectionOut,
   type LocationOut,
+  type OverdueSender,
+  type SenderHealth,
   type TagOut,
 } from "../../api/generated/model";
 import { useInvalidate } from "../../api/invalidate";
@@ -312,6 +316,53 @@ export function useBookSelection(): UseBookSelectionResult {
     error: general.error,
     dismissResult: () => general.reset(),
   };
+}
+
+/**
+ * How many overdue loans this member is being reminded about (#86).
+ *
+ * The in app reminder channel. Every other one pushes outward and needs
+ * something the household had to obtain first, so a household with no mailbox,
+ * no bot and no receiver was told nothing at all. This is the one that works on
+ * a fresh install with nothing configured, which is why it ships switched on.
+ *
+ * Who is counted is the server's decision (`notifications.overdue_for_viewer`):
+ * a member reads the loans they borrowed or lent, staff read every overdue loan
+ * on their shelf, and both go through the Shelf so nobody sees a private book
+ * that is not theirs.
+ *
+ * Zero when the household switched the channel off, so the banner disappears
+ * without this page having to read the admin-only settings record.
+ */
+export function useMyOverdue(): number {
+  const query = useMyOverdueQuery({ query: { staleTime: 60_000 } });
+  return query.data?.enabled ? (query.data.count ?? 0) : 0;
+}
+
+/**
+ * Which reminder channels have stopped working (#82).
+ *
+ * **Admin only, by the endpoint rather than by a prop.** It answers 403 to
+ * anybody else, so a member's query fails and this returns nothing, which is
+ * the arrangement `useSettings` already has and what keeps the library page
+ * from needing to know who is reading it. `retry: false` so a member costs one
+ * request rather than four.
+ *
+ * `broken` is the server's verdict and is not recomputed here: a refusal the
+ * app decided itself counts at once, a transport failure only after 24 hours
+ * and at least two consecutive failures. The evidence for that lives in the
+ * health record, not in this payload.
+ *
+ * The record changes at most once an hour, so it is held for five minutes
+ * rather than refetched on every return to the library.
+ */
+export function useBrokenSenders(): OverdueSender[] {
+  const query = useGetSenderHealth({
+    query: { retry: false, staleTime: 300_000 },
+  });
+  return (query.data ?? [])
+    .filter((entry: SenderHealth) => entry.broken)
+    .map((entry: SenderHealth) => entry.sender);
 }
 
 /**

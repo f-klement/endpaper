@@ -351,21 +351,80 @@ class AuthorityScheme(StrEnum):
     and one column holding both would make a heading and an author the same kind
     of row.
 
-    **One member, and the count is the honest state of the supply rather than a
-    stub.** Counted 2026-08-27: the DNB is the only catalogue this app reads for
-    a person's identifier (`100 $0` and `700 $0`), and it writes GND. K10plus
+    **Eleven members, and only one of them is ever the entry point.** GND is the
+    only scheme a catalogue writes here: the DNB is the only source this app
+    reads a person's identifier from (`100 $0` and `700 $0`), and K10plus
     carries the same subfield and is deliberately not read for it, which
-    `_k10plus_record` records. VIAF would be the second member and is not one:
-    nothing in this app queries it, and until something does, an enum member for
-    it would be a value no writer can produce.
+    `_k10plus_record` records. The other ten arrive as cross references on a GND
+    record that a Member confirmed, four of them free in that record's `sameAs`
+    through `authority.cross_references` and six from the VIAF cluster it names
+    through `authority.national_identifiers`. None of them arrives on its own.
+    So a search still starts with a name and a GND.
+
+    This docstring used to say "one member, and the count is the honest state of
+    the supply rather than a stub", and that sentence was true while nothing
+    stored a second scheme. Storing the cross references is what retired it, and
+    it is replaced rather than deleted because the reasoning is still the rule:
+    a member here has to be a value some writer can produce.
+
+    **`ISNI` is the spine.** ISO 27729, deliberately language neutral, and it
+    identifies a person rather than a cluster of records about one, which is the
+    difference between it and `VIAF`. Measured 2026-08-28 over fourteen GND
+    records spanning Spanish, Portuguese, Brazilian, Argentine, Uruguayan and
+    Italian authors: all fourteen carried ISNI, LCNAF, VIAF and Wikidata in
+    `sameAs`.
+
+    **`LCNAF` rather than `LC`**, because the file has a name and the
+    abbreviation for the library is not it: `id.loc.gov` serves several
+    authority files and this is the one about people.
+
+    **The six national files are spelled as VIAF spells them**, in `v:sid` as
+    `BLBNB|000560509`, because that source code is what the parser matches on and
+    a second spelling here would be a second name for one fact. Lowercased for
+    the stored value, like every other member.
+
+    ## Storing an identifier and resolving one are different acts
+
+    This docstring used to argue the six out on the ground that "nothing in this
+    app can look one up, so a member for it would be a value no reader can use".
+    **That conflated two acts, and the correction is the reason they are members
+    now.** A scheme has to be a value some writer can produce, which was the rule
+    the old sentence was reaching for and which these pass: the identifier
+    arrives free from a VIAF cluster this app already has a reason to read.
+    Being able to *resolve* one is a separate and later question, and it is what
+    makes the argument run the other way: Brazil and Argentina answer 403 to
+    every agent tried and have no open Z39.50 port, so an adapter for them is
+    blocked on a transport rather than on this list, and the identifier stored
+    today is what makes that adapter cheap on the day the transport lands.
+
+    So the closed set is still closed for the same reason: a member has to be
+    something a writer here produces. What changed is that six more things are.
 
     Adding a member costs one line here, one value in
     `ck_author_identifiers_scheme`, and a migration to widen that constraint.
-    That last one is why the set is closed: a scheme nobody recognises is an
-    identifier with no file to look it up in.
+    **`SUDOC` is deliberately still absent**, though a cluster carries it: it is
+    a French union catalogue rather than one of the six national files named
+    here, and nothing has asked for it. It goes in when somebody asks, in the
+    next migration.
     """
 
     GND = "gnd"
+    ISNI = "isni"
+    LCNAF = "lcnaf"
+    VIAF = "viaf"
+    WIKIDATA = "wikidata"
+    #: Biblioteca Nacional do Brasil.
+    BLBNB = "blbnb"
+    #: Biblioteca Nacional de la Republica Argentina.
+    ARBABN = "arbabn"
+    #: Biblioteca Nacional de Espana.
+    BNE = "bne"
+    #: Biblioteca Nacional de Portugal.
+    PTBNP = "ptbnp"
+    #: Istituto Centrale per il Catalogo Unico, Italy.
+    ICCU = "iccu"
+    #: Biblioteca Nacional de Chile.
+    BNCHL = "bnchl"
 
 
 class AuthorityProvenance(StrEnum):
@@ -487,6 +546,47 @@ class SettingKey(StrEnum):
     TELEGRAM_BOT_TOKEN = "telegram_bot_token"
     TELEGRAM_CHAT_ID = "telegram_chat_id"
 
+    # The in app notice. One toggle and nothing else: the channel is the app,
+    # so there is no destination to store and no credential to hold, which is
+    # the entire argument for its existence.
+    OVERDUE_IN_APP_ENABLED = "overdue_in_app_enabled"
+
+    # Library mode and the public catalogue. Two switches, nested, never one:
+    # library mode changes what a **cataloguer** sees and publishes nothing,
+    # and a library running it internally without publishing is the common
+    # case. One switch would force an institution to put its catalogue on the
+    # internet to get the cataloguer's column set.
+    #
+    # Nesting them also gives "hard to trip by accident" a structural meaning
+    # rather than a UI one: publishing takes two deliberate acts, and the
+    # second says only that. `settings_store.public_catalogue_is_published` is
+    # the single answer to whether anything is actually served, and it reads
+    # both rows, so flipping library mode off cannot leave a catalogue public.
+    #
+    # Settings rather than environment variables, deliberately: an environment
+    # variable takes a redeploy to correct, which is the wrong property for the
+    # switch most likely to be turned on by mistake. None of the three is in
+    # `config._ENV_OVERRIDES`, and
+    # `TestLibraryModeAndThePublicCatalogue` in `tests/test_settings_store.py`
+    # keeps it that way, in its `not_pinnable_from_the_environment` case.
+    LIBRARY_MODE = "library_mode"
+    PUBLIC_CATALOGUE_ENABLED = "public_catalogue_enabled"
+    # Publishing a catalogue and inviting a search engine to crawl it are
+    # different decisions, so the second is its own row. Off by default, which
+    # is what makes the public routes send `X-Robots-Tag: noindex`.
+    PUBLIC_CATALOGUE_INDEXING_ENABLED = "public_catalogue_indexing_enabled"
+
+    # The last outcome of each reminder sender, as one JSON object keyed by
+    # sender. A settings row rather than a table because a table would need a
+    # migration, a retention rule and a `backup._TABLES` entry, and this holds
+    # one record per sender rather than a history. `settings` is already in
+    # `backup._TABLES`, so the record survives a restore with everything else.
+    #
+    # Written by `notifications.record_run`, read by `notifications.health`.
+    # Never edited from the settings screen: it is a measurement, not a
+    # preference, which is why it has no field in `SettingsUpdate`.
+    SENDER_HEALTH = "sender_health"
+
 
 class OverdueSender(StrEnum):
     """Which channel a reminder went out on.
@@ -496,6 +596,15 @@ class OverdueSender(StrEnum):
     no label and no test noticing.
     """
 
+    #: The app itself. Listed first because it is the one channel that needs
+    #: nothing from the household: no receiver, no mailbox, no bot token.
+    #:
+    #: **It does not push, and `notifications.pushes_outward` is where that is
+    #: decided.** Nothing is handed to anything: the notice is read from
+    #: `GET /api/loans/overdue/mine` by the member it concerns. That is why it
+    #: is the one sender whose audience has a viewer, and so the one that can
+    #: carry a member's own private books without disclosing them.
+    IN_APP = "in_app"
     WEBHOOK = "webhook"
     EMAIL = "email"
     TELEGRAM = "telegram"
@@ -530,6 +639,12 @@ class OverdueNotifyReason(StrEnum):
     #: refusal an operator can act on reads differently from a receiver that
     #: was tried and did not answer.
     MISCONFIGURED = "misconfigured"
+    #: The in app notice is the only channel switched on, so nothing was sent
+    #: anywhere and nothing was meant to be. Distinct from `DISABLED`, which
+    #: says reminders are off: here they are on and every member reads them in
+    #: the app. It is also the reason `notified_at` is not stamped on such a
+    #: run, because no reminder went out to be stamped for.
+    IN_APP_ONLY = "in_app_only"
 
 
 class Locale(StrEnum):

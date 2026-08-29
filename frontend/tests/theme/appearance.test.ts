@@ -11,6 +11,18 @@ import {
   sameAppearance,
   type Appearance,
 } from "../../src/theme/appearance";
+import { isPaletteId } from "../../src/theme/palettes";
+
+/**
+ * A palette id this build does not have, and no build ever will.
+ *
+ * It used to be "kanagawa", which was a fine sentinel until Kanagawa shipped as
+ * a real palette and this test failed on its own premise rather than on the
+ * behaviour it names. A sentinel is only a sentinel while it stays unreal, so
+ * the premise is asserted below rather than assumed: adding a palette can no
+ * longer break this test without saying which half broke.
+ */
+const NOT_A_PALETTE = "no such palette";
 
 const GRUVBOX: Appearance = {
   palette: "gruvbox",
@@ -32,9 +44,10 @@ describe("resolveAppearance", () => {
     // stored choice, and the reader gets the house palette rather than an
     // unstyled page. It is a read that degrades, not a round trip that
     // preserves: the next change this client makes writes the default back.
-    expect(resolveAppearance({ ...GRUVBOX, palette: "kanagawa" }).palette).toBe(
-      "endpaper",
-    );
+    expect(isPaletteId(NOT_A_PALETTE)).toBe(false);
+    expect(
+      resolveAppearance({ ...GRUVBOX, palette: NOT_A_PALETTE }).palette,
+    ).toBe("endpaper");
   });
 
   it("falls back for a mode that is not one of the three", () => {

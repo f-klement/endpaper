@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useTranslation } from "../../../i18n";
-import { Icon } from "../../../components";
+import { Icon } from "../../components";
+import { useTranslation } from "../../i18n";
 
 /**
  * Debounce window, in ms, before a keystroke turns into a request.
@@ -26,10 +26,31 @@ export const MIN_QUERY_LENGTH = 2;
 interface SearchBarProps {
   onSearch: (query: string) => void;
   placeholder?: string;
+  /**
+   * The accessible name, when it is not "Search books".
+   *
+   * **Not optional in spirit, and it was hard coded.** The placeholder was
+   * already a prop while the `aria-label` was not, so the public catalogue read
+   * "Search this catalogue" on screen and announced "Search books" to a screen
+   * reader: two different names for one control, and the one a non sighted
+   * reader gets naming the wrong catalogue.
+   */
+  label?: string;
 }
 
-/** Debounced search input. Used only by Home, so it lives here. */
-export default function SearchBar({ onSearch, placeholder }: SearchBarProps) {
+/**
+ * Debounced search input.
+ *
+ * It lived in `Home/components` while Home was its only caller, and moved here
+ * when the public catalogue became the second: the debounce window and the
+ * minimum query length are one rule about when a keystroke is worth a request,
+ * and a second copy of it would be a second answer.
+ */
+export default function SearchBar({
+  onSearch,
+  placeholder,
+  label,
+}: SearchBarProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -66,7 +87,7 @@ export default function SearchBar({ onSearch, placeholder }: SearchBarProps) {
           setValue(event.target.value);
         }}
         placeholder={placeholder ?? t("library.search")}
-        aria-label={t("library.searchLabel")}
+        aria-label={label ?? t("library.searchLabel")}
         className="field pl-9"
       />
     </div>

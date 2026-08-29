@@ -8,6 +8,14 @@
 
 /**
  * A member as seen by other members. Deliberately has no password field.
+ *
+ * **And deliberately no address.** This is served inside every book payload
+ * and by the member list, so a field here is disclosed to every member who can
+ * see a book. `MemberEmailOut` is where an address is served, on the four
+ * routes named in `routers/users.py` and nowhere else;
+ * `tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed` fails
+ * if **any** other model puts one in front of a caller, and it asks pydantic
+ * for the wire name, so an alias does not get past it.
  */
 export interface UserOut {
   created_at: string;

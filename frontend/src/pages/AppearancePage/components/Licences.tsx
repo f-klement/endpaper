@@ -5,9 +5,9 @@ import { PALETTES } from "../../../theme";
  * Where the colours and the pattern names came from.
  *
  * On the screen that offers them rather than only in `docs/theming.md`, which
- * is where a reader can find it and where an attribution belongs. Six MIT
- * notices, generated from the catalogue so a seventh palette cannot ship
- * without one, and the Morris & Co sentence, which is a trademark matter rather
+ * is where a reader can find it and where an attribution belongs. Nine MIT
+ * notices, generated from the catalogue so a new palette cannot ship without
+ * one, and the Morris & Co sentence, which is a trademark matter rather
  * than a copyright one: the five designs are public domain and the five names
  * are in current commercial use.
  */

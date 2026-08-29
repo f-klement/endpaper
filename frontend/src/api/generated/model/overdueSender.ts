@@ -16,6 +16,7 @@
 export type OverdueSender = (typeof OverdueSender)[keyof typeof OverdueSender];
 
 export const OverdueSender = {
+  in_app: "in_app",
   webhook: "webhook",
   email: "email",
   telegram: "telegram",

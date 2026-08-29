@@ -1,17 +1,17 @@
 # Theming
 
-Seven palettes, two modes each, and the rule that generated every rung of them.
+Ten palettes, two modes each, and the rule that generated every rung of them.
 
 | Where | What |
 |---|---|
 | `frontend/src/index.css` | The tokens themselves, which are Endpaper's light values, plus Endpaper's dark corrections |
-| `frontend/src/theme/palettes.css` | The other six palettes, as `data-theme` blocks |
+| `frontend/src/theme/palettes.css` | The other nine palettes, as `data-theme` blocks |
 | `frontend/src/theme/palettes.ts` | The catalogue: the list, the attributions, and which member was constructed |
 | `frontend/src/theme/appearance.ts` | The per account preference and its write-through cache |
 | `frontend/src/pages/AppearancePage/` | The picker at `/settings/appearance/theme` |
 | `frontend/tests/theme/palettes.test.ts` | The contract below, measured against the shipped stylesheets |
 
-## The seven
+## The ten
 
 | Palette | Modes | Attribution |
 |---|---|---|
@@ -22,10 +22,21 @@ Seven palettes, two modes each, and the rule that generated every rung of them.
 | Solarized | light, dark | Ethan Schoonover, MIT |
 | Everforest | Medium light, Medium dark | sainnhe, MIT |
 | Nord | dark published, light constructed | Arctic Ice Studio and Sven Greb, MIT |
+| Kanagawa | Lotus, Wave | Tommaso Laurenzi, MIT |
+| Tokyo Night | light, dark | Enkia, MIT |
+| Ayu | light, dark | Konstantin Pschera, MIT |
 
-All six upstream palettes are MIT licensed and the values are taken from each project's own
+All nine upstream palettes are MIT licensed and the values are taken from each project's own
 repository rather than from a documentation site, which in at least one case carries a
 different licence. None of these projects endorses this one.
+
+**Which repository, for the three added last**, because for two of them the obvious one is
+the wrong one: `rebelot/kanagawa.nvim`, `tokyo-night/tokyo-night-vscode-theme`, and
+`ayu-theme/ayu-colors`. Ayu's editor plugins, `ayu-theme/ayu-vim` among them, are Apache 2.0
+and only the colours repository is MIT; and the Tokyo Night everybody links to,
+`folke/tokyonight.nvim`, is Apache 2.0 as well, where Enkia's original is MIT. A palette
+whose licence is read off the theme's website rather than the file the values came from is a
+licence read off the wrong thing.
 
 **Mode is an independent axis and no palette may disable it.** Nord publishes no light
 theme, so its light member is built from Snow Storm (the surfaces) and Polar Night (the
@@ -45,21 +56,54 @@ Only three publish one:
 | Catppuccin | Latte | Mocha |
 | Rose Pine | Dawn | Moon |
 | Everforest | Medium light | Medium dark |
+| Kanagawa | Lotus | Wave |
 
-The other four get no second line. "Gruvbox light" is not a title anybody uses, and Nord
+The other six get no second line. "Gruvbox light" is not a title anybody uses, and Nord
 names its colour groups rather than its themes: Polar Night and Snow Storm are the two
 neutral sets its members are built out of, not the names of a light and a dark theme.
+
+Tokyo Night and Ayu are the same rule seen from the other side, and both are worth stating
+because each looks at first like a palette that does name its members. Tokyo Night publishes
+three themes and Ayu three; in each case the third carries a name of its own, Storm and
+Mirage, and in each case the third is not what is ported here. The two that are ported are
+called by the palette's name plus the word for the mode, so there is nothing to print, and
+printing "Storm" or "Mirage" would name a member this app does not ship.
 
 ### The wallpaper names
 
 The rule, and both halves of the set are an instance of it: **name the tradition, not a
 product; use the historical title where one exists; never a mark that only a company uses.**
 
-Five are named for the historical Morris designs the drawings are after. Those names,
-"Willow Bough", "Strawberry Thief", "Golden Lily", "Pimpernel" and "Acanthus", are also
-current product names of Morris & Co, a live trading brand. The designs are public domain;
-the names are in commercial use, which is a trademark question rather than a copyright one,
-and the two do not expire together.
+Eight are named for the historical designs the drawings are after, seven of them Morris's
+own and one his firm's. Those names are also current product names of Morris & Co, a live
+trading brand. The designs are public domain; the names are in commercial use, which is a
+trademark question rather than a copyright one, and the two do not expire together.
+
+| Name | Designed | What is reproduced |
+|---|---|---|
+| Trellis | 1862, issued as wallpaper 1864 | The battened trellis and the wild rose climbing it. Morris's first wallpaper design. The birds on it are Philip Webb's and are not drawn, for the reason below the table |
+| Jasmine | 1872 | Trails of jasmine over a ground of hawthorn foliage. The one design here whose subject is two plants, which is what the underfoliage plane is for |
+| Acanthus | 1875 | The counter scrolling ogee of acanthus leaves |
+| Marigold | 1875 | The turnover: radiating marigold heads on scrolling stems, registered as both a wallpaper and a printed textile |
+| Pimpernel | 1876 | The ogee, with a bloom at the centre of each |
+| Strawberry Thief | 1883 | The climbing stems and the fruit. The thieving birds are not drawn |
+| Willow Bough | 1887 | The mass of willow leaves on serpentine stems |
+| Golden Lily | 1899, and it is **John Henry Dearle's**, not Morris's | The three petalled lilies on their stems. Dearle was Morris & Co's chief designer after Morris; he died in 1932, so it left copyright in 2003 under life plus seventy, against 1967 for Morris's own |
+
+**Two of these designs have birds in them and neither one's birds are drawn, and that is
+not a rights question.** Trellis's are Philip Webb's, who died in 1915, so they left
+copyright in 1985 under life plus seventy and in 2015 under the longest term anywhere;
+Strawberry Thief's are Morris's own and are out of copyright with everything else of his.
+They are absent because **this engine has no figurative motif**: it grows leaves, petals and
+berries along curves and stamps them at chosen points, and a bird is neither. Saying it any
+other way puts a date where a reader takes it to be doing work it is not.
+
+Morris died in 1896, so everything of his is long out of copyright, and Dearle in 1932.
+**A modern reproduction of one of these is a different question**, which is why nothing here
+is traced: a high resolution scan is usually a museum's photograph published under the
+museum's own terms, and "it is a Morris" is not on its own a licence for the image somebody
+made of it. What is reproduced here is a description, written from the designs, and it is in
+`frontend/src/theme/patterns.ts` for anybody to read.
 
 Naming a design by the name its author gave it is nominative use in its strongest form:
 these are the historical titles, used as such by the V&A and in every scholarly catalogue,
@@ -68,14 +112,29 @@ and there is no alternative name for Strawberry Thief.
 > The Morris pattern names identify the historical designs the drawings are after. This
 > project is not affiliated with, or endorsed by, Morris & Co.
 
-The other five are named for the traditions rather than for any surviving work: nonpareil,
-seigaiha, asanoha, plait and khatam are all common nouns for a kind of pattern, owned by
-nobody. Two of those names were chosen against an obvious alternative and the reason matters
-in both cases. **Khatam, not girih**: girih names the five-tile quasi-periodic system, which
-has no square repeat, and calling a periodic eight-point star field girih is wrong in the one
-way a reader who knows the field notices immediately. **Plait, not Book of Kells**: a plait
-is the construction, and naming a specific manuscript would claim a resemblance to a
-particular page that nothing here is traced from.
+The other eight are named for the traditions rather than for any surviving work. Every one
+of those names is a common noun for a kind of pattern, owned by nobody, and every one of the
+patterns is a geometric construction rather than a work: there is no author to have held a
+copyright in a rule for setting out circles on a lattice.
+
+| Name | Tradition | What is reproduced |
+|---|---|---|
+| Nonpareil | European and Turkish marbling, described under that name by Woolnough, 1853 | The comb drawn once through the bath in a single pass |
+| Curl | The same tradition, also called snail or French curl | The same comb, worked a second time with a stylus drawn in circles, which carries the lines round each eye |
+| Seigaiha | Japanese, the "blue sea wave", in use since the Heian period | Interlocked fans of concentric arcs |
+| Asanoha | Japanese, the "hemp leaf" | The hexagonal lattice and the six spokes that make its star |
+| Shippo | Japanese, the "seven treasures", also read as linked coins | Circles on a square lattice at the radius that makes each pass through its neighbours' centres |
+| Meander | Greek, from the geometric period | The fret, laid as a field rather than as a border |
+| Plait | Insular manuscript ornament | The interlace, over and under |
+| Khatam | Persian marquetry | The eight point star field and the cross between four stars |
+
+Three of those names were chosen against an obvious alternative. **Khatam, not girih**:
+girih names the five-tile quasi-periodic system, which has no square repeat, and calling a
+periodic eight-point star field girih is wrong in the one way a reader who knows the field
+notices immediately. **Plait, not Book of Kells**: a plait is the construction, and naming a
+specific manuscript would claim a resemblance to a particular page that nothing here is
+traced from. **Meander, not Greek key**: the two name the same ornament, and the first is
+what the literature uses.
 
 No pattern in this app is traced from an image. Every one is generated from a described
 rule, and the rule is in the source.
@@ -178,13 +237,34 @@ Published values kept verbatim, out of those the palette publishes at all:
 | Solarized | 4/7 | 4/8 | 11 |
 | Everforest | 5/8 | 6/8 | 7 |
 | Nord | 7/7 | 7/7 | 4 |
+| Kanagawa | 4/9 | 6/8 | 9 |
+| Tokyo Night | 5/5 | 6/6 | 1 |
+| Ayu | 6/6 | 4/4 | 2 |
 
-Nord is the only palette that needs no neutral correction in either mode, which is not luck:
-its neutrals are further apart than anybody else's. Solarized needs the most, because its
+Nord and Tokyo Night are the two palettes that need no neutral correction in either mode,
+which is not luck: both put their neutrals further apart than anybody else does. Kanagawa is
+the other end of that, and for the opposite reason: Lotus is ink on a cream page rather than
+on a white one, so its whole ink half starts closer to its own background than any other
+light member's does. Solarized needs the most, because its
 ink tiers are compressed against this app's (base01 through base1 span 2.4 to 4.9 on its own
 dark card, where the contract wants 3.0 to 7.0).
 
 ## Every correction
+
+**A semantic ink in light is corrected against the page, not the card.** In light the page
+is darker than the card, so it is the harder of the two surfaces, and a `500` bisected to
+4.5 lands there. Measured across all twenty of them, ten palettes times `bloom` and
+`danger`: **4.50 (Solarized) to 4.53 (Everforest) on the page**, and 4.64 (Ayu) to 5.22
+(Tokyo Night) on the card. Every row below names the page and quotes the page figure.
+
+**Eight rows used to name the card and quote the card figure**, on Rose Pine, Solarized,
+Everforest and Nord, and they were corrected here rather than left as they were: the
+correction each of them describes was driven by the page, so the surface was wrong and the
+number with it. Gruvbox looks like it belongs in that list and does not, because none of
+its corrections is a semantic ink. What stops the class returning is
+`palettes.test.ts::the correction tables in docs/theming.md`, which recomputes every "Was"
+figure in this section from the upstream hex beside it against the surface the last column
+names, and checks every "Shipped" hex against the stylesheet.
 
 ### Endpaper, light
 
@@ -236,8 +316,8 @@ dark card, where the contract wants 3.0 to 7.0).
 | `paper-500` | `#9893a5` | `#767183` | 2.87 | 4.5 | on the card |
 | `paper-700` | `#797593` | `#625d7a` | 4.23 | 6.0 | on the card |
 | `paper-900` | `#575279` | `#544e75` | 6.66 | 7.0 | on the page |
-| `bloom-500` | `#d7827e` | `#a95957` | 2.74 | 4.5 | text on the card |
-| `danger-500` | `#b4637a` | `#a7586f` | 4.04 | 4.5 | text on the card |
+| `bloom-500` | `#d7827e` | `#a95957` | 2.60 | 4.5 | text on the page |
+| `danger-500` | `#b4637a` | `#a7586f` | 3.84 | 4.5 | text on the page |
 
 ### Rose Pine, dark
 
@@ -280,8 +360,8 @@ dark card, where the contract wants 3.0 to 7.0).
 | `paper-400` | `#93a1a1` | `#849192` | 2.48 | 3.0 | on the card |
 | `paper-500` | `#839496` | `#647476` | 2.93 | 4.5 | on the card |
 | `paper-700` | `#586e75` | `#4c6168` | 4.99 | 6.0 | on the card |
-| `bloom-500` | `#d33682` | `#c82a78` | 4.21 | 4.5 | text on the card |
-| `danger-500` | `#dc322f` | `#d22626` | 4.29 | 4.5 | text on the card |
+| `bloom-500` | `#d33682` | `#c82a78` | 3.95 | 4.5 | text on the page |
+| `danger-500` | `#dc322f` | `#d22626` | 4.02 | 4.5 | text on the page |
 
 ### Solarized, dark
 
@@ -305,8 +385,8 @@ dark card, where the contract wants 3.0 to 7.0).
 | `paper-400` | `#a6b0a0` | `#889283` | 2.08 | 3.0 | on the card |
 | `paper-500` | `#939f91` | `#697467` | 2.56 | 4.5 | on the card |
 | `paper-700` | `#5c6a72` | `#536068` | 5.18 | 6.0 | on the card |
-| `bloom-500` | `#df69ba` | `#b24192` | 2.83 | 4.5 | text on the card |
-| `danger-500` | `#f85552` | `#cf2b30` | 3.04 | 4.5 | text on the card |
+| `bloom-500` | `#df69ba` | `#b24192` | 2.67 | 4.5 | text on the page |
+| `danger-500` | `#f85552` | `#cf2b30` | 2.86 | 4.5 | text on the page |
 
 ### Everforest, dark
 
@@ -323,8 +403,8 @@ dark card, where the contract wants 3.0 to 7.0).
 
 | Rung | Upstream | Shipped | Was | Needed | Where it is read |
 |---|---|---|---|---|---|
-| `bloom-500` | `#b48ead` | `#815e7c` | 2.46 | 4.5 | text on the card |
-| `danger-500` | `#bf616a` | `#a84c55` | 3.55 | 4.5 | text on the card |
+| `bloom-500` | `#b48ead` | `#815e7c` | 2.33 | 4.5 | text on the page |
+| `danger-500` | `#bf616a` | `#a84c55` | 3.36 | 4.5 | text on the page |
 
 ### Nord, dark
 
@@ -335,43 +415,126 @@ dark card, where the contract wants 3.0 to 7.0).
 | `bloom-500` | `#b48ead` | `#c8a2c1` | 3.55 | 4.5 | text on the card |
 | `danger-500` | `#bf616a` | `#f59199` | 2.46 | 4.5 | text on the card |
 
+### Kanagawa, Lotus
+
+7 corrections, the most of any light member.
+
+| Rung | Upstream | Shipped | Was | Needed | Where it is read |
+|---|---|---|---|---|---|
+| `paper-400` | `#a09cac` | `#888594` | 2.23 | 3.0 | on the card |
+| `paper-500` | `#8a8980` | `#6b6a62` | 2.93 | 4.5 | on the card |
+| `paper-600` | `#716e61` | `#5f5c52` | 4.26 | 4.5 | on the card |
+| `paper-800` | `#545464` | `#504f5f` | 5.00 | 5.39 | on the sunken tier |
+| `paper-900` | `#43436c` | `#414169` | 6.78 | 7.0 | on the page |
+| `bloom-500` | `#b35b79` | `#994563` | 3.26 | 4.5 | text on the page |
+| `danger-500` | `#c84053` | `#b42d44` | 3.55 | 4.5 | text on the page |
+
+`paper-800` is the one rung here corrected against something other than a floor in the rung
+contract. It clears every pair it is in at `#545464`; what it does not clear is the badge
+value cell, `paper-800` on `paper-100`, whose worst across the palettes is a figure
+`docs/decisions.md` states and `palettes.test.ts` asserts. Lotus's sunken tier is a cream
+rather than a near white, so at the published ink that pairing lands at 5.00 and takes the
+documented worst off Catppuccin at 5.34.
+
+### Kanagawa, Wave
+
+2 corrections.
+
+| Rung | Upstream | Shipped | Was | Needed | Where it is read |
+|---|---|---|---|---|---|
+| `paper-500` | `#938aa9` | `#968dac` | 4.34 | 4.5 | on the card |
+| `paper-600` | `#727169` | `#75746b` | 2.88 | 3.0 | on the card |
+
+### Tokyo Night, light
+
+1 correction, and no neutral moves in either mode.
+
+| Rung | Upstream | Shipped | Was | Needed | Where it is read |
+|---|---|---|---|---|---|
+| `bloom-600` | `#7b43ba` | `#7940b6` | 4.40 | 4.5 | text on the page |
+
+The page is what moved it, not the card. Tokyo Night Light's page is its side bar,
+`#d6d8df`, which is 5.3 CIE L* below its editor background, so a colour that clears 4.5 on
+the card at 5.07 and on its own tint at 5.25 can still fail the page. It is the one palette
+here whose two surfaces are far enough apart for those three to disagree.
+
+### Tokyo Night, dark
+
+No corrections.
+
+### Ayu, Light
+
+2 corrections.
+
+| Rung | Upstream | Shipped | Was | Needed | Where it is read |
+|---|---|---|---|---|---|
+| `bloom-500` | `#a37acc` | `#8961b1` | 3.21 | 4.5 | text on the page |
+| `danger-500` | `#e65050` | `#d13b3f` | 3.54 | 4.5 | text on the page |
+
+Ayu Light's neutrals are all kept, and that is a placement rather than luck. Its editor
+foreground measures 6.10 on its own card, which holds `paper-700` and not the 7.0 body text
+asks of `paper-900`, so it sits at 700 and the two rungs below it are generated. Placed at
+900 and corrected instead, it would have cleared the floor and squeezed `paper-700` through
+`paper-950` into a tenth of the ramp, leaving muted, secondary and body text within 0.02
+OKLab lightness of each other.
+
+### Ayu, Dark
+
+No corrections.
+
+Ayu Dark publishes three surfaces, `surface.base`, `surface.lift` and `editor.line`, and
+only the first two are taken. All three sit inside **4.61 CIE L***, so a ladder built from
+all of them puts the 1px divider this app draws between `paper-800` and `paper-900` at
+**3.02 L***,
+under the 4.0 floor the badge hairline is anchored to and below the 4.25 that was the
+faintest divider anything here shipped. The two rungs that name the page and the card are
+published; the two above them are generated, and the divider then measures 8.33.
+
 ## The measured result
 
 Every theme and mode clears every pair. `frontend/tests/theme/palettes.test.ts` reads the
 shipped stylesheets, resolves the cascade the way a browser does, and asserts the full list;
-these are the headline rows from that run.
+these are the headline rows, read off the same files by the same formula.
+
+**Four decimals where a cell is within a hundredth of its floor**, two everywhere else. A
+figure printed as `7.00` is the one a reader most needs to know the side of, and `7.00`
+cannot tell 7.0032 from 6.9968. Landing on a floor is the method working rather than a
+risk: a corrected rung is bisected to the floor itself, so the tightest margins here belong
+to the palettes that shipped first, Rose Pine's dark `paper-600` at 3.0001 and Endpaper's
+light `paper-400` at 3.0003. What holds them is not the margin, it is that
+`palettes.test.ts` asserts the whole list against the shipped files on every run.
 
 ### Light
 
-| pair | floor | endpaper | catppuccin | rosepine | gruvbox | solarized | everforest | nord |
-|---|---|---|---|---|---|---|---|---|
-| body on the page | 7.0 | 16.78 | 7.00 | 7.06 | 10.22 | 11.31 | 10.06 | 8.26 |
-| secondary on the card | 6.0 | 9.18 | 6.04 | 6.01 | 6.00 | 6.05 | 6.01 | 6.40 |
-| muted on the page | 4.5 | 5.67 | 4.92 | 4.78 | 5.03 | 4.81 | 4.73 | 5.02 |
-| paper-500 on the card | 4.5 | 4.53 | 4.54 | 4.53 | 4.53 | 4.53 | 4.53 | 4.51 |
-| paper-400 on the card | 3.0 | 3.00 | 3.00 | 3.00 | 3.02 | 3.02 | 3.00 | 3.00 |
-| link on the card | 4.5 | 5.47 | 6.11 | 7.76 | 6.25 | 6.88 | 6.58 | 6.34 |
-| fill pairing | 4.5 | 4.78 | 5.14 | 6.11 | 4.99 | 5.53 | 5.18 | 5.41 |
-| hover pairing | 4.5 | 5.47 | 6.91 | 8.06 | 6.88 | 7.42 | 7.09 | 7.31 |
-| focus ring on the page | 3.0 | 3.09 | 3.08 | 3.96 | 3.25 | 3.62 | 3.36 | 3.31 |
-| bloom ink on its tint | 4.5 | 6.69 | 7.79 | 7.41 | 7.54 | 7.73 | 7.66 | 7.33 |
-| danger text on the card | 4.5 | 6.29 | 6.28 | 5.85 | 4.90 | 6.03 | 5.05 | 5.21 |
+| pair | floor | endpaper | catppuccin | rosepine | gruvbox | solarized | everforest | nord | kanagawa | tokyonight | ayu |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| body on the page | 7.0 | 16.78 | 7.0019 | 7.06 | 10.22 | 11.31 | 10.06 | 8.26 | 7.0032 | 7.70 | 9.63 |
+| secondary on the card | 6.0 | 9.18 | 6.04 | 6.0071 | 6.0011 | 6.05 | 6.0071 | 6.40 | 6.06 | 6.53 | 6.10 |
+| muted on the page | 4.5 | 5.67 | 4.92 | 4.78 | 5.03 | 4.81 | 4.73 | 5.02 | 4.87 | 4.98 | 5.09 |
+| paper-500 on the card | 4.5 | 4.53 | 4.54 | 4.53 | 4.53 | 4.53 | 4.53 | 4.5075 | 4.53 | 5.11 | 4.55 |
+| paper-400 on the card | 3.0 | 3.0003 | 3.0034 | 3.0014 | 3.02 | 3.02 | 3.0015 | 3.0030 | 3.0019 | 3.86 | 3.24 |
+| link on the card | 4.5 | 5.47 | 6.11 | 7.76 | 6.25 | 6.88 | 6.58 | 6.34 | 6.04 | 6.86 | 6.05 |
+| fill pairing | 4.5 | 4.78 | 5.14 | 6.11 | 4.99 | 5.53 | 5.18 | 5.41 | 5.51 | 6.77 | 4.62 |
+| hover pairing | 4.5 | 5.47 | 6.91 | 8.06 | 6.88 | 7.42 | 7.09 | 7.31 | 7.25 | 8.47 | 6.21 |
+| focus ring on the page | 3.0 | 3.09 | 3.08 | 3.96 | 3.25 | 3.62 | 3.36 | 3.31 | 3.0067 | 3.35 | 3.01 |
+| bloom ink on its tint | 4.5 | 6.69 | 7.79 | 7.41 | 7.54 | 7.73 | 7.66 | 7.33 | 7.29 | 7.53 | 7.31 |
+| danger text on the card | 4.5 | 6.29 | 6.28 | 5.85 | 4.90 | 6.03 | 5.05 | 5.21 | 5.28 | 5.60 | 5.23 |
 
 ### Dark
 
-| pair | floor | endpaper | catppuccin | rosepine | gruvbox | solarized | everforest | nord |
-|---|---|---|---|---|---|---|---|---|
-| body on the page | 8.5 | 15.34 | 11.34 | 11.86 | 10.75 | 12.25 | 8.62 | 10.26 |
-| body on the card | 7.0 | 13.94 | 8.69 | 10.90 | 8.45 | 10.61 | 7.38 | 8.26 |
-| muted on the card | 6.0 | 7.43 | 6.03 | 6.00 | 6.01 | 6.03 | 6.01 | 6.04 |
-| paper-500 on the card | 4.5 | 4.56 | 4.51 | 4.52 | 4.54 | 4.51 | 4.51 | 4.50 |
-| paper-600 on the card | 3.0 | 3.00 | 3.40 | 3.00 | 3.16 | 3.00 | 3.21 | 3.01 |
-| accent text on the card | 4.5 | 7.51 | 9.07 | 5.24 | 6.43 | 5.31 | 7.14 | 5.59 |
-| fill pairing | 4.5 | 5.98 | 11.01 | 5.70 | 7.01 | 4.75 | 7.28 | 5.99 |
-| hover pairing | 4.5 | 8.26 | 11.83 | 7.42 | 8.18 | 6.13 | 8.33 | 6.94 |
-| focus ring on the page | 3.0 | 5.98 | 11.01 | 4.29 | 7.01 | 4.75 | 7.28 | 5.99 |
-| bloom text on the card | 4.5 | 9.25 | 8.23 | 6.55 | 4.72 | 5.92 | 5.40 | 5.63 |
-| danger text on the card | 4.5 | 9.25 | 5.43 | 7.96 | 6.01 | 5.92 | 4.76 | 4.80 |
+| pair | floor | endpaper | catppuccin | rosepine | gruvbox | solarized | everforest | nord | kanagawa | tokyonight | ayu |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| body on the page | 8.5 | 15.34 | 11.34 | 11.86 | 10.75 | 12.25 | 8.62 | 10.26 | 11.26 | 11.14 | 10.12 |
+| body on the card | 7.0 | 13.94 | 8.69 | 10.90 | 8.45 | 10.61 | 7.38 | 8.26 | 9.75 | 10.59 | 9.81 |
+| muted on the card | 6.0 | 7.43 | 6.03 | 6.0004 | 6.0088 | 6.03 | 6.0073 | 6.04 | 6.14 | 6.89 | 6.32 |
+| paper-500 on the card | 4.5 | 4.56 | 4.5096 | 4.52 | 4.54 | 4.51 | 4.51 | 4.5028 | 4.51 | 5.46 | 4.59 |
+| paper-600 on the card | 3.0 | 3.0011 | 3.40 | 3.0001 | 3.16 | 3.0017 | 3.21 | 3.0069 | 3.0084 | 4.18 | 3.15 |
+| accent text on the card | 4.5 | 7.51 | 9.07 | 5.24 | 6.43 | 5.31 | 7.14 | 5.59 | 6.36 | 8.27 | 10.92 |
+| fill pairing | 4.5 | 5.98 | 11.01 | 5.70 | 7.01 | 4.75 | 7.28 | 5.99 | 5.94 | 7.14 | 9.98 |
+| hover pairing | 4.5 | 8.26 | 11.83 | 7.42 | 8.18 | 6.13 | 8.33 | 6.94 | 7.35 | 8.70 | 11.27 |
+| focus ring on the page | 3.0 | 5.98 | 11.01 | 4.29 | 7.01 | 4.75 | 7.28 | 5.99 | 5.94 | 7.14 | 9.98 |
+| bloom text on the card | 4.5 | 9.25 | 8.23 | 6.55 | 4.72 | 5.92 | 5.40 | 5.63 | 6.83 | 7.39 | 9.34 |
+| danger text on the card | 4.5 | 9.25 | 5.43 | 7.96 | 6.01 | 5.92 | 4.76 | 4.80 | 7.07 | 8.46 | 7.16 |
 
 ## What the contract does not cover
 
@@ -380,20 +543,25 @@ rather than left to be discovered, because a contract that is silent about its
 own edges reads as a contract that has none.
 
 **`warn`, `ok` and `loan` are not tokens.** Amber, green and orange are still
-raw Tailwind at 29 lines across 16 files, so six of the seven palettes ship an
+raw Tailwind at 29 lines across 16 files, so nine of the ten palettes ship an
 overdue badge and a caution banner in colours that belong to none of them.
-Tokenising them is three ramps times seven palettes times two modes, which is
+Tokenising them is three ramps times ten palettes times two modes, which is
 its own piece of work. Most of those pairings are self-contained
 (`bg-amber-50` with `text-amber-800`), which is why nothing here fails and also
 why nothing here catches them.
 
 One was not self-contained and is repaired: `text-green-600` on the card, the
-success message on four screens, measured **2.79 (Nord) to 3.22 (Endpaper)**
-against a floor of 4.5. It is now `text-green-800`, at **6.19 to 7.13**.
-`green-700` looks like the answer and is not: 4.29 on Nord, 4.37 on
-Catppuccin, 4.49 on Gruvbox. A fixed hue is a bet on seven different card
-colours at once, and that is the argument for the token job rather than for
-more repairs like this one.
+success message on four screens, measured **2.61 (Tokyo Night) to 3.22
+(Endpaper)** against a floor of 4.5. It is now `text-green-800`, which clears on
+every palette at **5.78 (Tokyo Night) to 7.13 (Endpaper)**. `green-700` looks
+like the answer and is not: it is under the floor on five of the ten, at 4.01 on
+Tokyo Night, 4.12 on Kanagawa, 4.29 on Nord, 4.37 on Catppuccin and 4.49 on
+Gruvbox. A fixed hue is a bet on ten different card colours at once, and that is
+the argument for the token job rather than for more repairs like this one.
+
+Three palettes were added after that repair and it held: the darkest card of the
+ten is now Tokyo Night's rather than Nord's, and `green-800` still clears there
+by 1.28.
 
 **Dark hover is covered now.** Twelve sites wrote `hover:text-accent-800` with
 no `dark:` variant and measured **1.36 to 2.85** on the dark card: legible at
@@ -401,7 +569,7 @@ rest, illegible while pointed at. All twelve are repaired, and
 `frontend/tests/houseRules.test.ts` holds the rule with no exemption list.
 
 **The effort is still inverted in one place.** `paper-500` is held to 4.5 in
-all fourteen theme-modes and painted at **zero** call sites, while the amber
+all twenty theme-modes and painted at **zero** call sites, while the amber
 and orange above are painted constantly and measured nowhere.
 
 ## What this does to the wallpaper
@@ -421,7 +589,8 @@ dark    ground 0.061   under 0.070   foliage 0.083   bloom 0.102
 ```
 
 It has to work that way. At a fixed alpha the weight is a function of the
-palette, and the spread was the width of the whole budget:
+palette, and the spread was the width of the whole budget, measured across the
+seven palettes that shipped when the solve was built:
 
 | | at one alpha | solved per palette |
 |---|---|---|
@@ -430,27 +599,32 @@ palette, and the spread was the width of the whole budget:
 | light, in continuous colour | | 1.002x |
 
 The residual is the compositor rounding the blend to 8 bits per channel, not
-the palette: in continuous colour the seven agree to the bisection's own
-precision. The alpha the dark ground needs runs 0.078 (Endpaper) to 0.109
-(Rose Pine) to hold that one weight, and the highest solve anywhere is
-Solarized dark's bloom at 0.2082.
+the palette: in continuous colour those seven agree to the bisection's own
+precision. Across the ten the alpha the dark ground needs runs **0.0720 (Ayu)
+to 0.1093 (Rose Pine)** to hold that one weight, and the highest solve anywhere
+is still Solarized dark's bloom at **0.2082**, which is what the 0.30 ceiling is
+set against.
 
-Two things follow for whoever adds a palette. Nothing in `patterns.ts` needs
-touching: the eighth palette's wallpaper is solved from its own tokens. And
-the guard on opacity is 0.30 rather than 0.15, because 0.15 was a ceiling in
-the wrong unit; the ceiling on how heavy a tile may look is the table above.
+Two things follow for whoever adds a palette, and the three added after this was
+written are the evidence for the first. Nothing in `patterns.ts` needs touching:
+the eleventh palette's wallpaper is solved from its own tokens, and the tenth's
+was. And the guard on opacity is 0.30 rather than 0.15, because 0.15 was a
+ceiling in the wrong unit: seven of the ten palettes need more than 0.15
+somewhere in dark, where five of seven did. The ceiling on how heavy a tile may
+look is the table above.
 
-## The ten wallpapers
+## The sixteen wallpapers
 
 Two families, which is how the picker groups them.
 
 | William Morris | Decorated papers |
 |---|---|
-| Willow Bough, Acanthus, Pimpernel, Strawberry Thief, Golden Lily | Nonpareil, Seigaiha, Asanoha, Plait, Khatam |
+| Trellis, Jasmine, Acanthus, Marigold, Pimpernel, Strawberry Thief, Willow Bough, Golden Lily | Nonpareil, Curl, Seigaiha, Asanoha, Shippo, Meander, Plait, Khatam |
 
-The Morris five are grown along curves; the papers are set out on a lattice.
+The Morris eight are grown along curves; the papers are set out on a lattice.
 Between them they need both halves of the engine, which is the reason to have
-both.
+both. What each reproduces, and on what basis, is in **The wallpaper names**
+above.
 
 ### The ink budget
 
@@ -458,14 +632,23 @@ Mean tile weight, the same number in every palette by construction:
 
 | | | | |
 |---|---|---|---|
-| nonpareil 0.00784 | pimpernel 0.00788 | seigaiha 0.00805 | asanoha 0.00806 |
-| acanthus 0.00815 | khatam 0.00818 | plait 0.00822 | lily 0.00855 |
-| willow 0.00868 | strawberry 0.00879 | | |
+| shippo 0.00772 | jasmine 0.00778 | meander 0.00783 | nonpareil 0.00784 |
+| pimpernel 0.00788 | curl 0.00804 | seigaiha 0.00805 | asanoha 0.00806 |
+| acanthus 0.00815 | khatam 0.00818 | trellis 0.00820 | plait 0.00822 |
+| lily 0.00855 | willow 0.00868 | marigold 0.00869 | strawberry 0.00879 |
 
 The band is 0.0070 to 0.0092 and it binds at both ends. The spread across the
-ten is **1.122x**, against 2.65x for the five that shipped before, and two tiles
-moved to get there: Willow was 0.00485 and gained an underfoliage plane, Golden
-Lily was 0.01343 and its petals came down from 1.2 to 0.85.
+sixteen is **1.138x**, against 2.65x for the five that shipped before, and five
+tiles moved to get there: Willow was 0.00485 and gained an underfoliage plane,
+Golden Lily was 0.01343 and its petals came down from 1.2 to 0.85, Trellis was
+0.01030 and almost all of the excess was its roses, Jasmine arrived at 0.00482,
+thin in both of its planes because it is a trail over a ground, and Marigold
+arrived at 0.00678 with heads less than half the size Pimpernel's blooms are.
+
+Marigold then moved twice more and neither time was for this band: it was
+rebuilt onto the repeat's second mirror axis to close a 68px band of empty
+columns, 0.00777 to 0.00846, and its cross link was arched rather than left
+nearly straight, 0.00846 to 0.00869.
 
 The spread is a property of the measure as well as of the tiles. Coverage is
 computed analytically, which double counts ink laid twice on one pixel and
@@ -481,10 +664,28 @@ and native scale. Two numbers, both read off the generated tile:
 
 - **Tint contrast at least 0.196.** The tile's ink blurred to the acuity the
   rule names, as RMS contrast against its own mean. The floor is what a field
-  of parallel lines at exactly the 12px mark pitch measures; at 4px the same
-  field measures 0.018 and at 30px 1.140. The ten run 0.354 (Nonpareil) to
-  1.696 (Pimpernel). Those three are calibration measurements rather than a
-  formula, and `rasterise.ts` says why that distinction is load bearing.
+  of parallel lines at exactly the 12px mark pitch and 2.4px wide measures; a
+  4px, 1.2px field measures 0.018 and a 30px, 3px one 1.140. The sixteen run
+  0.354 (Nonpareil) to 1.696 (Pimpernel). Those three are calibration
+  measurements rather than a formula, each one is a pitch **and** a stroke
+  width, and `rasterise.ts` says why that distinction is load bearing. The
+  first two are now asserted in `patterns.test.ts`, so the filter cannot move
+  under the floor without something failing.
+
+  **A high score here is not a good tile.** The measure is contrast against the
+  tile's own mean, so a void raises it: Marigold scored the highest of the
+  sixteen while carrying a 68px band of empty columns, and reads 1.526 with the
+  band gone. Neither this nor peak coverage can see an empty region.
+
+- **No empty row or column, for a Morris repeat.** The third measure, and the
+  one that catches a void. It is asserted at zero and only for that family,
+  which is what leaves it with no free parameter: every gap of the kind in the
+  shipped set is a paper's own mark pitch, Meander and Curl at 11px, and no
+  repeat grown along curves has one at all. A threshold in pixels is not
+  available, and the tempting one is wrong: the 12px acuity pitch governs the
+  gap between adjacent marks, so a field of parallel lines at a 16px pitch
+  measures 0.488 on the tint rule, two and a half times its floor, and still
+  leaves a 12px run.
 - **Peak coverage at least 0.9 per layer.** Somewhere the layer has to lay down
   a whole mark. A pattern of sub-pixel hairlines has structure and no weight,
   and that is a stroke-width problem rather than an opacity one.
@@ -498,8 +699,11 @@ away, is in [decisions.md](decisions.md).
 1. Build it in `patterns.ts`, from the primitives if they fit: `lattice`,
    `radial`, `ribbon`, `flow` and `mirror`, plus `grow` for anything that
    follows a curve.
-2. Anything that varies with position must be periodic in the tile. `lattice`
-   and `flow` both throw rather than let it through.
+2. Anything that varies with position must be periodic in the tile. `lattice`,
+   `flow` and `swirl` all throw rather than let it through. `swirl`'s condition
+   is the one worth reading before using it: a displacement field built from
+   terms that vanish outside a radius repeats with the tile exactly when no two
+   of those terms overlap, so it refuses centres closer than twice the reach.
 3. Run `bun run test tests/theme/patterns.test.ts`. It measures the budget, the
    admission rule, the byte cap and the interning, and it names the pattern and
    the number in every failure.
@@ -522,8 +726,8 @@ Four controls, in this order:
 |---|---|
 | Preview | Two of the reader's own books, live |
 | Light and dark | Light, Dark, Follow system |
-| Palette | Seven tiles, each drawn in its own colours, with the attribution and any constructed member |
-| Wallpaper | None, Surprise me, then the ten under **William Morris** and **Decorated papers** |
+| Palette | Ten tiles, each drawn in its own colours, with the attribution and any constructed member |
+| Wallpaper | None, Surprise me, then the sixteen under **William Morris** and **Decorated papers** |
 
 Plus the licences, on the screen that offers the things they cover.
 
@@ -610,7 +814,7 @@ picker can say the system turned it off rather than showing an off state nobody 
 
 The selector is `:root:root`, doubled. A palette block is `:root[data-theme="x"]` at
 specificity (0,2,0) and a plain `:root` is (0,1,0), so written once the rule would apply on
-Endpaper and be silently ignored on the other six.
+Endpaper and be silently ignored on the other nine.
 
 ## Adding a palette
 
@@ -624,7 +828,23 @@ Endpaper and be silently ignored on the other six.
    order, the glare band and the completeness of both blocks. A palette that passes is
    finished; one that does not tells you which pair failed and by how much.
 
-Two palettes were measured and not shipped, so adding either later is a data change rather
-than a research project: **Dracula**, whose ramp needs eight of twelve neutrals generated
-and whose light member exists only inside a commercial product, and **Kanagawa**, whose
-light values could not be verified against upstream at the time.
+**Dracula** was measured and not shipped, and that is not a data change waiting to happen:
+its ramp needs eight of twelve neutrals generated, and its light member, Alucard, exists
+only inside a commercial product, so there is no published light theme to port and no Nord
+style construction out of published groups either.
+
+**Kanagawa** was on that list for the other reason, that its light values could not be
+verified against upstream at the time, and it now ships. They are in
+`lua/kanagawa/colors.lua`, which names every colour, and `lua/kanagawa/themes.lua`, which
+says which name plays which role in Lotus and in Wave: the `bg`, `bg_m1`, `bg_m2` and
+`bg_m3` ladder is the surface order, and `ui.fg` and `ui.fg_dim` are the two inks. A palette
+that publishes its roles as well as its hexes is the easy case, and the reason this one
+looked hard is that the roles are in a second file.
+
+**Two more were checked and refused while these three were chosen**, and both refusals are
+about something other than the colours. `folke/tokyonight.nvim` and `ayu-theme/ayu-vim` are
+**Apache 2.0**, and each is the repository a search returns first for a palette whose MIT
+source is somewhere else. **Flexoki** is MIT and publishes both modes and a full ramp, which
+would have made it the cheapest of the four to port, and it is refused on measurement: its
+dark page is **0.6** OKLab dE from Endpaper's and its light card **1.9** from Endpaper's, so
+the tile a reader would be choosing is the one the app already opens on.

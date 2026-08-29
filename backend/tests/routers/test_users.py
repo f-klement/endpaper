@@ -346,3 +346,276 @@ class TestCreateTestAccountInDirectoryModes:
         )
 
         assert res.status_code == 403
+
+
+# ── Addresses ─────────────────────────────────────────────────────────────────
+
+
+def _directory_member(db, username: str, source: str, email: str | None = None) -> User:
+    """A shadow account, the shape a directory sign in leaves behind."""
+    user = User(username=username, password_hash=None, auth_source=source, email=email)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+class TestReadingYourOwnAddress:
+    def test_a_new_account_has_none(self, client, admin):
+        res = client.get("/api/users/me/email", headers=admin["headers"])
+        assert res.status_code == 200
+        assert res.json()["email"] is None
+
+    def test_it_says_the_field_is_the_members_to_change(self, client, admin):
+        res = client.get("/api/users/me/email", headers=admin["headers"])
+        assert res.json()["editable"] is True
+
+    def test_it_needs_a_session(self, client, admin):
+        assert client.get("/api/users/me/email").status_code == 401
+
+    def test_it_answers_with_the_caller_own_address(self, client, admin, member):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "admin@example.org"},
+            headers=admin["headers"],
+        )
+
+        res = client.get("/api/users/me/email", headers=member["headers"])
+
+        assert res.json()["email"] is None
+        assert res.json()["username"] == "member"
+
+
+class TestWritingYourOwnAddress:
+    def test_it_stores_one(self, client, admin, db):
+        res = client.put(
+            "/api/users/me/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert res.json()["email"] == "kim@example.org"
+        assert db.query(User).filter(User.username == "admin").one().email == "kim@example.org"
+
+    def test_surrounding_space_is_trimmed(self, client, admin, db):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "  kim@example.org  "},
+            headers=admin["headers"],
+        )
+
+        assert db.query(User).filter(User.username == "admin").one().email == "kim@example.org"
+
+    def test_null_clears_it(self, client, admin, db):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+
+        res = client.put("/api/users/me/email", json={"email": None}, headers=admin["headers"])
+
+        assert res.json()["email"] is None
+        assert db.query(User).filter(User.username == "admin").one().email is None
+
+    def test_an_empty_string_clears_it_too(self, client, admin, db):
+        """A member removing their address types nothing into the field, and a
+        422 there would make "remove it" the one edit the form cannot express."""
+        client.put(
+            "/api/users/me/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+
+        client.put("/api/users/me/email", json={"email": "   "}, headers=admin["headers"])
+
+        assert db.query(User).filter(User.username == "admin").one().email is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not an address",
+            "kim@example.org, someone@elsewhere.example",
+            "kim@example.org\nBcc: someone@elsewhere.example",
+            "kim@example.org;someone@elsewhere.example",
+            "<kim@example.org>",
+            "kim@localhost",
+        ],
+    )
+    def test_something_that_is_not_an_address_is_refused(self, client, admin, value):
+        res = client.put("/api/users/me/email", json={"email": value}, headers=admin["headers"])
+        assert res.status_code == 422
+
+    def test_an_absurdly_long_one_is_refused(self, client, admin):
+        res = client.put(
+            "/api/users/me/email",
+            json={"email": "k" * 4000 + "@example.org"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_it_needs_a_session(self, client, admin):
+        res = client.put("/api/users/me/email", json={"email": "kim@example.org"})
+        assert res.status_code == 401
+
+    def test_a_member_writes_only_their_own(self, client, admin, member, db):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "member@example.org"},
+            headers=member["headers"],
+        )
+
+        assert db.query(User).filter(User.username == "admin").one().email is None
+        assert (
+            db.query(User).filter(User.username == "member").one().email
+            == "member@example.org"
+        )
+
+
+class TestAnAdminReadsAndWritesAnybodys:
+    def test_the_list_carries_every_member(self, client, admin, member):
+        res = client.get("/api/users/emails", headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert [row["username"] for row in res.json()] == ["admin", "member"]
+
+    def test_the_list_is_admin_only(self, client, admin, member):
+        assert client.get("/api/users/emails", headers=member["headers"]).status_code == 403
+
+    def test_the_list_needs_a_session(self, client, admin):
+        assert client.get("/api/users/emails").status_code == 401
+
+    def test_an_admin_writes_somebody_elses(self, client, admin, member, db):
+        res = client.put(
+            f"/api/users/{member['user']['id']}/email",
+            json={"email": "member@example.org"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert (
+            db.query(User).filter(User.username == "member").one().email
+            == "member@example.org"
+        )
+
+    def test_a_member_cannot_write_somebody_elses(self, client, admin, member, db):
+        res = client.put(
+            f"/api/users/{admin['user']['id']}/email",
+            json={"email": "stolen@example.org"},
+            headers=member["headers"],
+        )
+
+        assert res.status_code == 403
+        assert db.query(User).filter(User.username == "admin").one().email is None
+
+    def test_no_such_member_is_a_404(self, client, admin):
+        res = client.put(
+            "/api/users/9999/email",
+            json={"email": "nobody@example.org"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 404
+
+    def test_a_path_id_past_the_databases_range_is_refused_not_a_500(self, client, admin):
+        res = client.put(
+            "/api/users/99999999999999999999/email",
+            json={"email": "nobody@example.org"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+    def test_the_same_address_rule_applies(self, client, admin, member):
+        res = client.put(
+            f"/api/users/{member['user']['id']}/email",
+            json={"email": "not an address"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+
+
+class TestWhereTheDirectoryOwnsIt:
+    """The one case a write is refused rather than accepted and reverted."""
+
+    def test_the_field_reports_itself_read_only(self, client, admin, db, monkeypatch):
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        _directory_member(db, "kim", "proxy", "kim@example.org")
+
+        rows = client.get("/api/users/emails", headers=admin["headers"]).json()
+
+        kim = next(row for row in rows if row["username"] == "kim")
+        assert kim["editable"] is False
+        assert kim["email"] == "kim@example.org"
+
+    def test_an_admin_write_is_refused(self, client, admin, db, monkeypatch):
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        kim = _directory_member(db, "kim", "proxy", "kim@example.org")
+
+        res = client.put(
+            f"/api/users/{kim.id}/email",
+            json={"email": "typo@example.org"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 409
+        assert "PROXY_EMAIL_HEADER" in res.json()["detail"]
+        db.expire_all()
+        assert db.query(User).filter(User.username == "kim").one().email == "kim@example.org"
+
+    def test_a_local_account_in_a_directory_deployment_is_still_editable(
+        self, client, admin, db, monkeypatch
+    ):
+        """`editable` is per row. An admin created test account is local, so it
+        stays the admin's to set even where the directory owns everybody else's."""
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+
+        res = client.put(
+            f"/api/users/{admin['user']['id']}/email",
+            json={"email": "admin@example.org"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+
+    def test_an_unconfigured_directory_leaves_the_field_editable(self, client, admin, db):
+        """`PROXY_EMAIL_HEADER` unset, which is the shipped default: a shadow
+        account's address is nobody's to assert, so it stays the app's to set."""
+        kim = _directory_member(db, "kim", "proxy")
+
+        res = client.put(
+            f"/api/users/{kim.id}/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+
+
+class TestAnAddressIsNotOnTheMemberList:
+    """The rule the whole design turns on, checked on the wire rather than in a
+    schema: `UserOut` is served inside every book payload and by this list."""
+
+    def test_the_member_list_carries_no_address(self, client, admin, member):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/users", headers=member["headers"]).text
+
+        assert "kim@example.org" not in body
+        assert all("email" not in row for row in client.get(
+            "/api/users", headers=member["headers"]).json())
+
+    def test_a_book_payload_carries_no_address(self, client, admin, member, make_book):
+        client.put(
+            "/api/users/me/email",
+            json={"email": "kim@example.org"},
+            headers=admin["headers"],
+        )
+        make_book(admin["headers"], title="Dune")
+
+        body = client.get("/api/books", headers=member["headers"]).text
+
+        assert "kim@example.org" not in body

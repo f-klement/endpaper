@@ -221,7 +221,7 @@ export function applyWallpaper(
   // result as SVG, so an injected quote survives the round trip intact.
   //
   // What stops it is that the source set is closed: `data-theme` is only ever
-  // set through `resolvePalette`, which checks against the seven, and both
+  // set through `resolvePalette`, which checks against the catalogue, and both
   // stylesheets hold literal hexes. That is now an inference across two files,
   // so it is asserted here instead of being left to be re-derived.
   //

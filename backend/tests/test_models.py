@@ -11,7 +11,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
 from database import Base
-from enums import AuthorityProvenance, AuthorityScheme
+from enums import AuthorityProvenance, AuthorityScheme, ClassificationScheme
 from models import (
     AUTHORITY_IDENTIFIER_MAX,
     AuthorIdentifier,
@@ -719,12 +719,83 @@ class TestTheAuthorityIdentifierConstraints:
         db.add(row)
         return row
 
-    def test_a_scheme_no_authority_file_is_read_for_is_refused(self, db):
-        self._row(db, scheme="viaf")
+    def test_a_subject_heading_scheme_is_refused_as_a_persons_identifier(self, db):
+        """`ddc` is a `ClassificationScheme` member and will never be an
+        `AuthorityScheme` one.
+
+        **This test has now gone vacuous twice, and the third choice is meant to
+        end that.** The value was `viaf` until `viaf` became a member on
+        2026-08-28, then `blbnb` until `blbnb` became one later the same day.
+        Both times it kept passing right up to the commit that made its subject
+        legal and then failed loudly, which is the good outcome and an expensive
+        way to learn the lesson: **a refusal test whose subject is a plausible
+        future member is a countdown, not a guard.**
+
+        `ddc` is neither. It is a Dewey number, and both enums' docstrings say
+        why one column may never hold both: `4203576-4` is what a book is about
+        and `118181505` is who wrote it, and a store that accepted the first
+        here would make a heading and an author the same kind of row. That is a
+        design decision rather than a fact about today's supply, so this cannot
+        go vacuous without somebody reversing it.
+        """
+        self._row(db, scheme="ddc")
         with pytest.raises(IntegrityError) as refusal:
             db.commit()
 
         assert "ck_author_identifiers_scheme" in str(refusal.value)
+
+    def test_every_scheme_the_enum_offers_is_accepted(self, db):
+        """The other direction, and the one a widened enum breaks.
+
+        **Which schema this runs against is not fixed, and saying otherwise
+        would be the claim rather than the measurement.** `conftest._schema_once`
+        builds with `create_all`, where `models._scheme_check` derives the
+        constraint from `AuthorityScheme` and this passes by construction; but
+        `tests/test_schema.py`'s `restore_schema` fixture replaces the schema
+        with a **migrated** one for the rest of its worker, so on a run where
+        the two files share a worker this is against the migration. Measured
+        2026-08-28: with `'isni'` removed from `d5e1b93a7c62._SCHEMES_AFTER`,
+        this test failed alongside the schema one.
+
+        So the guard that can be relied on to separate the enum from the
+        migration is
+        `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase
+        ::test_every_scheme_the_enum_offers_is_storable`, which rebuilds through
+        `upgrade_to_head` itself. This one is here so the refusal above cannot
+        be read as "no scheme but GND is storable", which is what it used to
+        mean.
+        """
+        for scheme in AuthorityScheme:
+            self._row(db, author_key=f"{scheme.value} person", scheme=scheme)
+        db.commit()
+
+        assert db.query(AuthorIdentifier).count() == len(AuthorityScheme)
+
+    def test_the_two_scheme_enums_overlap_on_gnd_and_on_nothing_else(self):
+        """What the refusal above now rests on, asserted rather than assumed.
+
+        That test needs a value the closed set will never accept, and it has
+        twice picked one that was accepted within the day. `ddc` is safe because
+        a shelf notation is not a person, and this is the property that says so.
+
+        **The first version of this asserted the two enums share nothing, and
+        the suite refused it**, which is the reason it is worth having. They
+        share `gnd`, deliberately: the Gemeinsame Normdatei is one file covering
+        both subjects and people, the DNB writes both in the same MARC `$0`, and
+        `4203576-4` and `118181505` are both GND numbers. What the two enums
+        keep apart is the **column**, not the spelling.
+
+        So the invariant is an exact overlap rather than an empty one, and it
+        catches three things: a `ClassificationScheme` value arriving as a
+        person's scheme, a person's scheme arriving as a subject one, and `gnd`
+        being dropped from either side, which would leave the pair describing a
+        split that no longer exists.
+        """
+        shared = {member.value for member in AuthorityScheme} & {
+            member.value for member in ClassificationScheme
+        }
+
+        assert shared == {"gnd"}
 
     def test_a_provenance_that_is_neither_is_refused(self, db):
         self._row(db, provenance="robot")

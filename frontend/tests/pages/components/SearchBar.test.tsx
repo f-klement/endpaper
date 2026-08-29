@@ -8,13 +8,13 @@
  */
 
 import { act, fireEvent, screen } from "@testing-library/react";
-import { renderLocalised } from "../../../utils";
+import { renderLocalised } from "../../utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SearchBar, {
   DEBOUNCE_MS,
   MIN_QUERY_LENGTH,
-} from "../../../../src/pages/Home/components/SearchBar";
+} from "../../../src/pages/components/SearchBar";
 
 beforeEach(() => {
   vi.useFakeTimers();

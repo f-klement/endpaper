@@ -23,18 +23,21 @@ from ldap3.core.exceptions import LDAPException
 from ldap3.utils.conv import escape_filter_chars
 from sqlalchemy.orm import Session
 
+import mailer
 from auth import verify_password
 from config import (
     auth_mode,
     ldap_admin_group,
     ldap_bind_dn,
     ldap_bind_password,
+    ldap_email_attribute,
     ldap_start_tls,
     ldap_url,
     ldap_user_base_dn,
     ldap_user_filter,
     ldap_username_attribute,
     proxy_admin_group,
+    proxy_email_header,
     proxy_groups_header,
     proxy_user_header,
 )
@@ -103,8 +106,83 @@ def _move_test_account_aside(db: Session, user: User, source: AuthMode) -> None:
     db.flush()
 
 
+def directory_owns_email(auth_source: str) -> bool:
+    """Whether the directory behind this row decides its address.
+
+    **The whole of the "who may edit it" rule, in one place.** Empty
+    configuration means the directory has no opinion, and an app must not read
+    silence as an assertion: that is the same reasoning `_admin_group_set`
+    carries for demotion, and it is why `LDAP_EMAIL_ATTRIBUTE` and
+    `PROXY_EMAIL_HEADER` default to empty rather than to `mail` and
+    `Remote-Email`.
+
+    So the two owner decisions on issue #80 are one rule rather than a conflict.
+    The directory owns the address wherever it has been told which attribute
+    carries one, and there the field is read only for everybody, an admin
+    included, because a write nobody may make is a write the next sign in cannot
+    silently revert. Everywhere else it is the member's own, and an admin may
+    write it for anybody.
+
+    Takes the stored string rather than an `AuthMode`, because every caller has
+    a row in hand and `users.auth_source` carries no `CheckConstraint`: a
+    restored row spelling it something else is a row no directory is configured
+    for, which is exactly the `False` this returns.
+    """
+    if auth_source == AuthMode.PROXY.value:
+        return bool(proxy_email_header())
+    if auth_source == AuthMode.LDAP.value:
+        return bool(ldap_email_attribute())
+    return False
+
+
+def _directory_email(raw: str | None) -> str | None:
+    """What a directory asserted, or None if it asserted nothing usable.
+
+    Checked with `mailer.looks_like_address`, the same rule the household
+    address passes, so a directory cannot write into `users.email` a string the
+    mailer would later refuse. It is also the header injection control: this
+    value comes from a directory attribute or an upstream header, and both are
+    outside this app.
+
+    Bounded by `mailer.MAX_ADDRESS` before the length check can matter, because
+    SQLite does not enforce `String(320)`. The 2026-08-18 incident was a
+    4000-character `Remote-User` writing a 4000-character account.
+
+    None for anything it will not take, so an unusable attribute is
+    indistinguishable from an absent one. Both mean the directory named no
+    address, and both clear the column where the directory owns it.
+    """
+    value = (raw or "").strip()
+    if not value or len(value) > mailer.MAX_ADDRESS:
+        return None
+    return value if mailer.looks_like_address(value) else None
+
+
+def _address_was_refused(raw: str | None) -> bool:
+    """Did the directory assert something this app will not store?
+
+    **Not the same event as the directory naming no address**, and the two were
+    logged identically at INFO until a reviewer separated them. Both end in the
+    column being cleared, and only one of them is somebody's mistake or
+    somebody's attempt: a `Remote-Email` carrying a newline is the header
+    injection shape the address rule exists to refuse, and it arrives on the
+    same request whose `Remote-User` a refusal already logs at WARNING with the
+    peer.
+
+    Defined once, beside `_directory_email`, so "refused" cannot come to mean
+    two things. The callers log it, because only they know whether there is a
+    peer to name.
+    """
+    return bool((raw or "").strip()) and _directory_email(raw) is None
+
+
 def upsert_directory_user(
-    db: Session, username: str, *, is_admin: bool, source: AuthMode
+    db: Session,
+    username: str,
+    *,
+    is_admin: bool,
+    source: AuthMode,
+    email: str | None = None,
 ) -> User:
     """Find or create the local row backing a directory identity.
 
@@ -134,6 +212,22 @@ def upsert_directory_user(
     admin-created test account named like a directory identity would otherwise
     hand over its books, loans and notes to whoever signs in with that name.
     It is renamed aside instead: see `_move_test_account_aside`.
+
+    **`email` is re-applied on the same terms as `is_admin`, and only where the
+    directory owns it.** `directory_owns_email` is asked here rather than by the
+    callers, so "the directory decides" and "the directory is authoritative
+    including its silence" are one decision in one place. Where it owns the
+    value, an entry with no address clears the column, which is the demotion
+    case unchanged. Where it does not, this touches nothing: a member's own
+    address survives an LDAP deployment that never mentions addresses.
+
+    **The clearing is not symmetric with the demotion, and that is the cost of
+    copying the rule.** A wrongly demoted member is restored by putting them
+    back in the admin group and signing in again. A cleared address is gone:
+    the value is not kept anywhere, and the field is read only from the moment
+    the attribute is configured, so neither the member nor an admin can type it
+    back. `.env.example`, `README.md` and `DOCKERHUB.md` all say so, because
+    the person who turns the attribute on is the one who needs to know.
     """
     user = db.query(User).filter(User.username == username).first()
 
@@ -165,12 +259,19 @@ def upsert_directory_user(
         )
         is_admin = True
 
+    # Asked once, before both branches. Where the directory does not own the
+    # address, `asserted` stays None and nothing below reads it, which is what
+    # keeps a locally typed address from being cleared by a sign in.
+    owns_email = directory_owns_email(source.value)
+    asserted = _directory_email(email) if owns_email else None
+
     if user is None:
         user = User(
             username=username,
             password_hash=None,
             is_admin=is_admin,
             auth_source=source.value,
+            email=asserted,
         )
         db.add(user)
         # WARNING, not INFO. Creating an account is the most consequential
@@ -191,7 +292,16 @@ def upsert_directory_user(
     # reaches this, so an unconditional commit was a write per request against
     # the single SQLite writer, and an audit trail that could never say when
     # anything had genuinely changed.
-    changed = user.is_admin != is_admin or user.auth_source != source.value
+    #
+    # The address is compared only where the directory owns it. Dropping
+    # `owns_email` from this clause would make an unconfigured directory assert
+    # None and clear every stored address on the next sign in, which is the
+    # exact shape of the silent demotion the paragraph above exists to prevent.
+    changed = (
+        user.is_admin != is_admin
+        or user.auth_source != source.value
+        or (owns_email and user.email != asserted)
+    )
     if changed:
         if user.is_admin != is_admin:
             logger.warning(
@@ -200,6 +310,18 @@ def upsert_directory_user(
                 is_admin,
                 source.value,
             )
+        if owns_email and user.email != asserted:
+            # The fact, never the address: this goes to a log an operator
+            # reads, and an address is the one part of an envelope worth
+            # keeping out of one. `mailer._deliver` logs a refused recipient
+            # count for the same reason.
+            logger.info(
+                "The %s directory %s the address for %r",
+                source.value,
+                "cleared" if asserted is None else "set",
+                username,
+            )
+            user.email = asserted
         user.is_admin = is_admin
         # An account that predates the switch to a directory keeps its rows and
         # its history; it simply stops being authenticated locally.
@@ -315,10 +437,19 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
                 logger.error("LDAP service bind failed: %s", search_connection.result)
                 return None
 
+            # The address attribute is appended only when one is configured,
+            # so the shipped default asks the directory for exactly what it
+            # always asked for. An unconditional `"mail"` here would change the
+            # search every deployment makes on an upgrade nobody opted into.
+            attributes = [ldap_username_attribute(), "memberOf"]
+            email_attribute = ldap_email_attribute()
+            if email_attribute:
+                attributes.append(email_attribute)
+
             search_connection.search(
                 search_base=ldap_user_base_dn(),
                 search_filter=search_filter,
-                attributes=[ldap_username_attribute(), "memberOf"],
+                attributes=attributes,
             )
             if not search_connection.entries:
                 # No such member. Deliberately indistinguishable from a wrong
@@ -338,6 +469,16 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
             # Trust the directory's spelling of the name, not the one typed, so
             # "Kim" and "kim" cannot become two accounts.
             resolved_username = str(entry[ldap_username_attribute()].value)
+            # Read inside the `with`, like everything else off the entry: the
+            # connection is closed below and an ldap3 entry is not usable after
+            # it. `.value` is None for a present but empty attribute and a
+            # multi-valued one yields the first, both of which
+            # `_directory_email` reduces to "the directory named no address".
+            resolved_email = (
+                str(entry[email_attribute].value)
+                if email_attribute and email_attribute in entry and entry[email_attribute].value
+                else None
+            )
 
         with _connect(user_dn, password) as user_connection:
             if not user_connection.bind():
@@ -349,11 +490,24 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         logger.exception("LDAP authentication failed for %s", username)
         return None
 
+    if _address_was_refused(resolved_email):
+        # The same event as the proxy branch and it is logged at the same level.
+        # There is no peer: the value came from the directory this deployment
+        # configured, so the attribute is what identifies it.
+        logger.warning(
+            "Refused the %r attribute for %r: %d characters, not an address. "
+            "The stored address is cleared.",
+            email_attribute,
+            resolved_username,
+            len(resolved_email or ""),
+        )
+
     return upsert_directory_user(
         db,
         resolved_username,
         is_admin=_is_member_of_admin_group(entry, groups),
         source=AuthMode.LDAP,
+        email=resolved_email,
     )
 
 
@@ -439,7 +593,35 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
     wanted = proxy_admin_group()
     is_admin = bool(wanted) and any(group.lower() == wanted.lower() for group in groups)
 
-    return upsert_directory_user(db, username, is_admin=is_admin, source=AuthMode.PROXY)
+    # Read only when a header is configured, for the reason in
+    # `config.proxy_email_header`: an upstream that sends nothing must not be
+    # read as asserting that a member has no address.
+    email_header = proxy_email_header()
+    email = request.headers.get(email_header) if email_header else None
+
+    if _address_was_refused(email):
+        # WARNING and the peer, for the reason the refused username above gets
+        # them: this is the header injection shape, on the same request, from
+        # the same unauthenticated source. It also **clears** any stored
+        # address, so an operator reading INFO would see the same line here as
+        # for an upstream that simply sends nobody an address.
+        #
+        # The length and never the value. An address is a member's, and
+        # `mailer._deliver` logs a count of refused recipients rather than a
+        # list for the same reason; what an operator needs from this line is
+        # that the upstream sent something unusable, and from where.
+        logger.warning(
+            "Refused the %s header for %r: %d characters, not an address, from %s. "
+            "The stored address is cleared.",
+            email_header,
+            username,
+            len(email or ""),
+            _peer(request),
+        )
+
+    return upsert_directory_user(
+        db, username, is_admin=is_admin, source=AuthMode.PROXY, email=email
+    )
 
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────

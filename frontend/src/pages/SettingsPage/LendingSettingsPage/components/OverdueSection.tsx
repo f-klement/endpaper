@@ -3,14 +3,18 @@ import { useState } from "react";
 import {
   OverdueNotifyReason,
   type OverdueNotifyResult,
-  OverdueSender,
+  type SenderHealth,
   type SenderOutcome,
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../../api/generated/model";
 import { ErrorState, Icon } from "../../../../components";
 import { useTranslation, type MessageKey } from "../../../../i18n";
-import { SettingsSection } from "../../../components";
+import {
+  SENDER_LABELS,
+  SENDER_ROW_REASONS,
+} from "../../../../i18n/senderNames";
+import { SenderHealthLine, SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
 
 /**
@@ -27,38 +31,7 @@ const REASON_LABELS: Record<OverdueNotifyReason, MessageKey> = {
   [OverdueNotifyReason.nothing_due]: "settings.overdueNotSentNothingDue",
   [OverdueNotifyReason.unreachable]: "settings.overdueNotSentUnreachable",
   [OverdueNotifyReason.misconfigured]: "settings.overdueNotSentMisconfigured",
-};
-
-/**
- * One name per channel, as a `Record` for the same reason as above: a sender
- * added on the server is a compile error here rather than a blank line.
- */
-const SENDER_LABELS: Record<OverdueSender, MessageKey> = {
-  [OverdueSender.webhook]: "settings.overdueSenderWebhook",
-  [OverdueSender.email]: "settings.overdueSenderEmail",
-  [OverdueSender.telegram]: "settings.overdueSenderTelegram",
-};
-
-/**
- * The same five reasons again, as a fragment that reads after a channel's name.
- *
- * **A second table rather than reusing `REASON_LABELS`, because those are whole
- * sentences about the run.** Printed in a per-channel row they were wrong twice
- * over: the email row read "Email: The **webhook** could not be reached, so
- * nothing was sent", and the Telegram row read "Telegram: Nothing was sent. The
- * message below says which", where that row *is* the message below.
- *
- * `disabled` and `nothing_due` cannot appear here, because `senders` holds only
- * channels that were switched on and only for a run that had loans to send.
- * They are given a fragment anyway: the `Record` is exhaustive over the union,
- * which is what makes a sixth reason a compile error.
- */
-const SENDER_ROW_REASONS: Record<OverdueNotifyReason, MessageKey> = {
-  [OverdueNotifyReason.disabled]: "settings.overdueRowDisabled",
-  [OverdueNotifyReason.no_url]: "settings.overdueRowNoUrl",
-  [OverdueNotifyReason.nothing_due]: "settings.overdueRowNothingDue",
-  [OverdueNotifyReason.unreachable]: "settings.overdueRowUnreachable",
-  [OverdueNotifyReason.misconfigured]: "settings.overdueRowMisconfigured",
+  [OverdueNotifyReason.in_app_only]: "settings.overdueNotSentInAppOnly",
 };
 
 interface OverdueSectionProps {
@@ -70,6 +43,8 @@ interface OverdueSectionProps {
   isSending: boolean;
   sendResult: OverdueNotifyResult | null;
   sendError: unknown;
+  /** The webhook's standing record, or undefined when it is switched off. */
+  health: SenderHealth | undefined;
 }
 
 /**
@@ -94,6 +69,7 @@ export default function OverdueSection({
   isSending,
   sendResult,
   sendError,
+  health,
 }: OverdueSectionProps) {
   const { t } = useTranslation();
   // Both are drafts rather than controlled mirrors of `settings`: typing a URL
@@ -122,6 +98,12 @@ export default function OverdueSection({
         disabled={isSaving}
         onChange={(checked) => onSave({ overdue_webhook_enabled: checked })}
       />
+
+      {/* Directly under the switch it belongs to. The per run report at the
+          bottom of this card says what one run did; this says what has been
+          happening, which is the question somebody opening this screen is
+          actually asking. */}
+      <SenderHealthLine health={health} />
 
       {/* Stated on the screen that configures it, not only in the docs. A
           library that expects every overdue book to be chased and finds one

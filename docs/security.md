@@ -47,11 +47,19 @@ past a viewer and neither is a general escape: `whole_table_for_uniqueness()`, b
 ISBN and copy-group constraints span the table and a filtered check would miss the row
 that collides, and `rereading_filtered_rows()`, which takes ids a caller already filtered.
 
-Two modules are deliberately outside it. `notifications.py`: the overdue digest runs on a
-schedule for the library and has no viewer, so it partitions on privacy (`is_(False)` for
+Two modules are deliberately outside it. `notifications.py`: the overdue **digest** runs on
+a schedule for the library and has no viewer, so it partitions on privacy (`is_(False)` for
 the reminders it sends, `is_(True)` for a count of what privacy held back) rather than
 filtering by it. `backup.py`: it reads every row of every table so that a restore cannot
 produce a library missing rows, which is why it is admin only.
+
+**The exemption covers the digest and nothing else in that module.** The in app channel
+added for #86 has a viewer, so it does not inherit it: `notifications.overdue_for_viewer`
+is rooted at `Shelf.seen_by(db, viewer.id)` and every clause it adds is about the loan
+rather than the book. The overdue page added for #102 reads the same function rather than
+a second query, which is what keeps the audience decided in one place as surfaces are
+added to it. That is what lets it be the one channel that carries a member's own
+private books, and it is `visible_to()`'s existing rule rather than an exception to it.
 
 `backend/tests/test_shelf.py::TestTheShelfIsTheOnlyWayIn` enforces all of that and names
 both rather than letting either pass quietly. `backup.py` needs naming most, because it
@@ -396,6 +404,44 @@ account would silently stop being a valid switch target. It is renamed aside ins
 WARNING and naming both names. See [decisions.md](decisions.md) for why renaming rather
 than refusing the sign-in.
 
+### A member's address is served only where it is named
+
+`users.email` is deliberately not a field on `UserOut`, which is served inside every book
+payload and by the member list: a field there would disclose an address to every member who
+can see a book. It is served by `GET /api/users/me/email` (the caller's own, no member id
+in the route so there is nothing to authorize) and by the two admin routes, and nowhere
+else, four routes in all. `tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed`
+walks every Pydantic model this app builds and fails if **any** other one puts an address in
+front of a caller, because the rule is worth more than an intention.
+
+It asks pydantic for each model's **wire** names rather than reading Python field names, and
+takes a fixed point over field annotations. Its first version did neither, and a reviewer got
+two evasions past it: `mailbox: str = Field(serialization_alias="email")` on `UserOut`, which
+`from_attributes` fills from `User.email` and FastAPI serialises `by_alias=True`, so every
+book payload would have carried it; and a model with a `MemberEmailOut` field, which carries
+the whole address model and has no address field of its own. Both are caught, along with four
+more spellings of the same two families.
+
+A value arriving from a directory or an upstream header is checked with
+`mailer.looks_like_address` before it is stored, which is the same rule the household
+recipient list passes. It refuses whitespace anywhere, a **trailing** newline included,
+every control and non printing character, and the comma and semicolon that turn one `To`
+header into two. The trailing newline is named because it is the one spelling the rule used
+to accept: it was anchored with `$` under `match`, and `$` matches before a final newline,
+so for a while three docstrings and this paragraph claimed a property the function did not
+have. Nothing exploited it, because four independent `.strip()` calls stood in front of it,
+and a control that holds only because of its callers is not a control. It is `fullmatch`
+plus a Unicode category test now, and `tests/test_mailer.py` pins the newline and the NUL.
+
+It is bounded at `mailer.MAX_ADDRESS` first, because SQLite does not enforce a column
+width: the 2026-08-18 incident was a 4000 character `Remote-User` writing a 4000 character
+account.
+
+Where a directory owns the address the app refuses a write with **409** rather than
+accepting one the next sign in would revert. The log line records that an address was set
+or cleared and never the address itself, for the reason `mailer._deliver` logs a count of
+refused recipients rather than a list.
+
 ### The Google Books API key is never returned
 
 `GET /api/settings` returns a masked preview plus a boolean, never the key. The masking is
@@ -403,25 +449,39 @@ than refusing the sign-in.
 while still looking correct in the settings screen, which is why a test pins the stored
 value directly. The 400 raised when the key is missing does not echo it either.
 
-### The overdue digest is the one path that sends catalogue content out unauthenticated
+### The overdue digest is the one path that *pushes* catalogue content out unauthenticated
 
-Everything else in this app answers a request that carried a session. The overdue digest
-goes out on a timer with no member behind it and no session on the receiving end, on any
-of three channels: a webhook, mail over SMTP, and a Telegram chat. Two things bound all
-three.
+The overdue digest goes out on a timer with no member behind it and no session on the
+receiving end, on any of three channels: a webhook, mail over SMTP, and a Telegram chat.
+Two things bound all three.
 
-**Private books are excluded, on every channel**, in the query rather than by a filter
-afterwards. Each of the three lands where everyone here reads, so a private title on one
-is readable by everyone in it, which is exactly what `is_private` exists to prevent. The
-digest reports `skipped_private` as a count and never names one, per channel as well as
+**It is no longer the only unauthenticated path, and the distinction is push against
+pull.** The published catalogue below answers a request from a stranger; this one hands
+book titles to a destination nobody asked. Both exclude private books, in the query rather
+than by a filter afterwards, and that is the property they share.
+
+A **fourth** sender exists and is outside this section entirely, which is the point of it:
+the in app notice is read by a member holding a session, so it sends nothing out and has a
+viewer. `notifications.pushes_outward` is where the difference is decided. Two endpoints
+serve it, `GET /api/loans/overdue/mine` for the count and `GET /api/loans/overdue` for the
+loans, and both are `notifications.overdue_for_viewer` so the two cannot disagree about
+who may see what.
+
+**Private books are excluded, on every channel that pushes**, in the query rather than by a
+filter afterwards. Each of the three lands where everyone here reads, so a private title on
+one is readable by everyone in it, which is exactly what `is_private` exists to prevent.
+The digest reports `skipped_private` as a count and never names one, per channel as well as
 once at the top. The owner is still chased in the app, where the overdue view is per member
 and already scoped.
 
 **A per borrower mail is the one audience that could carry a private book**, because being
-reminded of a book you borrowed is not a disclosure. It is not built, and the reason is a
-missing fact rather than a decision: no member here has an address. `models.User` carries
-none and the LDAP backend requests none. Mail therefore goes to the household's own
-mailbox, which is a channel like the other two.
+reminded of a book you borrowed is not a disclosure. **It is still not built, and the fact it
+was blocked on has changed.** `models.User` now carries an `email` column and the LDAP
+backend requests an attribute where one is configured, so an address can exist. Nothing in
+the reminder path reads it: `send_mail` takes its recipients from `mailer.checked_config`,
+which reads `overdue_mail_to` and nothing else. Mail therefore still goes to the household's
+own mailbox, which is a channel like the other two, and a member who has filled the field in
+is in exactly the position of one who has not.
 
 **Nothing else is in the payload.** One entry per loan: the book's title, the borrower's
 username or free-text name, the due date and the days overdue. No ISBNs, no notes, no
@@ -434,6 +494,96 @@ secret is set, over the raw bytes that go on the wire. That authenticates the se
 receiver; it is not confidentiality, and an `http://` destination sends book titles in
 clear. **Redirects are not followed**, unlike the metadata lookups, because a 302 from the
 configured host would send the library's book titles somewhere nobody approved.
+
+### The public catalogue
+
+**The first surface in this application reachable without a session**, off by default,
+and the only place five separate rules apply at once. They are enforced in five places on
+purpose, because a single check doing all five would be a single check to get wrong.
+
+| Question | Answered by |
+|---|---|
+| Is anything published at all? | `settings_store.public_catalogue_is_published` |
+| Which **rows** may be shown? | `Shelf.seen_by_the_public` |
+| Which **columns** may be shown? | `backend/schemas/public.py` |
+| How fast may a stranger ask? | `ratelimit.public_catalogue_limiter` |
+| May a crawler index it? | `middleware.SecurityHeadersMiddleware` |
+
+**Two switches, nested, and the conjunction is enforced on the server.** Library mode
+changes what a cataloguer sees and publishes nothing. The publish switch is separate and
+means only "an unauthenticated reader may search". `public_catalogue_is_published` reads
+both rows, so a publish row left on while library mode is off serves nothing: flipping
+library mode back off cannot leave a catalogue public. Disabling a control in a browser is
+advice to one client; this is the guarantee. Both are runtime settings rather than
+environment variables, because an environment variable takes a redeploy to correct and
+that is the wrong property for the switch most likely to be turned on by mistake.
+
+**`Shelf.seen_by_the_public(db)` has no ownership arm at all**, and that absence is the
+whole design rather than an implementation detail. `visible_to(viewer_id)` is
+`deleted_at IS NULL AND (is_private IS false OR added_by_user_id = :viewer)`, and a public
+reader has no id for the second disjunct. A sentinel id was refused: `added_by_user_id = 0`
+is a real comparison against a real column and is safe only while no account holds that id,
+which nothing enforces, and the leak would be silent and answer 200. The public constructor
+is that predicate with the disjunct **removed**, so no value any input can take makes a
+private book match, and an authenticated request wrongly routed through it sees *less*
+rather than more. `tests/test_shelf.py::TestThePublicShelfHasNoOwnershipArm` pins it two
+ways: an AST pass over everything the constructor can call, and an assertion on the
+compiled SQL. Neither alone is enough, and both assert the two surviving clauses are still
+there, because "the owner column is absent" is also true of a query with no predicate at
+all.
+
+**A row filter is necessary and not sufficient.** A public book still carries what the
+household paid for it, which room it is in, who added it, whether they will lend it and
+whether anybody has read it. So the public payload is a **separate model** rather than
+`BookOut` with an exclusion list, and the difference is which way the default falls: an
+exclusion list publishes every field somebody forgets to add to it. The rule that decided
+each field is that a field is public when it is a fact about the work or about the object
+as a catalogue record, and withheld when it is a fact about a member, the household, or
+the transaction. A test fails until every field on `BookOut` is classified, so a new field
+cannot default to either answer.
+
+**A locally uploaded cover is dropped from the payload**, keeping only an https URL a
+metadata source supplied. `/covers/<id>` is served behind `book_for_read`, so publishing
+that path would advertise an image a public reader cannot fetch, and serving those bytes
+publicly is a new file route with its own authorization rather than a column decision.
+
+**Not published is 404, never 403**, which is the house rule applied where it matters most:
+a 403 would confirm to anybody that this deployment holds a catalogue it is withholding.
+The item route answers 404 for a book that does not exist, one in the trash and one marked
+private alike, so a stranger cannot count through ids to learn how many private books a
+library holds.
+
+**Nothing under `/api/public` writes.** There is no POST, PUT, PATCH or DELETE in that
+router, and the gate is a dependency on the **router** rather than on each handler, so a
+route added there cannot be added without it.
+
+**`noindex` by default, and it is set in the middleware rather than on the routes.**
+Publishing a catalogue and inviting a search engine to crawl it are different decisions.
+`SecurityHeadersMiddleware` puts `X-Robots-Tag: noindex, nofollow` on **every** response
+this application sends, and the published catalogue paths are what lift it once indexing is
+allowed. That direction is the safe one: a response nobody thought about stays out of the
+index, and the signed in application is now noindex too, which it always should have been.
+
+It was on the routes for a round and was wrong twice over. A header set from a route
+dependency merges onto the **success path only**, so measured it was on the 200 and absent
+from the gate's 404, the item 404, a 429 and a 500 while two documents said otherwise; and
+a dependency cannot reach the `StaticFiles` mount at all, so the HTML a crawler actually
+indexes never carried it.
+
+`/robots.txt` allows `/catalogue`, the **client** route, and not `/api/public/`. The first
+version allowed the JSON prefix and disallowed everything else, which invited a crawler to
+the one path with nothing readable at it and barred the two the catalogue is read at. Not a
+bare `Allow: /` either, which would invite it into the signed in application where every
+path answers 401.
+
+**The published `id` is the insert order, and that is a disclosure.** `order_for` appends
+`Book.id.asc()` to every ordering, so the catalogue comes back in acquisition order with no
+`sort` parameter at all, and `max(id)` against the number of rows returned gives the count
+of rows the shelf withheld: measured on ten rows, three private and one trashed,
+`max(id) - count` is exactly 4. It is accepted rather than fixed, because the id is the URL
+a record is read at and an opaque public id is a schema change with its own ticket. It is
+also why `PublicBookSort` excluding `newest` is a narrower guarantee than it reads: see
+`docs/decisions.md`.
 
 ### Telegram's host is a constant, and SMTP always verifies
 
@@ -487,7 +637,14 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-Five things are limited, for three different reasons:
+**Seven counters, for four different reasons.** Counted 2026-08-28 against
+`SlidingWindowLimiter(` in `backend/ratelimit.py`; this table used to say five
+and list four of them, omitting the authority and cover backfill limits
+entirely. The number is now derived rather than written:
+`tests/test_ratelimit.py::TestTheRateLimitTableInTheDocsIsTheModule`
+reads the sentence and the table out of this file and counts the module, so a
+counter added without a row here is a failing test rather than a stale
+paragraph.
 
 | Route | Limit | Keyed on | Why |
 |---|---|---|---|
@@ -496,13 +653,17 @@ Five things are limited, for three different reasons:
 | `/auth/register` | 5 / hour | address | Bounds account creation |
 | `/api/imports/*` | 3 / min | username | `/csv` writes thousands of rows in one transaction, holding the single SQLite writer against the library. `/preview` writes nothing and is limited for the other half of the cost: parsing a 5.02 MB, 20,000 row export is 3.081 seconds of CPU, measured, and `MAX_UPLOAD_BYTES` caps the body without capping the rate. One window covers both, so the ordinary flow of a preview then an import spends two of the three |
 | metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as seven public catalogues that this library neither runs nor pays for |
+| `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF: **8 requests, about 1.08 MB, three hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **14 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches two hosts and no VIAF, and is the **larger of the two in requests**: its name search branch is 1 + 2 per candidate capped by `MAX_CANDIDATES`, so **11 requests and about 43 KB**, and its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. At ten a minute that is up to 250 outbound requests for lookups against 140 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
+| `POST /api/books/covers/backfill` | 6 / min | username | One run fetches up to a hundred images from the same services the metadata limit protects, and it is the call a member would press twice while the first is still running |
+| `GET /api/public/books`, `GET /api/public/books/{id}` | 120 / min | address | The fourth reason, and the only counter here whose caller holds no session: this is the published catalogue, so it is the first surface a stranger can reach. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes |
 
-The last is the one that is not about this deployment: spending somebody else's quota is a
-way to get this deployment's address rate-limited upstream, which loses metadata for
-everyone. Sixty a minute is far above scanning a shelf by hand.
+The last three of the first six are the ones that are not about this deployment: spending somebody else's
+quota is a way to get this deployment's address rate-limited upstream, which loses
+metadata for everyone. Sixty a minute is far above scanning a shelf by hand.
 
 Everything else needs a valid token, so the thing worth bounding is guesses at getting
-one. All of it was unbounded before.
+one. All of it was unbounded before. The public catalogue is the exception to that
+sentence and is the reason it now has one: see [The public catalogue](#the-public-catalogue).
 
 `backend/ratelimit.py` is hand-rolled rather than slowapi, and the reason is load-bearing:
 **the useful key for a login limit is the username being attempted**, and a
@@ -596,10 +757,21 @@ therefore never repair another member's private books. It is rate limited instea
 ## Catalogue requests
 
 Seven third party catalogues are asked for records: Open Library, the DNB, K10plus, the
-BnF, the Library of Congress, the Austrian National Library and Google Books. `backend/fetch.py` is the only place a client for
-them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass over the
-tree, because the defect that produced the module was ten hand built clients that agreed on
-the timeout and agreed on nothing else.
+BnF, the Library of Congress, the Austrian National Library and Google Books. `backend/fetch.py` is the only place an HTTP
+client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
+over the tree, because the defect that produced the module was ten hand built clients that
+agreed on the timeout and agreed on nothing else.
+
+**There is a second transport, and it asks nothing today.** `backend/z3950.py` speaks
+Z39.50 to national library catalogues, which is the only protocol several of them offer.
+No source in the chain reaches it yet, so nothing is asked during a lookup. It carries the
+same bounds by construction rather than by resemblance: `MAX_RESPONSE_BYTES` is the same
+2 MiB, counted on the records rather than on chunks; the record count is bounded because
+the protocol answers a search with a hit count and hands over records only for the
+positions asked for; and one absolute deadline covers the open, every search and every
+record on an association. It has no host allowlist for the reason above, and the reason
+holds only while a `Target` is built from module constants: the day one is built from
+stored configuration or a request body, that changes.
 
 **There is no host allowlist here, and that is the difference from a cover.** A cover URL is
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
@@ -836,22 +1008,56 @@ Worth knowing before exposing this beyond a private network:
   is the bullet above; it is here because a reader auditing the asymmetry will ask.
 - **The overdue reminder is not retried with a backoff.** A run where nothing delivered
   leaves `notified_at` alone and the next hourly tick tries again, so a receiver that is
-  down for a day sees one attempt an hour and no queue. There is no dead-letter and no
-  alert: a channel that has never worked is silent in exactly the way one that has nothing
-  to send is. `POST /api/loans/overdue/notify` reports the outcome per channel on the run it
-  makes, which is the way to tell.
+  down for a day sees one attempt an hour and no queue. There is no dead-letter, and the
+  standing record is `SettingKey.SENDER_HEALTH` rather than a retry policy.
 - **One channel delivering stamps the loan for all of them.** `notified_at` records that
   the loan was chased, and it was, so a broken webhook beside a working Telegram chat means
   that batch never reaches the webhook. The alternative, stamping only on a clean sweep,
   repeats the identical list hourly on the channels that work, which is the behaviour
-  people switch off. The failed channel is named in `senders`.
-- **A failure is named in `senders` on the run that failed, and the standing record is the
-  log.** `ticker()` discards `run_digest`'s result, so once an hourly tick has stamped
-  `notified_at` on any one success, "Send now" inside the reminder window answers
-  `nothing_due` with an empty `senders` and shows nothing about the channel that is broken.
-  Pressing the button before the ticker gets there shows it; afterwards, the
-  `endpaper.notifications` warning line is where it lives. There is no stored per channel
-  status, and adding one is a table this feature does not warrant.
+  people switch off. The failed channel is named in `senders` and in the health record.
+  **Only a sender that pushes may stamp it**, which is why the in app channel does not: it
+  is on by default and delivers nothing, so counting it would stamp every loan on every run
+  and cut the three that do push from one attempt an hour to one per reminder interval,
+  seven days by default.
+- **A channel that has been failing is reported, and the bar for interrupting somebody is
+  deliberately high.** This used to be a gap and was the wrong disposition: for a household
+  running the published image, "read the container log" is not a worse form of alerting, it
+  is the absence of one. `run_digest` now records the last outcome per sender into one
+  settings row, so a failure survives the run that produced it and the record does not
+  depend on an admin pressing "Send now" before the ticker gets there. What is still a
+  judgement rather than a fact is when to say a channel is **broken**: a refusal the app
+  decided itself (`NO_URL`, `MISCONFIGURED`, all raised before a socket is opened) is
+  reported at once, and a transport failure only after 24 hours and at least two
+  consecutive failures. One failed send is a network; every send failing for a day is a
+  configuration, and a design that cannot tell them apart is one a household switches off.
+  A channel failing once every reminder interval therefore takes two intervals to be called
+  broken, which is the price of not crying wolf.
+- **A channel's record is cleared by any write to that channel's settings.** Not by the
+  on/off switch alone: `notifications._CONFIGURED_BY` owns every row that configures a
+  sender, and `routers/settings.py`'s `_store` drops the record whenever one of them is
+  written. That is the exit from a standing failure, and it is the only one, so it has to
+  cover the write that actually repairs the channel. Replacing an expired bot token, or
+  correcting a mail server, port or encryption choice, is not a toggle. The reminder
+  interval is deliberately outside it: it says how often a loan is chased, not whether a
+  channel works.
+- **A record is not cleared by time, and nothing else clears it.** A run only records the
+  senders it **attempted**, and a run with nothing overdue attempts none, so a household in
+  its steady state produces no evidence either way. `_is_broken` measures against a
+  `failing_since` that only grows. So a channel that failed and then silently recovered goes
+  on being reported until somebody writes to its settings; the line under the switch names
+  the date of the last attempt so a reader can see how old the evidence is. There is no
+  "test this channel" button, and adding one is a feature rather than a fix.
+- **The health record is a settings row, so a restore brings back an older one.**
+  `SENDER_HEALTH` lives in `settings`, which `backup._TABLES` already covers, so it needs no
+  new table and no new manifest entry. What it inherits is the archive's age: a restore can
+  reinstate a record describing runs that happened before the backup was taken. Writing to
+  the channel's settings clears it; a later tick overwrites it only if that tick had
+  something to send.
+- **The health record holds a failure's own sentence, and those sentences are curated.**
+  `detail` is either a fixed string ("The destination could not be reached.") or the message
+  from a refusal, and every refusal in `mailer.py` and `notifications.py` names the shape of
+  what is wrong rather than the value: "The Telegram bot token is not a bot token", never
+  the token. It is admin only regardless.
 - **The backup carries every stored secret in plaintext.** `backup._TABLES` includes
   `settings`, so `endpaper.json` holds `mail_password`, `telegram_bot_token`,
   `overdue_webhook_secret` and `google_books_api_key` in full, unmasked. That is not an

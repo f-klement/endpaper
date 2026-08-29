@@ -24,7 +24,9 @@ import type {
 import type {
   AppearanceOut,
   AppearanceUpdate,
+  EmailUpdate,
   HTTPValidationError,
+  MemberEmailOut,
   UserCreate,
   UserOut,
 } from "../../model";
@@ -182,6 +184,152 @@ export function useListUsers<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getListUsersQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListEmailsUrl = () => {
+  return `/api/users/emails`;
+};
+
+/**
+ * Every member's address. Admin only.
+ *
+ * **Reading was the half of this that was argued about**, and the refused
+ * alternative was write only, where nobody sees an address including an admin.
+ * It was refused because a household whose reminders silently go nowhere needs
+ * somebody able to see the typo, and a per sender delivery record tells you a
+ * send failed rather than that the address is wrong. Recorded on issue #80.
+ *
+ * A whole list rather than one member at a time, because the screen behind it
+ * is a list: a household has a handful of accounts and the admin is looking
+ * for the empty row.
+ * @summary List Emails
+ */
+export const listEmails = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberEmailOut[]> => {
+  return customFetch<MemberEmailOut[]>(getListEmailsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListEmailsQueryKey = () => {
+  return [`/api/users/emails`] as const;
+};
+
+export const getListEmailsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listEmails>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListEmailsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listEmails>>> = ({
+    signal,
+  }) => listEmails({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listEmails>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListEmailsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listEmails>>
+>;
+export type ListEmailsQueryError = unknown;
+
+export function useListEmails<
+  TData = Awaited<ReturnType<typeof listEmails>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEmails>>,
+          TError,
+          Awaited<ReturnType<typeof listEmails>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListEmails<
+  TData = Awaited<ReturnType<typeof listEmails>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listEmails>>,
+          TError,
+          Awaited<ReturnType<typeof listEmails>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListEmails<
+  TData = Awaited<ReturnType<typeof listEmails>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Emails
+ */
+
+export function useListEmails<
+  TData = Awaited<ReturnType<typeof listEmails>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listEmails>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListEmailsQueryOptions(options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,
@@ -440,6 +588,232 @@ export const useSetMyAppearance = <
   TContext
 > => {
   return useMutation(getSetMyAppearanceMutationOptions(options), queryClient);
+};
+export const getGetMyEmailUrl = () => {
+  return `/api/users/me/email`;
+};
+
+/**
+ * The caller's own address.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only address reachable here is the caller's. That is the same shape as
+ * `/me/appearance` and it is the reason neither is a field on `UserOut`.
+ * @summary Get My Email
+ */
+export const getMyEmail = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberEmailOut> => {
+  return customFetch<MemberEmailOut>(getGetMyEmailUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMyEmailQueryKey = () => {
+  return [`/api/users/me/email`] as const;
+};
+
+export const getGetMyEmailQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMyEmail>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMyEmailQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyEmail>>> = ({
+    signal,
+  }) => getMyEmail({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMyEmail>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetMyEmailQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMyEmail>>
+>;
+export type GetMyEmailQueryError = unknown;
+
+export function useGetMyEmail<
+  TData = Awaited<ReturnType<typeof getMyEmail>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyEmail>>,
+          TError,
+          Awaited<ReturnType<typeof getMyEmail>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMyEmail<
+  TData = Awaited<ReturnType<typeof getMyEmail>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyEmail>>,
+          TError,
+          Awaited<ReturnType<typeof getMyEmail>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetMyEmail<
+  TData = Awaited<ReturnType<typeof getMyEmail>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get My Email
+ */
+
+export function useGetMyEmail<
+  TData = Awaited<ReturnType<typeof getMyEmail>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getMyEmail>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetMyEmailQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getSetMyEmailUrl = () => {
+  return `/api/users/me/email`;
+};
+
+/**
+ * Set or clear the caller's own address.
+ * @summary Set My Email
+ */
+export const setMyEmail = async (
+  emailUpdate: EmailUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberEmailOut> => {
+  return customFetch<MemberEmailOut>(getSetMyEmailUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailUpdate),
+  });
+};
+
+export const getSetMyEmailMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setMyEmail>>,
+    TError,
+    { data: EmailUpdate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setMyEmail>>,
+  TError,
+  { data: EmailUpdate },
+  TContext
+> => {
+  const mutationKey = ["setMyEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setMyEmail>>,
+    { data: EmailUpdate }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return setMyEmail(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetMyEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setMyEmail>>
+>;
+export type SetMyEmailMutationBody = EmailUpdate;
+export type SetMyEmailMutationError = HTTPValidationError;
+
+/**
+ * @summary Set My Email
+ */
+export const useSetMyEmail = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setMyEmail>>,
+      TError,
+      { data: EmailUpdate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setMyEmail>>,
+  TError,
+  { data: EmailUpdate },
+  TContext
+> => {
+  return useMutation(getSetMyEmailMutationOptions(options), queryClient);
 };
 export const getListTestAccountsUrl = () => {
   return `/api/users/test-accounts`;
@@ -701,4 +1075,94 @@ export const useCreateTestAccount = <
   TContext
 > => {
   return useMutation(getCreateTestAccountMutationOptions(options), queryClient);
+};
+export const getSetMemberEmailUrl = (userId: number) => {
+  return `/api/users/${userId}/email`;
+};
+
+/**
+ * Set or clear any member's address. Admin only.
+ * @summary Set Member Email
+ */
+export const setMemberEmail = async (
+  userId: number,
+  emailUpdate: EmailUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MemberEmailOut> => {
+  return customFetch<MemberEmailOut>(getSetMemberEmailUrl(userId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(emailUpdate),
+  });
+};
+
+export const getSetMemberEmailMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setMemberEmail>>,
+    TError,
+    { userId: number; data: EmailUpdate },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setMemberEmail>>,
+  TError,
+  { userId: number; data: EmailUpdate },
+  TContext
+> => {
+  const mutationKey = ["setMemberEmail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setMemberEmail>>,
+    { userId: number; data: EmailUpdate }
+  > = (props) => {
+    const { userId, data } = props ?? {};
+
+    return setMemberEmail(userId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetMemberEmailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setMemberEmail>>
+>;
+export type SetMemberEmailMutationBody = EmailUpdate;
+export type SetMemberEmailMutationError = HTTPValidationError;
+
+/**
+ * @summary Set Member Email
+ */
+export const useSetMemberEmail = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setMemberEmail>>,
+      TError,
+      { userId: number; data: EmailUpdate },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setMemberEmail>>,
+  TError,
+  { userId: number; data: EmailUpdate },
+  TContext
+> => {
+  return useMutation(getSetMemberEmailMutationOptions(options), queryClient);
 };

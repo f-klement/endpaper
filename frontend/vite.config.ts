@@ -192,13 +192,23 @@ export default defineConfig({
     // reason that makes no sense, this line is the first thing to suspect.
     environment: "happy-dom",
     globals: true,
-    // Two, not one per core. vitest left alone forks per CPU: measured on a
+    // Bounded, not one per core. vitest left alone forks per CPU: measured on a
     // four core CI host it sustained 3.2 of them for the whole run, which is
-    // antisocial on a machine shared with anything else. Two workers bound the
-    // burst by choosing to use less, rather than being throttled into it by a
-    // CPU limit, which is the same work done slower. Keep in step with the CI
-    // runner's own limits.
-    maxWorkers: 2,
+    // antisocial on a machine shared with anything else. Bounding the workers
+    // caps the burst by making vitest choose to use less, rather than throttling
+    // it into the same work at a slower rate with a CPU limit.
+    //
+    // The number follows the machine, because CI hosts are different shapes: the
+    // runner sets `ENDPAPER_TEST_WORKERS` per host, alongside that host's CPU
+    // limit, and the two have to stay in step. So change it where the runner
+    // sets it rather than here, or a host will be told to use more workers than
+    // it is allowed cores.
+    //
+    // The fallback is 2 and is what a local run gets. It is deliberately the low
+    // number rather than the fast one: a development machine is usually doing
+    // something else that matters more than this suite finishing sooner, and a
+    // suite that saturates it has already caused an outage alert once.
+    maxWorkers: Number(process.env.ENDPAPER_TEST_WORKERS) || 2,
     // The suite mirrors src/ rather than sitting beside it.
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["./tests/setup.ts"],

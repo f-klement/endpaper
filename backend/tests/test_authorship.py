@@ -1066,3 +1066,137 @@ class TestOnlyAnAssertionTheBookCreditsIsStored:
         for row in recorded.stored:
             authorship.forget_identifier(row.id)
         assert db.query(AuthorIdentifier).count() == 0
+
+
+class TestTheCrossReferencesStoredWithAConfirmation:
+    """`record_cross_references`, the second half of `confirm_identifier`.
+
+    A Member confirms a **person**, and the GND record for that person already
+    carries their ISNI, LCNAF number, VIAF cluster and Wikidata item. All four
+    used to be shown once and dropped.
+    """
+
+    @staticmethod
+    def _references() -> dict[AuthorityScheme, str]:
+        """Borges as lobid answers, measured 2026-08-28 on GND `118513532`."""
+        return {
+            AuthorityScheme.ISNI: "0000000121429031",
+            AuthorityScheme.LCNAF: "n79007035",
+            AuthorityScheme.VIAF: "88919448",
+            AuthorityScheme.WIKIDATA: "Q909",
+        }
+
+    def test_every_scheme_lands_as_its_own_row(self, db, user):
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+
+        recorded = authorship.record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        assert {(row.scheme, row.identifier) for row in recorded.stored} == {
+            (scheme, value) for scheme, value in self._references().items()
+        }
+        assert recorded.refused == []
+
+    def test_the_rows_say_a_person_asserted_them(self, db, user):
+        """The identifier is the authority file's, but nothing tied it to this
+        author until somebody said the record was theirs. `CATALOGUE` would
+        claim the DNB asserted it about a Book this Library holds, which is not
+        what happened, and `ck_author_identifiers_asserter` forbids naming the
+        asserter on such a row anyway."""
+        shelve(db, user, "Jorge Luis Borges")
+
+        recorded = Authorship.seen_by(db, user.id).record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        assert all(
+            row.provenance == AuthorityProvenance.MEMBER for row in recorded.stored
+        )
+        assert all(row.created_by_user_id == user.id for row in recorded.stored)
+
+    def test_it_files_under_the_same_key_a_confirmation_does(self, db, user):
+        """Both go through `_confirmable_key`, so a confirmation and the cross
+        references that came with it cannot land on two different spellings and
+        make one of them unreachable from `listing()`."""
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        confirmed = authorship.confirm_identifier(
+            "Jorge Luis Borges", AuthorityScheme.GND, "118513532", by_user_id=user.id
+        )
+
+        recorded = authorship.record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        assert {row.author_key for row in recorded.stored} == {confirmed.author_key}
+        assert len(authorship.identifiers_for("Jorge Luis Borges")) == 5
+
+    def test_a_collision_is_reported_and_the_stored_value_stands(self, db, user):
+        """**Reported, not raised, and that is the difference from
+        `confirm_identifier`.** The confirmation is what the Member asked for; a
+        fact arriving alongside it must not undo one that succeeded."""
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.confirm_identifier(
+            "Jorge Luis Borges", AuthorityScheme.ISNI, "0000000000000001",
+            by_user_id=user.id,
+        )
+
+        recorded = authorship.record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        [refused] = recorded.refused
+        assert (refused.scheme, refused.asserted, refused.kept) == (
+            AuthorityScheme.ISNI,
+            "0000000121429031",
+            "0000000000000001",
+        )
+        assert refused.kept_provenance == AuthorityProvenance.MEMBER
+        assert {row.scheme for row in recorded.stored} == {
+            AuthorityScheme.LCNAF,
+            AuthorityScheme.VIAF,
+            AuthorityScheme.WIKIDATA,
+        }
+
+    def test_running_it_twice_writes_nothing_the_second_time(self, db, user):
+        """A re-confirmation is an ordinary thing to do and must not produce a
+        second row, which `uq_author_identifiers_key_scheme` would refuse with
+        an `IntegrityError` rather than a report."""
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        again = authorship.record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        assert again.refused == []
+        assert db.query(AuthorIdentifier).count() == 4
+
+    def test_an_author_nobody_can_see_raises(self, db, user, other):
+        """The same authority rule `confirm_identifier` applies: confirm what
+        you can see the effect of."""
+        shelve(db, user, "Jorge Luis Borges", private=True)
+
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, other.id).record_cross_references(
+                "Jorge Luis Borges", self._references(), by_user_id=other.id
+            )
+
+    def test_an_unstorable_value_is_dropped_rather_than_raising(self, db, user):
+        """`ck_author_identifiers_bounds` would refuse it at the database, which
+        is a 500 on a request whose confirmation already succeeded."""
+        shelve(db, user, "Jorge Luis Borges")
+
+        recorded = Authorship.seen_by(db, user.id).record_cross_references(
+            "Jorge Luis Borges",
+            {AuthorityScheme.ISNI: "", AuthorityScheme.VIAF: "88919448"},
+            by_user_id=user.id,
+        )
+
+        assert {row.scheme for row in recorded.stored} == {AuthorityScheme.VIAF}

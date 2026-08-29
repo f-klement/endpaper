@@ -96,6 +96,10 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/authors/suggestions` | user | Names that look like one person |
 | POST | `/api/books/authors/merge` | user | `{keys, keep_name}`. Says two spellings are one person. **404** for an author the caller cannot see |
 | DELETE | `/api/books/authors/aliases/{id}` | user | 204. Undoes one merge. **404** for one the caller cannot see |
+| GET | `/api/books/authors/authority` | user | What the authority files hold under a name. `author` is a key or any spelling; `q` retypes the search and forces the name route. Writes nothing. **503** if the file is unreachable, because nothing here is blocked by that |
+| GET | `/api/books/authors/wikipedia` | user | `lang` is `en` or `de`, the language the reader chose in the app rather than the browser's. One row per author carrying a confirmed `wikidata` identifier and none for anybody else, so the button a client draws from this is a property of the shelf rather than of the network. `language` names the Wikipedia edition `url` points at, or is **null** where the URL is the Wikidata item's own page, which is what an author with no article anywhere and an unreachable Wikidata both fall to. Never **503**: nothing here is a supplier, so an outage costs the language and not the link. Reads which language editions exist and no article text: `docs/featurelist.md` refuses author biographies and this does not touch that |
+| POST | `/api/books/authors/identifiers` | user | `{author, scheme, identifier}`. Says a candidate record is this author's. Confirming a `gnd` also stores the ISNI, LCNAF number, VIAF cluster and Wikidata item that record carries, **and the six national library numbers (`blbnb`, `arbabn`, `bne`, `ptbnp`, `iccu`, `bnchl`) from the VIAF cluster it names**, all re-read by the server and never from the body. A cluster that does not name the confirmed GND record back is discarded rather than stored. Where VIAF produces no cluster at all, the six are read from the Wikidata item instead: one source answers per confirmation, never both, so the two can never disagree. **409** for retyping one already held |
+| DELETE | `/api/books/authors/identifiers/{id}` | user | 204. The only correction there is: an identifier is removed and re-imported, never edited |
 | GET | `/api/books/locations` | user | Distinct shelf locations, most-populated first |
 | GET | `/api/books/duplicates` | user | Books that look like the same work |
 | GET | `/api/books/trash` | user | What the caller has deleted and could put back |
@@ -867,6 +871,8 @@ likes, including one outside the covers directory.
 | GET | `/api/loans?active_only=&overdue_only=` | user | Paginated; defaults to active only |
 | POST | `/api/loans` | user | Exactly one borrower. Optional `due_at`. **422** for both or neither borrower, **409** if already out **or** marked never lent, **404** for an unknown or invisible book |
 | PUT | `/api/loans/{id}/return` | user | **400** if already returned |
+| GET | `/api/loans/overdue` | user | The overdue loans themselves, paginated, most overdue first. **Narrower than `?overdue_only=true`**: see below |
+| GET | `/api/loans/overdue/mine` | user | The in app reminder: how many overdue loans this member is being chased about |
 | POST | `/api/loans/overdue/notify` | **admin** | Runs the overdue digest now and reports what it sent |
 
 **The borrower is either a member or a name.** `loaned_to_user_id` names a member;
@@ -895,8 +901,8 @@ afterwards: it answers one request rather than changing the library's mind. `in_
 `happy` are not checked at all. The reasoning is in [decisions.md](decisions.md).
 
 **Overdue reminders** go out as one digest on every channel switched on, hourly from a
-task started with the app. There are three: a **webhook** (the JSON below, POSTed to an
-admin-configured URL), **email** over SMTP, and a **Telegram** chat. Each is toggled by
+task started with the app. Three of them **push**: a **webhook** (the JSON below, POSTed to
+an admin-configured URL), **email** over SMTP, and a **Telegram** chat. Each is toggled by
 itself and they all carry the same digest, rendered as JSON for the webhook and as plain
 text for the two a person reads. `POST /api/loans/overdue/notify` runs the same pass
 immediately, which is what makes the feature testable by a person and what an external
@@ -904,21 +910,89 @@ cron would call instead. It answers
 `{sent, loans, skipped_private, reason, detail, senders}` rather than a bare 204, because
 "nothing is overdue" and "the receiver refused it" both look like silence otherwise.
 
-`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable` or `misconfigured`, and is
-**null exactly when `sent` is true**. It is a closed set because a client has to render the
-difference and cannot branch on prose; `detail` is the same outcome as a sentence, for a
-log or a caller with no message catalogue. A 200 with `sent: false` is the ordinary answer
-for all five: none of them is an error in the request.
+The fourth is the **in app** notice, and it is not a push. A member reads the count from
+`GET /api/loans/overdue/mine`, which answers `{enabled, count}`, and the loans themselves
+from `GET /api/loans/overdue`. It is the only channel that needs nothing obtained first, so
+it is the only one that ships switched **on**.
 
-`senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel
-that was tried, in webhook, email, Telegram order, and is empty when nothing was attempted
-at all. **`sent` at the top is true when any one of them delivered**, which is also the
-condition `notified_at` is stamped on: the loan was chased. Stamping only on a clean sweep
+**`GET /api/loans/overdue` is not `GET /api/loans?overdue_only=true`, and the difference is
+which question the answer is to, not who may read it.** The loans list is rooted at the
+shelf and stops there, so it answers with every overdue loan over a book the caller can
+see, housemates' loans included. That is the household's loans list working as designed:
+bare `/api/loans` with no parameter answers the same set, and `overdue_only` opens nothing
+that was closed. The overdue endpoint applies `notifications.overdue_for_viewer` on top: a
+member reads the loans they lent or borrowed, staff read every overdue loan on their shelf.
+
+That is the rule the count above is computed with, so a screen showing one and counting the
+other disagrees with itself: measured for a non admin member, a nudge reading the wide set
+said 2 above a page listing 1. Both are narrowed by the shelf first, so **neither can reach
+a book `visible_to` excludes**, and the choice between them is about a surface being
+consistent rather than about access.
+
+It also honours `overdue_in_app_enabled` and answers an empty page when that switch is off,
+because the switch is spelled "show overdue loans in the app" and this is what it shows.
+The loans list is not affected: a list of the household's loans is not the reminder
+channel.
+
+`reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured` or
+`in_app_only`, and is **null exactly when `sent` is true**. It is a closed set because a
+client has to render the difference and cannot branch on prose; `detail` is the same outcome
+as a sentence, for a log or a caller with no message catalogue. A 200 with `sent: false` is
+the ordinary answer for all six: none of them is an error in the request. `in_app_only` is
+the run where the in app notice is the only channel on, so nothing was sent anywhere and
+nothing was meant to be.
+
+`senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel this
+run had something to report, in the order in app, webhook, email, Telegram. A pushing sender
+is reported when it was **tried**, and a run with nothing overdue tries none, so the list is
+empty in two cases: every channel off, and nothing overdue while the in app notice is off.
+The in app row appears even on a run that pushed nothing, including one with nothing overdue,
+because "is it on" is the question a household with no receiver is asking.
+
+**`sent` at the top is true when any sender that pushes delivered**, which is also the
+condition `notified_at` is stamped on: a reminder went out. Stamping only on a clean sweep
 would turn one broken receiver into an hourly repeat of the same list on the channels that
-work, so a failed channel is reported here rather than compensated for. **The withheld
-count is per sender as well as at the top**: all three exclude the same private books
-today, because all three go to a channel rather than to a person, and a single figure
-would be a lie on two of three the moment that stops being true.
+work, so a failed channel is reported here rather than compensated for. **The in app row
+never sets it**, and that is not a detail: it delivers nothing, so counting it would stamp
+every overdue loan on every run and cut the three that do push from one attempt an hour to
+one per reminder interval.
+
+**The withheld count is per sender as well as at the top.** The three that push exclude the
+same private books, because each goes to a channel rather than to a person, so their three
+numbers agree. The in app row reports **0**: its audience is a member, so nothing is
+withheld from it.
+
+**A channel's standing record** is `GET /api/settings/sender-health`, admin only, one
+`{sender, last_run_at, sent, reason, detail, failing_since, failures, broken}` per channel
+that is switched on. Every run writes it, the manual one included, so a failure survives the
+run that produced it rather than living only in the container log. `sent` is null until the
+channel has run at all, because "not yet" and "fine" are different answers.
+
+`broken` is a judgement rather than a fact, and it is two rules. A refusal the app made
+itself (`no_url`, `misconfigured`) counts at once, since all of those are raised before a
+socket is opened and nothing will work until a setting changes. A destination that could not
+be reached counts only after **24 hours** and at least **two** consecutive failures: one
+failed send is a network, every send failing for a day is a configuration, and a design that
+cannot tell them apart is one a household switches off.
+
+**Any write to a channel's own settings clears its record**, not the on/off switch alone.
+Replacing an expired bot token, or correcting a mail server, port or encryption choice, is
+the write that repairs the channel, so it is the write that has to clear it;
+`notifications._CONFIGURED_BY` is the list of rows that count. The reminder interval is
+outside that rule, being about how often a loan is chased rather than about any channel.
+Nothing else clears a record: a run records only the senders it **attempted**, and a run with
+nothing overdue attempts none, so a household in its steady state produces no evidence either
+way. `last_run_at` is therefore worth reading beside `broken`, because it says how old the
+verdict is.
+
+**It is per sender per run, and never per loan.** There is no loan id in the record, so no
+screen built on it can say that a particular borrower was or was not told; the most it
+supports is "this channel is not getting through". Two screens draw it and both say what
+they are describing: Lending settings, under the switch that repairs the channel, and the
+overdue page, beside the loans, where the note above the lines states in as many words that
+they are about the channel and not about any one loan. Anything stronger would need a per
+loan per sender table, which [decisions.md](decisions.md) records as more than this feature
+warrants.
 
 ```json
 {
@@ -933,8 +1007,11 @@ would be a lie on two of three the moment that stops being true.
 ```
 
 Three properties of the request are load bearing. **Private books are excluded, on every
-channel**, in the query rather than afterwards: none of the three has a member identity
-behind it, and each lands where the whole household reads. `skipped_private` counts what
+channel that pushes**, in the query rather than afterwards: none of the three has a member
+identity behind it, and each lands where the whole household reads. The in app notice is
+the exception and it is the rule rather than a hole in it: that query is rooted at the
+Shelf, so each reader gets what `visible_to()` already says they may see, their own private
+books included. `skipped_private` counts what
 was held back, never names it. The webhook body is signed with HMAC-SHA256 in
 `X-Endpaper-Signature: sha256=<hex>` when a secret is set, over the raw bytes, so a
 receiver verifying a re-serialised payload will fail. And **redirects are not followed**,
@@ -953,7 +1030,9 @@ is opened, rather than sent in the clear.
 
 A loan is chased again only once `overdue_reminder_days` have passed since its last
 reminder. `notified_at` is stamped after a delivery that succeeded, so a failure retries
-on the next run.
+on the next run. The in app notice ignores that column entirely, in both directions: it
+does not stamp it, and it does not read it, because a loan is on the member's screen for as
+long as it is overdue.
 
 ### Notes
 
@@ -1007,16 +1086,33 @@ does.
 | GET | `/api/settings/features` | **public** | Feature flags and the default language |
 | GET | `/api/settings` | **admin** | The full record, API key masked |
 | PUT | `/api/settings` | **admin** | Partial update; absent fields are left alone |
+| GET | `/api/settings/sender-health` | **admin** | What each switched-on reminder channel last did. See the Loans section |
 | GET | `/api/stats` | user | Totals, per-member, per-tag, per-month, pages read |
 | GET | `/api/users` | user | The member list |
 | GET | `/api/users/test-accounts` | **admin** | The accounts an admin may switch into |
 | POST | `/api/users/test-accounts` | **admin** | 201. **400** if the name is taken, **422** under the 8 character floor |
 | GET | `/api/users/me/appearance` | user | The caller's own palette, mode and wallpaper |
 | PUT | `/api/users/me/appearance` | user | Replaces all three |
+| GET | `/api/users/me/email` | user | The caller's own address, and whether it is theirs to change |
+| PUT | `/api/users/me/email` | user | Sets or clears it. **409** where the directory owns it, **422** if it is not an address |
+| GET | `/api/users/emails` | **admin** | Every member's address |
+| PUT | `/api/users/{user_id}/email` | **admin** | Same body and the same two refusals, for anybody. **404** for no such member |
 
 `/api/settings/features` is public for the same reason the login image is: the login page
 is localised, so the default language has to be known before a token exists. It carries no
-secrets and nothing about the catalogue.
+secrets and nothing about the catalogue. Since the public catalogue it also carries
+`public_catalogue_published`, which is what tells a browser holding no token whether there
+is a catalogue to offer. It is the **server's conjunction** of library mode and the publish
+switch, never either row, so a client cannot get the nesting rule wrong. `library_mode` is
+deliberately **not** on this model: the cataloguer column set it changes is a later ticket,
+so it would be an unread field on the one endpoint a stranger can call.
+
+`PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled` and
+`public_catalogue_indexing_enabled`, and **refuses no combination of them**: an admin may
+store a publish row while library mode is off, and the catalogue stays unpublished because
+the routes ask `public_catalogue_is_published` rather than reading a row. Refusing the
+write instead would make the order two toggles are saved in matter, and would lose an
+admin's stated intent the moment they turned library mode off to look at something.
 
 `GET /api/settings` never returns the Google Books API key, only a masked preview plus
 `has_google_books_api_key`. A masked string is not a truth value, so the UI keys off the
@@ -1040,6 +1136,31 @@ client that does not have a stored palette shows its default instead, and overwr
 stored value with that default the next time the member changes anything, because the write
 is a whole record.
 
+An address is the same case as appearance and is handled the same way: **not** a field on
+`UserOut`, so no book payload and no member list carries one. It is served by the four
+routes above and nowhere else, and
+`tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed` fails if **any** other
+model this app builds puts an address in front of a caller, whether by naming one on the
+wire or by carrying a model that does. Two models are exempt, so the third fails, and one
+added to `UserOut` fails at once.
+
+Who may write it is two rules. A member writes their own; an admin writes anybody's. Both
+are **409** where the deployment's directory owns the address, which is the case when
+`LDAP_EMAIL_ATTRIBUTE` or `PROXY_EMAIL_HEADER` names where one comes from: there the next
+sign in overwrites whatever was typed, so the write is refused rather than reverted later.
+409 and not 403, because nothing about the caller's rights is wrong and there is no
+permission an admin could grant themselves. `editable` on the response carries the same
+answer per member, so the client can draw the field read only instead of offering an edit
+that will be refused.
+
+The body is `{"email": ...}`; `null` and an empty string both clear it, and anything else
+must pass the address rule the household recipient list already passes, which is a **422**
+if it does not. That rule rejects whitespace, newlines, commas and semicolons, the
+characters that turn one header into two.
+
+Nothing sends to these addresses yet. The mail sender still posts one digest to
+`overdue_mail_to`, so filling the field in changes no behaviour: see the Loans section.
+
 `/api/users/test-accounts` is a local account with a password an admin sets, for seeing the
 library the way an ordinary member sees it. It works in **every** auth mode, which is the
 point: `POST /auth/register` is 403 under `ldap` and `proxy`. The body is `UserCreate`, so
@@ -1050,7 +1171,8 @@ switch target. That is presentation: `POST /auth/switch` refuses one regardless.
 accounts do appear in `/api/users` like any other account, because the loan picker is a
 list of everybody who could hold a book.
 
-`PUT /api/settings` also carries the reminder fields, for all three channels.
+`PUT /api/settings` also carries the reminder fields, for all four channels; the in app
+one is a single switch, since it has no destination and no credential.
 `overdue_webhook_url` and `telegram_chat_id` are returned **in full**, unlike the Google
 Books key: a destination nobody can read back is a destination nobody can proofread, and an
 admin who can read it is an admin who can change it. A URL whose scheme is not `http` or
@@ -1078,6 +1200,66 @@ first entry on a book counts in full; a backwards step counts nothing, which cov
 re-read and a corrected typo and refuses to let the second inflate the figure.
 
 Every `/api/stats` aggregation applies the privacy predicate independently.
+
+### The public catalogue
+
+**The only endpoints in this API that answer without a session.** Off by default: both
+`library_mode` and `public_catalogue_enabled` have to be on, and the conjunction is
+evaluated on the server, so a publish row left on while library mode is off serves nothing.
+
+| Method | Path | Access | Notes |
+|---|---|---|---|
+| GET | `/api/public/books` | **public** | Search the published catalogue. **404** when nothing is published |
+| GET | `/api/public/books/{book_id}` | **public** | One record. **404** for a book that is private, trashed or absent |
+| GET | `/robots.txt` | **public** | Generated from the switches. Not in the OpenAPI schema |
+
+**`HEAD` answers 404 where `GET` answers 200**, on these routes and on every other GET
+endpoint in this API. FastAPI's `APIRoute` does not add `HEAD` the way Starlette's `Route`
+does, so a HEAD request only partially matches and falls through to the JSON 404 fallback.
+It is not fixed here because `custom_operation_id` drops the path from the operation id, so
+declaring `methods=["GET", "HEAD"]` gives the HEAD operation the same id as its GET and
+`assert_unique_operation_ids()` refuses to start the app. That is a boot failure rather
+than client noise, and it is why this is a separate change. In practice crawlers issue GET,
+and `robots.txt` is itself a GET, so what meets the 404 is `curl -I` and a monitor.
+
+**Everything about these is 404 rather than 403**, which is the house rule applied where it
+matters most. A 403 on the listing would confirm that this deployment holds a catalogue it
+is withholding; a 403 on an item would confirm the id exists, and a stranger counting
+through ids would learn how many private books a library holds.
+
+**The payload is `PublicBookOut`, not `BookOut`**, and it is a separate model rather than
+an exclusion list: an exclusion list publishes every field somebody forgets to add to it.
+It carries the bibliographic record, the format, the tags and the classifications, and
+nothing about a member, the household or the transaction. Ownership, lending willingness,
+reading status, member names, notes, purchase details, the shelf location, the collection
+and the copy count are all absent. A locally uploaded `cover_url` is dropped and only an
+https URL from a metadata source survives, because `/covers/<id>` is served behind
+`book_for_read` and a public reader cannot fetch it.
+
+The query parameters are a subset of `GET /api/books`: `q`, `tags`, `format`, `series`,
+`sort` and the paging pair. `status`, `unrated`, `discuss`, `ownership` and `lending` are
+absent by construction, the first three because there is no viewer to read them against
+and the last two because a filter over a column nobody can see is a way to read that
+column one query at a time. **`collection_id` is absent too**: the ids are consecutive, so
+the filter is enumerable, and what it enumerates is the household's own grouping of its
+shelves, which the payload withholds.
+
+`sort` is a **subset** of the signed in listing's, so `sort=newest` is a **422**: it orders
+by `added_at`, a withheld column, and an ordering returns the whole ordering of its column
+in one request. `tags` is bounded at 400 characters and 32 ids, and a longer list is a 422
+rather than a truncation.
+
+**`id` is published and discloses more than an identifier.** It is the insert order, so the
+catalogue comes back in acquisition order with no `sort` at all, and `max(id)` against the
+number of rows returned gives the count of rows that were withheld. It stays published
+because it is the URL a record is read at; see [security.md](security.md).
+
+Rate limited at **120 a minute, keyed on the source address**, which is the weakest key in
+`ratelimit.py` and the only one available: there is no username, and `X-Forwarded-For` is
+not trusted. See [security.md](security.md).
+
+Unless indexing is separately allowed, every response carries `X-Robots-Tag: noindex,
+nofollow` and `/robots.txt` disallows everything.
 
 ## System
 

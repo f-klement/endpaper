@@ -13,9 +13,31 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import CheckConstraint
 
 BACKEND = Path(__file__).resolve().parent.parent
+
+
+#: Directories under `backend/` that hold Python this project did not write.
+#:
+#: **A name per tool is what this used to be, and it failed the moment a new tool
+#: appeared.** The list read `.venv` and `__pycache__`, which is every cache anybody had
+#: seen locally; CI sets `UV_CACHE_DIR` inside the build directory, so `.uv-cache/`
+#: appeared under `backend/` with `pydantic` and `cyclonedx` inside it, and the address
+#: rule below reported `cyclonedx/model/contact.py` for reading a member's address. The
+#: suite was green locally and red on every push, because the difference was the
+#: environment rather than the tree.
+#:
+#: So the rule is structural: **a leading dot means a tool owns it**, which covers
+#: `.venv`, `.uv-cache`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache` and whatever is
+#: next without an edit here. `__pycache__` and `node_modules` are the two that carry no
+#: dot and so still have to be named.
+def _is_vendored(path: Path) -> bool:
+    return any(
+        part.startswith(".") or part in {"__pycache__", "node_modules"}
+        for part in path.relative_to(BACKEND).parts
+    )
 
 
 def _python_sources() -> list[Path]:
@@ -25,18 +47,13 @@ def _python_sources() -> list[Path]:
         for path in BACKEND.rglob("*.py")
         if "tests" not in path.parts
         and "migrations" not in path.parts
-        and ".venv" not in path.parts
-        and "__pycache__" not in path.parts
+        and not _is_vendored(path)
     ]
 
 
 def _test_sources() -> list[Path]:
     """Every file in the test tree. `_python_sources` deliberately excludes it."""
-    return [
-        path
-        for path in (BACKEND / "tests").rglob("*.py")
-        if "__pycache__" not in path.parts
-    ]
+    return [path for path in (BACKEND / "tests").rglob("*.py") if not _is_vendored(path)]
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
@@ -132,6 +149,47 @@ def _is_route_handler(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         if isinstance(call, ast.Attribute) and call.attr in ROUTE_METHODS:
             return True
     return False
+
+
+class TestTheSourceWalkSeesOnlyThisProject:
+    """Every rule in this file walks `_python_sources()`, so its reach is a rule too.
+
+    Written after `.uv-cache/` cost two red pipelines against a green local suite. Every
+    guard here reports a module by path, so a walk that reaches vendored code reports
+    somebody else's module for breaking a rule it has never heard of, and it does so only
+    in the environment where that directory exists.
+    """
+
+    def test_no_module_outside_this_project_is_walked(self) -> None:
+        # The failure this reproduces: `pydantic/networks.py` and
+        # `cyclonedx/model/contact.py` were reported for reading a member's address.
+        outside = [
+            str(path.relative_to(BACKEND))
+            for path in _python_sources() + _test_sources()
+            if path.suffix == ".py"
+            and any(
+                part.startswith(".") or part in {"__pycache__", "node_modules"}
+                for part in path.relative_to(BACKEND).parts
+            )
+        ]
+        assert not outside, f"the walk reached code this project did not write: {outside}"
+
+    def test_the_walk_still_finds_this_project(self) -> None:
+        # The other half. An exclusion that matched everything would satisfy the test
+        # above and silently retire every rule in this file, which is the failure mode
+        # a vacuity check exists for.
+        found = {path.name for path in _python_sources()}
+        assert "shelf.py" in found
+        assert "models.py" in found
+        assert len(found) > 30, f"only {len(found)} modules walked"
+
+    def test_a_tool_directory_is_excluded_by_shape_and_not_by_name(self, tmp_path: Path) -> None:
+        # The regression that matters: a cache nobody has seen yet is still excluded.
+        # A name per tool passes this only for the tools somebody thought of.
+        assert _is_vendored(BACKEND / ".some-tool-nobody-has-written-yet" / "mod.py")
+        assert _is_vendored(BACKEND / "__pycache__" / "mod.py")
+        assert not _is_vendored(BACKEND / "shelf.py")
+        assert not _is_vendored(BACKEND / "routers" / "loans.py")
 
 
 class TestEveryNumericQueryParamIsBoundedBothWays:
@@ -493,7 +551,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **74** models under `schemas/`, **29** of
+    Measured on the tree as it stands: **83** models under `schemas/`, **30** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -512,14 +570,24 @@ class TestEveryRequestBodyRowIdIsBounded:
     They are read back out of this paragraph by that test, because the previous
     pair (54 and 22) was stale by the time anybody noticed: it had drifted
     silently through at least two features before a reviewer recomputed it. It
-    then drifted again during the author authority feature, twice: 69 and 28 to
-    73 and 29 when four models arrived, and to 74 when a fifth did. The second
-    number did not move the second time, because `RefusedAssertionOut` is served
-    on a response and no handler accepts it, which is the distinction the two
-    counts exist to keep visible. Both drifts were caught by this test rather
-    than by a reader. A number in prose that nothing checks is a number that is eventually
-    wrong, and this file exists precisely to stop a defect being found a third
-    time by a person.
+    then drifted again during the author authority feature, three times: 69 and
+    28 to 73 and 29 when four models arrived, to 74 when a fifth did, and to 75
+    on 2026-08-28 when `ConfirmedIdentifierOut` did. It drifted a fourth time on the
+    same day, to **77**, when the overdue reminder work added `SenderHealth` and
+    `MyOverdueOut`. It drifted a fifth time, to **81** and **30**, when
+    `users.email` added `MemberEmailOut` and `EmailUpdate` and the public
+    catalogue added two more, and twice more inside the same evening as two
+    other seats landed a model each: to 82, then to **83**. **Three trios in
+    one wave is the condition this paragraph cannot survive on its own**, so
+    the last word before a commit belongs to the command below rather than to
+    this history. **The second number has now
+    stood still through five of those seven**, because every model that
+    did not move it is served on a response and accepted by no handler, which
+    is exactly the distinction the two counts exist to keep visible. Every drift
+    was caught by this test rather than by a reader, and a history that stops one
+    drift short is the defect this paragraph exists to prevent. A number in prose that
+    nothing checks is a number that is eventually wrong, and this file exists
+    precisely to stop a defect being found a third time by a person.
     """
 
     def _model_bases(self, node: ast.ClassDef) -> set[str]:
@@ -1530,12 +1598,65 @@ class TestNoFixtureLooksLikeACredential:
 
     Both test trees are published, so this is a rule about what ships rather
     than about what is true.
+
+    **This arm walks one of those two trees**, `backend/tests/`, because
+    `_test_sources()` is what it has. The frontend half is
+    `frontend/tests/houseRules.test.ts`, "no fixture or string carries an
+    address outside reserved space", and it walks `src/` as well as `tests/`
+    because `src/i18n/en.ts` ships a placeholder address in published source. A
+    docstring here claimed both trees for one round while checking one, which is
+    the reason that sentence is now this specific.
+
+    **The second arm is an address, and it is here because `users.email` is the
+    first column in this schema holding somebody's personal data.** A fixture
+    address is not a credential, but it ships to the same public mirror and
+    reads to a stranger as a real person's mailbox. The reserved domains exist
+    for exactly this: RFC 2606 sets aside `example.com`, `example.net`,
+    `example.org` and the `.test`, `.example`, `.invalid` and `.localhost` TLDs,
+    and nothing outside them can be told apart from somebody's actual address.
+
+    It was added while the diff that introduced the column was **already
+    green**: 25 distinct addresses across both trees and every one already
+    inside reserved space. That is the moment a guard costs nothing, and the
+    moment after it is the one where somebody has to go and change fixtures.
     """
 
-    #: Files allowed to contain the pattern, with the reason.
+    #: Files allowed to contain the patterns, with the reason.
     #:
-    #: Only this file, which has to write the pattern down in order to forbid it.
+    #: Only this file, which has to write them down in order to forbid them.
     ALLOWED = {"tests/test_house_rules.py"}
+
+    #: The reserved names a fixture address may sit under. RFC 2606 and RFC 6761.
+    #:
+    #: **Written without leading dots and compared by `_is_reserved`, not by
+    #: `str.endswith` against this tuple.** It held both spellings, `.example.com`
+    #: and `example.com`, so that a bare `example.com` would match; the
+    #: undotted entries then made `endswith` accept **`notexample.com`**,
+    #: **`myexample.org`** and **`fakeexample.net`**, all three registrable and
+    #: all three measured. That is `grep -F ci` matching "de**ci**sion", which
+    #: this file has now made in three different guards, so the comparison is a
+    #: named method with its own fixtures rather than a call site anybody can
+    #: get subtly right.
+    RESERVED = (
+        "example.com",
+        "example.net",
+        "example.org",
+        "test",
+        "example",
+        "invalid",
+        "localhost",
+    )
+
+    def _is_reserved(self, domain: str) -> bool:
+        """Is this domain the reserved name itself, or a label under it?
+
+        A boundary comparison, so `mail.example.org` passes and
+        `notexample.com` does not. The dot is what makes it a label boundary,
+        and the equality is what still admits the bare name.
+        """
+        return any(
+            domain == base or domain.endswith("." + base) for base in self.RESERVED
+        )
 
     def test_no_test_file_contains_a_realistic_bot_token(self):
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
@@ -1555,11 +1676,74 @@ class TestNoFixtureLooksLikeACredential:
             f"{sorted(offenders)}"
         )
 
-    def test_the_rule_reports_the_shape_it_exists_for(self):
+    def _addresses(self, text: str) -> list[str]:
+        """Every address-shaped string in a file.
+
+        Deliberately looser than `mailer._ADDRESS`: this is looking for what a
+        **reader** would take for an address, and a stranger triaging the public
+        mirror does not run our validator over it first.
+        """
+        return re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+
+    def test_no_test_file_carries_an_address_outside_reserved_space(self):
+        offenders: list[str] = []
+        for path in _test_sources():
+            relative = str(path.relative_to(BACKEND))
+            if relative in self.ALLOWED:
+                continue
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                for address in self._addresses(line):
+                    domain = address.rsplit("@", 1)[1].lower()
+                    if not self._is_reserved(domain):
+                        offenders.append(f"{relative}:{number} ({address})")
+
+        assert not offenders, (
+            "These carry an address outside the domains reserved for documentation, "
+            "and both test trees are published, so a stranger cannot tell them from "
+            "somebody's real mailbox. Use example.org, example.com, example.net or "
+            f"a .test / .invalid name: {sorted(offenders)}"
+        )
+
+    def test_the_rules_report_the_shapes_they_exist_for(self):
         """A rule nothing can fail is a rule nobody notices deleting."""
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
         assert pattern.search("123456789:AAHrealisticlookingsecrethalfhere")
         assert not pattern.search("0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")
+
+        # The address arm, both ways. A reserved domain passes and a plausible
+        # personal one does not, which is the only distinction it draws.
+        found = self._addresses("write to kim.jones@gmail.com or sam@example.org")
+        assert found == ["kim.jones@gmail.com", "sam@example.org"]
+        assert not self._is_reserved(found[0].rsplit("@", 1)[1])
+        assert self._is_reserved(found[1].rsplit("@", 1)[1])
+
+    @pytest.mark.parametrize(
+        ("domain", "reserved"),
+        [
+            ("example.org", True),
+            ("example.com", True),
+            ("example.net", True),
+            # A label under a reserved name, which is what makes this a rule
+            # rather than a list nobody can finish.
+            ("mail.example.org", True),
+            ("sub.deep.example.test", True),
+            ("anything.invalid", True),
+            ("localhost", True),
+            ("test", True),
+            # The three that `str.endswith` against a tuple of bare names
+            # accepted. All registrable, all measured.
+            ("notexample.com", False),
+            ("myexample.org", False),
+            ("fakeexample.net", False),
+            # The same mistake one label along, and at the TLD.
+            ("example.org.evil.test.co", False),
+            ("faketest", False),
+            ("notlocalhost", False),
+            ("gmail.com", False),
+        ],
+    )
+    def test_the_reserved_check_compares_at_a_label_boundary(self, domain, reserved):
+        assert self._is_reserved(domain) is reserved
 
 
 def _label(path: Path) -> str:
@@ -1797,3 +1981,281 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
         innocent.write_text("import dataclasses\ndataclasses.replace(thing, a=1)\n")
         assert not _holds_a_record(ast.parse(innocent.read_text()))
         assert not self._offenders_naming_the_flag([innocent])
+
+class TestAnAddressIsServedOnlyWhereItIsNamed:
+    """A member's address reaches the two schemas that exist for it, and no other.
+
+    The rule is issue #80's, settled by the owner: an admin may read and write
+    any address, a member may read and write their own, and **it is used and
+    shown nowhere else**. The last one is load bearing, and an intention is not
+    a mechanism: `UserOut` is served inside every book payload and by the member
+    list, so one field added there discloses an address to every member who can
+    see a book, with a 200 and nothing in any log. That is the shape the
+    appearance columns were kept off `UserOut` to avoid, and it was kept off by
+    a comment.
+
+    Two passes, in the two places the field could arrive.
+
+    **The schema pass asks pydantic what each model puts on the wire**, rather
+    than reading Python field names, and it asks **once**. A model carries an
+    address when the string `email` names a property anywhere in its JSON schema
+    document, in either mode. Nothing else.
+
+    **It took three versions to get to one mechanism, and the second is the
+    instructive one.** The first tested `"email" in model_fields`, the Python
+    name, and a reviewer walked past it twice in a sitting: with
+    `mailbox: str = Field(serialization_alias="email")` on `UserOut`, which
+    `from_attributes` fills from `User.email` and FastAPI serialises
+    `by_alias=True`; and with `class Anything(BaseModel): member: MemberEmailOut`,
+    which carries the whole address model and has no address field of its own.
+
+    The second version fixed both, and fixed them with **two** mechanisms: the
+    wire names from `model_json_schema`, plus a fixed point over Python
+    annotations for the nesting. A reviewer then walked through the seam between
+    them. A `@computed_field` returning `MemberEmailOut` is in the serialization
+    schema and **absent from `model_fields`**, which was all the annotation walk
+    read, so `model_dump()` returned `{'id': 0, 'person': {..., 'email': ...}}`
+    while the guard saw a model whose only field was `id`.
+
+    Two mechanisms meeting in the middle is where a hole lives. The third
+    version deletes the second one: `model_json_schema` already inlines every
+    referenced model into one flattened top level `$defs`, measured to reach a
+    model nested two deep, so walking the document covers naming, every alias
+    spelling, an `alias_generator`, nesting at any depth, list and dict
+    positions, and computed fields with no arm for any of them. It is a net
+    deletion, which is what the fix to an enumerating guard looks like when it
+    is the right one.
+
+    Models are reached through `BaseModel.__subclasses__()` after `main` has
+    imported every router, rather than by listing modules: a hard coded module
+    list is the guard defect this file has already made once. A model is this
+    app's if its own source file is under `backend/` and outside `.venv`, which
+    keeps `fastapi.openapi.models.Contact` (which has an `email`) out of the
+    answer. A model whose schema cannot be built is **reported**, not skipped:
+    a skipped model is a hole.
+
+    **The reader pass** is the `TestProvenanceColumnsAreNeverRead` shape: no
+    module outside the two named may read `.email` off anything. That is what
+    catches an address put into a plain `dict` a route returns, which no schema
+    pass can see. `getattr(x, "email")` is the other spelling of an attribute
+    read and is matched too; `getattr(row, column.name)` is not, which is
+    exactly the generic door `backup.py` reads every column through and the
+    reason a restore keeps carrying this one.
+
+    **Blind spots, stated rather than discovered**, and this list has itself
+    been wrong once: it claimed the pass covered everything except an address
+    under a different name, which did not describe the computed field above at
+    all. That one served the address **under the name `email`**, inside a nested
+    object. So what follows is what the mechanism cannot see rather than a
+    restatement of what it does.
+
+      * An address served under a different property name (`contact`, `mailbox`
+        with no alias). This pins the name the app uses, in the place a caller
+        sees it, and a rule that guessed at synonyms would be an enumeration.
+      * A route with `response_model=None` returning a hand built dict, unless
+        the value reached it through an attribute read, which the reader pass
+        catches.
+      * A model this app builds but never reaches from `BaseModel`'s subclass
+        tree, which today is none: the tripwire counts them.
+    """
+
+    #: The models allowed to carry an address, and what each is for.
+    #:
+    #: `EmailUpdate` is a request body rather than a response and is named here
+    #: anyway: the pass walks every model, and an exemption list that quietly
+    #: skipped request bodies would be a hole shaped exactly like the next
+    #: schema somebody adds.
+    ADDRESS_MODELS = {
+        "MemberEmailOut": "the four routes in routers/users.py",
+        "EmailUpdate": "the body those two writes take",
+    }
+
+    #: The modules allowed to read `.email`, and why each must.
+    #:
+    #: `models.py` is absent on purpose: declaring the column is an annotated
+    #: assignment rather than an attribute read, so it is invisible to this pass
+    #: and adding it here would exempt a module that has nothing to exempt.
+    ADDRESS_READERS = {
+        "auth_backends.py": "the directory writes it, and compares before writing",
+        "routers/users.py": "the routes that serve it",
+    }
+
+    #: The name an address goes by on the wire.
+    ADDRESS_FIELD = "email"
+
+    def _our_models(self) -> dict[str, type[BaseModel]]:
+        """Every Pydantic model defined in this app, by name."""
+        import inspect as inspect_module
+
+        import main  # noqa: F401  (imports every router, so every model is built)
+
+        found: dict[str, type[BaseModel]] = {}
+        seen: set[type[BaseModel]] = set()
+
+        def walk(model: type[BaseModel]) -> None:
+            for subclass in model.__subclasses__():
+                if subclass in seen:
+                    continue
+                seen.add(subclass)
+                try:
+                    source = Path(inspect_module.getfile(subclass))
+                except (TypeError, OSError):
+                    source = None
+                if (
+                    source is not None
+                    and BACKEND in source.parents
+                    and ".venv" not in source.parts
+                ):
+                    found[subclass.__name__] = subclass
+                walk(subclass)
+
+        walk(BaseModel)
+        return found
+
+    def _serves_an_address(self, schema: object) -> bool:
+        """Does this JSON schema document describe an address anywhere in it?
+
+        **One walk over the whole document, rather than `properties` plus a
+        second rule for nesting.** The previous version asked pydantic for the
+        top level property names and then read Python **annotations** to follow
+        nesting, and a reviewer walked straight through the seam between the
+        two: a `@computed_field` returning `MemberEmailOut` is in the
+        serialization schema and absent from `model_fields`, which is all the
+        annotation walk could see. Measured leak: `model_dump()` returning
+        `{'id': 0, 'person': {..., 'email': ..., }}` while `model_fields` was
+        `['id']`.
+
+        Two mechanisms meeting in the middle is where a hole lives, so there is
+        one now. `model_json_schema` already inlines every referenced model into
+        a single top level `$defs`, **flattened**: measured, a model nesting a
+        model that nests the address model carries both in its own `$defs`. So
+        an object node anywhere in the document whose `properties` names the
+        address is the whole rule, and it covers the plain field, every alias
+        spelling, an `alias_generator`, nesting at any depth, list and dict
+        positions, and a computed field, without an arm for any of them.
+
+        The one false positive it can produce is a field literally called
+        `properties` holding a mapping with an `email` key. That fails loudly
+        and is the safe direction; the alternative walks a schema by knowing
+        which keywords nest, which is the enumeration this replaced.
+        """
+        if isinstance(schema, dict):
+            properties = schema.get("properties")
+            if isinstance(properties, dict) and self.ADDRESS_FIELD in properties:
+                return True
+            return any(self._serves_an_address(value) for value in schema.values())
+        if isinstance(schema, list):
+            return any(self._serves_an_address(item) for item in schema)
+        return False
+
+    def _carriers(self, models: dict[str, type[BaseModel]]) -> tuple[set[str], list[str]]:
+        """The models that put an address in front of a caller, and any failures.
+
+        Both modes, because the two differ and an address disclosed by either is
+        disclosed: `validation_alias` names what a request body may send,
+        `serialization_alias` what a response carries, and a computed field is
+        in the serialization schema **only**.
+        """
+        unreadable: list[str] = []
+        carriers: set[str] = set()
+        for name, model in models.items():
+            try:
+                schemas = [
+                    model.model_json_schema(mode=mode)
+                    for mode in ("validation", "serialization")
+                ]
+            except Exception as error:  # noqa: BLE001  (reported, never skipped)
+                unreadable.append(f"{name}: {type(error).__name__}: {error}")
+                continue
+            if any(self._serves_an_address(schema) for schema in schemas):
+                carriers.add(name)
+        return carriers, unreadable
+
+    def test_no_other_schema_carries_an_address(self) -> None:
+        models = self._our_models()
+        carriers, unreadable = self._carriers(models)
+
+        assert not unreadable, (
+            "These models could not be asked what they put on the wire, so this "
+            "rule said nothing about them. A model it cannot read is a hole, not "
+            "an exemption:\n  " + "\n  ".join(sorted(unreadable))
+        )
+
+        offenders = sorted(carriers - set(self.ADDRESS_MODELS))
+        assert not offenders, (
+            "These put a member's address in front of a caller, by naming one on "
+            "the wire or by carrying a model that does, and are not one of the "
+            f"schemas that may: {offenders}. UserOut is served inside every book "
+            "payload and the member list, so an address there is disclosed to "
+            "every member who can see a book. Serve it from "
+            + "; ".join(f"{name} ({why})" for name, why in self.ADDRESS_MODELS.items())
+            + " instead, or change the rule on issue #80 first."
+        )
+
+    def test_no_module_outside_the_two_reads_an_address(self) -> None:
+        offenders: list[str] = []
+
+        for path in _python_sources():
+            where = str(path.relative_to(BACKEND))
+            if where in self.ADDRESS_READERS:
+                continue
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) and node.attr == self.ADDRESS_FIELD:
+                    offenders.append(f"{where}:{node.lineno}")
+                elif (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "getattr"
+                    and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == self.ADDRESS_FIELD
+                ):
+                    offenders.append(f"{where}:{node.lineno} (getattr)")
+
+        assert not offenders, (
+            "These read a member's address, and only "
+            + "; ".join(f"{where} ({why})" for where, why in self.ADDRESS_READERS.items())
+            + " may:\n  "
+            + "\n  ".join(sorted(offenders))
+        )
+
+    def test_the_two_passes_still_have_something_to_find(self) -> None:
+        """Both rules above pass just as well with the field deleted, which is
+        how a guard in this repository has twice gone quiet without failing."""
+        from models import User
+
+        models_found = self._our_models()
+        assert len(models_found) >= 40, (
+            f"the model walk found too little to be checking anything: "
+            f"{len(models_found)} models"
+        )
+        assert "UserOut" in models_found, "the walk missed the model this rule exists for"
+
+        carriers, unreadable = self._carriers(models_found)
+        assert not unreadable, f"models this rule cannot read: {sorted(unreadable)}"
+        for name in self.ADDRESS_MODELS:
+            assert name in models_found, f"{name} is gone, so the exemption guards nothing"
+            assert name in carriers, (
+                f"{name} no longer puts an address on the wire, so it is exempted "
+                "for nothing and the pass has stopped having a subject"
+            )
+
+        assert self.ADDRESS_FIELD in User.__table__.columns, (
+            "users.email is gone, so both passes above are vacuous"
+        )
+
+        readers = {
+            str(path.relative_to(BACKEND))
+            for path in _python_sources()
+            if any(
+                isinstance(node, ast.Attribute) and node.attr == self.ADDRESS_FIELD
+                for node in ast.walk(ast.parse(path.read_text()))
+            )
+        }
+        assert readers == set(self.ADDRESS_READERS), (
+            "the reader pass is exempting modules that do not read an address, "
+            f"or missing one that does: reads it {sorted(readers)}, "
+            f"exempted {sorted(self.ADDRESS_READERS)}"
+        )
+

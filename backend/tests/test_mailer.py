@@ -305,3 +305,66 @@ class TestTheEnvironmentTable:
         assert all(
             config.env_variable_name(key) for key in settings_store.MAIL_KEYS
         )
+
+
+class TestWhatCountsAsAnAddress:
+    """`looks_like_address`, on its own, with nothing in front of it.
+
+    **Every other test of this rule goes through a caller that strips first.**
+    `_addresses` strips each comma separated part, `checked_config` strips the
+    sender, `schemas.user.EmailUpdate` strips what a member typed, and
+    `auth_backends._directory_email` strips what a directory said. Four
+    independent `.strip()` calls, and between them they hid the one spelling
+    this function actually accepted: it was `re.compile(r"^...$").match`, and
+    `$` matches **before a trailing newline**.
+
+    So `"kim@example.org\\n"` passed the header injection control while three
+    docstrings and `docs/security.md` said it could not, and no fixture at any
+    layer used that shape: the injection fixtures all put the newline in the
+    middle, where the negated character class rejects it on its own merits.
+
+    A control that holds only because of its callers is not a control, so it is
+    tested here without them.
+    """
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "kim@example.org",
+            "kim.jones+books@mail.example.org",
+            "KIM@EXAMPLE.ORG",
+            "kim@sub.example.org",
+        ],
+    )
+    def test_an_ordinary_address_passes(self, address):
+        assert mailer.looks_like_address(address) is True
+
+    @pytest.mark.parametrize(
+        ("address", "why"),
+        [
+            ("kim@example.org\n", "a trailing newline, which `$` used to allow"),
+            ("kim@example.org\r", "a trailing carriage return"),
+            ("kim@example.org\r\n", "the pair a header actually ends with"),
+            ("\nkim@example.org", "a leading newline"),
+            ("kim@example.org\nBcc: attacker@evil.test", "a newline in the middle"),
+            ("kim\x00@example.org", "a NUL, which is not whitespace"),
+            ("kim\x1b@example.org", "an ESC, which is not whitespace"),
+            ("kim\x7f@example.org", "DEL, which is not whitespace"),
+            ("kim​@example.org", "a zero width space, category Cf"),
+            ("kim@example.org ", "a trailing space"),
+            ("kim@example.org,sam@example.org", "two addresses"),
+            ("kim@example.org;sam@example.org", "two addresses, the other separator"),
+            ("<kim@example.org>", "angle brackets"),
+            ("kim@localhost", "no dot in the domain"),
+            ("not an address", "not an address"),
+        ],
+    )
+    def test_what_a_header_may_not_carry_is_refused(self, address, why):
+        assert mailer.looks_like_address(address) is False, why
+
+    def test_the_bound_is_the_one_three_layers_share(self):
+        """`MAX_ADDRESS` is stated here rather than left to three call sites to
+        agree about by coincidence: `users.email` is `String(320)`, the schema
+        bounds a write to it, and `auth_backends` bounds what a directory may
+        assert. `tests/test_schema.py` pins the column against this number."""
+        assert mailer.MAX_ADDRESS == 320

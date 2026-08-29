@@ -75,20 +75,163 @@ committed, so neither the build nor the test suite needs a Python toolchain.
 ## The build
 
 ```
-Stage 1  oven/bun:alpine     bun install --frozen-lockfile  →  bun run build  →  dist/
-Stage 2  python:3.14-alpine  uv sync --frozen --no-dev  +  COPY --from=stage1 dist ./static
+Stage 1  python:3.14-alpine  compile YAZ                    →  /opt/yaz-runtime
+Stage 2  oven/bun:alpine     bun install --frozen-lockfile  →  bun run build  →  dist/
+Stage 3  python:3.14-alpine  uv sync --frozen --no-dev  +  COPY --from=stage2 dist ./static
+                                                       +  COPY --from=stage1 /opt/yaz-runtime
 ```
 
-Only the compiled assets cross between stages, so Bun, `node_modules` and the TypeScript
+Only the compiled assets cross from stage 2, so Bun, `node_modules` and the TypeScript
 sources are absent from the shipped image.
 
 Both stages install from a lockfile (`bun.lock`, `uv.lock`) and both base images are pinned
 by digest, so rebuilding a commit produces the same dependency set. `--no-dev` keeps pytest,
 ruff and mypy out of the runtime image, which runs as **uid 1000, non-root**.
 
-Both stages are Alpine, which sets a bar for new Python dependencies. A C-extension package
+Every stage is Alpine, which sets a bar for new Python dependencies. A C-extension package
 with no musllinux wheel does not fail politely: uv tries to build it from source and dies
 for want of a compiler, in CI, at image-build time.
+
+### The Z39.50 client library
+
+Stage 1 compiles **YAZ**, IndexData's Z39.50 implementation, because national library
+catalogues speak Z39.50 and nothing else reaches several of them. Six of the eight targets
+surveyed run YAZ as their server.
+
+**What uses it.** `backend/z3950.py` is the transport and `backend/z3950_provisional.py`
+is the client behind its seam, binding `libyaz.so.5` through `ctypes`. The client is
+explicitly provisional: the route was not settled when the transport was written, and the
+seam exists so that changing it is a change to one function. Nothing in the metadata source
+chain reaches either module yet, so a running deployment loads the library and asks no
+target anything.
+
+**Alpine packages no YAZ.** Checked across edge, v3.22, v3.21 and the pinned base's own
+3.24.1, in main, community and testing: no `yaz`, no `yaz-dev`. So it is either compiled or
+the base image changes, and the base image is the expensive half: `python:3.14.7-slim` is
+41.4 MB compressed against alpine's 16.9 MB, so moving to Debian for a packaged `libyaz5`
+costs 24.5 MB before YAZ is installed at all, and buys a larger scan surface against a
+release gate that refuses a fixable HIGH. Compiling costs about a minute, once.
+
+It compiles clean against musl with no patches, which is a narrower claim than it sounds:
+configure and make complete, which is not the same as the sources being musl-correct.
+Upstream 5.36.0 carries a fix, "expose gethostbyaddr with `_GNU_SOURCE`", that a clean
+build would not have revealed.
+
+What the runtime image pays, measured on the pinned base with `du -sk /` before and after,
+Alpine 3.24.1, package count 30 to 32 to 40:
+
+| | |
+|---|---|
+| `libxml2` and `libxslt` | 1,384 KiB |
+| `gnutls`, plus nettle, gmp, p11-kit, libtasn1, libunistring, brotli-libs and libidn2 | 7,704 KiB |
+| `/opt/yaz` itself, stripped: `libyaz.so.5` and `yaz-client` | 1,844 KiB |
+| | **10,932 KiB** |
+
+`gnutls` and the seven packages behind it are **70% of that**, 85% of the package cost
+alone, and buy Z39.50 over TLS, which no surveyed target uses: every one answers plaintext.
+Removing them is two edits rather than one, `./configure --without-gnutls` and dropping
+`gnutls` from the runtime package line, and it is a capability decision rather than a build
+tidy-up.
+
+**The size is not the cost. The advisory stream is.** The three libraries and everything
+they pull in carry **94 distinct CVE ids** in Alpine's security database: 52 against the
+gnutls group, of which gnutls alone accounts for 36, and 42 against libxml2 and libxslt.
+Counted at two scopes, v3.24 main alone and v3.24 with v3.21 and v3.19 across main and
+community, which agree. They land on the scan that blocks a release, which refuses a
+fixable HIGH or CRITICAL, so each one is a release held until the base image carries the
+fix.
+
+**All three are equally optional to the build**: YAZ offers `--with-xml2` and `--with-xslt`
+beside `--with-gnutls`, and a build without any of them links none of them. So the 52 is
+the price of TLS only against a judgement, not against a build constraint. The judgement is
+about record handling: the catalogue records this application exists to read are parsed and
+converted through libxml2 and libxslt, so dropping those would cost a feature, while
+dropping gnutls would cost an encrypted transport that no surveyed target offers. That is
+the argument for treating the 52 as separable and the 42 as not, and it is a claim about
+what this application needs rather than about what YAZ requires.
+
+**Nothing watches the library itself.** `/opt/yaz/lib/libyaz.so.5` is compiled here rather
+than installed from a package, so no package database lists it and the image scanners
+enumerate nothing for it: they read package manifests and lockfiles, and a C library built
+from a tarball appears in neither. A YAZ advisory reaches this repository only through the
+dependency bot watching upstream's release tags, and the version and its hash are then
+bumped by hand together.
+
+**What that TLS is worth is worth knowing.** YAZ performs no certificate verification in
+any released version: `verify_peers`, `set_x509_system_trust`, `session_set_verify_cert`,
+`set_x509_trust_file` and `GNUTLS_CERT` appear nowhere in its `src/` or `client/`, on
+5.35.1 or on 5.37.3. It allocates certificate credentials and initialises a client session
+without ever loading a trust store. An `ssl:` target is therefore encrypted against a
+passive listener and not authenticated against anyone able to answer for the address.
+
+**The install prefix is load bearing.** libtool records `/opt/yaz/lib` as `yaz-client`'s
+RUNPATH, which is why the binary resolves its library with no `LD_LIBRARY_PATH` and no
+symlink into `/usr/lib`, and why the tree has to land at exactly that path. A Python client
+should load the library by absolute path for the same reason.
+
+#### The compile does not run on every build
+
+`docker/build-yaz.sh` stamps the tree it produces with a **build id** naming the three
+things that decide what gets built: the version, the sha256 of the tarball, and the sha256
+of the recipe itself. Handed a tree already carrying that id it does nothing; handed
+anything else it compiles. So the build stage can take a prebuilt image as its base and an
+ordinary build becomes a layer fetch.
+
+**The id deliberately names nothing about the environment**, and that is the second
+attempt. It briefly carried the musl version, so the runtime stage could refuse a library
+built against a different libc. That was wrong in three ways at once. The value had to be
+read before the compiler was installed, and installing it can move musl, because
+`musl-dev` depends on an exact musl version. It said nothing about libxml2, libxslt or
+gnutls, which libyaz also links. And it was **too strict**: measured, a YAZ compiled on
+Alpine 3.24.1 against `musl-1.2.6-r2` loads and runs clean on Alpine 3.21.7 against
+`musl-1.2.5-r11`, three Alpine releases apart, with `LD_BIND_NOW` set so nothing is
+deferred to first call.
+
+**That is one ordered pair, and which pair it is matters.** It runs a newly built binary
+against an older libc, which is the harder direction, since symbols a new build expects
+need not exist in an old library. The scenario the musl term was for is the other way
+round, an older binary on a newer libc, so this result covers that case a fortiori.
+
+So, at the strength the evidence carries: **on one pair three releases apart, in the harder
+direction, a base image bump that keeps a YAZ built against the previous musl is not a
+breakage.** That is a strong directional result and not a proof about every pair, and the
+design does not rest on it either way. Where the ABI is compatible there is nothing to
+detect; where it is not, **the load check below detects it**. What the version-and-digest
+naming is worth is that the artefact is reproducible and attributable, rather than that it
+averts a breakage nobody has yet been able to produce.
+
+So the environment is not compared as a string. **It is checked by running the library**,
+in the runtime stage, once its dependencies are installed: the shipped `yaz-client` is
+executed and required to report the pinned version. That single line covers musl, all three
+shared libraries, and the install prefix, since libtool baked `/opt/yaz/lib` into the binary
+as its RUNPATH and a tree copied anywhere else cannot find itself. `LD_BIND_NOW` makes that
+the whole `DT_NEEDED` closure rather than one library: everything must load and fully bind,
+which is strictly more than the musl version string ever compared. **What it cannot cover is
+what is loaded later by `dlopen`**, and gnutls does exactly that with p11-kit at TLS setup
+time rather than at load. Moot while nothing here speaks TLS, and worth knowing before
+anything does. The release smoke test
+runs the same command again on the finished image, which is not duplication: the first
+fails the build, in any build including somebody's own `docker build`, and the second
+proves it in the artefact about to be published.
+
+The stamp is compared once more in the runtime stage, against the tree it received. In an
+ordinary build that cannot fire, because both stages inherit the same pins and copy the
+same recipe file, so the two ids are equal by construction. It is a check on where the
+`COPY` points, and narrower than that sounds in the safe direction: it does **not** fire
+when the `COPY` points at a different subset of the same build, because the recipe writes
+the same id into both `/opt/yaz` and `/opt/yaz-runtime`. Copying the full tree instead of
+the runtime subset would pass this check and silently ship the headers, the documentation
+and the two libraries the subset exists to leave out. It is not the guarantee that the
+library works.
+
+All of this is in this repository and in the published image's own Dockerfile. The build
+pipeline additionally names its prebuilt image after the same facts so it knows when to
+rebuild one, but that is a way of not paying the minute rather than a safety property.
+
+The version and its hash are bumped by hand, together. The hash is **trust on first use**:
+IndexData publish no signature and no checksum file beside the release, so it records the
+bytes one fetch saw and pins them against a later substitution, which is the threat it can
+actually address.
 
 ## Startup sequence
 

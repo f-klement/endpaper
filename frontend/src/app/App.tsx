@@ -8,6 +8,9 @@ import { Spinner } from "../components";
 import { useTranslation } from "../i18n";
 import { ErrorPage, SessionEndedPage } from "../pages/errors";
 import LoginPage from "../pages/LoginPage";
+import PublicCataloguePage, {
+  PublicBookPage,
+} from "../pages/PublicCataloguePage";
 import { useSession } from "../pages/hooks";
 import AppearanceSync from "./components/AppearanceSync";
 import NavBar, { BAR_OFFSET } from "./components/NavBar";
@@ -22,8 +25,15 @@ interface AppProps {
 /**
  * The application shell.
  *
- * Routing is gated on the session: signed out, every path renders the login
- * page, so there is no route that can be reached without an account.
+ * Routing is gated on the session, with **one deliberate exception**: signed
+ * out, every path renders the login page except `/catalogue`, which is the
+ * published catalogue and is the only surface in this application meant to be
+ * read without an account.
+ *
+ * That exception publishes nothing on its own. The two screens behind it read
+ * `/api/public/*`, which answers 404 unless an admin has turned on both library
+ * mode and the publish switch, so on a household that has taken neither
+ * decision the route renders "there is nothing here" and the gate is unchanged.
  */
 export default function App({ queryClient }: AppProps) {
   return (
@@ -73,6 +83,11 @@ function AppShell() {
   if (!user) {
     return (
       <Routes>
+        {/* Declared before the catch-all, which claims everything else. The
+            catalogue draws its own header and has no `NavBar`, so nothing here
+            leaks a signed in control to a reader with no account. */}
+        <Route path="/catalogue" element={<PublicCataloguePage />} />
+        <Route path="/catalogue/:id" element={<PublicBookPage />} />
         <Route path="*" element={<LoginPage onSignIn={signIn} />} />
       </Routes>
     );

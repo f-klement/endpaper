@@ -10,8 +10,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+import settings_store
 from config import MAX_UPLOAD_BYTES
 from covers import COVER_HOSTS
+from database import SessionLocal
+from routers.public import PUBLIC_PAGE_PREFIX, PUBLIC_PREFIX
 
 # `img-src` is **derived** from `covers.COVER_HOSTS`, not written out here.
 # The two used to be separate lists and drifted: covers.py started resolving
@@ -43,6 +46,66 @@ _CSP: Final = "; ".join(
 
 _ONE_YEAR_SECONDS: Final = 31_536_000
 
+#: What every response says to a crawler unless something lifts it.
+#:
+#: `noindex` alone would still let a crawler follow every link out of a page and
+#: index those, which for a catalogue is every record.
+NOINDEX: Final = "noindex, nofollow"
+
+#: The paths a published catalogue is actually read at, and the only ones that
+#: may ever lose `NOINDEX`.
+#:
+#: **Two of the three are client routes, and that is the point.** A crawler
+#: indexes the HTML at `/catalogue` and `/catalogue/<id>`, not the JSON at
+#: `/api/public/books`, and the JSON is what the first version of this listed.
+#: The SPA is served by a `StaticFiles` mount, which has no dependencies, so a
+#: header set by a route dependency could never have reached it: that is the gap
+#: this middleware closes and it is why this lives here rather than in
+#: `routers/public.py`.
+#: Matched **exactly or followed by a slash**, never as a bare prefix. A bare
+#: `startswith("/catalogue")` also matches `/catalogue-of-members`, which is the
+#: same looseness the signed out route table is tested against in
+#: `frontend/tests/app/App.test.tsx`.
+#:
+#: **Imported from the router rather than restated.** `routers/public.py` says
+#: those two constants and this list must agree, and for a round nothing tied
+#: them: they agreed because somebody had checked, which is the state a pair of
+#: literals is in right up until it is not.
+_INDEXABLE_PATHS: Final = (PUBLIC_PREFIX, PUBLIC_PAGE_PREFIX, "/robots.txt")
+
+
+def _may_be_indexed(path: str) -> bool:
+    """Whether this path is a published catalogue page a crawler was invited to.
+
+    **The database is read only for a path that could possibly qualify**, which
+    is three prefixes, so the signed in app pays nothing for this. The read
+    itself is a settings row on a local SQLite file, and it costs a session per
+    request on `/catalogue`, which has no rate limiter: measured at 3.99ms
+    against 2.01ms. A short cache removes it and is its own ticket rather than
+    this change.
+
+    `settings_store` and `SessionLocal` are imported at module scope. They were
+    deferred, on the argument that this module is imported by `main` before the
+    app is built, and that stopped being a reason the moment `_INDEXABLE_PATHS`
+    started importing from `routers.public`, which pulls the same chain.
+
+    Failure is `False`, deliberately and by construction: anything that goes
+    wrong leaves the response `noindex`, which is the answer a deployment that
+    has published nothing wants and the answer a broken one wants too.
+    """
+    if not any(
+        path == candidate or path.startswith(f"{candidate}/")
+        for candidate in _INDEXABLE_PATHS
+    ):
+        return False
+    session = SessionLocal()
+    try:
+        return settings_store.public_catalogue_may_be_indexed(session)
+    except Exception:
+        return False
+    finally:
+        session.close()
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds the standard hardening headers to every response.
@@ -67,6 +130,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # The barcode scanner needs the camera; nothing needs the rest.
             "camera=(self), microphone=(), geolocation=(), interest-cohort=()",
         )
+
+        # **Every response, not only a handler's.** A header set from a route
+        # dependency merges onto the success path alone, so measured on the
+        # public catalogue it was present on the 200 and absent from the gate's
+        # 404, the item 404, a 429 and a 500, while two documents claimed every
+        # public response carried it. Here it is unconditional and the public
+        # paths are what may lift it, which is the safe direction: a response
+        # nobody thought about stays out of the index.
+        response.headers.setdefault("X-Robots-Tag", NOINDEX)
+        if _may_be_indexed(request.url.path):
+            del response.headers["X-Robots-Tag"]
 
         forwarded_proto = request.headers.get("x-forwarded-proto", "")
         if request.url.scheme == "https" or forwarded_proto == "https":

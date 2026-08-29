@@ -15,7 +15,7 @@ interface SettingsPageProps {
 }
 
 /**
- * Settings is an index of six screens, not a screen.
+ * Settings is an index of screens, not a screen.
  *
  * It held thirteen collapsible sections and about 3,270 lines across one route,
  * and had stopped being a page: two features built on one night had to be told
@@ -24,8 +24,14 @@ interface SettingsPageProps {
  *
  * So each group is a real route now, and this is the map to them: a heading, a
  * sentence saying what is behind it, and a link. **The sentences are the whole
- * value of this page.** Six headings alone would make a household open three
+ * value of this page.** Headings alone would make a household open three
  * screens to find one setting, which is worse than the long page it replaced.
+ *
+ * **No count of the routes appears in this file, and that is deliberate.** It
+ * carried five of them and every one was wrong within a wave, because two
+ * seats added a route each and neither thought to reread a docstring. The
+ * table in `types.ts` is the answer, `types.test.ts` asserts it whole, and
+ * `SettingsPage.test.tsx` derives everything it checks from it.
  *
  * **Nothing here folds, and that is the point.** The collapse state was a
  * second way to hide a section beside the navigation, and keeping both is how
@@ -38,11 +44,13 @@ interface SettingsPageProps {
  * heading and the sentence together, which is what a reader listening to this
  * page wants: the sentence is the reason to follow the link.
  *
- * **A member who is not an admin is offered three of the six.** The page it
- * replaced refused in place, once, beside the cards it was refusing; six links
- * with no such mark would turn that into three dead ends, each a tap away and
- * each advertised with a sentence promising content. The three routes stay
- * mounted, so a deep link still lands and still meets `AdminSettings`.
+ * **A member who is not an admin is offered only the routes that hold
+ * something for them**, which is every route without `adminOnly`. The page it
+ * replaced refused in place, once, beside the cards it was refusing; links
+ * with no such mark would turn that into one dead end per admin only route,
+ * each a tap away and each advertised with a sentence promising content. Those
+ * routes stay mounted, so a deep link still lands and still meets
+ * `AdminSettings`.
  *
  * **The account comes down as a prop, which is the idiom inside `AppRoutes`.**
  * `BookDetail` takes the same one, and `NoteList` and `QuoteList` take
@@ -54,7 +62,7 @@ interface SettingsPageProps {
  * proxy auth that entry is not the identity: it is written only by `signIn`,
  * which under proxy fires only on a switch into a test account, and a test
  * account is never an admin. So the key is null for a proxy admin always, and
- * reading it dropped three entries off their own index, reachable only by
+ * reading it dropped every admin only entry off their own index, reachable only by
  * typing the URL.
  *
  * **This filter may only ever fail by under-offering.** It decides what is

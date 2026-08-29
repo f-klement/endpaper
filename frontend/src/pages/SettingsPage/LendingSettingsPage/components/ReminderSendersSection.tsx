@@ -1,22 +1,34 @@
 import { useState } from "react";
 
-import type {
-  SettingsOut,
-  SettingsUpdate,
+import {
+  OverdueSender,
+  type SenderHealth,
+  type SettingsOut,
+  type SettingsUpdate,
 } from "../../../../api/generated/model";
 import { Icon } from "../../../../components";
 import { useTranslation, type Translate } from "../../../../i18n";
 import { SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
+import { SenderHealthLine } from "../../../components";
 
 /**
- * The two reminder channels a household already has: a mailbox and a group chat.
+ * The reminder channels beside the webhook: the app itself, a mailbox and a
+ * group chat.
  *
  * The webhook stays in `OverdueSection` beside the interval and the send button,
  * because it is the channel that was here first and its form is the one an
  * existing install already knows. These two are the ones added on the argument
  * that a webhook makes the household build the receiver: **SMTP is universal**
  * and **Telegram is one fixed host**.
+ *
+ * **The in app notice is first, and it is the only one that ships switched
+ * on.** Mail and Telegram are better dependencies than a webhook and they are
+ * still dependencies: somebody has to obtain an SMTP account or a bot token
+ * before either does anything. This one needs neither, so a household that has
+ * configured nothing is still told, which is what #86 was filed about. It has
+ * one control because there is nothing else to say: no destination, no
+ * credential, and nothing an operator can pin from the environment.
  *
  * **Encryption is three radio buttons, not two switches, and that is the point
  * of the shape.** STARTTLS and implicit TLS are two protocols on one socket, and
@@ -177,12 +189,15 @@ interface ReminderSendersSectionProps {
   settings: SettingsOut;
   isSaving: boolean;
   onSave: (patch: SettingsUpdate) => void;
+  /** Keyed by sender. A channel that is switched off is absent. */
+  health: Partial<Record<OverdueSender, SenderHealth>>;
 }
 
 export default function ReminderSendersSection({
   settings,
   isSaving,
   onSave,
+  health,
 }: ReminderSendersSectionProps) {
   const { t } = useTranslation();
 
@@ -231,6 +246,31 @@ export default function ReminderSendersSection({
         {t("settings.sendersPrivacyNote")}
       </p>
 
+      {/* First, and above the divider the other channels sit under, because it
+          is the one that works before anything else is configured. */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-paper-700 dark:text-paper-200">
+          {t("settings.inApp")}
+        </h3>
+        <ToggleField
+          label={t("settings.inAppEnable")}
+          hint={t("settings.inAppHint")}
+          checked={settings.overdue_in_app_enabled ?? true}
+          disabled={isSaving}
+          onChange={(checked) => onSave({ overdue_in_app_enabled: checked })}
+        />
+        {/* No health line, deliberately. This channel hands the digest to
+            nobody, so its recorded outcome is never a failure and the line
+            could only ever read "working": a reassurance about a delivery
+            nothing checked. `SenderHealthLine` says the same in full. */}
+        {/* The one place the privacy note above does not apply, and saying so
+            here is the point: this channel has a reader, so it can show that
+            reader their own private books without disclosing them to anybody. */}
+        <p className={`${HINT_CLASS} leading-relaxed`}>
+          {t("settings.inAppPrivacyNote")}
+        </p>
+      </div>
+
       <MailBlock
         settings={settings}
         isSaving={isSaving}
@@ -249,6 +289,7 @@ export default function ReminderSendersSection({
         setTo={setTo}
         mailDirty={mailDirty}
         saveMail={saveMail}
+        health={health[OverdueSender.email]}
       />
 
       <div className="space-y-3 pt-4 border-t border-paper-200 dark:border-paper-700">
@@ -262,6 +303,8 @@ export default function ReminderSendersSection({
           disabled={isSaving}
           onChange={(checked) => onSave({ overdue_telegram_enabled: checked })}
         />
+
+        <SenderHealthLine health={health[OverdueSender.telegram]} />
 
         <SecretBox
           id="telegram-bot-token"
@@ -342,6 +385,7 @@ interface MailBlockProps {
   setTo: (value: string) => void;
   mailDirty: boolean;
   saveMail: () => void;
+  health: SenderHealth | undefined;
 }
 
 /** The mail half, split out only so neither half is a screen of its own. */
@@ -363,6 +407,7 @@ function MailBlock({
   setTo,
   mailDirty,
   saveMail,
+  health,
 }: MailBlockProps) {
   const encryption = encryptionOf(settings);
 
@@ -378,6 +423,8 @@ function MailBlock({
         disabled={isSaving}
         onChange={(checked) => onSave({ overdue_mail_enabled: checked })}
       />
+
+      <SenderHealthLine health={health} />
 
       {pinned.size > 0 && (
         <p className={HINT_CLASS}>

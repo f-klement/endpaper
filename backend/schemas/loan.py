@@ -81,3 +81,26 @@ class LoanOut(BaseModel):
     loaned_to: UserOut | None = None
     loaned_by: UserOut | None = None
     model_config = {"from_attributes": True}
+
+
+class MyOverdueOut(BaseModel):
+    """What the in app reminder tells one member, which is a number.
+
+    **A count and no titles, and that is a design decision rather than a
+    shortcut.** The banner it feeds says how many and links onward, which is the
+    shape `UnconfirmedBanner` already uses on the same page. Titles would put
+    catalogue content, including the reader's own private books, into a second
+    response for no gain: the list one click away already renders them, already
+    through the Shelf, and already knows how to page.
+
+    **The list is `GET /api/loans/overdue`, not the loans list.** Both were once
+    called the same thing here, and they are two different sets: only the first
+    applies `overdue_for_viewer`, which is what this number is counted with.
+
+    `enabled` is here so a household that switched the channel off sees nothing
+    rather than a banner it cannot explain, and so the frontend does not have to
+    read the admin-only settings record to find out.
+    """
+
+    enabled: bool
+    count: int = Field(default=0, ge=0)

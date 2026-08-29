@@ -9,7 +9,7 @@ import { renderLocalised } from "../../../utils";
 
 describe("Licences", () => {
   it("credits every palette this project did not write", () => {
-    // Generated from the catalogue, so a seventh palette cannot ship without a
+    // Generated from the catalogue, so a new palette cannot ship without a
     // notice by somebody forgetting to add one here.
     renderLocalised(<Licences />);
 

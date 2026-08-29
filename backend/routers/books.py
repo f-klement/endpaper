@@ -40,8 +40,11 @@ from dependencies import (
     DbSession,
     Paging,
     RowId,
+    TagIdList,
+    row_ids,
 )
 from enums import (
+    AuthorityScheme,
     BookFormat,
     BookSort,
     BulkAction,
@@ -56,6 +59,7 @@ from enums import (
 )
 from models import (
     AUTHOR_KEY_MAX,
+    AuthorIdentifier,
     Book,
     Classification,
     Collection,
@@ -81,6 +85,7 @@ from schemas import (
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
+    AuthorWikipediaOut,
     BookCreate,
     BookDetailsUpdate,
     BookDiscussUpdate,
@@ -94,6 +99,7 @@ from schemas import (
     BulkResult,
     ClassificationIn,
     CollectionAssign,
+    ConfirmedIdentifierOut,
     CopyCreate,
     CoverBackfillOut,
     CustomFieldCreate,
@@ -781,7 +787,7 @@ def list_books(
     paging: Paging,
     q: Annotated[str | None, Query(max_length=200)] = None,
     status_filter: Annotated[ReadStatus | None, Query(alias="status")] = None,
-    tags: Annotated[str | None, Query(description="Comma-separated tag ids")] = None,
+    tags: TagIdList = None,
     ownership: Annotated[OwnershipStatus | None, Query()] = None,
     format: Annotated[BookFormat | None, Query()] = None,
     lending: Annotated[LendingWillingness | None, Query()] = None,
@@ -852,7 +858,7 @@ def list_books(
     filters = BookFilters(
         q=q,
         status=status_filter,
-        tag_ids=[int(t) for t in tags.split(",") if t.strip().isdigit()] if tags else (),
+        tag_ids=row_ids(tags, field="tags"),
         ownership=ownership,
         format=format,
         lending=lending,
@@ -1483,6 +1489,89 @@ def list_author_suggestions(
     return Authorship.seen_by(db, current_user.id).suggestions()
 
 
+@router.get("/authors/wikipedia", response_model=list[AuthorWikipediaOut])
+async def author_wikipedia(
+    db: DbSession,
+    current_user: CurrentUser,
+    lang: Locale = Locale.EN,
+) -> list[AuthorWikipediaOut]:
+    """An outward Wikipedia link per author, in the reader's language.
+
+    **Declared before `/authors/{...}` would be**, the same route ordering trap
+    the comment above records: FastAPI matches in declaration order.
+
+    ## The gate is identity, not language
+
+    One row per author that carries a **confirmed Wikidata identifier**, and no
+    row for anybody else. That is what makes "if it is available" a property of
+    the shelf rather than of the network, and it is the whole reason this is
+    safe: #87 measured two GND records spelled `Stevenson, Robert Louis` of
+    which only one has a Wikidata item, and a biography attached to the wrong
+    one is worse than no biography. `Authorship.listing()` is what filters the
+    identifiers by `visible_to`, so this cannot announce an author only visible
+    on somebody else's private book.
+
+    ## `lang` is the app's locale and never the browser's
+
+    A `Locale`, so the closed set is the server's and an unknown value is a 422
+    rather than a `sitefilter` this app did not write. It is what the reader
+    chose in Settings, which is the owner's first rule on #89 and is exactly
+    what `Accept-Language` would get wrong: a German browser reading the app in
+    English would be sent to German Wikipedia.
+
+    The other locale follows it, so a reader gets their own language, then the
+    app's other one, then any edition at all, then the Wikidata item.
+
+    ## What it costs, and it is bounded rather than proportional to the shelf
+
+    **At most ten requests**, and the two halves are sized separately because
+    they are different shapes. Five filtered, `ceil(n / 50)` where `n` is the
+    confirmed authors capped by `authority.MAX_WIKIPEDIA_ITEMS` at 250: fifty
+    ids with `sitefilter=dewiki|enwiki` measured 15,034 bytes and 0.89s on
+    2026-08-28. Five unfiltered, for the authors with no article in either app
+    locale, at two ids each because one unfiltered entity reaches 64,449 bytes,
+    which is `Q692` and 336 sitelinks. About **720 KB** all told. A library that
+    has confirmed nobody makes **no
+    request at all**, and the client is expected not to call this then.
+
+    **The same limiter as the authority lookups, on purpose.** It is the counter
+    for "this member is asking authority services things", and sharing it means
+    somebody reloading this page cannot also be spending the confirmation
+    budget. The alternative, a counter of its own, would let the two add up
+    against one supplier.
+
+    Never 503, and that is the difference between this and
+    `GET /authors/authority`. Nothing here is a supplier: a Wikidata outage
+    turns every row into a link to the Wikidata item, which still names the
+    right person, so the button is present either way. See
+    `authority.wikipedia_articles`.
+    """
+    authority_limiter.check(current_user.username)
+    items: dict[str, str] = {}
+    for author in Authorship.seen_by(db, current_user.id).listing():
+        for row in author.identifiers:
+            if row.scheme is AuthorityScheme.WIKIDATA:
+                items[author.key] = row.identifier
+                break
+    if not items:
+        return []
+
+    # The reader's own language first, then the app's other one. Derived from
+    # the enum rather than written out, so a third locale is translated and
+    # linked in one edit instead of being translated and silently unlinked.
+    prefer = (lang.value, *(other.value for other in Locale if other is not lang))
+    found = await authority.wikipedia_articles(
+        tuple(items.values()),
+        prefer=prefer,
+        deadline=authority.deadline_from_now(),
+    )
+    return [
+        AuthorWikipediaOut(key=key, url=article.url, language=article.language)
+        for key, item in items.items()
+        if (article := found.get(item)) is not None
+    ]
+
+
 @router.post("/authors/merge", response_model=AuthorOut)
 def merge_authors(
     payload: AuthorMergeRequest, db: DbSession, current_user: CurrentUser
@@ -1702,16 +1791,91 @@ async def author_authority(
     return [_authority_out(row) for row in found]
 
 
+def _identifier_out(row: AuthorIdentifier, spelling: str) -> AuthorIdentifierOut:
+    """One stored identifier as the API serves it.
+
+    **The stored key's own spelling, never what the caller sent.** A client
+    holds `AuthorOut.key` and posts it, so echoing the payload put
+    `le guin ursula k` in a field whose own docstring says it is not the key.
+    `Authorship` files the row under a spelling the shelf carries, and that is
+    what a reader needs to see.
+    """
+    return AuthorIdentifierOut(
+        id=row.id,
+        spelling=spelling,
+        scheme=row.scheme,
+        identifier=row.identifier,
+        provenance=row.provenance,
+    )
+
+
+async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
+    """What the confirmed GND record says this person is called elsewhere.
+
+    **Resolved by the server, never read off the request body.** The rule
+    `Authorship.record_catalogue_assertions` states, applied here because this
+    is the other write that can reach `author_identifiers`: a client that could
+    post its own cross references would launder typed numbers into rows that
+    read like a national library's assertion. `payload.identifier` is the only
+    thing the caller contributes and it is a key, so exactly one record can
+    answer to it.
+
+    **Two sources, and the second is the one that costs a request.** The GND
+    record's own `sameAs` carries ISNI, LCNAF, VIAF and Wikidata, which
+    `authority.cross_references` reads off a response already in hand. It
+    carries **no national library number**, so the six that a reader of Spanish,
+    Portuguese, Brazilian, Argentine, Italian or Chilean books wants come from
+    the VIAF cluster that record names, through
+    `authority.national_identifiers`.
+
+    **The two are disjoint, and the `|` below is only a merge while they are.**
+    `_CROSS_REFERENCE_URIS` holds four schemes and `_NATIONAL_SOURCES` the other
+    six, and `national_identifiers` never returns a VIAF cluster id, so no key
+    can appear on both sides.
+    `tests/test_authority.py::TestTheEnumAndTheParserDescribeOneSet` pins that
+    rather than leaving it to be noticed.
+
+    **It is load bearing rather than tidy, because Python's `|` gives the right
+    operand priority and the right operand is the wrong one to prefer.** An
+    overlap would let the VIAF cluster's value silently overwrite the one lobid
+    asserted and Wikidata confirmed, which is resolution by precedence in favour
+    of the only source of the three that was never cross checked. An earlier
+    version of this paragraph said "the free ones win a collision", which is the
+    operand order backwards: they are on the left.
+
+    **Never raises, and an empty mapping is an ordinary answer.** The
+    confirmation is already committed by the time this runs and it is what the
+    Member asked for; the cross references are what came with it. A lobid
+    outage, a VIAF outage, a superseded number, or a record carrying none of
+    them all produce the same nothing, and none of them is a reason to fail a
+    write that succeeded.
+
+    One deadline for both, so a slow VIAF cannot buy itself the resolve's unused
+    budget on top of its own.
+    """
+    deadline = authority.deadline_from_now()
+    try:
+        candidate = await authority.resolve(identifier, deadline=deadline)
+    except authority.AuthorityUnavailable:
+        logger.info("Could not resolve a confirmed identifier for its cross references")
+        return {}
+    if candidate is None:
+        return {}
+    return authority.cross_references(candidate) | await authority.national_identifiers(
+        candidate, deadline=deadline
+    )
+
+
 @router.post(
     "/authors/identifiers",
-    response_model=AuthorIdentifierOut,
+    response_model=ConfirmedIdentifierOut,
     status_code=status.HTTP_201_CREATED,
 )
-def confirm_author_identifier(
+async def confirm_author_identifier(
     payload: AuthorIdentifierRequest,
     db: DbSession,
     current_user: CurrentUser,
-) -> AuthorIdentifierOut:
+) -> ConfirmedIdentifierOut:
     """Confirm that a candidate authority identifier is this author's.
 
     **This endpoint exists because a name is not a key.** An identifier on the
@@ -1727,10 +1891,49 @@ def confirm_author_identifier(
     identifier is the one operation this store has no verb for: correcting a
     wrong one is `DELETE`, and a re-import may put it back.
 
+    **Confirming a GND number stores the cross references that came with it.**
+    A person confirms a *record*, and that record already asserts this person's
+    ISNI, LCNAF number, VIAF cluster and Wikidata item. All four used to be
+    shown once by `GET /authors/authority` and dropped. They are re-read from
+    the record here rather than taken from the request, which is the only shape
+    that keeps a client from writing its own.
+
+    **And the six national library numbers, which cost the extra requests.** The
+    GND record carries none of them; the VIAF cluster it names carries all six.
+
+    **A confirmation is up to eight outbound requests**, and the count is worth
+    stating because `ratelimit.AUTHORITY_LIMIT` is sized against it: one lobid
+    record, **four to Wikidata** (`resolve` compares `P214` and `P213` on this
+    branch, so `_cross_check` is the item lookup, the description and two
+    claims), and up to three to VIAF. Only the last three are new here; the
+    first five are what confirming already cost. The third VIAF call is paid
+    only on a 5xx, so the ordinary confirmation is seven.
+
+    An earlier version of this paragraph said "one lobid request plus up to
+    three VIAF ones", which counted two of the three hosts. See
+    `authority.national_identifiers`, and `authority.DEADLINE_SECONDS` for the
+    time budget all of it shares.
+
+    **Only for `gnd`.** It is the one scheme this app can resolve, and a
+    confirmation under any other is a number a Member typed with no record
+    behind it to read cross references off. Nothing is fetched for those and
+    `cross_references` comes back empty.
+
+    **A cross reference colliding with a stored value is reported, not raised.**
+    The confirmation succeeded and is what the Member asked for; refusing it
+    afterwards because a fact that arrived alongside it disagrees would undo the
+    thing they came to do. A collision on the confirmed identifier itself is the
+    opposite case and is the 409 above.
+
     An author nobody can see is **404, not 403**, exactly as a private book is.
     """
+    # The same limiter the search route uses, because this request now reaches
+    # lobid too: without it, a client posting the same confirmation in a loop
+    # makes an outbound request per call under no budget at all.
+    authority_limiter.check(current_user.username)
+    authorship = Authorship.seen_by(db, current_user.id)
     try:
-        row = Authorship.seen_by(db, current_user.id).confirm_identifier(
+        row = authorship.confirm_identifier(
             payload.author,
             payload.scheme,
             payload.identifier,
@@ -1743,18 +1946,42 @@ def confirm_author_identifier(
             status_code=status.HTTP_409_CONFLICT,
             detail="That spelling already carries a different identifier. Remove it first.",
         ) from None
-    spelling = Authorship.seen_by(db, current_user.id).spelling_for(row.author_key)
-    return AuthorIdentifierOut(
-        id=row.id,
-        # **The stored key's own spelling, never what the caller sent.** A
-        # client holds `AuthorOut.key` and posts it, so echoing the payload put
-        # `le guin ursula k` in a field whose own docstring says it is not the
-        # key. `Authorship` files the row under a spelling the shelf carries,
-        # and that is what a reader needs to see.
-        spelling=spelling,
-        scheme=row.scheme,
-        identifier=row.identifier,
-        provenance=row.provenance,
+
+    references = (
+        await _cross_references_for(payload.identifier)
+        if payload.scheme is AuthorityScheme.GND
+        else {}
+    )
+    recorded = RecordedAssertions(stored=[], refused=[])
+    if references:
+        try:
+            recorded = authorship.record_cross_references(
+                payload.author, references, by_user_id=current_user.id
+            )
+        except AuthorNotFound:
+            # Unreachable through this handler: `confirm_identifier` resolved
+            # the same name a moment ago. Caught rather than trusted, because
+            # the confirmation is already committed and a 404 here would report
+            # a write that did happen as one that did not.
+            logger.info("An author resolved for a confirmation and not for its siblings")
+
+    spelling = authorship.spelling_for(row.author_key)
+    return ConfirmedIdentifierOut(
+        identifier=_identifier_out(row, spelling),
+        cross_references=[
+            _identifier_out(stored, authorship.spelling_for(stored.author_key))
+            for stored in recorded.stored
+        ],
+        refused=[
+            RefusedAssertionOut(
+                name=refused.name,
+                scheme=refused.scheme,
+                asserted=refused.asserted,
+                kept=refused.kept,
+                kept_provenance=refused.kept_provenance,
+            )
+            for refused in recorded.refused
+        ],
     )
 
 

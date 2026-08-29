@@ -143,6 +143,7 @@ export default function AuthorsPage() {
                   isSelected={selected.includes(author.key)}
                   onToggleSelect={(picked) => toggle(picked.key)}
                   onUndo={authors.undo}
+                  wikipedia={authors.wikipedia.get(author.key)}
                 />
               ))}
             </div>

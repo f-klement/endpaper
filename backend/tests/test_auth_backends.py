@@ -614,3 +614,303 @@ class TestATestAccountIsNeverAdopted:
 
         assert adopted.id == existing.id
         assert adopted.auth_source == AuthMode.PROXY.value
+
+
+# ── Addresses ─────────────────────────────────────────────────────────────────
+
+
+class TestWhoOwnsAnAddress:
+    """`directory_owns_email` is the whole of the "who may edit it" rule.
+
+    Empty configuration means the directory has no opinion, which is the rule
+    `_admin_group_set` already carries for demotion. Everything else in this
+    feature reads the answer from here: the API refuses a write with 409 where
+    it is true, and `upsert_directory_user` writes the column only where it is.
+    """
+
+    def test_a_local_account_is_nobody_elses_to_change(self):
+        assert auth_backends.directory_owns_email(AuthMode.LOCAL.value) is False
+
+    def test_ldap_owns_nothing_until_an_attribute_is_named(self, ldap_mode):
+        assert auth_backends.directory_owns_email(AuthMode.LDAP.value) is False
+
+    def test_ldap_owns_it_once_an_attribute_is_named(self, ldap_mode, monkeypatch):
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        assert auth_backends.directory_owns_email(AuthMode.LDAP.value) is True
+
+    def test_proxy_owns_nothing_until_a_header_is_named(self, proxy_mode):
+        assert auth_backends.directory_owns_email(AuthMode.PROXY.value) is False
+
+    def test_proxy_owns_it_once_a_header_is_named(self, proxy_mode, monkeypatch):
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        assert auth_backends.directory_owns_email(AuthMode.PROXY.value) is True
+
+    def test_the_two_are_configured_apart(self, ldap_mode, monkeypatch):
+        """Naming an LDAP attribute says nothing about a proxy deployment, and
+        one function answering for both would make it say something."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        assert auth_backends.directory_owns_email(AuthMode.PROXY.value) is False
+
+    def test_a_stored_source_no_directory_is_configured_for_is_editable(self):
+        """`users.auth_source` carries no CheckConstraint, so a restore can
+        write a value that is not an `AuthMode` at all. That row belongs to no
+        configured directory, which is the answer this returns."""
+        assert auth_backends.directory_owns_email("something-a-restore-wrote") is False
+
+
+class TestTheDirectoryWritesTheAddress:
+    def test_an_address_is_stored_when_the_attribute_is_named(
+        self, db, ldap_mode, monkeypatch
+    ):
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="kim@example.org")
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email == "kim@example.org"
+
+    def test_nothing_is_requested_or_stored_when_it_is_not(
+        self, db, ldap_mode, monkeypatch
+    ):
+        """The shipped default. The search asks for exactly what it always
+        asked for, so an upgrade changes no directory traffic."""
+        handed_out = directory_with(monkeypatch, email="kim@example.org")
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email is None
+        assert handed_out[0].searched_attributes == ["uid", "memberOf"]
+
+    def test_the_attribute_is_added_to_the_search_when_it_is_named(
+        self, db, ldap_mode, monkeypatch
+    ):
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        handed_out = directory_with(monkeypatch, email="kim@example.org")
+
+        auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert handed_out[0].searched_attributes == ["uid", "memberOf", "mail"]
+
+    def test_the_address_is_re_applied_on_every_sign_in(self, db, ldap_mode, monkeypatch):
+        """The `is_admin` rule, on the address: the directory is authoritative,
+        so a change there takes effect at the next login."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="kim@example.org")
+        auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        directory_with(monkeypatch, email="kim@work.example.org")
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email == "kim@work.example.org"
+
+    def test_an_entry_with_no_address_clears_a_stored_one(
+        self, db, ldap_mode, monkeypatch
+    ):
+        """Absence is the directory speaking, exactly as absence from the admin
+        group is a demotion once a group is configured."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="kim@example.org")
+        auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        directory_with(monkeypatch, email=None)
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email is None
+
+    def test_an_empty_attribute_is_the_same_as_an_absent_one(
+        self, db, ldap_mode, monkeypatch
+    ):
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="")
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email is None
+
+    def test_an_unconfigured_directory_leaves_a_stored_address_alone(
+        self, db, ldap_mode, monkeypatch
+    ):
+        """The case the whole default turns on. A member typed their address in
+        the app; the deployment names no attribute; signing in must not read
+        that silence as the directory saying they have none."""
+        db.add(
+            User(username="kim", password_hash=None, auth_source=AuthMode.LDAP.value,
+                 email="kim@example.org")
+        )
+        db.commit()
+        directory_with(monkeypatch)
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email == "kim@example.org"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "kim@example.org\nBcc: elsewhere@example.org",
+            "kim\x00@example.org",
+            "kim\x1b@example.org",
+            "kim@example.org,sam@example.org",
+            "not an address",
+        ],
+    )
+    def test_a_directory_value_that_is_not_an_address_is_refused(
+        self, db, ldap_mode, monkeypatch, value
+    ):
+        """A directory attribute is outside this app. `Bcc: someone` in a `To`
+        header is what an unchecked one buys, and a NUL is what a character
+        class of `\\s@,;<>` lets through."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email=value)
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email is None
+
+    def test_a_directory_value_with_surrounding_whitespace_is_stored_trimmed(
+        self, db, ldap_mode, monkeypatch
+    ):
+        """Not refused, and the distinction is worth stating because a fixture
+        here asserted the opposite for one round.
+
+        The property that matters is what ends up in the column, and `strip()`
+        runs before the check, so a trailing newline cannot survive into it: a
+        directory attribute with a stray newline is a formatting artefact and
+        trimming it is right. What `looks_like_address` must refuse on its own
+        is what trimming cannot remove, which is the case above.
+        """
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="  kim@example.org\n")
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email == "kim@example.org"
+
+    def test_a_refused_directory_value_is_a_warning_and_not_a_shrug(
+        self, db, ldap_mode, monkeypatch, caplog
+    ):
+        """"The directory named no address" and "the directory named something
+        this app will not store" both clear the column and are not the same
+        event. They were logged identically at INFO until a reviewer said so."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="kim@example.org\nBcc: elsewhere@example.org")
+
+        with caplog.at_level(logging.INFO, logger="endpaper.auth"):
+            auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        refusals = [r for r in caplog.records if "not an address" in r.getMessage()]
+        assert refusals and refusals[0].levelno == logging.WARNING
+        assert "'mail'" in refusals[0].getMessage()
+        # The length, never the value: an address is a member's, and this line
+        # goes to a log an operator reads.
+        assert "@" not in refusals[0].getMessage()
+
+    def test_a_directory_naming_no_address_is_not_logged_as_a_refusal(
+        self, db, ldap_mode, monkeypatch, caplog
+    ):
+        """The other half of the distinction, so the rule above cannot be
+        satisfied by warning about everything."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+
+        with caplog.at_level(logging.INFO, logger="endpaper.auth"):
+            directory_with(monkeypatch, email=None)
+            auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert not [r for r in caplog.records if "not an address" in r.getMessage()]
+
+    def test_an_absurdly_long_directory_value_is_refused(self, db, ldap_mode, monkeypatch):
+        """SQLite does not enforce `String(320)`, so the bound is applied here.
+        The 2026-08-18 incident was a 4000 character header writing a 4000
+        character account."""
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="k" * 4000 + "@example.org")
+
+        user = auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        assert user is not None
+        assert user.email is None
+
+    def test_the_log_records_the_change_and_never_the_address(
+        self, db, ldap_mode, monkeypatch, caplog
+    ):
+        monkeypatch.setenv("LDAP_EMAIL_ATTRIBUTE", "mail")
+        directory_with(monkeypatch, email="kim@example.org")
+        auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        with caplog.at_level(logging.INFO, logger="endpaper.auth"):
+            directory_with(monkeypatch, email="kim@work.example.org")
+            auth_backends.authenticate_ldap(db, "kim", "password123")
+
+        lines = [record.getMessage() for record in caplog.records]
+        assert any("directory set the address for 'kim'" in line for line in lines)
+        assert not any("@" in line for line in lines)
+
+
+class TestTheProxyHeaderCarriesAnAddress:
+    def test_the_header_is_stored_when_one_is_named(self, db, proxy_mode, monkeypatch):
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        request = cast(
+            Request,
+            SimpleNamespace(
+                headers={"Remote-User": "kim", "Remote-Email": "kim@example.org"},
+                client=SimpleNamespace(host="10.0.0.1"),
+            ),
+        )
+
+        user = auth_backends.user_from_proxy_headers(db, request)
+
+        assert user is not None
+        assert user.email == "kim@example.org"
+
+    def test_a_refused_header_is_a_warning_naming_the_peer(
+        self, db, proxy_mode, monkeypatch, caplog
+    ):
+        """The same shape the refused `Remote-User` above already logs, on the
+        same request and from the same unauthenticated source. It also clears
+        the stored address, so INFO would have said "no address here" for a
+        header carrying a newline."""
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        request = cast(
+            Request,
+            SimpleNamespace(
+                headers={
+                    "Remote-User": "kim",
+                    "Remote-Email": "kim@example.org\nBcc: elsewhere@example.org",
+                },
+                client=SimpleNamespace(host="10.0.0.1"),
+            ),
+        )
+
+        with caplog.at_level(logging.INFO, logger="endpaper.auth"):
+            user = auth_backends.user_from_proxy_headers(db, request)
+
+        assert user is not None
+        assert user.email is None
+        refusals = [r for r in caplog.records if "not an address" in r.getMessage()]
+        assert refusals and refusals[0].levelno == logging.WARNING
+        assert "10.0.0.1" in refusals[0].getMessage()
+        assert "@" not in refusals[0].getMessage()
+
+    def test_the_header_is_ignored_when_none_is_named(self, db, proxy_mode):
+        """An upstream sending `Remote-Email` to a deployment that never asked
+        for it is not the deployment's decision, so it is not honoured."""
+        request = cast(
+            Request,
+            SimpleNamespace(
+                headers={"Remote-User": "kim", "Remote-Email": "kim@example.org"},
+                client=SimpleNamespace(host="10.0.0.1"),
+            ),
+        )
+
+        user = auth_backends.user_from_proxy_headers(db, request)
+
+        assert user is not None
+        assert user.email is None

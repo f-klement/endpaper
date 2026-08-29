@@ -6,6 +6,7 @@ import {
   useRegister,
 } from "../../api/generated/endpoints/auth/auth";
 import {
+  useGetFeatureFlags,
   useGetLoginImage,
   useSetLoginImage,
 } from "../../api/generated/endpoints/settings/settings";
@@ -106,4 +107,23 @@ export function useLoginBackground(): UseLoginBackgroundResult {
     error: upload.error,
     upload: (file) => upload.mutate({ data: { file } }),
   };
+}
+
+/**
+ * Whether this deployment has a published catalogue to offer.
+ *
+ * Read here rather than through `app/hooks` so a page never imports from the
+ * shell: the dependency runs the other way, and `ScanPage` and `BookDetail`
+ * both read the same flags through their own `hooks.ts` for the same reason.
+ *
+ * `public_catalogue_published` is the **server's** conjunction of library mode
+ * and the publish switch, not either row, so a browser cannot get the nesting
+ * rule wrong by reading one of them. `retry: false` because the login page
+ * renders regardless: a failure here means no link, not an error screen.
+ */
+export function usePublishedCatalogue(): boolean {
+  const flags = useGetFeatureFlags({
+    query: { retry: false, staleTime: 60_000 },
+  });
+  return flags.data?.public_catalogue_published === true;
 }

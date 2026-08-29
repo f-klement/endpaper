@@ -32,10 +32,14 @@ const FAMILIES: { family: PatternFamily; label: MessageKey }[] = [
  * opacity is a lie about what is being chosen, and somebody picks khatam and
  * finds nothing there. The honest answer to a faint swatch is a larger one,
  * which is what the grid is: four columns inside `max-w-6xl`, less the page's
- * own padding and the section's, is a 257px cell, and nine of the ten tiles
- * repeat between 240px and 300px, so `contain` draws them at 86% to 107% of
- * the size they have on the page. Asanoha, at 420px, is the one that shrinks,
- * to 61%.
+ * own padding and the section's, is a 257px cell, and every tile repeats
+ * between 240px and 300px except Asanoha, so `contain` draws them at 86% to
+ * 107% of the size they have on the page. Asanoha, at 420px, is the one that
+ * shrinks, to 61%.
+ *
+ * Stated as a range with its one exception named rather than as "n of the m
+ * tiles", which is a count that does not recount itself: it read "nine of the
+ * ten" for a while after the set reached sixteen.
  *
  * `contain` rather than a 1:1 crop for the same reason: the swatch's job is
  * identification, and a 96px crop of a 260px repeat looks like nothing at all.
@@ -130,8 +134,9 @@ export default function WallpaperChoice() {
 
       {FAMILIES.map(({ family, label }) => (
         <div key={family}>
-          {/* Sticky, because the grid is twelve cells of 257px and the heading
-              is the only thing saying which half of the set you are looking at.
+          {/* Sticky, because the grid is a 257px cell per pattern plus two, and
+              the heading is the only thing saying which half of the set you are
+              looking at.
               `top-14` is the fixed bar's own height: see NavBar.BAR_STICKY.
 
               The card tokens, not the page's, because this sits inside a

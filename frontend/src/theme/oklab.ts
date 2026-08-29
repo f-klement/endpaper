@@ -2,11 +2,14 @@
  * Enough OKLab to weigh a wallpaper.
  *
  * The wallpaper's opacity used to be a constant per mode. It cannot be, now
- * that the ink follows the palette: the same alpha over seven different inks
- * lands seven different weights on the page, measured at 1.27x apart in light
- * and 1.32x in dark, which is the width of the whole budget the tile is
- * supposed to sit inside. So the constant moved from the alpha to the weight,
- * and the alpha is solved from it here.
+ * that the ink follows the palette: one alpha over ten inks is ten weights.
+ * Measured at 1.27x apart in light and 1.32x in dark, across the seven palettes
+ * that shipped when the solve was built, which is the width of the whole budget
+ * the tile is supposed to sit inside. Three palettes have been added since and
+ * the spread was not re-measured, because the solve removed it: the alpha is
+ * bisected per palette to reach one stated weight, so a new palette joins at
+ * that weight rather than widening anything. So the constant moved from the
+ * alpha to the weight, and the alpha is solved from it here.
  *
  * Lightness only, and OKLab rather than WCAG contrast, because the question is
  * "how far does this mark move the page", not "can this be read". A contrast

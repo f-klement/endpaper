@@ -1,9 +1,15 @@
+import { Link } from "react-router-dom";
+
 import type { UserOut } from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
 import { readStoredUser } from "../hooks";
 import BackgroundUploader from "./components/BackgroundUploader";
 import LoginForm from "./components/LoginForm";
-import { useLoginBackground, useLoginForm } from "./hooks";
+import {
+  useLoginBackground,
+  useLoginForm,
+  usePublishedCatalogue,
+} from "./hooks";
 import { Icon } from "../../components";
 
 interface LoginPageProps {
@@ -18,6 +24,13 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
   // Read from the cached account rather than /auth/me: this page also renders
   // when nobody is signed in, and the upload control is admin-only.
   const isAdmin = readStoredUser()?.is_admin === true;
+
+  // The one way in to the published catalogue from inside the app. Without it
+  // `/catalogue` is reachable only by typing it, which is fine for a library
+  // that links to it from its own site and useless for everybody else. Drawn
+  // only when something is actually published: `public_catalogue_published` is
+  // the server's conjunction of both switches, not either row.
+  const hasPublicCatalogue = usePublishedCatalogue();
 
   return (
     <div
@@ -66,6 +79,17 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
         {form.isDirectoryLogin && (
           <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
             {t("login.directoryHint")}
+          </p>
+        )}
+
+        {hasPublicCatalogue && (
+          <p className="text-center text-sm mt-6">
+            <Link
+              to="/catalogue"
+              className="font-medium text-accent-700 dark:text-accent-300"
+            >
+              {t("login.browseCatalogue")}
+            </Link>
           </p>
         )}
 

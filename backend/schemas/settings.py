@@ -1,3 +1,4 @@
+from datetime import datetime
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
@@ -58,6 +59,27 @@ class FeatureFlagsOut(BaseModel):
     google_books_ready: bool = False
     goodreads_lookup_enabled: bool
     default_locale: Locale
+
+    # ── The public catalogue ─────────────────────────────────────────────
+    #: **`library_mode` is deliberately not here**, and was for a round. It had
+    #: no reader: the cataloguer column set it changes is a later ticket, and an
+    #: unread field on the one endpoint a stranger can call is disclosure with
+    #: nothing on the other end of it. It costs one line to add back beside its
+    #: first consumer.
+    #:
+    #: Whether a reader with no account may search and read item records.
+    #:
+    #: **The conjunction, not the raw switch.** It is false whenever library
+    #: mode is off, however the publish row reads, which is the same answer
+    #: `settings_store.public_catalogue_is_published` gives the routes. Two
+    #: places reading one row and disagreeing about what it means is how a UI
+    #: comes to promise something the server refuses.
+    #:
+    #: Readable without a session, like everything else on this model, and it
+    #: has to be: it is what tells a browser holding no token whether there is
+    #: a public catalogue to show. It discloses nothing a request to
+    #: `/api/public/books` would not.
+    public_catalogue_published: bool = False
 
 
 class SettingsOut(BaseModel):
@@ -129,6 +151,28 @@ class SettingsOut(BaseModel):
     telegram_chat_id: str = ""
     telegram_chat_id_from_env: bool = False
 
+    # ── In app ───────────────────────────────────────────────────────────
+    #: One field, because the channel is the app: no destination, no
+    #: credential, nothing to pin from the environment. **Defaults to true**,
+    #: unlike the three above it, which start silent because they send
+    #: catalogue content somewhere outside this app.
+    overdue_in_app_enabled: bool = True
+
+    # ── Library mode and the public catalogue ────────────────────────────
+    #: The two switches **as stored**, not as they take effect. This model is
+    #: the admin's view of the settings table, and a screen that showed
+    #: `public_catalogue_enabled` as false because library mode happens to be
+    #: off would be a screen an admin cannot use: they would turn it on twice
+    #: and see it come back off. `public_catalogue_published` beside them is
+    #: the conjunction, which is what actually decides whether anything is
+    #: served, and is the value the confirmation and the banner read.
+    library_mode: bool = False
+    public_catalogue_enabled: bool = False
+    public_catalogue_indexing_enabled: bool = False
+    #: `library_mode and public_catalogue_enabled`, computed on the server so
+    #: the browser cannot get the rule wrong. See `FeatureFlagsOut`.
+    public_catalogue_published: bool = False
+
 
 class SettingsUpdate(BaseModel):
     """A partial update. Every field is optional; absent means "leave alone".
@@ -178,6 +222,21 @@ class SettingsUpdate(BaseModel):
     telegram_bot_token: str | None = Field(default=None, max_length=MAX_TELEGRAM_TOKEN)
     telegram_chat_id: str | None = Field(default=None, max_length=MAX_TELEGRAM_CHAT)
 
+    overdue_in_app_enabled: bool | None = None
+
+    #: Library mode, the publish switch and whether a crawler is invited.
+    #:
+    #: Three separate fields, and none of them refuses the other: an admin may
+    #: store `public_catalogue_enabled` while library mode is off, and the
+    #: catalogue stays unpublished because
+    #: `settings_store.public_catalogue_is_published` reads both. Refusing the
+    #: write instead would make the order the two toggles are saved in matter,
+    #: and would lose an admin's stated intent the moment they turned library
+    #: mode off to look at something.
+    library_mode: bool | None = None
+    public_catalogue_enabled: bool | None = None
+    public_catalogue_indexing_enabled: bool | None = None
+
     @field_validator("overdue_webhook_url")
     @classmethod
     def http_or_https(cls, value: str | None) -> str | None:
@@ -208,12 +267,12 @@ class SettingsUpdate(BaseModel):
 class SenderOutcome(BaseModel):
     """What one channel did with the digest.
 
-    **The withheld count is here rather than only at the top, and that is the
-    point of the shape.** All three senders withhold the same private books
-    today, because all three go to a channel rather than to a person, so the
-    three numbers agree. They are reported per sender anyway: the moment one
-    sender's audience differs, a single figure would be a lie on the other two,
-    and a reader has no way to tell a shared number from a coincidence.
+    **The withheld count is here rather than only at the top, and the case it
+    was written for has now arrived.** The three senders that push outward
+    withhold the same private books, because each goes to a channel rather than
+    to a person, so their three numbers agree. The in app channel reports **0**,
+    because its audience is a member and nothing is withheld from it. A single
+    figure at the top would now be wrong on one row of four.
     """
 
     sender: OverdueSender
@@ -235,6 +294,11 @@ class OverdueNotifyResult(BaseModel):
     """
 
     #: True when a request was actually made and the receiver accepted it.
+    #:
+    #: A sender that **pushes**, which is what `notifications.pushes_outward`
+    #: decides. The in app channel reports `sent` in its own row and never sets
+    #: this one: it hands the digest to nothing, so a run carrying only that
+    #: channel sent nothing and answers `IN_APP_ONLY`.
     sent: bool = False
     #: Loans in the digest that was sent, or that would have been.
     loans: int = Field(default=0, ge=0)
@@ -252,15 +316,61 @@ class OverdueNotifyResult(BaseModel):
     #: The same outcome as a sentence, for a log or for an API caller with no
     #: message catalogue. Null on a successful send.
     detail: str | None = None
-    #: One entry per sender that was switched on, in sender order. Empty when
-    #: nothing was attempted at all: everything off, or nothing overdue.
+    #: One entry per sender this run had something to report, in sender order.
     #:
-    #: **`sent` at the top level is true when any of these delivered**, because
-    #: that is the condition `notified_at` is stamped on: the loan was chased.
-    #: A sender that failed is reported here rather than compensated for, so a
-    #: broken receiver is visible on the screen that configures it instead of
-    #: turning the working channels into an hourly repeat.
+    #: **Empty in two cases, not one.** Every channel off, which is `DISABLED`;
+    #: and a run with nothing overdue while the in app notice is off, which is
+    #: `NOTHING_DUE` with no pushing sender attempted. A pushing sender is
+    #: reported when it was tried, and a run with nothing to send tries none.
+    #:
+    #: **`sent` at the top level is true when any sender that pushes
+    #: delivered**, because that is the condition `notified_at` is stamped on:
+    #: a reminder went out. A sender that failed is reported here rather than
+    #: compensated for, so a broken receiver is visible on the screen that
+    #: configures it instead of turning the working channels into an hourly
+    #: repeat.
+    #:
+    #: The in app row is here on a run that pushed nothing, including one where
+    #: nothing was overdue, because it is the channel a household can read
+    #: without configuring anything and "is it on" is what they are asking.
     senders: list[SenderOutcome] = Field(default_factory=list)
+
+
+class SenderHealth(BaseModel):
+    """What one switched-on channel last did, as a standing record.
+
+    #82. The per run report above says what happened on the run you are looking
+    at; this says what has been happening. Without it a household running mail
+    and Telegram whose bot token expires gets mail delivered, the loan stamped,
+    everything apparently normal, and Telegram failing hourly with nothing
+    anywhere but the container log.
+
+    Only channels that are switched on are reported: a line about a webhook
+    somebody turned off a month ago is a line about nothing.
+    """
+
+    sender: OverdueSender
+    #: Null until this channel has run at all, which is what a household sees
+    #: on the day they configure one. "Not yet" and "fine" are the two answers
+    #: they most need to tell apart, so they are not the same value here.
+    last_run_at: datetime | None = None
+    #: Null for the same reason as `last_run_at`.
+    sent: bool | None = None
+    #: The failure, if the last run was one. Null on a success.
+    reason: OverdueNotifyReason | None = None
+    detail: str | None = None
+    #: The first failure of the current unbroken run of them, so a channel that
+    #: failed once at 3am reads differently from one failing every hour since
+    #: Tuesday. Null whenever the last run succeeded.
+    failing_since: datetime | None = None
+    #: How many consecutive failures. Zero on a success and on a channel that
+    #: has never run.
+    failures: int = Field(default=0, ge=0)
+    #: Whether this is worth interrupting somebody about, which is a decision
+    #: rather than a fact and is made by `notifications._is_broken`: a refusal
+    #: at once, a transport failure only after it has persisted. **One failed
+    #: send is a network, every send failing for a day is a configuration.**
+    broken: bool = False
 
 
 class RestoreResult(BaseModel):

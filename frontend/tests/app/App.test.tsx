@@ -7,6 +7,7 @@ import { AuthMode } from "../../src/api/generated/model";
 import App from "../../src/app/App";
 import { BAR_OFFSET } from "../../src/app/components/NavBar";
 import { createTestQueryClient, mockApi, signIn, type MockApi } from "../utils";
+import { SETTINGS_ROUTES } from "../../src/pages/SettingsPage/types";
 import { makeBookPage, makeStats, makeUser, resetIds } from "../factories";
 
 let api: MockApi;
@@ -50,10 +51,52 @@ describe("App", () => {
   });
 
   it("hides the sidebar when signed out", async () => {
-    // There is no route reachable without an account.
+    // No signed in chrome without an account. The published catalogue is the
+    // one route that renders signed out, and it draws its own header rather
+    // than the NavBar: see the test below.
     renderApp();
     await screen.findByRole("button", { name: "Sign In" });
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("renders the published catalogue without an account", async () => {
+    // The one deliberate hole in the session gate, and it publishes nothing on
+    // its own: the endpoint behind it answers 404 unless an admin has turned on
+    // both library mode and the publish switch.
+    api.on(/\/api\/public\/books/, {
+      body: { items: [], total: 0, page: 1, page_size: 24 },
+    });
+    window.history.pushState({}, "", "/catalogue");
+    renderApp();
+
+    expect(
+      await screen.findByRole("heading", { name: /Catalogue/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sign In" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("draws no signed in navigation on the public catalogue", async () => {
+    api.on(/\/api\/public\/books/, {
+      body: { items: [], total: 0, page: 1, page_size: 24 },
+    });
+    window.history.pushState({}, "", "/catalogue");
+    renderApp();
+    await screen.findByRole("heading", { name: /Catalogue/ });
+
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("still sends every other signed out path to the login page", async () => {
+    // The hole is exactly one path. A route table that let `/catalogue` through
+    // by prefix would let `/catalogue-of-members` through too.
+    window.history.pushState({}, "", "/stats");
+    renderApp();
+
+    expect(
+      await screen.findByRole("button", { name: "Sign In" }),
+    ).toBeInTheDocument();
   });
 
   it("shows the library and the top bar when signed in", async () => {
@@ -158,8 +201,8 @@ describe("App under proxy auth", () => {
     // `localStorage["user"]` for one round. Under proxy that key is written
     // only by `signIn`, which fires only on a switch into a test account, and
     // a test account is never an admin, so it is null for a proxy admin
-    // always. They were offered three of the six entries, the other three
-    // reachable only by typing the URL.
+    // always. They were offered the four non admin entries, the rest reachable
+    // only by typing the URL.
     //
     // It has to be asserted here rather than in `SettingsPage.test.tsx`,
     // because the account is a prop now and a unit test can only assert what
@@ -177,14 +220,12 @@ describe("App under proxy auth", () => {
       within(index)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href")),
-    ).toEqual([
-      "/settings/appearance",
-      "/settings/catalogue",
-      "/settings/library",
-      "/settings/lending",
-      "/settings/data",
-      "/settings/about",
-    ]);
+      // Derived from the table rather than restated. This list was written out
+      // and went stale twice on the night two changes each added a route: what
+      // is under test here is that a **proxy** admin is recognised as one, not
+      // which routes exist, and `SettingsPage/types.test.ts` is what pins the
+      // table itself.
+    ).toEqual(SETTINGS_ROUTES.map((route) => route.path));
     expect(localStorage.getItem("user")).toBeNull();
   });
 

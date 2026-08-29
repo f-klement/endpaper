@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Final
 
@@ -12,7 +13,13 @@ from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import DbSession
 from enums import SettingKey
 from models import User
-from schemas import FeatureFlagsOut, LoginImageOut, SettingsOut, SettingsUpdate
+from schemas import (
+    FeatureFlagsOut,
+    LoginImageOut,
+    SenderHealth,
+    SettingsOut,
+    SettingsUpdate,
+)
 from uploads import read_image_upload, replace_image
 
 #: One definition, in the module that owns what the covers directory is called.
@@ -42,12 +49,55 @@ _SENDER_TEXT: Final[dict[str, SettingKey]] = {
     "telegram_chat_id": SettingKey.TELEGRAM_CHAT_ID,
 }
 
+#: The three library mode switches, whose write is uniform: a boolean, stored,
+#: with no environment override to refuse and no sender health to forget.
+#:
+#: A table for the same reason `_SENDER_BOOL` is one, and separate from it
+#: because these are not senders: `notifications.sender_for` answers None for
+#: all three, so routing them through `_SENDER_BOOL` would work and would file
+#: them under a heading they do not belong to.
+#:
+#: **Nothing here refuses a combination.** `public_catalogue_enabled` may be
+#: stored true while `library_mode` is false; the catalogue is still not
+#: published, because `settings_store.public_catalogue_is_published` reads both
+#: and the routes ask it rather than reading a row. Enforcing the nesting at
+#: the write instead would make the order of two toggles in one form matter.
+_LIBRARY_MODE_BOOL: Final[dict[str, SettingKey]] = {
+    "library_mode": SettingKey.LIBRARY_MODE,
+    "public_catalogue_enabled": SettingKey.PUBLIC_CATALOGUE_ENABLED,
+    "public_catalogue_indexing_enabled": SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
+}
+
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
     "overdue_mail_enabled": SettingKey.OVERDUE_MAIL_ENABLED,
     "mail_use_tls": SettingKey.MAIL_USE_TLS,
     "mail_use_ssl": SettingKey.MAIL_USE_SSL,
     "overdue_telegram_enabled": SettingKey.OVERDUE_TELEGRAM_ENABLED,
+    # One field, because the channel is the app: no destination, no credential,
+    # and nothing an operator can pin from the environment.
+    "overdue_in_app_enabled": SettingKey.OVERDUE_IN_APP_ENABLED,
 }
+
+def _store(db: DbSession, key: SettingKey, value: str) -> None:
+    """Write one settings row, and drop the health record it invalidates.
+
+    **Every write in `update_settings` goes through here**, which is what makes
+    the second half impossible to forget. It used to be a table in this module
+    keyed on the payload field and covering the four on/off switches only, so a
+    household replacing an expired bot token cleared nothing: the record
+    survived, `_is_broken` measures against a `failing_since` that only grows,
+    and a household with nothing overdue attempts no sender, so no later run
+    overwrote it either. The banner was permanent.
+
+    `notifications.sender_for` is the single answer to "which channel does this
+    row configure", and it lives with the senders rather than here. A row that
+    configures nothing (the locale, the Google key, the reminder interval)
+    answers `None` and this is then an ordinary write.
+    """
+    settings_store.set_value(db, key, value)
+    sender = notifications.sender_for(key)
+    if sender is not None:
+        notifications.forget_health(db, sender)
 
 
 def _refuse_if_pinned(key: SettingKey) -> None:
@@ -168,6 +218,20 @@ def _read_settings(db: DbSession) -> SettingsOut:
         ),
         telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
         telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
+        overdue_in_app_enabled=settings_store.get_bool(
+            db, SettingKey.OVERDUE_IN_APP_ENABLED
+        ),
+        # The two switches as stored, so the form shows what an admin typed,
+        # plus the conjunction that decides whether anything is actually
+        # served. See `SettingsOut` for why the screen needs all three.
+        library_mode=settings_store.get_bool(db, SettingKey.LIBRARY_MODE),
+        public_catalogue_enabled=settings_store.get_bool(
+            db, SettingKey.PUBLIC_CATALOGUE_ENABLED
+        ),
+        public_catalogue_indexing_enabled=settings_store.get_bool(
+            db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
+        ),
+        public_catalogue_published=settings_store.public_catalogue_is_published(db),
     )
 
 
@@ -189,6 +253,10 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
         ),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
+        # The conjunction, never the raw row: this is the flag a browser with
+        # no token reads to decide whether there is a public catalogue to
+        # offer, and it has to give the same answer the routes do.
+        public_catalogue_published=settings_store.public_catalogue_is_published(db),
     )
 
 
@@ -198,6 +266,29 @@ def get_settings(
     current_user: Annotated[User, Depends(require_admin)],
 ) -> SettingsOut:
     return _read_settings(db)
+
+
+@router.get("/sender-health", response_model=list[SenderHealth])
+def get_sender_health(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> list[SenderHealth]:
+    """What each switched-on reminder channel last did.
+
+    Declared **before** nothing, and that is worth saying: this prefix has no
+    path parameter, so the route order rule has no work to do here. It is a
+    separate endpoint rather than a field on `SettingsOut` because the banner
+    that reads it lives on the library page, and pulling the whole admin
+    settings record, four secrets' previews included, to render one line would
+    be the wrong payload on the wrong screen.
+
+    Admin only, like the settings it reports on and for the same reason: it
+    names channels, their failures and the sentences those failures produced.
+    An ordinary member can do nothing with any of it, since only an admin can
+    reach the screen that fixes it.
+    """
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return [SenderHealth(**entry) for entry in notifications.health(db, now)]
 
 
 @router.put("", response_model=SettingsOut)
@@ -213,7 +304,7 @@ def update_settings(
     sending the field back would blank it.
     """
     if payload.google_books_enabled is not None:
-        settings_store.set_value(
+        _store(
             db,
             SettingKey.GOOGLE_BOOKS_ENABLED,
             "true" if payload.google_books_enabled else "false",
@@ -230,22 +321,22 @@ def update_settings(
                 ),
             )
         # An empty string is a deliberate clear; None never reaches here.
-        settings_store.set_value(
+        _store(
             db, SettingKey.GOOGLE_BOOKS_API_KEY, payload.google_books_api_key.strip()
         )
 
     if payload.goodreads_lookup_enabled is not None:
-        settings_store.set_value(
+        _store(
             db,
             SettingKey.GOODREADS_LOOKUP_ENABLED,
             "true" if payload.goodreads_lookup_enabled else "false",
         )
 
     if payload.default_locale is not None:
-        settings_store.set_value(db, SettingKey.DEFAULT_LOCALE, payload.default_locale.value)
+        _store(db, SettingKey.DEFAULT_LOCALE, payload.default_locale.value)
 
     if payload.overdue_webhook_enabled is not None:
-        settings_store.set_value(
+        _store(
             db,
             SettingKey.OVERDUE_WEBHOOK_ENABLED,
             "true" if payload.overdue_webhook_enabled else "false",
@@ -255,18 +346,18 @@ def update_settings(
         # Already scheme-checked by `SettingsUpdate.http_or_https`, which
         # answers a 422 naming the field. `notifications.checked_url` checks it
         # again before every send, for the row a restore wrote.
-        settings_store.set_value(
-            db, SettingKey.OVERDUE_WEBHOOK_URL, payload.overdue_webhook_url
-        )
+        _store(db, SettingKey.OVERDUE_WEBHOOK_URL, payload.overdue_webhook_url)
 
     if payload.overdue_webhook_secret is not None:
         # An empty string is a deliberate clear, like the Google key.
-        settings_store.set_value(
+        _store(
             db, SettingKey.OVERDUE_WEBHOOK_SECRET, payload.overdue_webhook_secret.strip()
         )
 
     if payload.overdue_reminder_days is not None:
-        settings_store.set_value(
+        # Not a channel's configuration: it says how often a loan is chased, so
+        # `sender_for` answers None and no health record is dropped.
+        _store(
             db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days)
         )
 
@@ -277,13 +368,19 @@ def update_settings(
         _refuse_if_pinned(key)
         # An empty string is a deliberate clear, like the Google key and the
         # webhook secret. `None` never reaches here.
-        settings_store.set_value(db, key, value.strip())
+        _store(db, key, value.strip())
+
+    for field, key in _LIBRARY_MODE_BOOL.items():
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        _store(db, key, "true" if value else "false")
 
     for field, key in _SENDER_BOOL.items():
         value = getattr(payload, field)
         if value is None:
             continue
         _refuse_if_pinned(key)
-        settings_store.set_value(db, key, "true" if value else "false")
+        _store(db, key, "true" if value else "false")
 
     return _read_settings(db)

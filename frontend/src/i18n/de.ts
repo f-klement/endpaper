@@ -94,6 +94,12 @@ export const de: Messages = {
     "Bei {count} Büchern ist nicht bestätigt, ob sie in deinem Regal stehen.",
   "ownership.reviewThem": "Jetzt prüfen",
 
+  "library.overdueBanner": "{count} Ausleihen sollten angemahnt werden.",
+  "library.overdueBannerAction": "Ansehen",
+  "library.channelBroken":
+    "Erinnerungen an überfällige Bücher kommen über {channels} nicht an.",
+  "library.channelBrokenAction": "Einstellungen prüfen",
+
   // ── Bibliothek ──────────────────────────────────────────────────────────
   "library.title": "Bibliothek",
   "library.scanButton": "+ Scannen",
@@ -364,6 +370,7 @@ export const de: Messages = {
   "login.usernamePlaceholder": "Benutzername eingeben",
   "login.passwordPlaceholder": "Passwort eingeben",
   "login.pleaseWait": "Bitte warten...",
+  "login.browseCatalogue": "Den öffentlichen Katalog durchsuchen",
   "login.firstAccountAdmin":
     "Das zuerst erstellte Konto wird zum Administrator.",
   "login.directoryHint":
@@ -383,12 +390,47 @@ export const de: Messages = {
   "settings.appearance.title": "Darstellung",
   "settings.appearance.summary":
     "Das Farbschema, hell oder dunkel, das Hintergrundmuster und die Sprache der App.",
+  "settings.account.title": "Dein Konto",
+  "settings.account.summary":
+    "Die Adresse, an die eine an dich gerichtete Erinnerung ginge.",
   "settings.catalogue.title": "Katalogquellen",
   "settings.catalogue.summary":
     "Woher die Angaben zu einem Buch stammen, wenn es gescannt oder gesucht wird.",
   "settings.library.title": "Deine Bibliothek",
   "settings.library.summary":
     "Bücher aus einem anderen Dienst übernehmen, fehlende Cover nachholen und Angaben ergänzen, für die Endpaper keine Spalte hat.",
+  "settings.public.title": "Öffentlicher Katalog",
+  "settings.public.summary":
+    "Der Bibliotheksmodus, und ob Lesende ohne Konto in diesem Katalog suchen dürfen. Beides ist aus, bis Sie es einschalten.",
+  "settings.public.modeTitle": "Bibliotheksmodus",
+  "settings.public.modeLabel": "Diese Bibliothek als Bibliothek katalogisieren",
+  "settings.public.modeHint":
+    "Zeigt Signatur, Klassifikation und Erfassungsstand und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
+  "settings.public.modeRepublishes":
+    "Das Veröffentlichen ist bereits eingeschaltet. Wenn Sie dies wieder einschalten, ist der Katalog sofort erneut öffentlich.",
+  "settings.public.publishTitle": "Veröffentlichen",
+  "settings.public.publishLabel": "Alle dürfen in diesem Katalog suchen",
+  "settings.public.publishHint":
+    "Suche und ein Datensatz je Buch, lesbar ohne Konto. Sonst nichts.",
+  "settings.public.publishNeedsMode":
+    "Schalten Sie zuerst den Bibliotheksmodus ein. Ohne ihn lässt sich kein Katalog veröffentlichen.",
+  "settings.public.liveNotice": "Dieser Katalog ist veröffentlicht.",
+  "settings.public.liveLink": "Ansehen, was Besuchende sehen",
+  "settings.public.indexingLabel": "Suchmaschinen dürfen ihn indexieren",
+  "settings.public.indexingHint":
+    "Standardmäßig aus. Einen Katalog zu veröffentlichen und eine Suchmaschine einzuladen, ihn zu durchsuchen, sind zwei verschiedene Entscheidungen.",
+  "settings.public.confirmTitle": "Diesen Katalog veröffentlichen?",
+  "settings.public.confirmBody":
+    "Alle, die diesen Server erreichen, können darin suchen und je Buch einen Datensatz lesen, ohne Konto und ohne Passwort.",
+  "settings.public.confirmShown":
+    "Sichtbar: Titel, Autorin oder Autor, Verlag, Jahr, ISBN, Sprache, Seitenzahl, Ausgabeform, Reihe, Beschreibung, Schlagwörter und Klassifikationen.",
+  "settings.public.confirmWithheld":
+    "Nicht sichtbar: wem ein Buch gehört, ob Sie es verleihen, wer es gelesen hat, wo es steht, was es gekostet hat, und sämtliche Notizen.",
+  "settings.public.confirmPrivate":
+    "Private Bücher bleiben privat, und alles im Papierkorb ebenso.",
+  "settings.public.confirmIndexing":
+    "Suchmaschinen wird gesagt, dass sie fernbleiben sollen, bis Sie sie eigens zulassen.",
+  "settings.public.confirmAction": "Veröffentlichen",
   "settings.lending.title": "Ausleihe",
   "settings.lending.summary":
     "Erinnerungen an überfällige Bücher, und wohin sie gehen.",
@@ -397,6 +439,22 @@ export const de: Messages = {
     "Die ganze Bibliothek sichern und zurückspielen, und Konten, um sie wie ein gewöhnliches Mitglied zu sehen.",
   "settings.about.summary":
     "Welche Version läuft, wo der Quelltext liegt und wie sich das Projekt unterstützen lässt.",
+
+  // ── Dein Konto ──────────────────────────────────────────────────────────
+  "account.email.title": "E-Mail-Adresse",
+  "account.email.hint":
+    "Hierhin ginge eine Erinnerung, die an dich gerichtet ist. Verschickt wird noch nichts: Erinnerungen an überfällige Bücher gehen an das Postfach des Haushalts.",
+  "account.email.yours": "Deine Adresse",
+  "account.email.placeholder": "du@example.org",
+  "account.email.none": "Nicht hinterlegt.",
+  "account.email.fromDirectory":
+    "Diese Adresse stammt aus deinem Verzeichnis. Ändere sie dort.",
+  "account.email.directoryRefused":
+    "Diese Adresse gehört dem Verzeichnis und wurde hier nicht geändert.",
+  "account.email.couldNotSave": "Die Adresse konnte nicht gespeichert werden.",
+  "account.members.title": "Adressen der Mitglieder",
+  "account.members.hint":
+    "Damit du die fehlende oder falsch getippte Adresse findest, wenn Erinnerungen nirgends ankommen.",
 
   "theme.hint": "Wird in deinem Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
@@ -515,6 +573,9 @@ export const de: Messages = {
     "{count} private Bücher wurden ausgelassen.",
   "settings.overdueNotSentMisconfigured":
     "Es wurde nichts gesendet: Ein Kanal ist eingeschaltet und seine Einstellungen sind unbrauchbar. Welcher, steht unten.",
+  "settings.overdueNotSentInAppOnly":
+    "Nach außen wurde nichts gesendet: Der Hinweis in der App ist der einzige eingeschaltete Kanal, und alle Mitglieder lesen ihn in der Bibliothek.",
+  "settings.overdueSenderInApp": "In der App",
   "settings.overdueSenderWebhook": "Webhook",
   "settings.overdueSenderEmail": "E-Mail",
   "settings.overdueSenderTelegram": "Telegram",
@@ -526,7 +587,23 @@ export const de: Messages = {
   "settings.overdueRowUnreachable":
     "nicht erreichbar. Es wird erneut versucht.",
   "settings.overdueRowMisconfigured": "die Einstellungen sind unbrauchbar.",
+  "settings.overdueRowInAppOnly": "nach außen nichts zu senden.",
   "settings.overdueRowNothingSent": "nichts gesendet.",
+
+  // ── Erinnerungen in der App, und ob ein Kanal funktioniert ──────────────
+  "settings.inApp": "In der App",
+  "settings.inAppEnable": "Überfällige Ausleihen in der App anzeigen",
+  "settings.inAppHint":
+    "Ein Hinweis auf der Bibliotheksseite und die Seite mit den überfälligen Ausleihen, auf die er verweist. Wird er ausgeschaltet, bleibt diese Seite leer, alle anderen Kanäle laufen weiter. Dies ist der einzige Kanal, für den nichts eingerichtet werden muss, deshalb ist er von Anfang an eingeschaltet.",
+  "settings.inAppPrivacyNote":
+    "Dieser Kanal hat eine Leserin oder einen Leser, deshalb gilt der Hinweis oben für ihn nicht: Jede Person sieht die überfälligen Ausleihen, die sie verliehen oder ausgeliehen hat, einschließlich ihrer eigenen privaten Bücher, und niemals die anderer.",
+  "settings.senderHealthNotYet":
+    "Noch nicht gelaufen. Erinnerungen gehen stündlich raus, und nur wenn etwas überfällig ist.",
+  "settings.senderHealthWorking": "Funktioniert. Zuletzt gelaufen am {when}.",
+  "settings.senderHealthFailedOnce":
+    "Der letzte Versuch ist fehlgeschlagen: {detail} Es wird erneut versucht.",
+  "settings.senderHealthBroken":
+    "Funktioniert seit dem {since} nicht mehr. Der letzte Versuch war am {when}: {detail}",
 
   // ── Erinnerungen per Mail und Chat ──────────────────────────────────────
   "settings.senders": "Erinnerungen per Mail und Chat",
@@ -692,6 +769,9 @@ export const de: Messages = {
   "authors.mergedFrom": "Zusammengeführt aus: {spelling}",
   "authors.undo": "Zusammenführung rückgängig machen",
   "authors.browse": "Diese Bücher anzeigen",
+  "authors.wikipediaOn": "Über {name} auf Wikipedia lesen",
+  "authors.wikipediaInOther": "Über {name} auf Wikipedia lesen, auf {language}",
+  "authors.wikidataItem": "{name} auf Wikidata nachschlagen",
   "authors.select": "{name} auswählen",
   "authors.selectedCount": "{count} ausgewählt",
   "authors.keepNamed": "{name} behalten",
@@ -768,8 +848,28 @@ export const de: Messages = {
   "loans.overdue": "Überfällig",
   "loans.overdueSince": "Überfällig seit {date}",
   "loans.overdueOnly": "Nur überfällige",
-  "loans.overdueBanner": "{count} Ausleihen sind überfällig.",
+  "loans.overdueBanner": "{count} Ausleihen sollten angemahnt werden.",
   "loans.chaseThem": "Anzeigen",
+
+  // ── Die Seite mit den überfälligen Ausleihen ────────────────────────────
+  "overdue.title": "Überfällig",
+  "overdue.couldNotLoad":
+    "Die überfälligen Ausleihen konnten nicht geladen werden.",
+  "overdue.none": "Nichts ist überfällig",
+  "overdue.noneHint":
+    "Jedes ausgeliehene Buch ist noch innerhalb seiner Frist.",
+  "overdue.switchedOff": "Die Erinnerung in der App ist ausgeschaltet",
+  "overdue.switchedOffHint":
+    "Ein Administrator kann sie unter Ausleihe wieder einschalten. Betroffen ist nur diese Seite: Kanäle, die nach außen verschicken, laufen weiter, und die Ausleihen selbst stehen weiterhin auf der Ausleihseite.",
+  "overdue.capped":
+    "Es werden die {shown} am längsten überfälligen von {total} angezeigt.",
+  "overdue.deliveryTitle": "Erinnerungskanäle",
+  "overdue.deliveryNote":
+    "Endpaper hält fest, was jeder Kanal bei seinem letzten Lauf getan hat. Es hält nicht fest, welche Erinnerung wen erreicht hat: diese Zeilen beschreiben also den Kanal und keine einzelne Ausleihe darunter.",
+  "overdue.deliveryNone":
+    "Kein Kanal verschickt diese Erinnerungen irgendwohin.",
+  "overdue.deliveryUnreadable":
+    "Der Kanalbericht konnte nicht gelesen werden. Diese Seite sagt daher nichts darüber aus, ob Erinnerungen verschickt werden.",
 
   // ── Das Exemplar ────────────────────────────────────────────────────────
   "copy.title": "Dieses Exemplar",
@@ -991,4 +1091,32 @@ export const de: Messages = {
   "error.sessionEnded.action": "Erneut anmelden",
   "error.backToLibrary": "Zurück zur Bibliothek",
   "error.reload": "Seite neu laden",
+
+  // ── Der veröffentlichte Katalog ─────────────────────────────────────────
+  //
+  // Die Bibliothek siezt hier, anders als der Rest der Anwendung: wer diese
+  // Seiten liest, gehört nicht zum Haushalt.
+  "public.title": "Katalog",
+  "public.skipToContent": "Zum Katalog springen",
+  "public.signIn": "Anmelden",
+  "public.search": "In diesem Katalog suchen...",
+  "public.searchLabel": "In diesem Katalog suchen",
+  "public.resultCount": "{count} Bücher",
+  "public.resultCountOne": "1 Buch",
+  "public.noResults": "Nichts gefunden",
+  "public.noResultsHint":
+    "Versuchen Sie es mit weniger Wörtern oder einer anderen Schreibweise.",
+  "public.emptyHint": "In diesem Katalog steht noch nichts.",
+  "public.loadMore": "Mehr anzeigen",
+  "public.backToCatalogue": "Zurück zum Katalog",
+  "public.closedTitle": "Hier ist nichts",
+  "public.closedHint": "Diese Bibliothek veröffentlicht ihren Katalog nicht.",
+  "public.classifications": "Klassifikation",
+  "public.fact.isbn": "ISBN",
+  "public.fact.publisher": "Verlag",
+  "public.fact.year": "Jahr",
+  "public.fact.language": "Sprache",
+  "public.fact.pages": "Seiten",
+  "public.fact.format": "Ausgabeform",
+  "public.fact.series": "Reihe",
 };

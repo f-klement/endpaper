@@ -68,7 +68,8 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
   ebook, kept from sold, yours from mine. A book is in one or in none, and filing it
   changes nothing about who can see it: that is still up to whether it is private
 - **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
-  The borrower does not need an account: lend to a neighbour by typing their name
+  The borrower does not need an account: lend to a neighbour by typing their name. Overdue
+  loans get their own page, with the reminder channels' standing state beside them
 - **Overdue reminders**: Endpaper can send a digest of every overdue loan on a schedule
   you set, by email, to a Telegram chat, or to a webhook you choose (signed, so the
   receiver can check it came from here). Switch on as many as you like; they all carry the
@@ -87,8 +88,13 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 
 **That is the shape of it. The complete list, including what Endpaper
 deliberately does not do**, is in [`docs/featurelist.md`](docs/featurelist.md):
-no public catalogue, no offline mode, no circulation desk. Worth knowing before
-you install it rather than after.
+no offline mode, no circulation desk. Worth knowing before you install it rather
+than after.
+
+A **public catalogue** is there if you want one, off by default and behind two
+switches: library mode changes what a cataloguer sees and publishes nothing, and
+publishing is a second, separate decision. Private books stay private in every
+mode.
 
 ## Local Development
 
@@ -220,10 +226,12 @@ signed in as a real member this way.
 | `LDAP_USER_FILTER` | `(&(objectClass=person)(uid={username}))` | `{username}` is substituted and escaped |
 | `LDAP_USERNAME_ATTRIBUTE` | `uid` | The attribute holding the login name |
 | `LDAP_ADMIN_GROUP` | none | Members of this group get admin, re-checked at each sign-in |
+| `LDAP_EMAIL_ATTRIBUTE` | none | The attribute holding a member's address, usually `mail`. Set it and the directory owns the address, re-applied at each sign-in and read only in the app. **Setting it clears the stored address of any member the directory has none for**, at their next sign-in, and the field is read only from then on, so it cannot be put back |
 | `LDAP_START_TLS` | `false` | Upgrade a plain connection with StartTLS |
 | `PROXY_USER_HEADER` | `Remote-User` | Header naming the signed-in account |
 | `PROXY_GROUPS_HEADER` | `Remote-Groups` | Comma-separated group list |
 | `PROXY_ADMIN_GROUP` | none | Membership of this group grants admin |
+| `PROXY_EMAIL_HEADER` | none | Header asserting the member's address, `Remote-Email` for Authelia. Same ownership rule, and the same clearing, as `LDAP_EMAIL_ATTRIBUTE` |
 
 > **`AUTH_MODE=proxy` trusts headers.** Safe only behind a proxy that sets them itself
 > *and strips any arriving from the client*. Exposed directly, anyone can claim to be admin.

@@ -24,7 +24,10 @@ import { PATTERNS } from "../../../../src/theme/patterns";
 import { renderLocalised } from "../../../utils";
 
 describe("WallpaperChoice", () => {
-  it("offers the ten patterns plus off and surprise me", () => {
+  it("offers every pattern plus off and surprise me", () => {
+    // Named for the property rather than for a count. The assertion was always
+    // `PATTERNS.length`, so the name went stale on its own the first time the
+    // catalogue grew and nothing failed.
     renderLocalised(<WallpaperChoice />);
 
     expect(screen.getAllByRole("button")).toHaveLength(PATTERNS.length + 2);

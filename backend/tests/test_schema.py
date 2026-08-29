@@ -9,13 +9,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import String, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
 from database import Base, engine
+from enums import AuthorityScheme
 
 
 def drop_everything() -> None:
@@ -1617,13 +1618,56 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
 
         assert "author_identifiers" in table_names()
 
-    def test_a_scheme_no_authority_file_is_read_for_is_refused(self):
+    def test_a_subject_heading_scheme_is_refused_as_a_persons_identifier(self):
+        """`ddc` for the reason its counterpart in `test_models.py` gives: the
+        value was `viaf`, then `blbnb`, and both became members. A
+        `ClassificationScheme` value cannot, because the two enums exist to keep
+        a subject heading and a person apart."""
         self._migrated()
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
-            connection.execute(text(self._insert(scheme="'viaf'")))
+            connection.execute(text(self._insert(scheme="'ddc'")))
 
         assert "ck_author_identifiers_scheme" in str(refusal.value)
+
+    def test_the_national_scheme_downgrade_clears_the_rows_it_narrows_past(self):
+        """Revision c9a5f27b3e41. A row the schema says cannot exist is worse
+        than a row that is gone: narrowing a CHECK with rows that violate it
+        fails outright on a real database and is accepted on SQLite, so the
+        downgrade deletes them first.
+
+        **The four older schemes must survive it**, which is the half a delete
+        is easy to get wrong: the revision before this one narrows to `gnd`
+        alone, and doing that work here would take rows the caller did not ask
+        to lose.
+        """
+        from alembic import command
+
+        self._migrated()
+        with engine.connect() as connection:
+            connection.execute(text(self._insert(scheme="'blbnb'", identifier="'000560463'")))
+            connection.execute(
+                text(
+                    self._insert(
+                        author_key="'stevenson robert louis'",
+                        scheme="'isni'",
+                        identifier="'0000000122831567'",
+                    )
+                )
+            )
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), "d5e1b93a7c62")
+
+        with engine.connect() as connection:
+            left = [
+                row[0]
+                for row in connection.execute(
+                    text("SELECT scheme FROM author_identifiers")
+                )
+            ]
+
+        assert left == ["isni"]
 
     def test_a_provenance_that_is_neither_is_refused(self):
         self._migrated()
@@ -1670,3 +1714,162 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
 
         with engine.connect() as connection, pytest.raises(IntegrityError):
             connection.execute(text(self._insert(created_at="NULL")))
+
+    def test_every_scheme_the_enum_offers_is_storable(self):
+        """`AuthorityScheme` and `ck_author_identifiers_scheme` cannot separate.
+
+        **The one drift `TestTheMigrationsAndTheModelsAgree` cannot see.** That
+        class compares nullability and type per column and takes no view of a
+        CHECK, so widening the enum without writing the revision leaves a value
+        the application accepts and the deployment rejects, surfacing as an
+        `IntegrityError` on somebody's first confirmation rather than as a red
+        pipeline. `a4c73e0b19d5` says in prose that "the two have to be read
+        against each other by a person"; this is that reading, mechanised for
+        one constraint.
+
+        **Driven off the enum rather than a written out list**, so a member
+        added tomorrow is covered without anybody remembering this test exists.
+        A list here would be the shape `CLAUDE.md` records as failing twice: a
+        guard that enumerates something open.
+
+        **Against the migrated database, never the model's.** `conftest.py`
+        builds with `create_all`, and `models._scheme_check` derives the same
+        constraint from the same enum, so a model built check can only ever
+        agree with itself. Only `schema.upgrade_to_head()` runs the revision.
+
+        Attacked rather than read, 2026-08-28. With `'isni'` removed from
+        `d5e1b93a7c62._SCHEMES_AFTER` the failing test was this one, named:
+        `FAILED tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOn
+        AMigratedDatabase::test_every_scheme_the_enum_offers_is_storable`,
+        reporting `isni`. With a sixth member added to `AuthorityScheme` and no
+        revision written, the same test failed naming that member.
+        """
+        self._migrated()
+
+        refused: list[str] = []
+        for scheme in AuthorityScheme:
+            with engine.connect() as connection:
+                try:
+                    # A distinct key per scheme, so
+                    # `uq_author_identifiers_key_scheme` cannot be what refuses
+                    # the second row and be read as the CHECK doing it.
+                    connection.execute(
+                        text(
+                            self._insert(
+                                author_key=f"'{scheme.value} person'",
+                                scheme=f"'{scheme.value}'",
+                            )
+                        )
+                    )
+                    connection.commit()
+                except IntegrityError as refusal:
+                    refused.append(f"{scheme.value}: {refusal}")
+
+        assert not refused, (
+            "the migrated ck_author_identifiers_scheme refuses a member "
+            "AuthorityScheme offers:\n" + "\n".join(refused)
+        )
+
+
+class TestAnAddressPerMember:
+    """Revision a3f7c1d94e82, which adds `users.email`.
+
+    Nullable and with no fallback written into any row, which is the whole
+    promise of it: a library upgrading past this revision must see no behaviour
+    change, and a NULL address is what makes the mail sender keep using the
+    household mailbox it already used.
+    """
+
+    PREVIOUS = "c9a5f27b3e41"
+
+    def build_database_with_a_member(self) -> None:
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',1)")
+            )
+            connection.commit()
+
+    def test_the_column_arrives(self):
+        self.build_database_with_a_member()
+
+        schema.upgrade_to_head()
+
+        columns = {column["name"] for column in inspect(engine).get_columns("users")}
+        assert "email" in columns
+
+    def test_it_is_nullable(self):
+        """A NOT NULL column here would need a value for every existing row,
+        and there is no address that would be right for one."""
+        self.build_database_with_a_member()
+
+        schema.upgrade_to_head()
+
+        column = next(
+            item
+            for item in inspect(engine).get_columns("users")
+            if item["name"] == "email"
+        )
+        assert column["nullable"] is True
+
+    def test_the_column_is_as_wide_as_the_rule_allows(self):
+        """The three places that bound an address agree, and nothing else makes
+        them.
+
+        `models.User.email` is `String(320)` as a literal, because importing
+        `mailer.MAX_ADDRESS` there is an import cycle (`mailer` imports
+        `settings_store`, which imports `models`). So the constant claimed to be
+        the bound while `grep -rnF MAX_ADDRESS backend/tests/` returned nothing,
+        and SQLite enforces no column width, which left three numbers agreeing
+        by coincidence. This is the tie: the migrated column, the model, and the
+        number the schema and `auth_backends` check against.
+        """
+        import mailer
+        from models import User
+
+        self.build_database_with_a_member()
+        schema.upgrade_to_head()
+
+        column = next(
+            item
+            for item in inspect(engine).get_columns("users")
+            if item["name"] == "email"
+        )
+        # `isinstance` rather than a cast: that the column is a VARCHAR at all
+        # is half the claim, and a cast would assert it without checking it.
+        migrated = column["type"]
+        declared = User.__table__.columns["email"].type
+        assert isinstance(migrated, String)
+        assert isinstance(declared, String)
+        assert migrated.length == mailer.MAX_ADDRESS
+        assert declared.length == mailer.MAX_ADDRESS
+
+    def test_the_existing_member_survives_with_no_address(self):
+        self.build_database_with_a_member()
+
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT username, email FROM users")
+            ).one()
+        assert row.username == "kim"
+        assert row.email is None
+
+    def test_the_downgrade_drops_it(self):
+        """Batch mode rebuilds the table to drop a column on SQLite, so this is
+        the half of the migration that can silently take the row with it."""
+        from alembic import command
+
+        self.build_database_with_a_member()
+        schema.upgrade_to_head()
+
+        # Alembic directly: schema.py only ever moves forward, because the app
+        # has no reason to downgrade itself at startup.
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        columns = {column["name"] for column in inspect(engine).get_columns("users")}
+        assert "email" not in columns
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1

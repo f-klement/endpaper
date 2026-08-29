@@ -1,7 +1,17 @@
 """Tests for backend/routers/settings.py: the admin-set login background."""
 
+import ast
+import inspect
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+
 import pytest
 
+import notifications
+import settings_store
+from enums import OverdueNotifyReason, OverdueSender
+from routers import settings as settings_router
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
 
 PNG = PNG_BYTES
@@ -796,8 +806,54 @@ _BEFORE_THE_SENDERS = frozenset(
 )
 
 
+def _write_tables() -> dict[str, dict[str, object]]:
+    """The write tables in `routers/settings.py`, by the name they are bound to.
+
+    **Derived from the module rather than named**, and that was a correction.
+    The guard below read `_SENDER_TEXT | _SENDER_BOOL` by name, so a **third**
+    table was invisible to it: the library mode switches arrived in
+    `_LIBRARY_MODE_BOOL`, are written on every `PUT`, and the guard reported all
+    three fields as accepted and dropped. A rule that enumerates the tables it
+    knows about fails on the table added after it, which is the one case it
+    exists for.
+
+    A table here is a module level `dict[str, SettingKey]`, which is what all
+    three are and what a fourth would be, **and which `update_settings` actually
+    reads**. That last clause is the second correction: without it a table
+    somebody declared and never wired up would count as writing its fields, and
+    would forgive exactly the "accepted and dropped" defect this exists to
+    catch.
+
+    One definition, returned whole, because two tests wanted this set and were
+    computing it with two different predicates, which is one fact with two
+    answers.
+    """
+    from enums import SettingKey
+    from routers import settings as settings_router
+
+    written = inspect.getsource(settings_router.update_settings)
+    return {
+        name: value
+        for name, value in vars(settings_router).items()
+        if isinstance(value, dict)
+        and value
+        and all(
+            isinstance(field, str) and isinstance(key, SettingKey)
+            for field, key in value.items()
+        )
+        # On a word boundary, not `name in written`: a table called `_SENDER`
+        # would otherwise be counted as read because `_SENDER_TEXT` appears.
+        and re.search(rf"\b{re.escape(name)}\b", written)
+    }
+
+
+def _written_fields() -> set[str]:
+    """Every payload field one of those tables writes."""
+    return {field for table in _write_tables().values() for field in table}
+
+
 class TestEverySenderFieldIsActuallyWritten:
-    """`_SENDER_TEXT` and `_SENDER_BOOL` are tables, and a table can be short.
+    """The write tables are tables, and a table can be short.
 
     A field added to `SettingsUpdate` and not to one of them is accepted by the
     schema, answered **200**, and dropped: no error, no log line, and a settings
@@ -809,11 +865,42 @@ class TestEverySenderFieldIsActuallyWritten:
     raises `AttributeError` on the first `PUT`, which is loud.
     """
 
+    def test_the_derivation_finds_the_tables(self):
+        """A guard that inspects nothing reads as coverage, and this one has
+        already been blind to a whole table once."""
+        assert set(_write_tables()) == {
+            "_SENDER_TEXT",
+            "_SENDER_BOOL",
+            "_LIBRARY_MODE_BOOL",
+        }, (
+            "The write tables in routers/settings.py are pinned here, so a "
+            "fourth fails this until somebody says it is one. That is the "
+            "point: the rule below counts on finding them all, and it was blind "
+            "to the third for a round."
+        )
+        written = _written_fields()
+        assert "mail_server" in written, "the text table is not being found"
+        assert "overdue_in_app_enabled" in written, "the bool table is not"
+        assert "library_mode" in written, "a table added later is not"
+
+    def test_a_table_nothing_reads_does_not_count_as_written(self, monkeypatch):
+        """A declared but unwired table would otherwise forgive its own fields,
+        which is the exact defect this guard exists to catch."""
+        from enums import SettingKey
+        from routers import settings as settings_router
+
+        monkeypatch.setattr(
+            settings_router,
+            "_NEVER_WIRED_UP",
+            {"a_field_nothing_writes": SettingKey.LIBRARY_MODE},
+            raising=False,
+        )
+        assert "a_field_nothing_writes" not in _written_fields()
+
     def test_no_sender_field_is_accepted_and_dropped(self):
-        from routers.settings import _SENDER_BOOL, _SENDER_TEXT
         from schemas import SettingsUpdate
 
-        written = set(_SENDER_TEXT) | set(_SENDER_BOOL)
+        written = _written_fields()
         # The complement, not a prefix match. A prefix list fails **open** on
         # the field it most wants to catch: `smtp_relay_host` or `ntfy_topic`
         # starts with none of them, so it falls outside `declared`, the guard
@@ -824,12 +911,15 @@ class TestEverySenderFieldIsActuallyWritten:
 
         assert declared - written == set()
 
-    def test_the_two_tables_do_not_overlap(self):
-        """A field in both is written twice, the second write deciding, which is
-        a bug that only shows up as the wrong stored type."""
-        from routers.settings import _SENDER_BOOL, _SENDER_TEXT
+    def test_no_two_tables_overlap(self):
+        """A field in two tables is written twice, the second write deciding,
+        which is a bug that only shows up as the wrong stored type.
 
-        assert set(_SENDER_TEXT) & set(_SENDER_BOOL) == set()
+        Through `_write_tables`, not a second derivation of its own. It had one,
+        with a slightly different predicate, which is one fact with two
+        definitions and two chances to disagree about what a table is."""
+        total = sum(len(table) for table in _write_tables().values())
+        assert len(_written_fields()) == total, "a field is written by two tables"
 
 
 class TestTheEnvironmentWinsOverTheStoredValue:
@@ -894,3 +984,280 @@ class TestTheEnvironmentWinsOverTheStoredValue:
 def body_has_no_token(text: str) -> bool:
     """A 409 must not quote the value back. It is a credential either way."""
     return "AAaaBBbb" not in text and "BBBBBBBB" not in text
+
+
+class TestSenderHealthEndpoint:
+    """`GET /api/settings/sender-health` (#82).
+
+    When a channel counts as broken is pinned in `tests/test_notifications.py`.
+    What is here is the route: who may read it, and that it reports the channels
+    that are on rather than every one that exists.
+    """
+
+    def test_a_member_may_not_read_it(self, client, member):
+        res = client.get("/api/settings/sender-health", headers=member["headers"])
+        assert res.status_code == 403
+
+    def test_it_needs_a_token(self, client):
+        assert client.get("/api/settings/sender-health").status_code == 401
+
+    def test_a_fresh_install_reports_nothing(self, client, admin):
+        """Empty, though the in app channel is on: it is the one channel that
+        hands the digest to nobody, so it has no delivery to have health about
+        and reporting one would assert a send that never happened."""
+        body = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+
+        assert body == []
+
+    def test_switching_a_channel_on_adds_it(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_enabled": True},
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+
+        assert [entry["sender"] for entry in body] == ["webhook"]
+        assert body[0]["last_run_at"] is None
+        assert body[0]["broken"] is False
+
+    def test_switching_one_off_drops_it(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_enabled": True},
+            headers=admin["headers"],
+        )
+        client.put(
+            "/api/settings",
+            json={"overdue_webhook_enabled": False},
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+
+        assert body == []
+
+
+class TestInAppReminderSetting:
+    def test_it_starts_switched_on(self, client, admin):
+        """The one reminder channel that does, because it sends nothing outward
+        and a household that configured nothing is otherwise told nothing."""
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["overdue_in_app_enabled"] is True
+
+    def test_it_can_be_switched_off(self, client, admin):
+        body = client.put(
+            "/api/settings",
+            json={"overdue_in_app_enabled": False},
+            headers=admin["headers"],
+        ).json()
+        assert body["overdue_in_app_enabled"] is False
+
+    def test_a_member_may_not_change_it(self, client, member):
+        res = client.put(
+            "/api/settings",
+            json={"overdue_in_app_enabled": False},
+            headers=member["headers"],
+        )
+        assert res.status_code == 403
+
+
+class TestEverySettingsWriteClearsWhatItInvalidates:
+    """`update_settings` writes through one door, so the second half of a write
+    cannot be forgotten (#82)."""
+
+    def test_no_write_bypasses_the_helper(self):
+        """Structural, because the alternative is remembering.
+
+        A settings row written without going through `_store` leaves the health
+        record describing a configuration that no longer exists, which is the
+        defect #82 exists to close.
+
+        **Scoped to the module and not to `update_settings`**, and matching a
+        bare `Name` as well as a dotted one. Measured against the first version
+        of this rule, which did neither: of three ways to reopen the hole it
+        caught **one**. An inline `settings_store.set_value(...)` in the handler
+        was caught; `from settings_store import set_value` then `set_value(...)`
+        was not, because the callee is a `Name`; and a sibling `_store_raw()`
+        helper was not, because the write had left the function this rule was
+        looking inside. The third is ordinary refactoring, which is what makes it
+        the dangerous one.
+
+        **The writers are derived from `settings_store`, not named.** The second
+        version of this rule hard-coded `set_value` and so could not see
+        `set_json`, which is a second ordinary public writer in the same module
+        and the one `notifications.record_run` and `forget_health` already use.
+        Reaching for it in this router is the same ordinary refactoring the
+        paragraph above calls dangerous, and it would have reopened the hole
+        silently. A `set_` prefix over `dir()` covers a third writer the day it
+        is added, which is the difference between a rule and a list.
+
+        So the question asked is "which functions in this module write a settings
+        row", and the answer must be exactly one.
+
+        **This is one of two legs and it guards the near one.** A write reaching
+        `_store` still clears nothing if its `SettingKey` is absent from
+        `notifications._CONFIGURED_BY`, because `sender_for` then answers `None`;
+        that leg is held by
+        `TestEverySenderSettingIsOwned::test_every_settings_row_the_senders_read_belongs_to_one`
+        and is invisible from here. Named so a reader does not take a green run
+        on this one as covering both.
+        """
+        source = Path(settings_router.__file__).read_text()
+        tree = ast.parse(source)
+
+        # Every public writer `settings_store` offers, plus every local name
+        # bound to one, so neither a second writer nor an aliased import can
+        # rename its way out.
+        writers = {name for name in dir(settings_store) if name.startswith("set_")}
+        assert "set_value" in writers and "set_json" in writers, (
+            "The writer names are derived from `settings_store`; if that module "
+            "renamed them, this rule is now guarding nothing."
+        )
+        bound = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in writers
+        } | writers
+
+        # `found`, not `writers`: the two are a set of names and a map of call
+        # sites, and reusing one name for both made mypy the only thing that
+        # noticed. The suite was green on the shadowed version.
+        found: dict[str, list[int]] = {}
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(function):
+                if not isinstance(node, ast.Call):
+                    continue
+                callee = node.func
+                name = (
+                    callee.id
+                    if isinstance(callee, ast.Name)
+                    else callee.attr
+                    if isinstance(callee, ast.Attribute)
+                    else None
+                )
+                if name in bound:
+                    found.setdefault(function.name, []).append(node.lineno)
+
+        assert sorted(found) == ["_store"], (
+            "A settings row is written outside `_store`, so the health record it "
+            f"invalidates is left standing: {found}"
+        )
+
+    def test_replacing_an_expired_bot_token_clears_the_record(self, client, admin, db):
+        """The case #82 names, and the one the old table did not cover.
+
+        A household whose bot token expires meets the banner. Replacing the
+        token is not a toggle, so with only the switches owned the record
+        survived it, and a household with nothing overdue attempts no sender, so
+        no later run overwrote it either.
+        """
+        client.put(
+            "/api/settings",
+            json={"overdue_telegram_enabled": True},
+            headers=admin["headers"],
+        )
+        notifications.record_run(
+            db,
+            {
+                "senders": [
+                    {
+                        "sender": OverdueSender.TELEGRAM,
+                        "sent": False,
+                        "reason": OverdueNotifyReason.MISCONFIGURED,
+                        "detail": "The Telegram bot token is not a bot token.",
+                    }
+                ]
+            },
+            datetime.now(UTC).replace(tzinfo=None),
+        )
+        before = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+        assert [e["broken"] for e in before if e["sender"] == "telegram"] == [True]
+
+        client.put(
+            "/api/settings",
+            # The house's fake bot id, not a realistic one:
+            # `TestNoFixtureLooksLikeACredential` forbids the realistic shape
+            # because both test trees are published and somebody else triages
+            # the scanner alert. It still satisfies `_TELEGRAM_TOKEN`.
+            json={"telegram_bot_token": "0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL"},
+            headers=admin["headers"],
+        )
+
+        after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+        telegram = next(e for e in after if e["sender"] == "telegram")
+        assert telegram["broken"] is False
+        assert telegram["last_run_at"] is None
+
+    def test_a_mail_transport_change_clears_the_mail_record(self, client, admin, db):
+        """Not a credential, and exactly the fix `MISCONFIGURED` asks for:
+        `mailer.checked_config` refuses a password over neither STARTTLS nor
+        implicit TLS, so the encryption choice is the write that repairs it. A
+        rule covering credentials alone would have left it out."""
+        client.put(
+            "/api/settings",
+            json={"overdue_mail_enabled": True},
+            headers=admin["headers"],
+        )
+        notifications.record_run(
+            db,
+            {
+                "senders": [
+                    {
+                        "sender": OverdueSender.EMAIL,
+                        "sent": False,
+                        "reason": OverdueNotifyReason.MISCONFIGURED,
+                        "detail": "A password would cross the wire in the clear.",
+                    }
+                ]
+            },
+            datetime.now(UTC).replace(tzinfo=None),
+        )
+
+        client.put(
+            "/api/settings",
+            json={"mail_use_tls": True, "mail_use_ssl": False},
+            headers=admin["headers"],
+        )
+
+        after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+        assert next(e for e in after if e["sender"] == "email")["last_run_at"] is None
+
+    def test_the_reminder_interval_is_not_a_channel_and_clears_nothing(
+        self, client, admin, db
+    ):
+        """It says how often a loan is chased, not whether a channel works, so
+        changing it is no evidence about any of them. The mirror of the tests
+        above: a rule that cleared on every settings write would be a rule that
+        never reported anything."""
+        client.put(
+            "/api/settings",
+            json={"overdue_telegram_enabled": True},
+            headers=admin["headers"],
+        )
+        notifications.record_run(
+            db,
+            {
+                "senders": [
+                    {
+                        "sender": OverdueSender.TELEGRAM,
+                        "sent": False,
+                        "reason": OverdueNotifyReason.UNREACHABLE,
+                        "detail": "The destination could not be reached.",
+                    }
+                ]
+            },
+            datetime.now(UTC).replace(tzinfo=None),
+        )
+
+        client.put(
+            "/api/settings", json={"overdue_reminder_days": 3}, headers=admin["headers"]
+        )
+
+        after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
+        assert next(e for e in after if e["sender"] == "telegram")["failures"] == 1

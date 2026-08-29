@@ -1,5 +1,5 @@
 /**
- * The six settings routes, as data.
+ * The eight settings routes, as data.
  *
  * Settings is an index, not a page: each entry is a heading, one sentence
  * saying what the route holds, and a link to it. The table is here rather than
@@ -11,17 +11,27 @@
  * single long page, so each sentence names what is actually behind the link
  * rather than restating its title.
  *
- * **Three routes hold nothing for a member who is not an admin**, and the index
+ * **Four routes hold nothing for a member who is not an admin**, and the index
  * says so by leaving them out rather than by advertising a screen that answers
  * "only an admin can change these". The long page this replaced refused in
- * place, once, beside the cards it was refusing; six links with no such mark
- * would turn one refusal into three, each of them a tap away and each announced
+ * place, once, beside the cards it was refusing; eight links with no such mark
+ * would turn one refusal into four, each of them a tap away and each announced
  * with a sentence promising content.
  *
  * The routes stay mounted regardless, so a deep link still lands and still
  * refuses. This flag decides what is offered, never what is allowed: the
  * endpoints behind these screens are `require_admin`, and `AdminSettings` is
  * what a member actually meets.
+ *
+ * Your account arrived later, with `users.email` (issue #80): a member's own
+ * address belongs to none of the others, since Appearance is what the app
+ * looks like and Data and accounts is admin only.
+ *
+ * **The four numbers above are asserted, not remembered.** Two of them were
+ * stale within one evening, because two changes each added a route and each
+ * corrected a different sentence. `tests/pages/SettingsPage/types.test.ts`
+ * reads this comment and counts the array, so a route added without touching
+ * the prose is a failing test rather than a paragraph nobody rereads.
  *
  * The grouping is the owner's, settled 2026-08-27, and two of its placements
  * came from reading the strings rather than the section names: the default
@@ -53,6 +63,12 @@ export const SETTINGS_ROUTES: SettingsRoute[] = [
     summary: "settings.appearance.summary",
   },
   {
+    path: "/settings/account",
+    icon: "user",
+    title: "settings.account.title",
+    summary: "settings.account.summary",
+  },
+  {
     path: "/settings/catalogue",
     icon: "search",
     title: "settings.catalogue.title",
@@ -64,6 +80,19 @@ export const SETTINGS_ROUTES: SettingsRoute[] = [
     icon: "book",
     title: "settings.library.title",
     summary: "settings.library.summary",
+  },
+  {
+    // After Your library and before Lending: it is a decision about the
+    // catalogue that already exists rather than about bringing books in, and
+    // it is the one route here whose subject is people outside the household.
+    path: "/settings/public",
+    // `globe`, and About keeps `library`. The index is scanned by shape, so two
+    // entries sharing an icon costs a reader the one cue that is faster than
+    // reading; `types.test.ts` asserts the icons are distinct.
+    icon: "globe",
+    title: "settings.public.title",
+    summary: "settings.public.summary",
+    adminOnly: true,
   },
   {
     path: "/settings/lending",

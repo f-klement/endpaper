@@ -161,19 +161,41 @@ def silence_catalogues(mock: Any) -> Any:
 
 
 class FakeEntry:
-    def __init__(self, dn: str, username: str, groups: list[str], attribute: str = "uid"):
+    """An ldap3 entry, as much of one as `authenticate_ldap` touches.
+
+    `email=None` is an entry with no such attribute at all, and `email=""` is
+    the attribute present and empty. ldap3 gives those two different shapes,
+    `item in entry` being False for the first and `.value` being None for the
+    second, and the app has to reduce both to "the directory named no address".
+    """
+
+    def __init__(
+        self,
+        dn: str,
+        username: str,
+        groups: list[str],
+        attribute: str = "uid",
+        email: str | None = None,
+        email_attribute: str = "mail",
+    ):
         self.entry_dn = dn
         self._username = username
         self._attribute = attribute
         self.memberOf = SimpleNamespace(values=groups)
         self._has_groups = bool(groups)
+        self._email = email
+        self._email_attribute = email_attribute
 
     def __contains__(self, item: str) -> bool:
-        return item == "memberOf" and self._has_groups
+        if item == "memberOf":
+            return self._has_groups
+        return item == self._email_attribute and self._email is not None
 
     def __getitem__(self, item: str) -> SimpleNamespace:
         if item == self._attribute:
             return SimpleNamespace(value=self._username)
+        if item == self._email_attribute and self._email is not None:
+            return SimpleNamespace(value=self._email or None)
         raise KeyError(item)
 
 
@@ -190,6 +212,11 @@ class FakeConnection:
         self._available = entries
         self.result = "fake"
         self.searched_filter: str | None = None
+        #: What the search asked the directory for. Recorded because the
+        #: shipped default must not add an attribute to it: a test asserting
+        #: only the stored address would pass while every deployment's search
+        #: had quietly grown a field.
+        self.searched_attributes: list[str] | None = None
 
     def __enter__(self) -> FakeConnection:
         return self
@@ -202,6 +229,7 @@ class FakeConnection:
 
     def search(self, search_base: str, search_filter: str, attributes: list[str]) -> None:
         self.searched_filter = search_filter
+        self.searched_attributes = list(attributes)
         self.entries = self._available
 
 
@@ -220,8 +248,21 @@ def install_directory(monkeypatch, connections: list[FakeConnection]) -> list[Fa
     return handed_out
 
 
-def directory_with(monkeypatch, *, groups: list[str] | None = None, user_bind: bool = True):
-    entry = FakeEntry("uid=kim,ou=people,dc=example,dc=org", "kim", groups or [])
+def directory_with(
+    monkeypatch,
+    *,
+    groups: list[str] | None = None,
+    user_bind: bool = True,
+    email: str | None = None,
+    email_attribute: str = "mail",
+):
+    entry = FakeEntry(
+        "uid=kim,ou=people,dc=example,dc=org",
+        "kim",
+        groups or [],
+        email=email,
+        email_attribute=email_attribute,
+    )
     return install_directory(
         monkeypatch,
         [

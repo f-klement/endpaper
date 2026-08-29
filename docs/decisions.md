@@ -254,7 +254,7 @@ all seven light palettes with the same formula `tests/theme/palettes.test.ts` us
 
 | Pair | Worst | Where | Best |
 |---|---|---|---|
-| `paper-600` on `paper-200` | **3.55:1** | solarized (then 3.56 nord, 3.87 catppuccin) | 4.71 default |
+| `paper-600` on `paper-200` | **3.55:1** | solarized (then 3.56 nord, 3.64 ayu, 3.74 tokyonight, 3.87 catppuccin) | 4.71 default |
 | `paper-700` on `paper-200` | 4.19:1 | solarized | 7.32 default |
 | `paper-800` on `paper-200` | **4.57:1** | catppuccin | 11.35 default |
 | `paper-200` on `paper-800`, dark | 5.57:1 | everforest (then 6.31 catppuccin, 6.43 gruvbox, 7.09 nord) | 11.35 default |
@@ -1521,6 +1521,10 @@ is the better of the two errors, because the other one invents reading that neve
 
 ### Overdue reminders go out on three channels: a webhook, email, and Telegram
 
+**Four channels since 2026-08-28, and the fourth is not like the other three: it does
+not go out.** The in app notice is added below; the reasoning in this entry is about
+the three that push and is unchanged.
+
 **This reverses an earlier decision, and the earlier reasoning is kept because it is what
 the reversal answers.** It read: a self-hosted app that other libraries run should not carry
 an integration with a service nobody else runs, and email means SMTP credentials,
@@ -1579,24 +1583,30 @@ digest reports `skipped_private` as a count so a library that expects five entri
 receives four can see why, and the settings screen says so in words rather than leaving it
 to the docs.
 
-**The count is reported per channel as well as once at the top.** All three withhold the
-same rows today and so all three report the same number, which is exactly why the shape
-matters: a reader has no way to tell a shared number from a coincidence, and a single
-figure would become a lie on two channels of three the moment one audience differs.
+**The count is reported per channel as well as once at the top.** It was written when
+all three withheld the same rows and all three reported the same number, and it argued
+that a single figure would become a lie the moment one audience differed. **That moment
+arrived**: the in app channel reports 0, because its audience is a member and nothing is
+withheld from them, while the three that push still agree with each other. The shape is
+the reason the fourth channel needed no new field.
 
 **A per borrower mail is the one audience that could carry a private book, and it is not
 built.** Being reminded of a book *you* borrowed is not a disclosure, and withholding it
-means nobody ever chases the one book least likely to be chased by anyone else. The reason
-it is absent is a missing fact rather than a judgement: **no member here has an email
-address.** `models.User` carries none and the LDAP backend requests only the username
-attribute and `memberOf`. Reaching it needs a `users.email` column, somewhere to set it
-including for accounts that never type a password here, and a decision about who may read
-another member's address, since `UserOut` is served inside book payloads. Until then mail
-goes to the household's own mailbox, which is a channel like the other two and excludes
-private books like the other two. Recorded so the absence reads as a blocked item rather
-than an oversight.
+means nobody ever chases the one book least likely to be chased by anyone else. The reason it
+**was** absent was a missing fact rather than a judgement: no member had an email address.
+**That fact changed with #80 and the conclusion did not.** `users.email` exists, a member
+or an admin can set it and a directory can fill it, and **nothing in the reminder path
+reads it**: `send_mail` takes its recipients from `mailer.checked_config`, which reads
+`overdue_mail_to` and nothing else.
 
-### `notified_at` is a timestamp on the loan, stamped when at least one channel delivered
+What is still missing is the per borrower **audience**, which is a second recipient list
+and a second shape of digest rather than a column. Mail still goes to the household's own
+mailbox, which is a channel like the other two and excludes private books like the other
+two. Recorded so the absence reads as a blocked item rather than an oversight, and
+rewritten rather than deleted so that the reason it was blocked, and the fact that the
+blocker is gone, are both findable by whoever proposes it next.
+
+### `notified_at` is a timestamp on the loan, stamped when at least one channel that pushes delivered
 
 Without any state the digest has two behaviours and both are wrong: send once and forget a
 book that is still out, or repeat the same list into the channel every hour.
@@ -1607,32 +1617,39 @@ rather than a "sent" flag: the interval question ("has this been chased recently
 retry question ("did the last attempt land") are the same question, and one column answers
 both.
 
-**With three channels, "at least one" rather than "all of them", and the choice has a
-cost.** A broken webhook beside a working Telegram chat means that batch never reaches the
+**With four channels, "at least one" rather than "all of them", and the rule is
+narrower than it sounds: at least one channel that *pushes*.** The in app notice
+delivers nothing outward and never advances the column. **The choice has a cost.** A broken webhook beside a working Telegram chat means that batch never reaches the
 webhook. The alternative repeats the identical list hourly on the channels that work, which
 is the behaviour people switch off, and the only way to have neither is per loan per sender
 state, which is a table this feature does not warrant. The column records that the loan
 **was chased**, and it was; a channel that is down is an operator problem, reported in
 `senders` rather than compensated for.
 
-**What compensates for it is reporting, and the reporting has a gap worth knowing.** The
-hourly ticker discards the result, so once a tick has stamped `notified_at` on any one
-success, a manual "Send now" inside the reminder window answers `nothing_due` with an empty
-`senders`. The per channel failure is visible on the run that failed and in the log
-afterwards, not on a later button press. Named here rather than left to be discovered.
+**What compensates for it is reporting, and the gap this entry used to describe is
+closed.** The hourly ticker discarded its result, so a per channel failure was visible
+only on the run that failed and in the log afterwards. It no longer does: every run
+records what each channel did into `SettingKey.SENDER_HEALTH`, so a failure survives the
+run that produced it and is shown under that channel's own switch.
+
+What survives of the original caveat is the honest half. The column still records that
+the loan **was chased** and still does not say by which channel, and per loan per sender
+state remains a table this feature does not warrant.
 
 ### The digest result carries a `reason`, and it is null exactly when it sent
 
-`sent: false` on its own made five different outcomes one answer on the screen: switched
-off, no address stored, nothing overdue, a receiver that refused the request, and a channel
-whose settings cannot be used. A person
+`sent: false` on its own made six different outcomes one answer on the screen: switched
+off, no address stored, nothing overdue, a receiver that refused the request, a channel
+whose settings cannot be used, and, since the in app notice, every pushing channel being
+off so that nothing was sent anywhere and nothing was meant to be. A person
 pressing "Send now" to check their configuration was told "nothing was sent" by a broken
 setup and by a quiet week alike, which is the whole thing the button exists to tell apart.
 
 `detail` was already there and is not enough. It is a sentence, and a client cannot branch
 on a sentence or translate one. `reason` is the closed set beside it, so the frontend keys a
-`Record` off the generated union and adding a sixth reason on the server is a compile error
-in the catalogue rather than a silent fall through.
+`Record` off the generated union and adding a seventh reason on the server is a compile error
+in the catalogue rather than a silent fall through. It did exactly that: `in_app_only`
+reddened `REASON_LABELS` and `SENDER_ROW_REASONS` until both were given an arm.
 
 **Nullable rather than total.** A `sent` member would make `reason` and `sent: bool` two
 spellings of one fact, which is the duplication this repository treats as a defect. So the
@@ -3591,8 +3608,8 @@ holes reads as missing data rather than as data a book does not have.
 **The status is plain muted text, not the card's coloured pill.** One pill among
 covers is a marker; thirty stacked is a colour field with no signal. Measured as
 drawn, with the formula `tests/theme/palettes.test.ts` uses: `paper-600` on the
-card's `paper-0` is **5.03:1** at worst across the seven palettes (rosepine and
-everforest; 5.30 at best, on nord), and `paper-400` on `paper-900` in dark is
+card's `paper-0` is **5.03:1** at worst across the ten palettes (rosepine; 5.91 at
+best, on endpaper, where an earlier draft of this line said 5.30, which is nord's), and `paper-400` on `paper-900` in dark is
 **6.00:1** at worst, against the pill's **3.97:1** as drawn. The replacement is
 better on contrast as well as quieter, and the word carries the same
 information.
@@ -3699,7 +3716,7 @@ Three consequences worth knowing before touching any of it.
   Solving at runtime means an eighth palette needs nothing here at all.
 - **The alpha ceiling had to move**, from 0.15 to 0.30. That number guarded "make it
   visible" from becoming a page that competes with a book cover, and it guarded it in the
-  wrong unit: five of the seven palettes need more than 0.15 in dark to reach the weight
+  wrong unit: seven of the ten palettes need more than 0.15 in dark to reach the weight
   Endpaper reaches at 0.13. The weight ceiling is `TARGETS` now, identical for every
   palette; the alpha ceiling is a guard against an ink so close to its own page that no
   reasonable alpha reaches it. The highest solve that ships is Solarized dark's bloom at
@@ -3784,8 +3801,10 @@ a real 2x display, because two designers independently predicted it would not. W
 actually done: the tile was rasterised at 1x at the solved opacity over the light page, and
 the image inspected at two tiles square. The break at a crossing is 20px of interrupted
 2.2px outline and it reads. The tint contrast is 0.477, which is 2.43x the floor and the
-second lowest of the five decorated papers: only Nonpareil resolves less, and Nonpareil is
-a field of parallel lines.
+third lowest of the eight decorated papers: Nonpareil at 0.354 and Curl at 0.435 both
+resolve less, and both are fields of parallel lines, Curl being Nonpareil combed a second
+time. Recounted 2026-08-29 when the family went from five to eight; it read "second lowest
+of the five" and named only Nonpareil.
 
 **That is a rendering, not a screen.** Nobody has looked at this in a browser on a 2x
 display, and the difference is real: subpixel rendering, the browser's own antialiasing of a
@@ -3873,16 +3892,17 @@ record, and folding the bug fixes into the theming release would have lost which
 
 ### `warn`, `ok` and `loan` stay raw Tailwind, for now, minus one repair
 
-They are amber, green and orange at 29 lines across 16 files, so six of the seven palettes
+They are amber, green and orange at 29 lines across 16 files, so nine of the ten palettes
 ship a success message and an overdue badge in colours belonging to none of them. Tokenising
-them is three ramps times seven palettes times two modes, which is a phase of its own and
+them is three ramps times ten palettes times two modes, which is a phase of its own and
 not this one.
 
 **One repair landed anyway, because it was a live AA failure and needed no token.**
-`text-green-600` on the card measured **2.79 (Nord) to 3.22 (Endpaper)** for text that needs
-4.5, and it is the success message on four screens. It is now `text-green-800`, measured
-**6.19 to 7.13**. `green-700` was the obvious step and does not clear: 4.29 on Nord, 4.37 on
-Catppuccin, 4.49 on Gruvbox.
+`text-green-600` on the card measured **2.61 (Tokyo Night) to 3.22 (Endpaper)** for text
+that needs 4.5, and it is the success message on four screens. It is now `text-green-800`,
+measured **5.78 (Tokyo Night) to 7.13 (Endpaper)**, clearing on all ten. `green-700` was
+the obvious step and does not clear on five of the ten: 4.01 Tokyo Night, 4.12 Kanagawa,
+4.29 Nord, 4.37 Catppuccin, 4.49 Gruvbox.
 
 That measurement is also the argument for the token job. A raw hue is a bet on seven
 different card colours at once, and the only green that wins it is two steps darker than the
@@ -3892,7 +3912,7 @@ one anybody would reach for.
 
 Doubled deliberately, and not a typo. The rule has to outrank `:root[data-theme="x"]`, which
 is (0,2,0); written once, at (0,1,0), the preference would be honoured on the default
-palette and silently ignored on the other six. The dark half is `:root:root.dark` for the
+palette and silently ignored on the other nine. The dark half is `:root:root.dark` for the
 same reason.
 
 ### Appearance is three columns on `users`, and is not on `UserOut`
@@ -4425,7 +4445,7 @@ one would report a private server to a third party every time somebody opened
 Settings.
 
 Drawn as markup and CSS instead, which is better here for three reasons that have nothing
-to do with the policy: the row themes with whichever of the seven palettes is in force, it
+to do with the policy: the row themes with whichever of the ten palettes is in force, it
 renders in the installed PWA with no network at all, and it adds no request to a page load.
 Written down because an `<img src="https://img.shields.io/...">` is what the next person
 reaches for, and it would look like a simplification.
@@ -4471,16 +4491,18 @@ against the dark card `paper-900` is **1.01:1** on gruvbox and `accent-950` agai
 **That rejection is about solid rungs and nothing wider.** The idiom this app already ships
 for a tinted chip on a dark surface is an alpha tint, `dark:bg-accent-500/20` in
 `app/components/NavBar.tsx`. Composited over the dark card it measures 8.21 to 13.85 CIE L*
-of separation across the seven palettes, with `paper-200` ink on it at 4.92:1 to 10.58:1:
-better than the neutral split below, on every palette. It is not used here because neutral
+of separation across the seven palettes that shipped when this was measured, with
+`paper-200` ink on it at 4.92:1 to 10.58:1: better than the neutral split below, on every
+one of them. Not recomputed for the ten, deliberately: it is a NavBar pairing rather than
+a token, and the sentence it supports is a rejection that holds either way. It is not used here because neutral
 chrome is quieter on a card whose whole design is that it is quiet, which is a choice about
 loudness. Recorded so the next person does not read the two ratios above as "an accent cell
 cannot be built in the dark", because they do not say that.
 
 **The two cells are separated by a hairline, not by their own difference, and the first
 draft got this wrong.** `paper-100` against `paper-200` is **1.32 CIE L*** apart on Rose
-Pine light where the other six run 3.14 to 8.89, so on that one palette the badge drew as a
-single flat chip. That draft had rejected a 1.13:1 accent cell in the dark, then shipped a
+Pine light and **2.54** on Kanagawa, where the other eight run 3.14 to 8.89, so on those
+two the badge drew as a single flat chip. That draft had rejected a 1.13:1 accent cell in the dark, then shipped a
 1.035:1 split in the light: the same defect, on the same palette, in the other mode. The fix
 is `border-l border-paper-300 dark:border-paper-600`, which is 6.75 CIE L* off the value
 cell and 5.43 off the label cell at worst (both Rose Pine light), and 12.30 and 24.11 at
@@ -4496,7 +4518,7 @@ and in both modes. `paper-100` on `paper-200` is 1.035:1 on Rose Pine and 1.272:
 solarized: both round to "the same colour" as a ratio, while their lightness separation
 differs by a factor of six and only one of them reads as two surfaces.
 
-**Contrast, measured across all seven palettes and both modes** with the formula
+**Contrast, measured across all ten palettes and both modes** with the formula
 `frontend/tests/theme/palettes.test.ts` uses, and added to that file's pair list so the
 numbers cannot drift from the tokens:
 
@@ -4516,7 +4538,7 @@ badge is `text-xs`, 12px.
 
 **The four `paper` on `paper` rows are shaped the way that table's tripwire reads.**
 `palettes.test.ts::the contrast table in docs/decisions.md` parses rows whose pairing cell
-begins with the two tokens, and asserts each figure is the worst across the seven palettes
+begins with the two tokens, and asserts each figure is the worst across the ten palettes
 and each palette is the one it belongs to. The first draft of this table wrote the cell as
 "label ink `paper-800` on `paper-200`, light", which the regex does not match, so eight
 freshly written figures sat in a document with a guard against exactly that and were not
@@ -4524,7 +4546,10 @@ covered by it. The four `accent` rows are still uncovered: the tripwire reads on
 
 **The status pill's ramp is deliberately not reused.** The `unread` pill draws `paper-600`
 on `paper-200`, which measures 3.55:1 on solarized, 3.56 on nord and 3.87 on catppuccin,
-under the floor on three of seven palettes and recorded above as known debt. A badge
+under the floor on three of ten palettes **as drawn**, at 70% over the card, and recorded
+above as known debt. The raw pairing, before that opacity, is under 4.5 on nine of the
+ten: only Endpaper clears it. The two are different measurements and this sentence once
+ran them together. A badge
 copying it would have inherited that. It takes the `paper-800` ink the did-not-finish pill
 takes instead, which is the one rung of that pairing that clears 4.5 everywhere.
 `AboutBadges.test.tsx::keeps its ink off the rung the status pill fails on` ties the
@@ -5020,3 +5045,1579 @@ converts a permanent review cost into a one time one, which is the house pattern
 
 **Blocked on library mode existing**, because there is no mode to follow until then. English is
 unaffected: it has no equivalent distinction.
+
+## Multi workstation is joined terminals, and the container stays the documented alternative
+
+Decided by the owner on 2026-08-28. **Shape B: the desktop app on one machine, other machines
+enrol against it. Shape A, the container, is documented beside it rather than dropped.**
+
+**This reverses a pre written refusal**, which is why it is recorded here rather than only on the
+tracker. The desktop plan listed multi workstation creep among the ways the project could go
+wrong, and answered it in advance: a small library with a circulation desk and three machines
+will ask for shared access, and the answer is the existing container, not a desktop app learning
+to be a server. The owner has since said multi workstation work is expected, so the refusal is
+reversed and a shape had to be chosen rather than defaulted into.
+
+**The question was never whether this application can serve three desks.** It already can, and
+has since before any of the desktop work: the container is a server, one backend process and one
+SQLite file behind many browsers, with concurrency handled at the HTTP layer and never at the
+file layer. Three desks is a deployment. **The question is which artefact the archive installs.**
+
+**What made the desktop the hard case is precise.** The single instance lock exists to stop two
+desktop processes opening one SQLite file, which is the corruption case. A second workstation
+running its own copy against a shared file is exactly that case over a network filesystem, which
+is worse than the one the lock was written for.
+
+**B was chosen because it is nearly built, and because two plans reached it independently.** The
+phone enrolment work already specifies a device scanning a QR on an admin screen, receiving a
+scoped JWT, and writing into the real catalogue. **Nothing in that mechanism cares whether the
+device is a phone or a second desk.** The desktop plan and the library mode plan arrived at the
+same enrolment design from opposite directions without noticing, which is the strongest argument
+available that it is the right shape rather than a convenient one.
+
+**A is documented rather than dropped because it costs nothing to keep and covers the case B does
+not**: an institution that can run Docker gets the simpler answer, and B exists for the audience
+that cannot, which is most of why a desktop client is being built at all. Offering both is not
+indecision here; the two serve different installations.
+
+**C stays refused**: the desktop app on every machine sharing storage, which is either two writers
+on one file or a sync protocol nobody asked for. The original reason survives the reversal
+intact, because it makes the desktop a worse container.
+
+**One consequence lands immediately.** The single instance lock is written differently if a
+second machine is expected to connect, and it is cheap to do now and a refactor later. The phone
+enrolment tickets also stop being a phone feature and become the multi workstation mechanism,
+which raises both their priority and their review bar.
+
+## VIAF is the wrong supplier for resolution and the right one for discovery
+
+**This is a second decision, not a correction of the first, and the earlier entry stands
+unchanged.** The lobid choice recorded why VIAF was refused for resolution: it aggregates
+national files rather than minting identifiers, and what this application receives is already a
+GND, so reaching a fact through an aggregator that the source states directly is a round trip.
+That is correct, and it is correct about **resolution**.
+
+Discovery is the other question. Holding only a name for an author no German catalogue has
+cited, the cross walk **is** the value, and no single national file provides it. The same fact
+about VIAF supports both decisions because the question changed.
+
+**What the measurement then did to the sizing, 2026-08-28.** The premise was that these
+identifiers exist only for authors the GND knows. True, and the GND knows them: lobid's existing
+name search found 18 of 18 Spanish, Portuguese, Brazilian, Argentine, Uruguayan and Italian
+authors at rank 1, contemporary ones included, and 14 of 14 of their records carried ISNI,
+LCNAF, VIAF and Wikidata in `sameAs`. The DNB catalogues foreign literature in translation, so
+its authority file is not a German authors file.
+
+So storing what already arrives is the larger half of the work and costs no request at all. What
+a VIAF call adds is the national file ids `sameAs` omits, and a fallback for a GND miss that
+could not be produced in eighteen attempts.
+
+**The VIAF query shape, settled so it need not be settled again.** The index the documentation
+points at is not broken; the CQL **relation** was. For `local.personalNames` and `"Borges, Jorge
+Luis"`: `exact` answers 0, `all` answers 44, `=` answers 43, and `any` answers 98,581. Ranking is
+the real problem: unsorted, `all` puts a Bioy Casares pseudonym first and Borges nowhere in the
+top ten, while `&sortKeys=holdingscount` puts Borges first. `AutoSuggest` ranks by its own score,
+put the person first in 8 of 8 names tried, carries `nametype` so work clusters are separable,
+and costs 2,461 to 3,517 bytes against 1,778,760 for ten `recordSchema=VIAF` records.
+
+**Two traps measured on 2026-08-28, both of which return a plausible answer rather than an
+error.** `justlinks.json` and `viaf.json`, the classic minimal endpoints, now 404 with `"no
+Route matched with those values"`, which is a **Kong gateway** message rather than VIAF's: the
+service moved behind a gateway and those endpoints did not survive it. And `BriefVIAF` returns
+**500 on any record containing a bare `&`**, because it breaks VIAF's own XML serialisation. That
+is a property of the data rather than an outage, so retrying is useless; the bare JSON record
+endpoint answers 200 for the same cluster and is the only fallback that works.
+
+## An identifier two files disagree about is shown and never stored
+
+`authority.cross_references` omits any scheme named in the candidate's disagreements. A
+disagreement means the two files point at different records, so storing either side is resolution
+by precedence, which is the one thing this feature refuses to do anywhere. The identifier is
+still on the response, beside the conflict; it is not written down.
+
+That rule is why `authority._disagreements` now compares ISNI. The earlier entry there recorded a
+deliberate refusal to compare it and named its own trigger: raise it rather than adding it
+quietly if ISNI ever becomes something this application cites. It is now stored, and it is the
+identity spine, so the trigger fired. The full reasoning is in that function's docstring rather
+than repeated here.
+
+### VIAF was refused as a supplier and is used as an enrichment, and both are right
+
+
+`docs/decisions.md` already records why lobid was chosen over VIAF: VIAF aggregates
+national files and mints nothing, the identifier this app receives is already a GND, so
+going through an aggregator is the indirect route to a file that can be read directly.
+**That entry stands and is not corrected.** This is a second decision about a different
+question.
+
+The question it answers is not "who is this person" but "what is this person called in
+Brazil". Measured 2026-08-28 over six Romance and Latin American authors: a GND record's
+`sameAs` carries ISNI, LCNAF, VIAF and Wikidata and **no national library number at all**,
+and the VIAF cluster it names carries BLBNB, ARBABN, BNE, PTBNP, ICCU and BNCHL. Minting
+nothing of its own is exactly what makes VIAF the only place those are reachable, so the
+same fact supports both decisions because the question changed.
+
+What that buys and what it costs:
+
+* A lookup is unchanged. `resolve` and `search` do not touch VIAF, so
+  `GET /authors/authority` costs what it did.
+* A confirmation is up to **eight** outbound requests across three hosts: one lobid
+  record, four Wikidata (`resolve` compares `P214` and `P213` on this branch) and up to
+  three VIAF. At `AUTHORITY_LIMIT`'s ten a minute that is up to eighty. Measured worst
+  case 2026-08-28: 0.56s + 0.75s + 1.81s of VIAF on top of a 1.3s resolve, about 4.4s
+  against a shared `DEADLINE_SECONDS` of 8.0.
+* The third VIAF call is paid only on a 5xx and is nine times the bytes.
+
+### A VIAF cluster is verified against the confirmed record, never trusted
+
+
+VIAF cluster ids **split and merge**, and #87 measured one name resolving to four
+clusters. So nothing here treats a cluster as an identity: what is stored as the `viaf`
+scheme still comes from lobid's assertion cross checked against Wikidata's `P214`, and
+VIAF's own answer is never written as one.
+
+The cluster is usable anyway because it is checkable. A cluster's `v:sid` list names the
+GND record it was built from, as `DNB|118753711`, so it is used only when it names back
+the exact identifier the Member confirmed. Six of six clusters did, measured 2026-08-28.
+That is the both directions property this feature already prizes for lobid and Wikidata,
+applied to a third file.
+
+Three refusals follow from it and each is the same rule rather than caution:
+
+| Refused | Why |
+|---|---|
+| a cluster naming a different GND record | it is a different person, arriving with six plausible numbers |
+| a cluster naming two GND records | that is the merge case, and picking one is adjudication |
+| a candidate whose VIAF cluster lobid and Wikidata disagree about | asking VIAF which of the two is right is adjudication by a third party |
+
+The last one is the existing `authority.cross_references` rule, which omits a contested
+scheme, applied one level out.
+
+**A cluster is found by name only when lobid names none**, which is 7 of 49 GND person
+records sampled on 2026-08-28, one of them Italo Calvino. Even then the name is how the
+question is asked and not how the answer is chosen: `AutoSuggest` returns each hit with its
+own `dnb`, and the hit is selected on the confirmed GND number. `Mario Benedetti` returns
+three different men, and the top ranked one is not the one a search for GND `123000327`
+means.
+
+### Storing an identifier and resolving one are different acts
+
+
+`AuthorityScheme`'s docstring used to argue the six national files out: "nothing in this
+app can look one up, so a member for it would be a value no reader can use". That
+conflated two acts. The rule it was reaching for is that **a member has to be a value some
+writer here can produce**, and these pass it: the identifier arrives free from a cluster
+this app already has a reason to read.
+
+Being able to resolve one is a later question, and it runs the other way. `acervo.bn.gov.br`
+answers 403 to every agent tried and has no open Z39.50 port, and the rest wait on a Z39.50
+transport this app does not have. So an adapter is blocked on a transport rather than on
+this list, and the identifier stored today is what makes that adapter cheap on the day the
+transport lands.
+
+`SUDOC` is deliberately still absent though every cluster carries it: it is a French union
+catalogue rather than one of the six national files that were asked for.
+
+### The national identifiers have one route, and Wikidata is the fallback for it
+
+**Settled by the owner, 2026-08-28, and this heading used to end "and Wikidata is not a
+second one yet".** The entry below measured why a second *comparator* made coverage worse,
+and that measurement stands. What changed is the shape the second route takes.
+
+**Wikidata is asked only when VIAF is unreachable.** One supplier speaks at a time, so no
+disagreement arises, `AuthorIdentifier`'s report-never-adjudicate rule is untouched, and no
+form normalisation is needed for the two schemes whose numbering differs. The redundancy
+the ruling demanded is redundancy **of supply**, which is what the stated risk was about: a
+gateway outage taking the whole feature down. It is not cross-checking, and it was never
+the cross-checking that was wanted.
+
+The precedent is in this same module: VIAF's own bare-record call is a fallback on a 5xx
+rather than a second opinion, for the same reason.
+
+**What the measurement below still governs**: if Wikidata is ever promoted from fallback to
+comparator, BNE and BNCHL become contested and stop being stored, and that is a coverage
+regression rather than a stricter check. Read it before proposing that.
+
+
+
+**The rule this is measured against**: a cross walk read through a single supplier is a
+single point of failure, so a second, independent route to the same identifiers is a
+requirement rather than a refinement. VIAF behind a gateway that deleted two documented
+endpoints is what made that concrete.
+
+**One route shipped, 2026-08-28: the VIAF cluster.** Wikidata is read on the same path,
+but only as a cross check on the *person* (`P227` for the item, `P214` for the VIAF
+cluster, `P213` for the ISNI). It is never a route to a national library number. So if VIAF
+is unreachable there is no second way to learn that an author is `BLBNB|000560509`.
+
+**Wikidata could be that route, and the reason it is not is measured rather than assumed.**
+`wbgetclaims` for `Q1512` on 2026-08-28, 355 claim properties and 243,802 bytes unfiltered,
+carries all six:
+
+| Scheme | Wikidata property | Wikidata says | VIAF cluster 95207986 says |
+|---|---|---|---|
+| BLBNB | `P4619` | 000560463 | 000560463 |
+| ARBABN | `P3788` | 000035867 | 000035867 |
+| PTBNP | `P1005` | 27012 | 27012 |
+| ICCU | `P396` | CFIV000439 | CFIV000439 |
+| **BNE** | `P950` | **XX900250** | **981060880923108606** |
+| **BNCHL** | `P1890` | **000034753** | **10000000000000000007303** |
+
+**Four of six agree and two do not, and the two are not a data error**: they are the same
+library's old control number and its new one. `author_identifiers` reports a disagreement
+and never adjudicates one, and `authority.cross_references` implements that by omitting a
+contested scheme. So adding Wikidata as a second source **before** identifier forms are
+normalised per national file would *remove* BNE and BNCHL from storage rather than making
+them more reliable. A second route is worth having; a second route that costs two of six
+identifiers is not, and the normaliser is the hard half of the work rather than an
+afterthought.
+
+**The cost, so the next person need not re-derive it**: six more `wbgetclaims` requests at
+roughly 3,500 bytes each on a path that is already eight outbound requests, or one
+unfiltered request at 243,802 bytes, which is the size `authority._RESPONSE_LIMIT` exists
+to refuse.
+
+**What the single route degrades to is honest rather than silent.** VIAF being unreachable
+costs the six national numbers and nothing else: the confirmation still succeeds, and the
+GND, ISNI, LCNAF, VIAF and Wikidata identifiers still land, because those come from lobid
+cross checked against Wikidata and never touch VIAF.
+`tests/routers/test_books_authors.py::test_viaf_being_down_costs_the_national_ones_and_nothing_else`
+pins it. An outage is a smaller shelf, not a broken feature.
+
+**That was weaker than the rule at the top of this entry asks for, and it no longer is.**
+Wikidata is now asked for the same six when VIAF produces no cluster, so an outage costs
+them only where Wikidata holds none of them either. The named test still passes and still
+pins something, but something **narrower**: its mock supplies no national properties, and
+its docstring now says so. The half that was missing is
+`test_wikidata_supplies_them_when_viaf_cannot` beside it, which stores all six through the
+same 503.
+
+**So this is a known gap with a named blocker, not an oversight.** Anyone arriving to
+propose the second cross walk should start from the two disagreeing rows above.
+
+### A refusal test whose subject is a plausible future member is a countdown
+
+
+`test_a_scheme_no_authority_file_is_read_for_is_refused` existed in three places and went
+vacuous twice in one day: its value was `viaf` until `viaf` became a member, then `blbnb`
+until `blbnb` became one. Both times it kept passing right up to the commit that made its
+subject legal, then failed loudly, which is the good outcome and an expensive way to learn
+it.
+
+The three now use `ddc`, a `ClassificationScheme` member, because a shelf notation will
+never be a person's identifier: that is a design decision both enums' docstrings state
+rather than a fact about today's supply.
+
+**And the first attempt at the guard behind it was wrong, which is why it is worth
+having.** It asserted the two enums share no value; the suite refused it. They share `gnd`,
+deliberately, because the Gemeinsame Normdatei is one file covering both subjects and
+people and the DNB writes both in the same MARC `$0`. What the two enums keep apart is the
+column, not the spelling. The test now pins the overlap as exactly `{"gnd"}`, which also
+catches `gnd` being dropped from either side.
+
+---
+
+### The in app reminder is a sender, and it is the one that does not stamp `notified_at`
+
+
+Every other sender pushes: a webhook the household runs, an SMTP account, a Telegram bot.
+The in app notice is read rather than sent, and `notifications.pushes_outward` is where that
+difference is decided, exhaustively, with an `assert_never` tail.
+
+It matters because of the stamp. `notified_at` records that a reminder went **out** and
+`due_for_reminder` reads it, so counting a channel that delivers nothing would stamp every
+overdue loan on every run and then select nothing until the interval expired. Measured
+against the shipped default of seven days: a broken mail server would be attempted **once a
+week instead of once an hour**, from a channel that is on by default. That is one sample a
+week for the failure window the health record is built on.
+
+So the stamp condition is "at least one sender that **pushes** delivered", and the rule the
+webhook decision recorded is otherwise unchanged: stamping on any success is deliberate, and
+the alternative repeats an identical list hourly on the channels that work.
+
+### A sender includes exactly what its audience may see
+
+
+The three channels that push go to a mailbox or a chat with no member behind them, so they
+exclude every private book and report a count instead. That is unchanged.
+
+The in app channel has a **viewer**, so it carries what `visible_to()` already says that
+viewer may see, their own private books included. Being told about your own book is not a
+disclosure. This is the rule rather than an exception to it, and it is why
+`notifications.overdue_for_viewer` is rooted at `Shelf.seen_by` while the digest beside it is
+not: the digest has no viewer and is exempt for that reason, and the exemption is the
+digest's rather than the module's.
+
+Two audiences, decided in one place, `notifications.sees_every_loan`. A member reads the
+loans they borrowed or lent; staff read every overdue loan on their shelf. That is the seam
+library mode widens, and what it must not become is "an admin sees all": an admin is not a
+superuser over another member's private books anywhere else in this app, and both arms go
+through the Shelf before either clause is added.
+
+### A new endpoint is classified for cache invalidation, or the inventory guard fails
+
+
+Not a new decision, an existing one meeting its second case. `tests/api/invalidate.test.ts`
+walks every query key the generated client can build and fails on one nothing has placed,
+which is how `authorAuthority` was caught and is how the in app overdue count and the sender
+health record were caught here.
+
+The placements: the overdue count is **catalogue**, because it is a count over loans and
+books and it is drawn above the library grid; the health record is **left alone**, with the
+settings, because it measures the channels rather than anything derived from the books
+table.
+
+### One failed send is a network. Every send failing for a day is a configuration
+
+
+`ticker()` discarded `run_digest`'s result, so a channel failing hourly existed only as a
+warning in the container log. `docs/security.md` recorded that under Known gaps, and the
+disposition was wrong: for a household running the published image, "read the container log"
+is not a worse form of alerting, it is the absence of one.
+
+The run now records the last outcome per sender into one settings row, `SENDER_HEALTH`. Not
+a table: a table needs a migration, a retention rule and a `backup._TABLES` entry, and what
+is wanted is one record per sender rather than a history. `settings` is already backed up.
+
+The recording is in `run_digest` rather than in `ticker()`, which is where the symptom was,
+because `POST /api/loans/overdue/notify` runs the same pass and had the same defect. It is
+the run that "races the ticker" in the ticket's own words, and with the write in one caller a
+household pressing "Send now" would leave the panel describing an older run.
+
+**When a channel counts as broken** is the judgement, and it is two rules rather than one
+threshold, because the two kinds of failure carry different evidence.
+
+A **refusal** counts at once. `NO_URL` and `MISCONFIGURED` come out of `_REFUSALS`, and all
+three of those are raised before a socket is opened: `checked_url` is string handling,
+`send_telegram` matches both regexes before `_post`, and `mailer.checked_config` raises at
+`mailer.py:109` to `162` while the socket is opened at `mailer.py:230`. Nothing was dialled,
+so there is no outage to wait out.
+
+A **transport failure** counts only after `BROKEN_AFTER_HOURS`, 24, **and** at least two
+consecutive failures. Both, and the second clause is the one that is easy to leave out: a
+working webhook beside a broken mail server stamps `notified_at`, so mail is attempted once
+per reminder interval rather than once an hour, and its single failure would otherwise cross
+the window having failed exactly once, which is the network event the bar exists to ignore.
+
+24 hours is deliberately not `overdue_reminder_days`. That interval says how often a loan is
+chased; this says how long a channel may be broken before somebody is interrupted on a
+screen they did not go looking at. A household may set the first to 24 hours without meaning
+anything by it, so the two are named separately and a test asserts `_is_broken` does not read
+the setting.
+
+---
+
+### YAZ is compiled, not packaged, and the image stays Alpine
+
+
+Alpine has no `yaz` and no `yaz-dev`, in `main`, `community` or `testing`, on
+`edge`, `v3.24`, `v3.22` or `v3.21`. So a Z39.50 client is either compiled or the
+base image changes, and the base image is the expensive half: `python:3.14.7-slim`
+is **41.4 MB compressed** against alpine's **16.9 MB**, so a packaged `libyaz5`
+costs 24.5 MB before YAZ is installed, and buys a larger Debian userland to scan
+against a release gate that refuses a fixable HIGH.
+
+Compiling costs a minute, once, and needs no patches against musl.
+
+**A pure Python reimplementation was refused by the owner**, 2026-08-28: "I
+definitely do not want to own a protocol reimplementation in Python." The
+hand written `InitRequest` in the survey tool stays a survey tool, and the
+`SearchRequest` that every target rejected is the evidence for the refusal:
+encoding BER by hand reached Init and no further.
+
+**What the runtime image pays**, measured on the pinned base by `du -sk /` before
+and after, Alpine 3.24.1:
+
+| | |
+|---|---|
+| `libxml2`, `libxslt` | 1,384 KiB |
+| `gnutls` and the seven packages behind it | 7,704 KiB |
+| the stripped `/opt/yaz`: `libyaz.so.5` and `yaz-client` | 1,848 KiB |
+| | **10,936 KiB** |
+
+That is **2.7x the 3,359 KiB first estimated**, packages against packages, and the
+reason is that the estimate counted three packages where apk installs **ten**. `gnutls` alone is 85% of the
+package cost and 70% of the 10,932 KiB total and buys Z39.50 over TLS, which no target surveyed uses.
+`--without-gnutls` is the first of **two** edits that would remove all eight: the
+recipe stops libyaz linking gnutls, and the packages leave the image only when
+`gnutls` also comes off the Dockerfile's runtime `apk add`.
+
+**The owner decided to keep it, 2026-08-28, against the recommendation to drop it, and
+the condition was that the cost is recorded rather than paid silently.** That is what
+the paragraph below is for. Removing it later is the two edits above, and it is cheap
+to reverse: the recipe change moves the build id, hence the tag.
+
+**And the size is not the cost.** The three libraries and their dependants carry **94
+distinct CVE ids** in Alpine's security database: 52 against the gnutls group, gnutls
+alone 36, and 42 against libxml2 and libxslt. They land on the release scan that
+refuses a fixable HIGH.
+
+**All three are equally optional to the build**, and an earlier draft of this said
+otherwise: YAZ offers `--with-xml2` and `--with-xslt` beside `--with-gnutls`. So the
+52 is the price of TLS against a **judgement about record handling**, not against a
+build constraint: catalogue records are parsed and converted through libxml2 and
+libxslt, so dropping those costs a feature, while dropping gnutls costs an encrypted
+transport no surveyed target offers.
+
+`libyaz.so.5.3.0` strips from 5,168,584 to **1,753,232 bytes**, a 66.1% cut. The
+filename is the library revision, not the release number, which is why an
+earlier strip aimed at `libyaz.so.5.35.1` silently found nothing, and the soname moved
+again from 5.1.1 to 5.3.0 when YAZ went to 5.37.3, so the strip list is globbed.
+
+### The YAZ builder image is named after what it is built from
+
+
+The compile is skipped by handing the build stage a prebuilt image instead of the
+plain base. It is tagged `<yaz version>-<base digest>-<recipe hash>` and built only
+when nothing in the registry carries that name, so **the rebuild check and the
+artefact's name are the same string**.
+
+**Not a layer cache, and the reason is specific.** `--cache-ttl` expires on a
+clock, not on a fact. This repository already learned that the other way round,
+from a cached `apk upgrade` layer that re-pinned the patch level, which is why
+`--cache-ttl=6h` sits on both build jobs. At six hours a layer cache would
+recompile YAZ four times a day for nothing **and still hand a build a YAZ linked
+against the previous musl the moment the base image moved.** A tag naming both
+inverts both failures.
+
+**The third tag component is an addition to what was settled**, which named the
+version and the digest. It is the sha256 of the recipe, and it is there because
+those two do not determine the artefact: the configure flags, the strip list and
+the runtime subset can all move under a fixed pair. It costs one line to drop,
+because correctness does not live in the tag: the recipe stamps its own build id
+into the tree and recompiles in place when it does not recognise it. Removing the
+component makes builds slower and never wrong.
+
+**The parameter is the base of the YAZ stage, not the source of a `COPY`.** That
+is the reverse of the obvious shape and it is forced by the builder. Measured
+against kaniko v1.28.3, 2026-08-28: `COPY --from=${ARG}` fails outright with
+`could not parse reference: ${ARG}`, while `FROM ${ARG}` resolves and
+`--build-arg` overrides it.
+
+### The runtime `COPY` shipped with the builder image, not with the transport
+
+
+Nothing calls YAZ until the Z39.50 transport lands, so the image carries about
+11 MB it does not yet use. Shipping it now was chosen deliberately, over three
+alternatives, and the reason is verification rather than convenience.
+
+**A builder image nothing consumes is never verified.** The failure the whole
+design exists to prevent is a base image bump that keeps a YAZ compiled against
+the previous musl, and that is only detectable when something actually loads the
+library. The release smoke test now runs `yaz-client -V` inside the shipped image
+and compares it to the version pinned in the Dockerfile, which also catches a
+missing runtime package and a tree copied to a path other than `/opt/yaz`. None of
+those fail the build; all three fail there.
+
+Two consequences worth stating rather than discovering. The image scan now covers
+`gnutls` from today rather than from the day the transport wants to ship, which is
+when a blocking HIGH would be most expensive. And shipping now forecloses nothing:
+`--without-gnutls` changes the recipe, which changes the build id and the tag, and
+the next build rebuilds on its own.
+
+---
+
+### The YAZ build id names what is built, never what it is built against
+
+
+Three components: the version, the sha256 of the tarball, the sha256 of the recipe. The
+environment is deliberately absent, and it was briefly present.
+
+**A musl term was wrong in three ways at once.** It had to be read before the compiler was
+installed, and `apk add build-base` moves musl whenever the repository is ahead of the
+pinned digest, because `musl-dev` depends on an exact musl version (`D:musl=1.2.6-r2` in
+the v3.24 index). It said nothing about libxml2, libxslt or gnutls, which libyaz also
+links. And it was too strict: **a YAZ compiled on Alpine 3.24.1 against `musl-1.2.6-r2`
+loads and runs clean on Alpine 3.21.7 against `musl-1.2.5-r11`**, three Alpine releases
+apart, with `LD_BIND_NOW` set so nothing is deferred to first call.
+
+**That is one ordered pair, and which pair it is matters.** It runs a newly built binary
+against an older libc, the harder direction, since symbols a new build expects need not
+exist in an old library. The scenario the musl term was for is the other way round, so
+this result covers it a fortiori.
+
+At the strength the evidence carries: on one pair three releases apart, in the harder
+direction, a base image bump that keeps a YAZ built against the previous musl is not a
+breakage. A strong directional result, not a proof about every pair. **The design does not
+rest on it either way**: where the ABI is compatible there is nothing to detect, and where
+it is not, the load check detects it. So what the tag and the id are worth is that the
+artefact is reproducible and attributable, and that the compile is paid once, rather than
+that they avert a breakage nobody has yet produced. An earlier draft of this entry said
+"nothing detects it because there is nothing to detect", which was false in the second half
+of that sentence and contradicted the paragraph after it.
+
+The environment is instead checked by running the library in the runtime stage under
+`LD_BIND_NOW`, which covers musl, all three shared libraries and the install prefix at
+once.
+
+### The YAZ pin is trust on first use, and nothing else watches it
+
+
+`ARG YAZ_SHA256` pins the tarball by content, and nothing corroborates it. IndexData
+publish no signature and no checksum file beside the release: `.sig`, `.asc`,
+`SHA256SUMS`, `CHECKSUMS`, `sha256sums.txt` and `MD5SUMS` all 404 under the release
+directory, checked 2026-08-28. Re-fetching only proves upstream has not changed since.
+The pin is still worth having: it pins the artefact against a later substitution, which
+is the threat it can address.
+
+**And no scanner sees the library.** Trivy's C and C++ analyzer reads `conan.lock` only
+and is not applied in a container image or rootfs context, so `/opt/yaz/lib/libyaz.so.5`
+is enumerated by nothing in `scan:image` or `verify:image`. NVD returns no results for
+this version, so this is a monitoring gap rather than a shipped vulnerability, and it
+would have been permanent. A Renovate custom manager now raises the version from
+`indexdata/yaz`'s git tags. It is deliberately not automerged: Renovate cannot know the
+new hash, so the merge request is expected to be red at `sha256sum -c` until a person
+supplies it, and that failure is the design rather than a defect.
+
+### YAZ encrypts a TLS connection and does not authenticate it
+
+
+YAZ performs no certificate verification in any released version. `verify_peers`,
+`set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
+`GNUTLS_CERT` appear nowhere in `src/` or `client/`, checked on 5.35.1 and 5.37.3;
+`src/tcpip.c` allocates certificate credentials and calls `gnutls_init(GNUTLS_CLIENT)`
+without ever loading a trust store. So an `ssl:` target is protected against a passive
+listener and not against anyone who can answer for the address. Recorded rather than
+acted on: no target this application reaches uses TLS, and whether to keep gnutls at all
+is the owner's call.
+
+### A suite pod must not outlive the run that made it
+
+
+The suite runner deleted its pod from a `trap ... EXIT INT TERM`, which covers every
+way the script can end except the one that happens: a tool timeout SIGKILLs the parent
+and no handler runs. Measured 2026-08-28: SIGTERM runs the trap, SIGKILL does not.
+
+The cost is the resource request rather than the leftover object. A leaked pod stays
+Running for an hour holding 500m of CPU and 512Mi on a four core node that three seats
+share, so the next run goes Pending and reads as a hang: one battery waited **17
+minutes**, and the same run took **14s** once the orphan was deleted by hand.
+
+A trap cannot be made to cover SIGKILL, so the recovery is at the start of the next run.
+A reaper deletes a labelled pod in Succeeded or Failed, which is finished
+whoever made it, and a Running pod whose creating process is gone, which each run records
+as `<pid> <pod>` before it waits for readiness.
+
+**Neither arm uses an age threshold**, and that is the design rather than an omission: a
+threshold would have to exceed the backend suite's 23 minutes, so it would arrive long
+after the starvation it exists to prevent, and it would still race a concurrent seat. A
+`kill -0` on a recorded pid is exact.
+
+### The suite pod registry is untrusted, and what that bought is a bound rather than safety
+
+
+`~/.cache/endpaper-ci-pods` is a plain file any process running as this user can append
+to, another agent seat included, and the kubeconfig can delete pods in every namespace.
+The first version put the registry's pod name straight into `kubectl delete pod`, so a
+line could name a real workload **and** be read as flags: `--all` produced
+`kubectl delete pod --all`, which empties the namespace.
+
+Three constraints replace the delete-by-name path: the name must match the one shape the
+runner creates, every call carries both the namespace and the label, and the name is a
+field-selector value rather than a positional. A fourth rule refuses to delete any pod
+another registry line claims with a living process, which is what stops a forged line
+naming a concurrent seat's live pod.
+
+Two things make that fourth rule work and neither is obvious. **The registry is read once
+and both passes use that snapshot**, so everything the deleting pass acts on was seen by
+the claiming pass; re-reading the file in the second pass is valid shell, passes every
+test, and deletes a pod a living process claims. And **the runner writes its line before
+it creates the pod**, because registering afterwards left a window on every single run in
+which the pod existed and nothing claimed it. A line naming a pod that does not exist yet
+is inert, which is what makes the earlier write safe rather than merely earlier.
+
+**What that delivers is a bounded blast radius, not harmlessness**, and saying so is the
+point of this entry. A forged line naming a pod of ours whose owner never registered, or
+whose line was already removed, still deletes it. Closing that needs the pod UID recorded
+at creation and compared before deletion, which reintroduces a check-then-act window and
+is more than a small change. It is recorded here rather than done.
+
+### A member's address is served only where it is named, and never on `UserOut`
+
+`users.email` arrived with issue #80. The owner settled three things: an admin may read and
+write any address, a member may read and write their own where the mode allows, and it is
+used and shown nowhere else.
+
+The last of those is the one that needed a mechanism rather than an intention. `UserOut` is
+served inside every book payload and by the member list, so a field added there is disclosed
+to every member who can see a book, with a 200 and nothing in any log. That is the same trap
+the three `appearance_*` columns were kept out of, and it was kept out by a comment.
+
+So the address is served by `MemberEmailOut` on four routes and nowhere else, and
+`tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed` fails if **any** other
+Pydantic model this app builds puts an address in front of a caller, or if any module
+outside `auth_backends.py` and `routers/users.py` reads `.email` off anything.
+
+**The first version of that guard was wrong and the way it was wrong is the reason to keep
+this entry.** It tested `"email" in model_fields`, which is the field's Python name, and a
+reviewer got two evasions past it in one sitting: a `serialization_alias="email"` on
+`UserOut`, which `from_attributes` fills from `User.email` and FastAPI serialises
+`by_alias=True`; and a model with a `MemberEmailOut` field, which carries the whole address
+model and has no address field of its own. Neither reads `.email` anywhere, so the reader
+pass stayed clean too.
+
+The fix is not two more arms. The pass asks **pydantic** for each model's wire names
+(`model_json_schema`, both modes), which is the question FastAPI asks it and covers every
+alias spelling without naming one, and takes a **fixed point** over field annotations, so a
+wrapper around a wrapper is caught. Fifteen evasions were attempted and all fifteen caught.
+The blind spots it still has, an address under a different wire name and a hand built dict,
+are stated in its docstring rather than left to be found.
+
+### Who owns a member's address is a configuration lookup, not a column
+
+Two of the owner's decisions read as a conflict: the directory is authoritative under LDAP
+and PROXY, and an admin may write any address. Together they would let an admin type an
+address the next sign in silently reverts.
+
+They are not a conflict, and the precedent that settles it is the one decision A already
+names. `auth_backends._admin_group_set` says that with no admin group configured `is_admin`
+is False because **the app has no opinion, and that must not be read as one**, so
+`upsert_directory_user` refuses to demote on it.
+
+`LDAP_EMAIL_ATTRIBUTE` and `PROXY_EMAIL_HEADER` copy that exactly, and both default to
+empty:
+
+* Configured, the directory owns the address. It is re-applied at every sign in, an entry
+  with no address clears the column (the demotion case unchanged), and the field is read
+  only for everybody, an admin included.
+* Unset, the directory has no opinion. The attribute is not requested, the header is not
+  read, and a locally typed address is never touched.
+
+So an admin may write any address wherever anything is his to write, and the one case where
+his write would be reverted is exactly the case where nobody may write. There is no second
+column recording which applies: `auth_backends.directory_owns_email` is the one reader of
+the answer, and a column would be a cached copy of a config lookup.
+
+A write refused this way is **409, not 403**. Nothing about the caller's rights is wrong,
+and a 403 would send an admin looking for a permission to grant themselves that does not
+exist. The detail names the variable to clear, because the remedy is a deployment change.
+
+**The clearing is not symmetric with the demotion it copies, and that is the cost of the
+precedent.** A wrongly demoted member is restored by putting them back in the admin group. A
+cleared address is gone: the value is kept nowhere and the field is read only from the moment
+the attribute is configured, so neither the member nor an admin can type it back. Turning
+`LDAP_EMAIL_ATTRIBUTE` on therefore empties the stored address of every member the directory
+has none for. `.env.example`, `README.md`, `DOCKERHUB.md` and `upsert_directory_user` all say
+so, because the person who turns it on is the one who needs to know.
+
+**A refused value is a different event from an absent one**, and both clear the column. A
+`Remote-Email` carrying a newline is the injection shape, on the same request whose
+`Remote-User` a refusal already logs at WARNING with the peer, so it is logged the same way:
+the length and never the value. The LDAP path logs the attribute instead, there being no
+peer. `_address_was_refused` defines "refused" once so the two cannot drift.
+
+### A guard is one mechanism, because two mechanisms have a seam
+
+`TestAnAddressIsServedOnlyWhereItIsNamed` took **three** versions, and the second is the one
+worth recording, because it was not obviously wrong.
+
+Version one tested `"email" in model_fields`, the Python name. A reviewer walked past it
+with a `serialization_alias` and with a model that nested `MemberEmailOut`.
+
+Version two fixed both, with **two** mechanisms: the wire names from `model_json_schema`,
+plus a fixed point over Python annotations for the nesting. A reviewer then walked through
+the **seam between them**. A `@computed_field` returning `MemberEmailOut` is in the
+serialization schema and absent from `model_fields`, so `model_dump()` returned
+`{'id': 0, 'person': {..., 'email': ...}}` while the guard saw a model whose only field was
+`id`.
+
+Version three is a **net deletion**. `model_json_schema` already inlines every referenced
+model into one flattened top level `$defs`, measured to reach a model nested two deep, so
+one walk over the schema document, reporting any object node whose `properties` names
+`email`, covers naming, every alias spelling, an `alias_generator`, nesting at any depth,
+list and dict positions, and computed fields. `_wire_names`, `_referenced`, the fixed point
+and the class-to-name map are gone.
+
+Measured over the whole app: 87 models, carriers exactly `['EmailUpdate', 'MemberEmailOut']`,
+0 unreadable, which is the pair `openapi.json` independently gives. 21 evasions attempted,
+21 caught.
+
+**The general lesson, and it is the one that generalises past this feature: where two
+mechanisms meet, that is where the hole is.** The fix to an enumerating guard is structural,
+and when it is the right fix it deletes code.
+
+### One definition of what an address is, and it has to hold without its callers
+
+`mailer.looks_like_address` and `mailer.MAX_ADDRESS` are now the single rule, used by the
+household recipient list, the sender address, the schema behind `users.email`, and the
+directory values `auth_backends` accepts. A second regex would have been a second answer.
+
+**Making it the single rule is also what exposed that it was not a rule.** It was
+`re.compile(r"^...$").match`, and `$` matches before a trailing newline, so
+`"kim@example.org\n"` passed the header injection control while three docstrings and
+`docs/security.md` said it could not. Its character class excluded whitespace and five
+punctuation characters, so a NUL or an ESC passed too. Nothing was exploitable: four
+independent `.strip()` calls, in `_addresses`, `checked_config`, `EmailUpdate` and
+`_directory_email`, stood in front of it. **A control that holds only because of its
+callers is not a control**, and no fixture at any layer used the shape it actually
+permitted, because every injection fixture put the newline in the middle where the
+character class rejects it anyway.
+
+Two structural fixes rather than two more characters: `fullmatch`, and a refusal of any
+character whose Unicode general category begins `C`. `TestWhatCountsAsAnAddress` tests the
+function with none of the four callers in front of it, which is the whole point of it.
+
+What is **not** a refusal, and the distinction cost a fixture: a value that trimming makes
+valid, such as a directory attribute with a stray trailing newline, is stored trimmed. The
+property that matters is what reaches the column.
+
+`schemas.settings.MAX_MAIL_ADDRESS` is the same number for the household field and predates
+this. Folding the two is one line and was deliberately not done while another seat was in
+that file. `models.User.email` keeps `String(320)` as a literal because importing the
+constant is an import cycle; a test ties the three together.
+
+---
+
+### The public shelf has no ownership arm, rather than a sentinel viewer
+
+`visible_to(user_id: int)` takes a non optional int and a public reader has no
+id. Three shapes were available and two were refused, 2026-08-28.
+
+A **sentinel id** (`0`, `-1`) was refused because `Book.added_by_user_id == 0` is
+a real comparison against a real column: it is safe only while no account holds
+that id, which nothing enforces, and the leak would be silent and answer 200.
+A **nullable parameter** on `visible_to` was refused because it loosens the type
+at every call site to serve one caller, and a `None` arriving by accident becomes
+a silent mode change.
+
+`Shelf.seen_by_the_public(db)` applies `deleted_at IS NULL` and `is_private IS
+false` and **no ownership arm at all**. It is safe by construction rather than
+by invariant: there is no value any input can take that makes a private book
+match, because the clause that could match one is not in the query. It fails
+safe in the other direction too, since an authenticated request wrongly routed
+through it sees less rather than more. It goes through the Shelf, so
+`TestTheShelfIsTheOnlyWayIn` keeps holding with no exemption.
+
+`Shelf._viewer_id` widened to `int | None` and nothing else did: `seen_by` and
+`trashed_by` still take a plain `int`. The three per member narrowings read a
+`_viewer` property that **raises** rather than returning None, because the
+silent version is wrong rather than empty: `UserBook.user_id == None` compiles to
+`IS NULL`, the outer join in `_with_read_status` then matches nothing, and
+`status=unread`, whose branch also accepts a missing row, returns the whole
+public catalogue.
+
+### Publishing takes two switches, and the conjunction is on the server
+
+Library mode and the public catalogue are separate, because a library running
+library mode internally without publishing is the common case rather than an
+edge one, and one switch would force an institution to put its catalogue on the
+internet to get the cataloguer's columns. It also gives "hard to trip by
+accident" a structural meaning rather than a UI one.
+
+`settings_store.public_catalogue_is_published` reads both rows, and the routes
+ask it rather than reading a row, so a publish row left on while library mode is
+off serves nothing. **The write refuses nothing**: an admin may store
+`public_catalogue_enabled` while library mode is off. Refusing the write would
+make the order two toggles are saved in matter, and would lose an admin's stated
+intent the moment they turned library mode off to look at something.
+
+### The public payload is a separate model, not `BookOut` with an exclusion list
+
+A row filter is necessary and not sufficient. A public book still carries what
+the household paid for it, which room it is in, who added it and whether
+anybody has read it, and `seen_by_the_public` filters rows rather than columns.
+
+`schemas/public.py` declares its own fields. The difference from an exclusion
+list is which way the default falls: an exclusion list publishes every field
+somebody forgets to add to it, and a field is added to `BookOut` about twice a
+release. The cost is that a genuinely public new field is added in two places.
+
+The rule that decides each field: **public when it is a fact about the work or
+about the object as a catalogue record, withheld when it is a fact about a
+member, the household, or the transaction.**
+`tests/schemas/test_public.py::TestEveryFieldOnBookOutIsClassified` asserts the
+partition is **total**, so a new field on `BookOut` fails until a person
+classifies it. It is not a list of forbidden names, which is an enumeration over
+something open.
+
+Three placements are worth their sentence:
+
+* **`location` is withheld** although in library mode it is the shelf mark a
+  patron needs. The column is shared with household mode, where it holds
+  "bedroom", and the publish switch does not change what is in it. A shelf mark
+  for patrons wants its own field.
+* **`copy_count` is withheld** because it cannot be computed here: it counts the
+  copies *the caller may see*, and there is no caller.
+* **A locally uploaded `cover_url` is dropped**, keeping only an https URL a
+  metadata source supplied. `/covers/<id>` is served behind `book_for_read`, so
+  publishing that path would advertise an image a public reader cannot fetch,
+  and serving those bytes publicly is a new file route with its own
+  authorization rather than a column decision. The published catalogue therefore
+  shows a cover where a metadata source supplied one and none where a member
+  uploaded one.
+
+### The `X-Robots-Tag` belongs in the middleware, not on the routes
+
+It was set from `public_reader` for a round and was wrong twice over. A header
+set from a route dependency merges onto the **success path only**: measured, it
+was on the 200 and absent from the gate's 404, the item 404, a 429 and a 500,
+while `routers/public.py` and `docs/security.md` both said every public response
+carried it. And a dependency cannot reach the `StaticFiles` mount, so the HTML a
+crawler actually indexes never had it at all, which is the case the header
+exists for.
+
+`SecurityHeadersMiddleware` now sets `noindex, nofollow` on **every** response
+and the published catalogue paths lift it. That direction fails safe, and it
+makes the signed in application noindex too, which it always should have been.
+
+`robots.txt` allows `/catalogue`, the client route, not `/api/public/`. The first
+version allowed the JSON prefix, so a library that switched indexing on invited a
+crawler to the one path with nothing readable at it and barred the two the
+catalogue is read at.
+
+### The public listing takes a subset of the filters, and a subset of the sorts
+
+`status`, `unrated` and `discuss` are absent because the public shelf has no
+viewer to read them against; `ownership` and `lending` because they are columns
+the payload does not carry, and a filter over a column nobody can see is a way to
+read that column one query at a time.
+
+**`collection_id` was accepted in the first draft and was cut.** The ids are
+consecutive, so the filter is enumerable, and what it enumerates is the
+household's own grouping of its shelves, which `PublicBookOut` withholds. A
+public way to link to one shelf wants a published name to link by.
+
+**`sort` is `PublicBookSort`, a declared subset of `BookSort`.** An ordering is a
+read of the column it orders by, and unlike a filter it returns the **whole**
+ordering in one request: `BookSort.NEWEST` orders by `added_at`, which says when
+this household acquired each book.
+`tests/schemas/test_public.py::TestEveryPublicSortOrdersByAPublishedColumn`
+compiles the clauses `order_for` produces and fails on any column
+`PublicBookOut` does not carry, so a sort added to the subset is checked against
+the model rather than by eye.
+
+### The published `id` is the insert order, and that disclosure is accepted
+
+**Recorded rather than buried, and it weakens a claim made elsewhere in this
+change.** `order_for` appends `Book.id.asc()` to every ordering, and `id` is on
+the public payload, so the catalogue comes back in **acquisition order with no
+`sort` parameter at all**. Worse, `max(id)` against the number of rows returned
+gives the count of rows the shelf withheld: measured on ten rows, three private
+and one trashed, `max(id) - count` is exactly 4. So a stranger can learn how
+many books a library holds privately, though not which or what.
+
+It is accepted rather than fixed. The id is the URL a record is read at, and an
+opaque public id is a schema change, a URL change and a migration: its own
+ticket, not a column decision inside this one.
+
+**The consequence for `PublicBookSort` is stated rather than left implied.**
+Excluding `newest` was argued as withholding the acquisition order; it withholds
+the `added_at` **column** and not the order, which `id` already gives. The subset
+is still right, and the reason is the next member rather than this one: a
+`BookSort` over a price, a condition or a location would be publicly sortable the
+day it was added, and a sort returns the whole ordering of its column in one
+request.
+
+### `noindex` by default, because publishing and being crawled are two decisions
+
+A published catalogue sends `X-Robots-Tag: noindex, nofollow` and `/robots.txt`
+disallows everything until indexing is separately allowed. With it allowed,
+`robots.txt` allows the catalogue paths and nothing else: a bare `Allow: /`
+would invite a crawler into the signed in application, where every path answers
+401.
+
+---
+
+### What "unreachable" was implemented as, and the two cases it deliberately excludes
+
+**The fallback fires when VIAF produced no cluster record.** Not when VIAF produced no
+national numbers, which is a different and wider rule:
+
+| What happened | Wikidata asked |
+|---|---|
+| the request never got a status: timeout, DNS, refused | yes |
+| a 403, a gateway 404, a 5xx whose bare record also failed | yes |
+| a 200 carrying HTML rather than JSON | yes |
+| a body that parsed and held no `VIAFCluster` | yes |
+| `AutoSuggest` answered and matched no hit, or matched two | **no** |
+| a cluster came back and named a different GND record | **no** |
+| a cluster came back carrying none of the six | **no** |
+
+**The line is supply, not coverage.** The bottom three are VIAF answering, and two of them
+are answers `national_identifiers` refuses on a rule of its own: a cluster naming a
+different GND record is the wrong person, and two clusters under one GND number is an
+ambiguity nothing here is entitled to settle. Asking a second file to overrule a refusal
+is adjudication, which is the one thing this feature refuses to do anywhere.
+
+The bottom row is the one that costs coverage: a cluster carrying none of the six leaves
+the six unstored even where Wikidata has them. That is deliberate. Widening the trigger to
+"VIAF supplied nothing" would let the two suppliers fill different halves of one person's
+row, which is the merge the decision above rules out.
+
+**`AutoSuggest` answering and matching nothing is the case that cannot be read off a
+return value**, because "VIAF is down" and "VIAF knows nobody by that name" are the same
+absent cluster. `authority._viaf_cluster_by_gnd` returns a pair for that reason alone, and
+`tests/test_authority.py` pins both sides of it as a diagonal.
+
+### What the fallback refuses to store, and why it is not `_claim`
+
+`_claim` returns a property's **first** value, which is right for the comparison it was
+written for and wrong for a write. Measured 2026-08-28 through the Wikidata query service,
+humans (`P31=Q5`) carrying more than one truthy value:
+
+| Scheme | Property | Humans with more than one | Humans with the property |
+|---|---|---|---|
+| BNE | P950 | 4,955 | 235,481 |
+| ICCU | P396 | 3,270 | (the count query timed out) |
+| PTBNP | P1005 | 899 | (the count query timed out) |
+| ARBABN | P3788 | 156 | 8,645 |
+| BLBNB | P4619 | 72 | 24,420 |
+| BNCHL | P1890 | 44 | 4,081 |
+
+`Q5682`, Cervantes, carries **eight** `P3788` values, all at rank `normal`. So taking the
+first would be resolution by ordering for nine thousand people. `authority._claims` reads
+every value and the fallback drops a property that has more than one, which is
+`_viaf_sources`' rule for a code a cluster names twice, one file over. A `deprecated`
+statement is skipped, because that rank is Wikidata saying the value is known wrong.
+
+### The budget moved and the statement moved with it
+
+A confirmation is now up to **fourteen** outbound requests across three hosts rather than
+eight: eight on the path that works, and six Wikidata `wbgetclaims` **instead of** the
+three VIAF calls rather than beside them. Measured 2026-08-28, the six for `Q1512` are
+1,942 bytes and 1.49 seconds together, against the 1,061,272 bytes the three VIAF calls
+reach at their worst. `authority.DEADLINE_SECONDS` stays at 8.0 and its comment now says
+why the fallback does not move the worst case.
+
+They are asked one at a time. Wikidata answers **429** to a burst: roughly fifty
+`wbgetclaims` from one address inside two minutes, measured 2026-08-28, and it kept
+answering it for minutes afterwards.
+
+---
+
+### The author card links out to Wikipedia, and the language is resolved rather than guessed
+
+**Settled by the owner 2026-08-28: link out, not fetch.** The refusal of author biographies
+and portraits in `docs/featurelist.md` stands untouched. What is read is which language
+editions hold an article, which is data about availability; an article's prose is the thing
+the refusal exists to prevent. `authority.WikipediaArticle` carries a URL and a language
+code and a test asserts it carries nothing else.
+
+**`Special:GoToLinkedPage` was the obvious mechanism and is refused, on a measurement.** It
+resolves server side from a Q id and a site code, so it needs no stored URL and cannot go
+stale. Measured 2026-08-28, its failure mode is the problem: a site with no article answers
+**200 with a 39,003 byte Wikidata maintenance form**, not a 404, so nothing downstream can
+tell success from failure and the reader lands on an edit form. Sampled over 300 people
+carrying a GND number and the writer occupation, 259 of the 297 with any article have a
+`dewiki` one, so **12.8% of German readers** would have hit that form.
+
+**The language therefore has to be known before the link is rendered, and it cannot be a
+redirect endpoint.** Every request to this API carries a bearer token and a plain
+`<a href>` cannot, which is the same constraint `mutator.downloadFile` records. So it is a
+data endpoint, `GET /books/authors/wikipedia`, and a hook.
+
+**The fallback chain ends at the Wikidata item and never at nothing.** The alternative
+measured against it, falling back to `Special:GoToLinkedPage/enwiki`, would have worked for
+97.3% of the sample and dropped the rest on the form. A link that is right every time and
+sometimes points at a data page beats one that is right 97.3% of the time and fails
+invisibly.
+
+**The one URL this app takes out of a response, and why that is safe.** Everywhere else in
+`authority.py` the rule is three fixed hosts and a cross reference is shown but never
+fetched. `_WIKIPEDIA_ARTICLE` matches the API's own `url` against an anchored pattern whose
+host half is written here, `wikipedia.org`, with only the language subdomain from the
+response and bounded to `[a-z0-9-]{2,32}`. Building the URL from the site code instead was
+refused on a measurement: `Q1512` carries 153 sitelinks, **101** ending in `wiki`, of which
+exactly one is not Wikipedia (`commonswiki`, at `commons.wikimedia.org`), so a code to host
+rule needs a denylist plus a transliteration for `zh_yuewiki` and `bat_smgwiki`. Nothing
+fetches the URL: **Wikipedia is not an outbound host of this app.**
+
+**The budget guard was widened deliberately and this is the record.**
+`test_wikidata_is_never_asked_for_every_claim`'s allowlist held `labels|descriptions` alone
+and now holds `sitelinks/urls`. That test is the budget and refuses `claims` by name, which
+is still refused; the refusal is the three tests above it, and none is touched.
+`sitelinks/urls` for `Q1512` is **354 bytes** with a `sitefilter` against 243,864 for
+`claims`.
+
+
+---
+
+### The Z39.50 transport is a seam, and the client behind it is not chosen yet
+
+`fetch.py` is one door for HTTP because a bound nobody has to remember is the only kind
+that holds. Z39.50 needs the same property and cannot inherit it: the protocol has no
+redirects, no content encoding and no chunked reads, so two of that door's four guarantees
+have no equivalent and the other two had to be rebuilt.
+
+`backend/z3950.py` is that door. What it guarantees:
+
+| Bound | How |
+|---|---|
+| At most `MAX_RESPONSE_BYTES` (2,097,152, the same figure `fetch.py` uses, and the ceiling on a caller supplied `limit`) | counted on the record bytes as they arrive |
+| At most `MAX_RECORDS` (5) | the search returns a count, and records are asked for by position |
+| One absolute deadline for the open, every search and every record | `Association` holds the clock |
+| A term from a member cannot change the query's shape | `z3950.query` quotes and escapes it |
+
+**The client is behind a `Session` and `Client` protocol and is not the decision.**
+`z3950_provisional.py` is a ctypes binding to the ZOOM API in the `libyaz.so.5` the image
+already ships. It is named for its status: swapping it is a change to one function,
+`z3950._default_client`. A test refuses any other backend module importing it.
+
+**Three dispositions, kept apart, because the target survey conflated two of them.**
+`Unreachable` means nothing answered. `Refused` means the target answered and said no, and
+carries the diagnostic code. **Answering nothing is neither: it is `Answer(hits=0)`**,
+because a catalogue that does not hold a book is the ordinary case.
+
+**The seam names the record format; the client owns both spellings of it.** Three names
+for MARC21 were measured across one request and two targets: `usmarc` asked for, `MARC21`
+from LIBRIS, `USmarc` from the Library of Congress. A `Target` carrying one string and a
+`Record` carrying another gives a caller nothing to compare, and makes
+`record.syntax == target.syntax` false on an honoured request. So `Syntax` is the
+vocabulary, `Record.reported` keeps the target's own word, and the client maps both ways.
+
+**A blocking client is why `Association` exists rather than a bare handle.** It owns one
+worker thread and one lock, and it latches its own end. Four failures were measured before
+it did, every one of them silent or fatal rather than an error:
+
+* Closing from the loop thread frees memory a live thread is reading. A 0.05s deadline on
+  a search to the Library of Congress left the process to be SIGKILLed at 40s where not
+  closing returned at 0.40s. Now: 0.06s, and the release is submitted behind the abandoned
+  call on the same thread rather than awaited.
+* Two coroutines on one association corrupt each other's result set, because a session
+  holds one: five bogus `Unreachable`, two `Answer(hits=0)` on a query that returns 444
+  serially, and one SIGSEGV, over eight pairs. **A wrong zero is the disposition the
+  session's latch exists to prevent, arriving by another door.** Now 0/8 bogus.
+* A timed out open still produced a session and nothing held it: built 1, closed 0, a
+  connection and a socket for the life of the process. Now the close is scheduled for when
+  it arrives; five timed out opens leave the thread count where they found it.
+* `search()` after `close()` was signal 11. Both the association and the session latch.
+
+**A PQF term is escaped for three characters and refused for a fourth class.** Measured
+with `p_query_rpn` and `yaz_rpnquery_to_wrbuf`, which render what YAZ actually built:
+`"` unescaped turns `moby dick` into 558 hits where the phrase returns 444; a trailing
+`\` eats the closing quote; and **`@` followed by a digit replaces the use attribute this
+module pins**, so `@1=1016 harry` parsed as `@attr 1=1016 "harry\""` and
+`@1=4 @set someset` parsed as `@set "someset\""`, a result set reference. Escaping `@` is
+inert on ordinary terms and collapses all eight injected shapes to one literal term,
+confirmed against Greece and Czechia, which return 0 hits for the injected text where a
+real `@set` would be refused. A **control character cannot be escaped at all**: a NUL is
+not whitespace and the query crosses into C as a NUL terminated string, so
+`moby\x00dick` became `@attr 1=4 moby`. The whole class is refused.
+
+**`MAX_RECORDS` is bounded by time, and deliberately not by where a walk stops working.**
+Records are presented one position at a time, so a walk of N is N round trips: 5 records
+0.62s, 10 records 1.30s, 20 records 2.70s at the Library of Congress, against a 4.0s
+budget for the **whole fan out** across seven sources. A walk can also end in
+`[13] Present request out of range`, at a position that moved across 43, 23, 11, 36 and 0
+in five runs of the identical request, and at record 0 under load. That is a target
+condition, it arrives as `Refused`, and a margin against a number that moved from 43 to 0
+is not a margin.
+
+**Validated against the control rather than asserted.** `lx2.loc.gov:210/LCDB` is already
+in the source chain over SRU, so the same question was asked both ways: ISBN 9780142437247
+returns one record over each, MARC 245$a `Moby-Dick, or, The whale /` against MODS
+`Moby-Dick, or, The whale`; 9780141439518 returns `Pride and prejudice` both ways;
+9780553213119 returns **zero both ways**, which is the half a positive result cannot give;
+and `moby dick` as a title returns **444 over each**. The MARC leader's own length field
+agreed with the bytes returned in every case (02227/2227, 01954/1954).
+
+**There is no host allowlist and that is `fetch.py`'s reasoning, not an omission.** A
+`Target` is built from module constants, so no host is attacker chosen. The property lives
+in the callers: the day a `Target` comes from stored configuration or a request body, this
+module needs the allowlist `covers.is_fetchable` already is for the other direction.
+
+**Three caller supplied numbers could raise a bound the seam exists to hold, and all
+three now refuse.** `limit` above `MAX_RESPONSE_BYTES` and `records` above `MAX_RECORDS`
+raise `ValueError`. The third was the deadline, and it was declined once as a preference
+before being measured: **a 0.5s association ran a search to t+5.004s and returned a hit
+count**, ten times its own ceiling, contained live only by the client's socket timeout,
+which surfaced as `Unreachable [10004] Connection lost` rather than as a deadline. A bound
+held by a client accident is not held by the seam. `search(deadline=...)` now takes
+`min()` with the association's clock, so it can narrow and never widen; and
+`association(deadline=...)`, which is the one place the budget is set, raises `ValueError`
+beyond `TIMEOUT_SECONDS`. Narrowing stays silent where the other two refuse, because a
+caller asking for less time still gets everything it asked for.
+
+**What is deliberately not here.** No provider was added and no source constant was
+touched: that is #91, and the owner's rule is that #94's provider section ships before or
+with the first new providers. UNIMARC mapping is the next ticket, and Greece is what forces
+it rather than Italy, which serves MARC21 as well.
+
+### The blur calibration is a test now, because the eleventh pattern arrived as six
+
+`rasterise.ts` carried the tint filter's calibration as a paragraph and said
+plainly that it should be a test, deferred until "the eleventh pattern is
+admitted", on the reasoning that a test written in the same hour as the thing it
+checks tends to encode the mistake. #106 admitted six at once, so it was built.
+
+**What it pins is the filter, not the floor**, and that distinction is the reason
+it is worth having. `BLUR_RADIUS` and the three box passes decide what "adjacent
+marks at least 12px apart" means. Move either and every pattern's headroom moves
+while the floor still reads 0.196, and nothing else in the suite notices, because
+every other assertion compares against that same constant. The failure would
+arrive as tiles being refused for no stated reason.
+
+Two assertions, both gratings built in the test: a 12px pitch at 2.4px wide must
+measure 0.196, and a 4px pitch at 1.2px must measure 0.018. **Attacked with six
+mutations** of the radius and the pass count (radius 1, 2 and 4; one, two and four
+passes) and every one is caught by both assertions. The nearest miss is four
+passes, which takes the 12px figure to 0.1045 against a tolerance of 0.0005.
+
+**One figure in the old prose does not reproduce, and the reason is that a grating
+is two numbers.** The three calibration figures do not share a duty cycle: 0.196
+is 12px at 2.4px and 0.018 is 4px at 1.2px, both of which reproduce exactly, but
+1.140 at 30px only reproduces at a 3px stroke. At 6px, which is the 12px figure's
+own duty cycle, a 30px grating measures 1.071. The widths are now stated beside
+the figures in `rasterise.ts`. The floor itself was never in doubt: it rests on
+the 12px measurement, which is the one the test now holds.
+
+### A displacement field repeats with the tile when its supports are disjoint
+
+Curl is the first pattern here whose geometry comes from a function of absolute
+position rather than of a branch parameter, so the header's periodicity condition
+binds it directly. `swirl` rotates the plane about each of a set of centres, by an
+angle that falls to zero at `reach`. The sum of such terms is periodic in the tile
+exactly when no two of them overlap, so the constructor refuses centres closer
+than twice the reach. The failure it prevents is a discontinuity along a line
+**inside** the tile, which the nine drawing offsets do not rescue.
+
+**The check measures on the torus rather than against nine written copies**, and
+that is not a stylistic preference. Enumerating the eight neighbouring offsets
+reads correctly and accepts centres at `[0, 0]` and `[484, 4]`, which is the same
+lattice written two tiles out and a 5.7px overlap. There is no further arm that
+fixes it, because nothing bounds how far out a centre may be written; reducing the
+offset into the tile fixes the family. The first draft here enumerated, and the
+evasion was found by attacking it rather than by reading it. Eleven evasions are
+now checked, three of them in the suite.
+
+The same reduction runs in the displacement itself, so a lattice written at the
+origin and the same lattice written a tile out displace a point identically.
+
+### Curl is Nonpareil worked a second time, and that is the point rather than a shortcut
+
+A design critic could reasonably ask why two of the eight papers come out of one
+generator. The answer is that this is the marbler's own sequence: a curl marble
+**is** a nonpareil that has had a stylus drawn through it in circles, and drawing
+it any other way would be drawing spirals rather than reproducing the technique.
+
+Three things follow that are worth having recorded. A rotation maps every circle
+about its centre to itself, so the displaced comb lines shear but can never cross
+one another, which is why the tile needed no untangling. The compression is
+therefore the only thing to tune, and it depends on the **total** turn and not on
+the reach: the shear peaks at half the turn whatever radius it is spread over. At
+5 radians two lines 15px apart close to 5.6px at the tightest ring, so the stroke
+came down to 2.9px against Nonpareil's 3.2px, which puts the densest 7x7 window at
+0.72 against Seigaiha's 0.718 and Shippo's 0.786.
+
+### Golden Lily is John Henry Dearle's, not William Morris's
+
+Noticed while tabulating what each Morris pattern reproduces. `docs/theming.md`
+said "the historical Morris designs", and Golden Lily (1899) is by Dearle, Morris
+& Co's chief designer after Morris. Dearle died in 1932, so it left copyright in 2003 under life plus seventy,
+against 1967 for Morris's own. The table says both dates.
+
+### A claim survives review when the evidence that would test it is not on the line
+
+Two rules, learned twice in one file and worth stating once.
+
+**A hit count carries the query that produced it.** The previous `targets.txt` held nine
+counts; three named their query. Re-measured 2026-08-29, those three reproduced exactly
+(444, 350, 6,638) and the other six did not (12,599 to 1,143, 223 to 10, 1,183 to 56,
+1,254 to 95, 24,477 to 350, 2,788 to 410). Sweden is on both sides of that split, so it is
+the query and not the target.
+
+**An index claim carries the ISBN that produced it.** Three lines claimed something about
+`@attr 1=7` without naming an ISBN, and one was false: Czechia's said the ISBN-10 does not
+match, and two ISBN-10s from NKC's own `020$a` match hyphenated and unhyphenated alike.
+
+Both are the same rule. **A claim with no evidence beside it is not reviewable, so it
+survives.** That is why the format is the fix rather than a proofread.
+
+### A Z39.50 target is three separate questions, and the third one fails silently
+
+The survey has now been wrong twice in the same shape, each time by taking an earlier
+answer as a later one.
+
+| Question | What answers it | What it does not answer |
+|---|---|---|
+| Will it talk to us? | an unauthenticated `initResponse` | whether a search is answered |
+| Will it answer a search? | a `find` returning records | whether it answers **in time**, and whether it answers **an ISBN** |
+| Will it answer an ISBN? | `@attr 1=7` matching an ISBN taken from **that target's own record** | |
+
+The first gap cost Spain: `z3950.bne.es` answers Init and refuses every search on every
+database name with an identical `[101]`. The second cost Sweden: `libris.kb.se` answers,
+and takes **12.9 seconds for the search alone** against a 4.0 second budget for the whole
+fan out. The third is new and is the worst of the three, because it has no diagnostic at
+all: `catalogos.cultura.gob.es:220/ABNET_REBECA` indexes the ISBN as the exact string
+**including its hyphens**, so `84-204-5732-9` matches and `8420457329` returns **0 hits
+and no error**. An ISBN normalised the way this application normalises it would return
+nothing from that target forever, and nothing anywhere would say so.
+
+**0 hits does not discriminate**, so establishing the third question needs an ISBN the
+target itself returned. That is the method, not a detail of it.
+
+### A red line in the survey is a moment, not a verdict
+
+Measured 2026-08-29 against `catalogos.cultura.gob.es:220`, in this order: a clean search
+returning 242 records; then about fifteen minutes in which every connection was closed on
+Init, to `yaz-client` and to the survey's own probe alike; then a clean search again
+and a green probe. Port 212 on the same host answered throughout.
+
+So a target can be recorded as unreachable on a reading that describes fifteen minutes.
+`targets.txt` has always said a green line is not sufficient; what it now also says is that
+a red line is not conclusive, and re-probing before concluding is what #101 is for.
+
+**This entry started life as the opposite claim**, that the probe under-reports, on the
+evidence of one green search and one red probe minutes apart. Two readings taken at
+different times were read as a difference between two instruments. The probe and a full
+YAZ client agreed in both directions once both were re-run, which is what identified the
+single cause.
+
+### Published catalogue lists rot, and a `gaierror` is a claim about a string
+
+Of Tellico's thirteen shipped Z39.50 servers, **four still work and nine have rotted**:
+three hostnames do not resolve, two are filtered, one has no route, one is behind
+Cloudflare, one closes the connection on Init, one refuses. That is the ordinary state of
+this material and is why every entry is verified here rather than copied.
+
+Two specific traps, both of which cost a session's conclusion:
+
+* **The British Library is one character.** Tellico ships `3950cat.bl.uk`, which is
+  `gaierror`. `z3950cat.bl.uk` resolves. (The target is retired anyway, refusing on 9909,
+  so the correction changed the verdict from "never existed" to "withdrawn".)
+* **Portugal was recorded as shut and is not.** `z3950.porbase.org` is filtered, and the
+  BNP's own maintained target list names two live hosts on a different domain. Portugal
+  went from unreachable to two SEARCHED targets by reading one page.
+
+**The most reliable source is the institution's own page**, and it is not always current
+either: Spain's Ministerio de Cultura publishes `catalogos.mecd.es`, which is filtered on
+every port, while the same service, ports and database names answer on the ministry's
+current domain `catalogos.cultura.gob.es`.
+
+### A load bearing operational fact may not live only in a file that gets deleted
+
+The suite and probe pods run with container name `run` because Falco's
+"drop and execute new binary in container" rule is exempted on exactly
+`k8s.ns.name = "default" and container.name = "run"`. That rule is level 13, Telegram
+pages at 12 and above, and before the exemption existed these pods produced 57,062 alerts
+in one day. A rename that looks like tidying therefore pages a person overnight.
+
+That fact lived in a seat note, which is deleted with the plan, and in another
+repository's Falco values, which is the rule rather than a warning to whoever writes the
+next pod. It now sits beside the manifest line that names the container, and in the
+working notes a seat reads before writing one.
+
+### Where a credential is published by the library itself, that is a decision and not a measurement
+
+Argentina's and Uruguay's national libraries each publish the full connection parameters,
+user and password included, on their own public pages, with a contact address and no
+stated restriction on use. Both targets refuse unauthenticated and answer with those
+credentials, verified here.
+
+**The provenance claim has to be exactly right, because it is the whole argument.** This
+file first said Uruguay published no database name and spent eleven lines establishing
+`BNU01`. The page publishes `Base: BNU01`, one line above the username; the field was lost
+by the filter used to read the page, not by reading it. A defence that rests on "the
+library publishes this itself" is only as good as the reading of the page.
+
+That is the library's documented front door rather than a guessed credential or a worked
+around authentication wall, and it is recorded as SEARCHED for that reason. **Whether
+Endpaper ships a credential at all is a separate question and is the owner's**, because it
+is about terms of use and about carrying a secret for a third party, not about whether the
+target works. Nothing was attempted at Spain's BNE, which publishes none.
+
+### The Alma gateway cannot be enumerated
+
+An Alma hosted national library is reachable at
+`eu0N.alma.exlibrisgroup.com:210/<INSTITUTION_CODE>`, which looks like a way to add a
+country per line. It is not. A real institution code (`43ACC_ONB`, Austria) and an invented
+one (`99NOSUCH_XX`) return the **identical** `[101] Access-control failure`, so membership
+cannot be tested from outside; Norway answers only because BIBSYS opted in; and Spain's
+CSIC is on `eu00` while Norway is on `eu01`, so the code does not even determine the host.
+
+### A generator may not read its own output
+
+Recorded because it cost a review round and the failure is silent by construction. The tool
+that generated these three palettes places each ramp on an envelope, the mean OKLab
+lightness per rung across the palettes already shipped, and it read that envelope out of
+`palettes.css`. Which is where it writes. So the moment a generated palette was in that
+file it joined its own average, and a second run produced different colours from identical
+inputs.
+
+**Nothing about that announces itself.** The anchors are published values and never move,
+so the file keeps its shape; only the generated rungs walk. Measured: **35 tokens apart, 0
+of them anchors.** And because the reporting read the ramps it had just built rather than
+the file, every published figure described a palette no browser would render, while the
+correction tables, which are all anchors, came out exact. Nine figures in three published
+documents were wrong that way, and the suite was green throughout: it reads the stylesheet,
+which was correct.
+
+Two changes, and the second is the one that generalises. The envelope now excludes whatever
+is being generated, so the tool is idempotent. And the tool **refuses to print a figure at
+all** unless every token it built matches the stylesheet byte for byte, because a report
+that measures anything other than the shipped file is worth less than no report.
+
+### Three palettes chosen by licence and by measured distance, not by taste
+
+Seven to ten, 2026-08-29. The candidates were Kanagawa, Tokyo Night, Ayu and Flexoki, and
+the two that decided the shortlist were not about colour.
+
+**Licence, read off the file the values came from.** Two of the repositories a search
+returns first are Apache 2.0 rather than MIT: `folke/tokyonight.nvim`, which is the Tokyo
+Night everybody links to, and `ayu-theme/ayu-vim`. The MIT sources are Enkia's original
+`tokyo-night/tokyo-night-vscode-theme` and `ayu-theme/ayu-colors`. A palette whose licence
+is read off the theme's website rather than the file the hexes came from is a licence read
+off the wrong thing.
+
+**Nothing in the tree can check any of that**, and it is worth being plain about why.
+`palettes.test.ts` asserts every attribution ends in "MIT", which is a check on a string.
+It cannot see a wrong licence and it cannot see a wrong holder, and a wrong holder is
+exactly what shipped in the first draft of this: Ayu was credited to "Ayu Theme" where
+`ayu-theme/ayu-colors` reads `Copyright (c) Konstantin Pschera`. Caught by a reviewer
+reading the licence file, which is the only thing that can catch it.
+
+**Flexoki was refused on a measurement.** It is MIT, publishes both modes and a complete
+ramp, and would have been the cheapest of the four to port. Its dark page is **0.6** OKLab
+dE from Endpaper's and its light card **1.9** from Endpaper's, so the tile a reader would
+be choosing is the one the app already opens on. Distance from what is already shipped is
+the thing a palette is for.
+
+**Kanagawa scored no better on that metric and was kept**, which is the part worth
+recording because it looks inconsistent. Its nearest neighbour is Rose Pine on the dark
+surfaces alone; Flexoki's is Endpaper in both modes and on the card as well as the page.
+And Kanagawa is the only one of the four whose upstream names both members, which is the
+case the catalogue's two naming rules exist for and which nothing since Rose Pine had
+exercised.
+
+**Ayu Dark's third surface is deliberately not taken.** It publishes `surface.base`,
+`surface.lift` and `editor.line` inside 4.6 CIE L* in total, so a ladder built from all
+three puts the 1px divider this app draws between `paper-800` and `paper-900` at **3.02
+L\***, under the 4.0 floor the badge hairline is anchored to and under the 4.25 that was
+the faintest divider anything here shipped. Two published rungs, two generated, and the
+divider measures 8.33. Nothing tested that divider, which is what made the whole argument
+prose: the badge floor of 4.0 is justified by this being the faintest line the app treats as
+visible, and a palette drawing it fainter would have retired that justification without
+failing anything. `palettes.test.ts::the hairline the badge floor is anchored to stays
+visible` now holds it, in both modes, on every palette. Verified by putting Ayu's third
+surface back: exactly one test fails and it is that one.
+
+### The channel record lives in two places, and they answer two questions
+
+**Settings keeps the repair affordance. The overdue page shows the consequence.**
+
+A person in Lending settings is there to fix a channel, so the standing record belongs
+under the switch that repairs it: `notifications._CONFIGURED_BY` already makes writing
+that switch the thing that clears the record. A person on the overdue page is asking
+whether the household's reminders are going out at all, beside the books they are about.
+Those are two questions and the same fact answers both.
+
+**What stops it being a fact stored twice is that it is one component.**
+`SenderHealthLine` moved from the Lending route to `pages/components/` and both screens
+draw it, so a change to how a channel's state reads changes both. What differs is the
+frame: settings draws it under the fields, the overdue page draws it under a note saying
+what it is and is not about.
+
+**The overdue page gets no navigation entry**, and the reason is not the one first written
+here. `NavBar.tsx:33` declares `/loans` with `end: false`, so the Loans item **stays
+active** on `/loans/overdue`: the page is already inside a navigation entry. With nothing
+overdue it carries nothing Lending settings does not, so a permanent link would point at a
+usually empty screen. The one state where that bit was the dead end above, and the nudge
+fix removes it.
+
+**The banner on the library page stays where it is**, and that is the part of the ticket
+that is a judgement rather than a consequence. It is the interrupt, not the detail: it is
+admin only, it fires only on the server's `broken` verdict, and it links to the screen
+that repairs the channel. Removing it would mean a household learns about a dead Telegram
+bot only if somebody happens to open the overdue page. Two banners can appear together on
+the library page, an admin with overdue loans and a broken channel, and that is accepted
+rather than overlooked. **Flagged for the owner** rather than settled: the ticket asked
+for a deliberate decision and this is the reversible one.
+
+### The overdue page reads `overdue_for_viewer`, not the loans list with a filter
+
+**This is a consistency decision, not a disclosure fix, and calling it the second was
+wrong.** The security seat established live that the wide set is the household loans list
+working as designed: bare `GET /api/loans` with no parameter answers the same rows, so
+`overdue_only` opens nothing that was closed, and no arm of either endpoint reaches a book
+`visible_to` excludes. What was actually broken is a surface showing one set and counting
+another.
+
+`GET /api/loans?overdue_only=true` is rooted at `Shelf.seen_by` and stops there, so a
+member reads every overdue loan over a book they can see. `GET /api/loans/overdue` applies
+`notifications.overdue_for_viewer` on top, which is the rule the in app count already
+uses: staff read every overdue loan on their shelf, a member reads the ones they lent or
+borrowed. Both are narrowed by the Shelf first, so neither arm can reach a private book
+somebody else added.
+
+**Two screens that disagreed about how many loans are overdue would be worse than either
+alone**, and that is what the banner's old link produced. The loans page keeps the wider
+endpoint, because a list of the household's loans is a list of the household's loans.
+
+The new endpoint also honours `overdue_in_app_enabled` and answers an empty page when the
+switch is off: the switch is spelled "show overdue loans in the app" and this page is what
+it shows. The loans list is deliberately unaffected.
+
+**Every screen that counts overdue loans now counts through that one rule**, and the first
+attempt did not. The loans page nudge still read `overdue_only=true` while linking to the
+new page, so it reproduced the defect one screen over: measured for a non admin member,
+which by `sees_every_loan` is every member, the nudge said 2 and the page showed 1; with
+the channel switched off it said 2 and the page said "switched off", and since the library
+banner hides itself in that state, **that nudge was the only entrance to the dead end**.
+Both nudges now read `GET /api/loans/overdue/mine`.
+
+### The channel panel may not claim anything about this page
+
+`notifications.health` reports on channels that **push**, and never consults
+`overdue_in_app_enabled`. So a panel sentence about where the loans appear is a sentence
+the record cannot support: the empty line ended "They appear here, and nowhere else" and
+rendered three lines above "The in app reminder is switched off". Both sentences on screen
+together, measured. What survives is the half the record answers, "No channel sends these
+reminders anywhere."
+
+The same rule retired an over claim beside it: the page's empty state said "Overdue
+reminders are switched off" when only the in app channel is off and Telegram may still be
+sending hourly. It now names the channel it means.
+
+### The channel record has three states, and a nullable list is two
+
+Hidden (a member's 403, and the first render), unreadable (any other failure), and read.
+They were one nullable value, so an admin whose record 500s got a page that loaded, no
+panel, and no error, because this page keeps that query's error out of its own error slot
+on purpose. `DeliveryRecord` names the three so a caller has to answer every arm.
+
+### A count and a capped list may not appear on one screen without saying so
+
+The overdue page prints `total` in its header badge and requests one page of fifty rows.
+Above fifty those are two different numbers presented as one, and the page has no pager,
+so the remainder is not merely uncounted, it is unreachable.
+
+**A pager is more than this ticket, and the honest alternative is not to drop the badge
+but to name the cap.** A reader who is told "63" and shown 50 rows has been given a wrong
+impression; a reader told "showing the 50 most overdue of 63" has been given a true one
+and a reason to look at the loans page. The rows are ordered most overdue first, so the
+page a reader gets is the page they wanted.
+
+Two tests, and the second is the one that matters: a line rendered unconditionally
+satisfies the first and is wrong on every ordinary page.
+
+**Library mode (#18) is what makes fifty reachable**, which is why this was worth fixing
+now rather than when somebody hits it. A private household with fifty overdue books has a
+different problem.
+
+### A banner may not say "your" where the viewer is an admin
+
+`sees_every_loan` is `viewer.is_admin`, so an admin's overdue count includes loans between
+two other members. Both banners said "{count} of your loans are overdue". They now say the
+loans need chasing, which is true under both arms.
+
+Pre-existing on the library banner and propagated to the loans page by #102, so it is a
+defect the diff spread rather than one it invented, and it is fixed in both places rather
+than in the one the ticket touched.
+
+### `LoanRowSkeleton` exists because the placeholder drifts from the row
+
+#102 moved `LoanRow` into `pages/components/` on the argument that the choice is one move
+or one copy, and the copy is what causes drift. It then copied fifteen lines of that row's
+loading placeholder into the new page verbatim.
+
+The drift is the same drift: the row gains a line, one page's placeholder grows with it
+and the other jumps when the data lands. `testId` is a prop rather than a constant because
+the two pages name their lists differently and their tests assert on those names, which is
+the one thing a shared component here could not hard-code.
+
+### The health line's docstring said the thing the page exists to deny
+
+`SenderHealthLine` is drawn by two screens, and its docstring described the overdue page as
+"where somebody asks whether a borrower was told". The health record holds no loan id, so
+no screen built on it can answer that, and `overdue.deliveryNote` exists to say so. The
+docstring now says what the panel does answer, and names the wrong framing as wrong,
+because the shared component is where the next reader picks a framing up.
+
+### `en.ts` is the source of truth, so a hint fixed in German only is a hint not fixed
+
+`Messages` typing makes a missing key a compile error and says nothing about meaning. The
+in app hint was corrected in `de.ts` and left stale in `en.ts`, so German readers got the
+accurate sentence and English readers the old one. Nothing failed. This is the divergence
+`deliveryNote`'s own test comment names, inverted.
+
+### A check that cannot find its input has not passed
+
+A guard read a file, found nothing, compared the nothing against a real value behind an
+`[ -n "$want" ]`, and reported success. It had never once run on the path everybody uses,
+because that path executes the script from a copy and the file was resolved relative to
+the script's own location.
+
+**The bug is not the path. It is that a missing input was treated as a satisfied
+condition.** A guard in that state is indistinguishable from one that is working, from
+every angle except the one nobody looks from, and it stays that way indefinitely: nothing
+ever fails, so nothing ever asks.
+
+So: **read the input, and refuse when you cannot.** An unreadable input is a defect in the
+setup, not an absent constraint, and saying so out loud costs one branch. This is the same
+lesson as a stated bound that stops guarding without failing, one level further out: there
+the assertion was weakened, here it was skipped.
+
+Third occurrence in two days, which is what promoted it from a fix to an entry.
+
+### Prose inside an unquoted heredoc is code
+
+A heredoc that interpolates a variable interpolates everything else too. A paragraph of
+explanation added inside one, with identifiers in backticks the way this repository writes
+them everywhere else, became a list of commands executed on the machine running the script.
+
+The detail that makes it worth an entry rather than a comment: substitution **replaces**
+what it runs, so the text that survived into the applied document was the paragraph with
+its subject deleted. A comment can be destroyed by the act of using the file it documents,
+and it happens silently, and the result still looks like a comment.
+
+**Prose belongs outside the heredoc.** Where a document genuinely needs the text, quote the
+delimiter and interpolate nothing.
+
+### An eager load is kept because a measurement asks for it, not because the route beside it has one
+
+`GET /api/loans/overdue` took its four eager load options from `GET /api/loans` by copying.
+Both blocks were then guarded, and the guard was believed because the whole block could not
+be deleted without it failing.
+
+**Deleting the whole block is the wrong mutation.** Run one at a time (the diagonal this
+repository already asks for on fixtures), and on 2026-08-29 every one of the four options
+could be deleted on its own, in either route, with the file green. One of them was not
+merely unpinned: it cost a statement and bought nothing.
+
+**The reason no option was pinned is the fixture, not the assertion.** Both tests built
+their page out of one admin who added every book, lent every loan and was the counterparty
+to it, so every relationship resolved to a User already in the session's identity map and a
+missing `joinedload` cost nothing to omit. **A cost test is only a cost test when every
+relationship on the page names a different row.** Rebuilt with a distinct adder, lender and
+borrower per loan, three of the four options are reported by name, at +3 selects on a page
+of three and +10 on a page of ten.
+
+The measurement then decides each option separately, which is the entry:
+
+| Option | `list_loans` | `list_overdue` |
+|---|---|---|
+| `.joinedload(Book.added_by)`, the chain link | +3 and +10 on any page | +3 and +10 |
+| `joinedload(Loan.loaned_to)` | +3 and +10, page holding returned loans only | 0, and cannot be anything else |
+| `joinedload(Loan.loaned_by)` | +3 and +10, page holding returned loans only | 0, and cannot be anything else |
+| `joinedload(Loan.book).selectinload(Book.tags)` | **-1**, deleted | **-1**, deleted |
+
+`books_to_out` fetches the page's **active** loans with both users joinedloaded, so
+`loaned_to` and `loaned_by` are answered by somebody else's query on an active page and only
+`active_only=false` pays for them. `list_overdue` returns unreturned loans by construction,
+so there they are free in every shape the route can produce. They stay, as the insurance
+that a change to `overdue_for_viewer` does not arrive as an N+1, and nothing pins them
+because there is nothing observable to pin: that is written beside them rather than left for
+the next diagonal to rediscover.
+
+`selectinload(Book.tags)` is the one deleted, and the line that separates it from the two
+kept is worth stating: it is redundant under **every** page shape, because `books_to_out`
+selectinloads tags for every book it serialises, while the other two are redundant only under
+some. A statement that can never do work is deleted; one that does no work today is kept and
+documented.
+
+**A cost figure means nothing without the mutation that produced it**, and this table
+cost a round by not saying. The first row was reported once as +6 and +20 and once as +3
+and +10, by two seats on the same afternoon, and both were right: dropping the
+`.joinedload(Book.added_by)` link while keeping the Book loaded is one lazy member per
+loan, and dropping the whole first option takes the Book with it and is two. Written as a
+bare `Book.added_by`, the row named neither. This is the same rule as a mutation count
+being worthless without the failing test's name, applied to a measurement instead of a
+verdict.
+
+### A ceiling cannot see a statement removed
+
+`assert len(selects) <= 12` went on passing at 11 after an option was deleted, which is this
+repository's recorded failure mode (a smaller count is a weaker inequality) seen from the
+other side: not a bound that drifted, a bound that could not detect the improvement it was
+sitting on. Both loan cost tests now assert the count exactly, beside the two-length equality
+that catches the N+1. Moving the number stays allowed; it just has to be deliberate.

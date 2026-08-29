@@ -108,10 +108,17 @@ to change.
 Needs `LDAP_URL`, `LDAP_USER_BASE_DN`, and usually `LDAP_BIND_DN` with
 `LDAP_BIND_PASSWORD`. `LDAP_ADMIN_GROUP` grants admin; `LDAP_USER_FILTER`,
 `LDAP_USERNAME_ATTRIBUTE` and `LDAP_START_TLS` tune the rest.
+`LDAP_EMAIL_ATTRIBUTE` (usually `mail`) hands the directory ownership of each
+member's address; leave it empty and members set their own in the app. Turning it
+on **clears the address of every member the directory has none for**, at their
+next sign in, and the field is read only from then on: populate the attribute
+before setting this.
 
 `AUTH_MODE=proxy` trusts an identity header set by a forward-auth portal (Authelia,
 oauth2-proxy). Needs `PROXY_USER_HEADER` (default `Remote-User`);
-`PROXY_GROUPS_HEADER` and `PROXY_ADMIN_GROUP` grant admin.
+`PROXY_GROUPS_HEADER` and `PROXY_ADMIN_GROUP` grant admin, and
+`PROXY_EMAIL_HEADER` (`Remote-Email` for Authelia) asserts the address, with the
+same clearing as `LDAP_EMAIL_ATTRIBUTE`.
 
 **In proxy mode the port must not be reachable except through the portal.** Anything
 that can set that header is whoever it says it is.

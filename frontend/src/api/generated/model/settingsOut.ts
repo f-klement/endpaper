@@ -20,6 +20,7 @@ export interface SettingsOut {
   has_mail_password?: boolean;
   has_overdue_webhook_secret?: boolean;
   has_telegram_bot_token?: boolean;
+  library_mode?: boolean;
   mail_default_sender?: string;
   mail_from_env?: string[];
   mail_password_preview?: string;
@@ -28,6 +29,7 @@ export interface SettingsOut {
   mail_use_ssl?: boolean;
   mail_use_tls?: boolean;
   mail_username?: string;
+  overdue_in_app_enabled?: boolean;
   overdue_mail_enabled?: boolean;
   overdue_mail_to?: string;
   /**
@@ -39,6 +41,9 @@ export interface SettingsOut {
   overdue_webhook_enabled?: boolean;
   overdue_webhook_secret_preview?: string;
   overdue_webhook_url?: string;
+  public_catalogue_enabled?: boolean;
+  public_catalogue_indexing_enabled?: boolean;
+  public_catalogue_published?: boolean;
   telegram_bot_token_from_env?: boolean;
   telegram_bot_token_preview?: string;
   telegram_chat_id?: string;

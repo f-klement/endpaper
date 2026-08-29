@@ -1,4 +1,4 @@
-/* The six palettes that are not this app's own.
+/* The nine palettes that are not this app's own.
  *
  * A palette is a block of `--color-*` overrides, selected by `data-theme` on
  * the document. `applyPalette` in `palettes.ts` sets that attribute and nothing
@@ -8,7 +8,7 @@
  * Endpaper is not here. Its light values are the `@theme` block in `index.css`,
  * which is where Tailwind reads them to generate the utilities in the first
  * place, and its dark corrections sit in the `:root.dark` block beside them.
- * Repeating them here as a seventh palette would make the same eleven ramps
+ * Repeating them here as a tenth palette would make the same eleven ramps
  * two facts that can disagree.
  *
  * ## Every block declares every token, including the ones that look redundant
@@ -130,7 +130,7 @@
 }
 
 /* ── Rose Pine, Dawn and Moon ───────────────────────────────────────────────
-   Rose Pine (MIT). The palette with the least contrast of the seven: Dawn's
+   Rose Pine (MIT). The palette with the least contrast of the ten: Dawn's
    `highlight_high` is 1.56 on its own surface and its `muted` 2.87, so the ink
    half of the light ramp moves the furthest of any theme here. Moon's pine carries neither white (3.65) nor
    its own page ink (4.29) at 4.5, so the fill steps down to `accent-400`
@@ -555,4 +555,280 @@
   --color-danger-500: #f59199;
   --color-danger-600: #9b4a52;
   --color-danger-700: #77353c;
+}
+
+/* ── Kanagawa, Lotus and Wave ───────────────────────────────────────────────
+   Kanagawa (Tommaso Laurenzi, MIT). Lotus puts its ink on a cream page rather
+   than a white one, which makes it the hardest light member here: `lotusInk2`,
+   its own dimmed foreground, carries 6.78 on that page against the 7.0 the
+   contract asks of body text, so five of the nine neutrals Lotus publishes
+   move. Wave moves two. `bloom` and `danger` are `lotusPink` and `lotusRed`,
+   which sit nearer each other than most palettes' two semantic seeds do,
+   because that is where Kanagawa puts them. In Wave they are `sakuraPink` and
+   `autumnRed`, and the red lands on `danger-600`, the one semantic rung the
+   dark contract leaves free, with the 500 above it generated. */
+
+:root[data-theme="kanagawa"] {
+  --color-paper-0: #f2ecbc;
+  --color-paper-50: #e5ddb0;
+  --color-paper-100: #dcd5ac;
+  --color-paper-200: #d5cea3;
+  --color-paper-300: #c5c0a7;
+  --color-paper-400: #888594;
+  --color-paper-500: #6b6a62;
+  --color-paper-600: #5f5c52;
+  --color-paper-700: #585658;
+  --color-paper-800: #504f5f;
+  --color-paper-900: #414169;
+  --color-paper-950: #36355d;
+  --color-accent-50: #f3f8ff;
+  --color-accent-100: #d3e1f7;
+  --color-accent-200: #b1c9f1;
+  --color-accent-300: #8eb0eb;
+  --color-accent-400: #7196d8;
+  --color-accent-500: #5c7db9;
+  --color-accent-600: #4d699b;
+  --color-accent-700: #3f5782;
+  --color-accent-800: #2c3d5e;
+  --color-accent-900: #1e2c46;
+  --color-accent-950: #152034;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #f6e7eb;
+  --color-danger-100: #fbe6e6;
+  --color-bloom-300: #e2aebd;
+  --color-danger-300: #eba5a8;
+  --color-bloom-500: #994563;
+  --color-danger-500: #b42d44;
+  --color-bloom-600: #934661;
+  --color-danger-600: #ac3345;
+  --color-bloom-700: #75374c;
+  --color-danger-700: #8a2434;
+}
+
+:root[data-theme="kanagawa"].dark {
+  --color-paper-0: #faf9f5;
+  --color-paper-50: #f1efe3;
+  --color-paper-100: #e8e5d2;
+  --color-paper-200: #dcd7ba;
+  --color-paper-300: #c8c093;
+  --color-paper-400: #b1aa9e;
+  --color-paper-500: #968dac;
+  --color-paper-600: #75746b;
+  --color-paper-700: #54546d;
+  --color-paper-800: #363646;
+  --color-paper-900: #2a2a37;
+  --color-paper-950: #1f1f28;
+  --color-accent-50: #f3f7ff;
+  --color-accent-100: #dbe6fc;
+  --color-accent-200: #c0d5fc;
+  --color-accent-300: #a5c2fb;
+  --color-accent-400: #8eaeee;
+  --color-accent-500: #7e9cd8;
+  --color-accent-600: #6780b2;
+  --color-accent-700: #526893;
+  --color-accent-800: #3e4e6e;
+  --color-accent-900: #2a3750;
+  --color-accent-950: #172033;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #f7e7eb;
+  --color-danger-100: #fde6e4;
+  --color-bloom-300: #dba6b6;
+  --color-danger-300: #f4a29d;
+  --color-bloom-500: #d27e99;
+  --color-danger-500: #ff7573;
+  --color-bloom-600: #9a5069;
+  --color-danger-600: #c34043;
+  --color-bloom-700: #77354c;
+  --color-danger-700: #8e1d24;
+}
+
+/* ── Tokyo Night, light and dark ────────────────────────────────────────────
+   Tokyo Night (Enkia, MIT). The only palette besides Nord whose neutrals
+   survive whole: eleven published surfaces and inks across the two modes and
+   eleven kept, which is what a genuinely dark page under a genuinely pale ink
+   buys. Upstream publishes a third theme, Storm, which is not ported here;
+   these two are its base dark and its light. `bloom` is the magenta, because
+   Tokyo Night's pink is its red and the red is `danger`. */
+
+:root[data-theme="tokyonight"] {
+  --color-paper-0: #e6e7ed;
+  --color-paper-50: #d6d8df;
+  --color-paper-100: #ccced6;
+  --color-paper-200: #b9bcc5;
+  --color-paper-300: #9da0ab;
+  --color-paper-400: #707280;
+  --color-paper-500: #5b5f73;
+  --color-paper-600: #54576d;
+  --color-paper-700: #4a4f67;
+  --color-paper-800: #404761;
+  --color-paper-900: #343b59;
+  --color-paper-950: #272e4b;
+  --color-accent-50: #f3f8ff;
+  --color-accent-100: #cbdfff;
+  --color-accent-200: #a0c4ff;
+  --color-accent-300: #73a8ff;
+  --color-accent-400: #4b8af4;
+  --color-accent-500: #3670d2;
+  --color-accent-600: #2959aa;
+  --color-accent-700: #214b91;
+  --color-accent-800: #1a386e;
+  --color-accent-900: #0d2651;
+  --color-accent-950: #0c1f40;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #efe8fc;
+  --color-danger-100: #f6e8ea;
+  --color-bloom-300: #c7aaf3;
+  --color-danger-300: #d3a7ad;
+  --color-bloom-500: #7d3bc1;
+  --color-danger-500: #954555;
+  --color-bloom-600: #7940b6;
+  --color-danger-600: #8c4351;
+  --color-bloom-700: #5f3192;
+  --color-danger-700: #763944;
+}
+
+:root[data-theme="tokyonight"].dark {
+  --color-paper-0: #f6f7fe;
+  --color-paper-50: #e6eafb;
+  --color-paper-100: #d6ddf8;
+  --color-paper-200: #c0caf5;
+  --color-paper-300: #a9b1d6;
+  --color-paper-400: #9ca3c6;
+  --color-paper-500: #8b90b0;
+  --color-paper-600: #787c99;
+  --color-paper-700: #363b54;
+  --color-paper-800: #282b3d;
+  --color-paper-900: #1a1b26;
+  --color-paper-950: #16161e;
+  --color-accent-50: #f3f7ff;
+  --color-accent-100: #dce8ff;
+  --color-accent-200: #c4d8ff;
+  --color-accent-300: #abc7ff;
+  --color-accent-400: #90b4ff;
+  --color-accent-500: #7aa2f7;
+  --color-accent-600: #6385cb;
+  --color-accent-700: #4e6ba7;
+  --color-accent-800: #3a507d;
+  --color-accent-900: #27375b;
+  --color-accent-950: #131f3a;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #efe8ff;
+  --color-danger-100: #fbe6e8;
+  --color-bloom-300: #bb9af7;
+  --color-danger-300: #eea2ac;
+  --color-bloom-500: #ab72ff;
+  --color-danger-500: #f7768e;
+  --color-bloom-600: #7e3ccf;
+  --color-danger-600: #b23b57;
+  --color-bloom-700: #621fa8;
+  --color-danger-700: #88233d;
+}
+
+/* ── Ayu, Light and Dark ────────────────────────────────────────────────────
+   Ayu (Konstantin Pschera, MIT, from `ayu-theme/ayu-colors`). The amber is
+   2.22 on Ayu Light's own card, so it is anchored at `accent-400`, which
+   carries no text, and the fill steps down to the generated 600 below it. That
+   is the same rule that keeps Everforest's olive and Catppuccin's teal verbatim
+   rather than darkening them into colours those palettes do not contain.
+
+   Two placements here are deliberate and neither is obvious from the hexes.
+   Ayu Light's editor foreground holds `paper-700` as published and the two
+   rungs below it are generated: it measures 6.10 on the card, so it clears 700
+   and not the 7.0 body text needs, and placing it at 900 instead would have
+   squeezed 700 through 950 into a tenth of the ramp. And Ayu Dark publishes a
+   third surface, `editor.line`, which is not taken: its three surfaces span
+   4.61 CIE L* in total, so a ladder built from all three puts the 1px divider
+   this app draws between `paper-800` and `paper-900` at 3.02 L*, under the 4.0
+   the badge hairline is anchored to and below the 4.25 that is the faintest
+   divider anything else here ships. The two rungs that name the page and the
+   card are published, the two above them are generated, and the divider then
+   measures 8.33.
+
+   `bloom` is the purple, since Ayu's pink is a salmon one step off its red and
+   the red is `danger`. */
+
+:root[data-theme="ayu"] {
+  --color-paper-0: #fcfcfc;
+  --color-paper-50: #f8f9fa;
+  --color-paper-100: #ebeef0;
+  --color-paper-200: #d2d5d7;
+  --color-paper-300: #adaeb1;
+  --color-paper-400: #828e9f;
+  --color-paper-500: #6d757f;
+  --color-paper-600: #666b73;
+  --color-paper-700: #5c6166;
+  --color-paper-800: #4e5358;
+  --color-paper-900: #3d4247;
+  --color-paper-950: #303439;
+  --color-accent-50: #fff6ed;
+  --color-accent-100: #ffe0c2;
+  --color-accent-200: #ffc890;
+  --color-accent-300: #ffae52;
+  --color-accent-400: #f29718;
+  --color-accent-500: #ce7e00;
+  --color-accent-600: #a76600;
+  --color-accent-700: #8c5400;
+  --color-accent-800: #6b3f00;
+  --color-accent-900: #4e2d00;
+  --color-accent-950: #321a00;
+  --color-accent-fill: var(--color-accent-600);
+  --color-accent-fill-hover: var(--color-accent-700);
+  --color-on-accent: #ffffff;
+  --color-bloom-100: #efe9f6;
+  --color-danger-100: #fde6e4;
+  --color-bloom-300: #d2bcea;
+  --color-danger-300: #f8aca6;
+  --color-bloom-500: #8961b1;
+  --color-danger-500: #d13b3f;
+  --color-bloom-600: #7f5ba2;
+  --color-danger-600: #c03a3d;
+  --color-bloom-700: #5c3e78;
+  --color-danger-700: #8e1e23;
+}
+
+:root[data-theme="ayu"].dark {
+  --color-paper-0: #f5f5f4;
+  --color-paper-50: #e5e5e2;
+  --color-paper-100: #d5d4d0;
+  --color-paper-200: #bfbdb6;
+  --color-paper-300: #a8a9a7;
+  --color-paper-400: #93989a;
+  --color-paper-500: #778087;
+  --color-paper-600: #5a6673;
+  --color-paper-700: #303842;
+  --color-paper-800: #20252f;
+  --color-paper-900: #10141c;
+  --color-paper-950: #0d1017;
+  --color-accent-50: #fdf6ea;
+  --color-accent-100: #fbeacc;
+  --color-accent-200: #fcdca3;
+  --color-accent-300: #fcce75;
+  --color-accent-400: #f4bf56;
+  --color-accent-500: #e6b450;
+  --color-accent-600: #bb923f;
+  --color-accent-700: #97742a;
+  --color-accent-800: #6f551f;
+  --color-accent-900: #4d390c;
+  --color-accent-950: #2c1d00;
+  --color-accent-fill: var(--color-accent-500);
+  --color-accent-fill-hover: var(--color-accent-400);
+  --color-on-accent: var(--color-paper-950);
+  --color-bloom-100: #f2e6ff;
+  --color-danger-100: #fce6e4;
+  --color-bloom-300: #d2a6ff;
+  --color-danger-300: #da8d89;
+  --color-bloom-500: #c07bff;
+  --color-danger-500: #d95757;
+  --color-bloom-600: #8c3ec9;
+  --color-danger-600: #aa2f34;
+  --color-bloom-700: #6a1c9f;
+  --color-danger-700: #8b2127;
 }

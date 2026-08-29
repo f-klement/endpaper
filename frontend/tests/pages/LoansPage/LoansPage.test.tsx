@@ -23,7 +23,14 @@ beforeEach(() => {
 
 /** Query parameters of the most recent loans request. */
 function lastQuery(): URLSearchParams {
-  return new URL(api.lastCall("/api/loans")!.url, "http://localhost")
+  // **Matched on `/api/loans?`, not on `/api/loans`.** `lastCall` matches a
+  // string by substring, and this page now also calls
+  // `/api/loans/overdue/mine` for the nudge's count, which contains it: the
+  // helper started reading the wrong request the moment that query was added,
+  // and reported `active_only` as null. The list endpoint is the only one of
+  // the three that carries query parameters, so the `?` is what separates
+  // them.
+  return new URL(api.lastCall(/\/api\/loans\?/)!.url, "http://localhost")
     .searchParams;
 }
 
@@ -109,9 +116,17 @@ describe("LoansPage", () => {
     });
 
     it("links through to the book", async () => {
+      // Named rather than taken by index. `getAllByRole("link")[0]` used to be
+      // the cover, and stopped being it the moment the overdue nudge above the
+      // list became a link to the overdue page (#102): the test then asserted
+      // about a different element and failed for a reason that had nothing to
+      // do with what it is named after.
       renderWithProviders(<LoansPage />);
       await screen.findByText("Dune");
-      expect(screen.getAllByRole("link")[0]).toHaveAttribute("href", "/book/7");
+      expect(screen.getAllByRole("link", { name: "Dune" })[0]).toHaveAttribute(
+        "href",
+        "/book/7",
+      );
     });
 
     it("records a return", async () => {
@@ -194,10 +209,23 @@ describe("LoansPage", () => {
 });
 
 describe("LoansPage overdue handling", () => {
-  function stubLoans(rows: unknown[], overdueTotal = 0) {
+  /**
+   * The list, and the count the nudge is drawn from.
+   *
+   * **Two endpoints, and that is the point (#102).** The nudge counts through
+   * `GET /api/loans/overdue/mine`, which is the rule the page it links to
+   * lists by; the list itself is `GET /api/loans`, which is wider. `wide` is
+   * how many rows the "Overdue only" filter would show, and it is set higher
+   * than `overdueTotal` in the tests below precisely so a nudge that went back
+   * to reading the list would print a different number and fail.
+   */
+  function stubLoans(rows: unknown[], overdueTotal = 0, wide = overdueTotal) {
+    api.on("/api/loans/overdue/mine", {
+      body: { enabled: true, count: overdueTotal },
+    });
     api.on(/\/api\/loans\?/, (url) =>
-      url.includes("overdue_only=true") && url.includes("page_size=1")
-        ? { body: { items: [], total: overdueTotal, page: 1, page_size: 1 } }
+      url.includes("overdue_only=true")
+        ? { body: { items: [], total: wide, page: 1, page_size: 50 } }
         : { body: { items: rows, total: rows.length, page: 1, page_size: 50 } },
     );
   }
@@ -206,7 +234,51 @@ describe("LoansPage overdue handling", () => {
     stubLoans([makeLoan()], 2);
     renderWithProviders(<LoansPage />);
 
-    expect(await screen.findByText("2 loans are overdue.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("2 loans need chasing."),
+    ).toBeInTheDocument();
+  });
+
+  it("counts what the page it links to lists, not what the filter shows", async () => {
+    // The defect this replaced. The nudge read `overdue_only=true`, which is
+    // the household's loans narrowed to the late ones, and linked to a page
+    // that applies `overdue_for_viewer` on top. For a non admin member, which
+    // is every member, the two are different sets: the nudge said 2 and the
+    // page showed 1.
+    stubLoans([makeLoan()], 1, 9);
+    renderWithProviders(<LoansPage />);
+
+    expect(
+      await screen.findByText("1 loans need chasing."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/9 loans need chasing/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the in app reminder is switched off", async () => {
+    // The dead end. With the channel off the server empties the overdue page,
+    // and the library banner hides itself, so a nudge still counting the
+    // household's late loans was the only entrance to a page that could only
+    // say "switched off".
+    api.on("/api/loans/overdue/mine", { body: { enabled: false, count: 0 } });
+    api.on(/\/api\/loans\?/, (url) =>
+      url.includes("overdue_only=true")
+        ? { body: { items: [], total: 4, page: 1, page_size: 50 } }
+        : {
+            body: {
+              items: [makeLoan({ book: makeBook({ title: "Dune" }) })],
+              total: 1,
+              page: 1,
+              page_size: 50,
+            },
+          },
+    );
+    renderWithProviders(<LoansPage />);
+
+    await screen.findByText("Dune");
+    expect(screen.queryByText(/loans are overdue/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Show them" }),
+    ).not.toBeInTheDocument();
   });
 
   it("stays quiet when nothing is overdue", async () => {
@@ -220,14 +292,29 @@ describe("LoansPage overdue handling", () => {
   it("filters to the overdue ones", async () => {
     stubLoans([makeLoan()], 2);
     renderWithProviders(<LoansPage />);
-    await screen.findByText("2 loans are overdue.");
+    await screen.findByText("2 loans need chasing.");
 
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Show them" }));
+      .click(screen.getByRole("button", { name: "Overdue only" }));
 
     await waitFor(() =>
       expect(api.lastCall(/overdue_only=true.*page_size=50/)).toBeDefined(),
+    );
+  });
+
+  it("sends the reader to the overdue page for the delivery status", async () => {
+    // The nudge used to be a second spelling of the "Overdue only" button two
+    // lines above it (#102). It is now the one route to the page that carries
+    // the reminder channels' standing state, which the loans list does not
+    // show and cannot.
+    stubLoans([makeLoan()], 2);
+    renderWithProviders(<LoansPage />);
+    await screen.findByText("2 loans need chasing.");
+
+    expect(screen.getByRole("link", { name: "Show them" })).toHaveAttribute(
+      "href",
+      "/loans/overdue",
     );
   });
 
@@ -235,11 +322,11 @@ describe("LoansPage overdue handling", () => {
     // It would be asking for something the reader is already looking at.
     stubLoans([makeLoan()], 2);
     renderWithProviders(<LoansPage />);
-    await screen.findByText("2 loans are overdue.");
+    await screen.findByText("2 loans need chasing.");
 
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Show them" }));
+      .click(screen.getByRole("button", { name: "Overdue only" }));
 
     await waitFor(() =>
       expect(screen.queryByText(/loans are overdue/)).not.toBeInTheDocument(),

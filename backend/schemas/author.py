@@ -154,6 +154,32 @@ class AuthorIdentifierOut(BaseModel):
     provenance: AuthorityProvenance
 
 
+class ConfirmedIdentifierOut(BaseModel):
+    """What one confirmation wrote: the number asked for, and what came with it.
+
+    **A person confirms a record, not a number.** The GND record a Member picks
+    already carries that person's ISNI, LCNAF number, VIAF cluster and Wikidata
+    item, and until this existed all four were shown once and dropped.
+    `identifier` is what the request named and `cross_references` is what the
+    same record asserted beside it.
+
+    **`refused` is not an error and the request that produced it succeeded.**
+    A cross reference colliding with a value this Library already holds is
+    reported rather than raised, because the confirmation is what the Member
+    asked for and a fact arriving alongside it must not undo one. A collision on
+    the confirmed identifier itself is the opposite case and is a 409.
+
+    Empty lists are the ordinary answer, not a failure: they mean the authority
+    file was not reachable in the moment, or the confirmed scheme is not one
+    this app can resolve, or the record carried nothing new. Nothing in this
+    feature is blocked by any of the three.
+    """
+
+    identifier: AuthorIdentifierOut
+    cross_references: list[AuthorIdentifierOut] = Field(default_factory=list)
+    refused: list[RefusedAssertionOut] = Field(default_factory=list)
+
+
 class AuthorIdentifierRequest(BaseModel):
     """Confirm that a candidate identifier is this author's.
 
@@ -227,6 +253,33 @@ class AuthorOut(BaseModel):
     #: upstream cluster is, and nothing here can tell which. Empty is the
     #: ordinary case, including for an author with no identifier at all.
     identifier_conflicts: list[AuthorityScheme] = Field(default_factory=list)
+
+
+class AuthorWikipediaOut(BaseModel):
+    """Where to send a reader who wants to read about one author.
+
+    **A link and never a biography.** `docs/featurelist.md` refuses author
+    biographies and portraits, and this is the outward link half of #89's
+    decision rather than an exception to it: nothing is fetched but the list of
+    which language editions exist, nothing is stored, and no prose, description
+    or image reaches this model. A field here carrying an extract would be that
+    refusal reversed.
+
+    **Offered only for an author carrying a confirmed Wikidata identifier**, so
+    "if it is available" is a property of the data rather than of the network.
+    #87 measured why: two GND records are spelled `Stevenson, Robert Louis` and
+    only one has a Wikidata item, and an article about the wrong one of them is
+    worse than none.
+
+    `language` is the Wikipedia edition `url` points at, and **null means the
+    URL is the Wikidata item's own page**: either no edition holds an article,
+    or Wikidata could not be reached. A client renders both the same way and can
+    say which language it landed on when that is not the reader's own.
+    """
+
+    key: str
+    url: str
+    language: str | None = None
 
 
 class AuthorSuggestionOut(BaseModel):

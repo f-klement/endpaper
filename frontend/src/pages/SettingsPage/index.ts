@@ -11,8 +11,10 @@
 export { default } from "./SettingsPage";
 export { SETTINGS_ROUTES, type SettingsRoute } from "./types";
 export { default as AboutSettingsPage } from "./AboutSettingsPage";
+export { default as AccountSettingsPage } from "./AccountSettingsPage";
 export { default as AppearanceSettingsPage } from "./AppearanceSettingsPage";
 export { default as CatalogueSettingsPage } from "./CatalogueSettingsPage";
 export { default as DataSettingsPage } from "./DataSettingsPage";
 export { default as LendingSettingsPage } from "./LendingSettingsPage";
 export { default as LibrarySettingsPage } from "./LibrarySettingsPage";
+export { default as PublicCatalogueSettingsPage } from "./PublicCatalogueSettingsPage";

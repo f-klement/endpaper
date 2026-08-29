@@ -1,4 +1,62 @@
-# ── Stage 1: Build the React PWA with Bun ──────────────────────────────────
+# ── The pins every stage shares ────────────────────────────────────────────
+#
+# BASE IS WRITTEN ONCE AND USED BY TWO STAGES. YAZ is compiled in the first and loaded in
+# the last, so they have to be the same image: a library built against one musl and linked
+# into another is the failure this whole arrangement exists to prevent. It used to be
+# written out twice with a pipeline check comparing them, which is a fact stored twice
+# with a guard bolted on. Verified under kaniko v1.28.3 that this shape works and that
+# `--build-arg YAZ_BUILDER=...` still overrides only the builder half.
+#
+# Renovate bumps this line: the dockerfile manager reads an `ARG` default that a `FROM`
+# consumes, and the runtime stage consumes it directly.
+ARG BASE=python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc
+
+# Bumped by hand, and BOTH LINES TOGETHER. A version moved without its hash fails the
+# build at `sha256sum -c`, which is the failure you want. Renovate raises the version half
+# from the upstream git tags and cannot know the hash, so its merge request is expected to
+# be red until somebody pastes the new one in; that is why it is not automerged.
+#
+# **The hash is trust on first use.** IndexData publish no signature and no checksum file
+# alongside the release, so nothing corroborates it. See docker/build-yaz.sh.
+ARG YAZ_VERSION=5.37.3
+ARG YAZ_SHA256=975d7878b272cc999e5acbd02dc272a46607f95e6ee4f35ac655e8e4d333bf2b
+
+# ── Stage 1: YAZ, the Z39.50 client library ────────────────────────────────
+#
+# Alpine packages no YAZ, so it is compiled here. Why it is here at all, and why not
+# Debian: docs/architecture.md, "The Z39.50 client library".
+#
+# THIS STAGE IS FIRST SO IT CAN BE BUILT ALONE. `--target yaz` builds every stage up to
+# the target and skips the rest, so with this at the top the pipeline can produce a
+# prebuilt image without also running the Bun install.
+#
+# YAZ_BUILDER IS THE WHOLE MECHANISM, and it takes this shape because of what kaniko
+# does and does not substitute. Measured against kaniko v1.28.3 on 2026-08-28:
+#
+#   COPY --from=${SOME_ARG}   fails outright, "could not parse reference: ${SOME_ARG}"
+#   FROM ${SOME_ARG}          works, and --build-arg overrides the default
+#
+# So the parameter is the BASE OF THIS STAGE rather than the source of a COPY, which is
+# the reverse of the obvious shape. Handed the plain base image, this stage compiles YAZ
+# in about a minute. Handed a prebuilt image, build-yaz.sh finds its own build id already
+# in /opt/yaz and returns in milliseconds.
+#
+# **Correctness does not depend on which, and it does not depend on the pipeline either.**
+# The build id names the YAZ version, the tarball hash, the recipe and the musl it was
+# linked against, so a prebuilt image that disagrees on any of them is recompiled here,
+# and one that disagrees on musl is refused by the runtime stage below. The pipeline's tag
+# is a performance optimisation on top of that, not the guarantee.
+ARG YAZ_BUILDER=${BASE}
+FROM ${YAZ_BUILDER} AS yaz
+
+ARG YAZ_VERSION
+ARG YAZ_SHA256
+ENV YAZ_VERSION=$YAZ_VERSION YAZ_SHA256=$YAZ_SHA256
+
+COPY docker/build-yaz.sh /tmp/build-yaz.sh
+RUN sh /tmp/build-yaz.sh build && rm -f /tmp/build-yaz.sh
+
+# ── Stage 2: Build the React PWA with Bun ──────────────────────────────────
 FROM oven/bun:1.4.0-alpine@sha256:07235578f79ef8c6f97d94aee7938e76f5cdba5f21ae5dbfdd3d3d38058437eb AS frontend
 WORKDIR /app/frontend
 
@@ -21,7 +79,7 @@ ENV CI_COMMIT_TAG=$APP_VERSION
 
 RUN bun run build
 
-# ── Stage 2: FastAPI server with uv ────────────────────────────────────────
+# ── Stage 3: FastAPI server with uv ────────────────────────────────────────
 #
 # Alpine, matching stage 1. Moved off python:3.14.7-slim (Debian 13) on 2026-08-18,
 # alongside the same move in the webpage project, where the first gating image scan
@@ -43,7 +101,29 @@ RUN bun run build
 # Keep that bar for new dependencies. A package with a C extension and no musllinux
 # wheel will not fail politely: uv will try to build it from source and die for want
 # of a compiler, in CI, at image-build time.
-FROM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc
+FROM ${BASE}
+
+# ── The YAZ tree ───────────────────────────────────────────────────────────
+#
+# Two checks, and they answer different questions. This one asks whether the tree is the
+# build this Dockerfile describes: the version, the tarball it came from, and the recipe
+# that made it. Whether it actually LINKS in this image is a separate question, checked
+# further down once its libraries are installed, by running it.
+#
+# **BE CLEAR ABOUT WHAT THIS ONE CAN AND CANNOT CATCH.** In an ordinary build it cannot
+# fire: the stage above runs from the same pins and the same recipe file, so the stamp
+# matches by construction. It is a check on the COPY source, and the thing it would catch
+# is somebody pointing `--from` at a tree this Dockerfile did not describe. **It does not
+# catch a different subset of the SAME build**, because the recipe writes the same id into
+# /opt/yaz and /opt/yaz-runtime alike, so copying the full tree would pass here and
+# silently ship the headers, the documentation and the two libraries the runtime subset
+# exists to leave out. The guarantee that the library works in this image is the load
+# check below, not this line.
+ARG YAZ_VERSION
+ARG YAZ_SHA256
+COPY --from=yaz /opt/yaz-runtime /opt/yaz
+COPY docker/build-yaz.sh /tmp/build-yaz.sh
+RUN sh /tmp/build-yaz.sh verify && rm -f /tmp/build-yaz.sh
 
 # Alpine ships no package manager userland worth keeping current beyond this, but the
 # principle that bit webpage applies here too: pinning a base image by digest pins its
@@ -55,6 +135,71 @@ FROM python:3.14.7-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd
 # over a fixed openssl HIGH the upgrade should have taken. `release:build` now passes
 # `--cache-ttl=6h`; if that flag is ever removed, this line becomes decorative again.
 RUN apk upgrade --no-cache
+
+# ── YAZ's runtime dependencies ─────────────────────────────────────────────
+#
+# libyaz links libxml2, libxslt and gnutls, and the base image carries none of them.
+# THE COST IS 2.7 TIMES WHAT THE FIRST ESTIMATE SAID, because the estimate costed three
+# packages and apk installs TEN. Measured 2026-08-28 on this exact base by `du -sk /`
+# before and after, Alpine 3.24.1, package count 30 to 32 to 40:
+#
+#   libxml2 + libxslt                                        +1,384 KiB
+#   gnutls, which drags in nettle, gmp, p11-kit, libtasn1,
+#   libunistring, brotli-libs and libidn2                    +7,704 KiB
+#                                                            ───────────
+#   packages, against the 3,359 KiB first estimated           9,088 KiB   2.7x
+#   /opt/yaz below                                           +1,844 KiB
+#                                                            ───────────
+#   in the image                                             10,932 KiB
+#
+# The 2.7 is packages against packages. An earlier version of this said 3.3x, which put
+# /opt/yaz in the numerator and not the denominator.
+#
+# **gnutls and its seven dependants are 85% of the package cost, 70% of the total above,
+# and buy Z39.50 over TLS**, which no target measured for #92 uses: every one answers
+# plaintext on 210, 2100 or 9991. Dropping it is a capability decision for whoever writes
+# the transport, not a build tidy-up, so it is recorded rather than taken.
+#
+# **AND IT IS TWO EDITS, NOT ONE.** `./configure --without-gnutls` in docker/build-yaz.sh
+# stops libyaz linking it; the 7,704 KiB leaves the image only when `gnutls` also comes
+# off the line below. The build id makes the recompile automatic. It does not touch this
+# line, and an earlier version of this comment claimed there was "nothing else to
+# remember", which was wrong about the larger half.
+#
+# **What gnutls buys is transport encryption and NOT peer authentication.** YAZ performs
+# no certificate verification in any released version: `verify_peers`,
+# `set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
+# `GNUTLS_CERT` appear nowhere in src/ or client/, on 5.35.1 or on 5.37.3.
+# src/tcpip.c allocates certificate credentials and calls gnutls_init(GNUTLS_CLIENT)
+# without ever loading a trust store. So an `ssl:` target is encrypted against a passive
+# listener and not against anyone who can answer for the address.
+RUN apk add --no-cache libxml2 libxslt gnutls
+
+# ── And now make it actually link ──────────────────────────────────────────
+#
+# **THIS REPLACES A STRING COMPARISON WITH THE THING THE STRING WAS A PROXY FOR.** The
+# build id used to carry the musl version so this stage could refuse a library built
+# against a different libc. That was wrong twice over: it was read before `apk add
+# build-base`, which upgrades musl whenever the repository is ahead of the pinned digest
+# (`musl-dev` depends on `musl=<exact version>`), and it said nothing at all about
+# libxml2, libxslt or gnutls, which libyaz also links.
+#
+# Loading the library answers all of it at once, and answers the question that actually
+# matters rather than a proxy for it: musl, all three shared libraries, and the install
+# prefix, since libtool baked /opt/yaz/lib into the binary as its RUNPATH and a tree
+# copied anywhere else cannot find itself. A missing library names itself and exits
+# non-zero.
+#
+# The release smoke test runs the same command again on the finished image. That is not
+# duplication: this line fails the BUILD, in any build including somebody's own
+# `docker build`, while the smoke test proves it in the artefact that is about to be
+# published, after the unprivileged user and the file ownership are in place.
+# `LD_BIND_NOW=1` resolves every symbol at load instead of on first call, so a missing
+# one fails here rather than at some later request. Measured to work: the same binary
+# loads clean with it set.
+RUN LD_BIND_NOW=1 /opt/yaz/bin/yaz-client -V | grep -q "^YAZ version: ${YAZ_VERSION} " \
+    || { echo "the YAZ in /opt/yaz does not load, or is not ${YAZ_VERSION}" >&2; \
+         /opt/yaz/bin/yaz-client -V >&2 || true; exit 1; }
 
 WORKDIR /app
 

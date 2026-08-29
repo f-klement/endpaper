@@ -77,6 +77,16 @@ export const en = {
     "{count} books have not been confirmed as being on your shelf.",
   "ownership.reviewThem": "Review them",
 
+  // The in app overdue reminder and the broken channel notice, both on the
+  // library page because it is the screen somebody passes without going
+  // looking. Neither has a plural form: this catalogue interpolates and does
+  // not inflect, so every phrase has to read for one and for several.
+  "library.overdueBanner": "{count} loans need chasing.",
+  "library.overdueBannerAction": "See them",
+  "library.channelBroken":
+    "Overdue reminders are not getting through on {channels}.",
+  "library.channelBrokenAction": "Check the settings",
+
   // ── Library ─────────────────────────────────────────────────────────────
   "library.title": "Library",
   "library.scanButton": "+ Scan",
@@ -372,6 +382,7 @@ export const en = {
   "login.usernamePlaceholder": "Enter username",
   "login.passwordPlaceholder": "Enter password",
   "login.pleaseWait": "Please wait...",
+  "login.browseCatalogue": "Browse the public catalogue",
   "login.firstAccountAdmin": "The first account created becomes the admin.",
   "login.directoryHint":
     "Sign in with your directory account. Accounts are managed there, not here.",
@@ -393,12 +404,52 @@ export const en = {
   "settings.appearance.title": "Appearance",
   "settings.appearance.summary":
     "The palette, light or dark, the wallpaper, and the language the app speaks.",
+  "settings.account.title": "Your account",
+  // Deliberately says nothing about other people's addresses, even though an
+  // admin finds them behind this link. This sentence is on the settings index,
+  // which every member reads, and `MemberAddresses.tsx` returns null rather
+  // than a refusal for exactly the reason a summary must not announce the list
+  // either. An admin meets the section on the page.
+  "settings.account.summary":
+    "The address a reminder addressed to you would be sent to.",
   "settings.catalogue.title": "Catalogue sources",
   "settings.catalogue.summary":
     "Where a book's details come from when you scan or search for one.",
   "settings.library.title": "Your library",
   "settings.library.summary":
     "Bringing books in from another service, the covers they arrived without, and facts this library keeps that Endpaper has no column for.",
+  "settings.public.title": "Public catalogue",
+  "settings.public.summary":
+    "Library mode, and whether a reader with no account may search this catalogue. Both are off until you turn them on.",
+  "settings.public.modeTitle": "Library mode",
+  "settings.public.modeLabel": "Catalogue this library as a library",
+  "settings.public.modeHint":
+    "Shows the call number, the classification and the record status, and puts ownership and reading status away. It publishes nothing.",
+  "settings.public.modeRepublishes":
+    "Publishing is already switched on, so turning this back on republishes the catalogue immediately.",
+  "settings.public.publishTitle": "Publishing",
+  "settings.public.publishLabel": "Let anyone search this catalogue",
+  "settings.public.publishHint":
+    "Search and one record per book, readable without an account. Nothing else.",
+  "settings.public.publishNeedsMode":
+    "Turn on library mode first. A catalogue cannot be published without it.",
+  "settings.public.liveNotice": "This catalogue is published.",
+  "settings.public.liveLink": "See what a visitor sees",
+  "settings.public.indexingLabel": "Let search engines index it",
+  "settings.public.indexingHint":
+    "Off by default. Publishing a catalogue and inviting a search engine to crawl it are different decisions.",
+  "settings.public.confirmTitle": "Publish this catalogue?",
+  "settings.public.confirmBody":
+    "Anyone who can reach this server will be able to search it and read one record per book, with no account and no password.",
+  "settings.public.confirmShown":
+    "Shown: title, author, publisher, year, ISBN, language, pages, format, series, description, tags and classifications.",
+  "settings.public.confirmWithheld":
+    "Not shown: who owns a book, whether you will lend it, who has read it, where it is shelved, what it cost, and every note.",
+  "settings.public.confirmPrivate":
+    "Private books stay private, and so does everything in the trash.",
+  "settings.public.confirmIndexing":
+    "Search engines are told to stay away until you allow them separately.",
+  "settings.public.confirmAction": "Publish",
   "settings.lending.title": "Lending",
   "settings.lending.summary":
     "Reminders for books that are late, and where they are sent.",
@@ -407,6 +458,25 @@ export const en = {
     "The whole library out and back in again, and accounts for seeing it the way an ordinary member does.",
   "settings.about.summary":
     "Which version is running, where the source is, and how to support the project.",
+
+  // ── Your account ────────────────────────────────────────────────────────
+  // One field today, and the hint says what it is for rather than promising a
+  // reminder: nothing sends to this address yet, so a sentence implying one
+  // would be a lie the household finds out about a week later.
+  "account.email.title": "Email address",
+  "account.email.hint":
+    "Where a reminder addressed to you would go. Nothing is sent to it yet: overdue reminders go to the household mailbox.",
+  "account.email.yours": "Your address",
+  "account.email.placeholder": "you@example.org",
+  "account.email.none": "None set.",
+  "account.email.fromDirectory":
+    "This comes from your directory. Change it there.",
+  "account.email.directoryRefused":
+    "That address is the directory's to set, so it was not changed here.",
+  "account.email.couldNotSave": "The address could not be saved.",
+  "account.members.title": "Member addresses",
+  "account.members.hint":
+    "So you can find the empty one, or the typo, when somebody's reminders go nowhere.",
 
   "theme.hint": "Saved to your account, so it follows you between devices.",
   "theme.light": "Light",
@@ -525,8 +595,11 @@ export const en = {
   "settings.overdueSkippedPrivate": "{count} private books were left out.",
   "settings.overdueNotSentMisconfigured":
     "Nothing was sent: a channel is switched on and its settings cannot be used. The message below says which.",
+  "settings.overdueNotSentInAppOnly":
+    "Nothing was sent outward: the in app notice is the only channel switched on, and every member reads it in the library.",
   // One line per channel that was tried, because "sent" over three channels
   // hides the one that failed, and the loans were still stamped.
+  "settings.overdueSenderInApp": "In the app",
   "settings.overdueSenderWebhook": "Webhook",
   "settings.overdueSenderEmail": "Email",
   "settings.overdueSenderTelegram": "Telegram",
@@ -540,7 +613,33 @@ export const en = {
   "settings.overdueRowUnreachable":
     "could not be reached. It will be tried again.",
   "settings.overdueRowMisconfigured": "its settings cannot be used.",
+  "settings.overdueRowInAppOnly": "nothing to send outward.",
   "settings.overdueRowNothingSent": "nothing was sent.",
+
+  // ── In app reminders, and whether a channel is working ──────────────────
+  //
+  // The one channel that needs nothing obtained first, and the standing record
+  // of what each of them last did. Before this, a broken channel lived only in
+  // the container log, which for a household is not a worse form of alerting
+  // but the absence of one.
+  "settings.inApp": "In the app",
+  "settings.inAppEnable": "Show overdue loans in the app",
+  "settings.inAppHint":
+    "A note on the library page, and the overdue loans page it links to. Switched off, that page stays empty and every other channel keeps running. This is the only channel that needs nothing set up, so it is on to begin with.",
+  "settings.inAppPrivacyNote":
+    "This one has a reader, so the rule above does not apply to it: each person sees the overdue loans they lent or borrowed, including their own private books, and never anybody else's.",
+  "settings.senderHealthNotYet":
+    "Not run yet. Reminders go out on the hour, and only when something is overdue.",
+  "settings.senderHealthWorking": "Working. Last run on {when}.",
+  "settings.senderHealthFailedOnce":
+    "The last attempt failed: {detail} It will be tried again.",
+  // No count in it. The refusal arm reports a channel as broken on its first
+  // failure, so "1 attempts have failed in a row" was reachable and this
+  // catalogue has no plural forms. What replaces it says more: when the run of
+  // failures started, and when it was last tried, which is what tells a reader
+  // whether the verdict is fresh.
+  "settings.senderHealthBroken":
+    "Not working since {since}. The last attempt was on {when}: {detail}",
 
   // ── Mail and chat reminders ─────────────────────────────────────────────
   //
@@ -711,6 +810,15 @@ export const en = {
   "authors.mergedFrom": "Folded in: {spelling}",
   "authors.undo": "Undo this merge",
   "authors.browse": "Show these books",
+  "authors.wikipediaOn": "Read about {name} on Wikipedia",
+  // Shown when the article we could reach is not in the reader's language. The
+  // owner's rule on #89: a page they cannot read beats an absent button,
+  // because it is still the right person. Naming the language is what stops
+  // that being a surprise.
+  "authors.wikipediaInOther": "Read about {name} on Wikipedia, in {language}",
+  // The floor of the fallback chain: no Wikipedia edition holds an article, or
+  // Wikidata could not be reached. The item page still names the right person.
+  "authors.wikidataItem": "Look {name} up on Wikidata",
   "authors.select": "Select {name}",
   "authors.selectedCount": "{count} selected",
   "authors.keepNamed": "Keep {name}",
@@ -786,8 +894,30 @@ export const en = {
   "loans.overdue": "Overdue",
   "loans.overdueSince": "Overdue since {date}",
   "loans.overdueOnly": "Overdue only",
-  "loans.overdueBanner": "{count} loans are overdue.",
+  "loans.overdueBanner": "{count} loans need chasing.",
   "loans.chaseThem": "Show them",
+
+  // ── The overdue page ────────────────────────────────────────────────────
+  //
+  // #102. The library page keeps the reminder and this holds the detail. The
+  // delivery lines below describe a channel and never a loan: the health
+  // record is written once per sender per run and carries no loan id, so a
+  // sentence implying a receipt for one book would be one this app cannot
+  // support. `overdue.deliveryNote` is what stops it being read that way.
+  "overdue.title": "Overdue",
+  "overdue.couldNotLoad": "The overdue list could not be loaded.",
+  "overdue.none": "Nothing is overdue",
+  "overdue.noneHint": "Every book that is out is still within its date.",
+  "overdue.switchedOff": "The in app reminder is switched off",
+  "overdue.switchedOffHint":
+    "An admin can switch it back on under Lending. Only this page is affected: any channel that sends outward carries on, and the loans themselves are still on the loans page.",
+  "overdue.capped": "Showing the {shown} most overdue of {total}.",
+  "overdue.deliveryTitle": "Reminder channels",
+  "overdue.deliveryNote":
+    "Endpaper records what each channel did on its last run. It does not record which reminder reached which borrower, so these lines are about the channel and not about any one loan below.",
+  "overdue.deliveryNone": "No channel sends these reminders anywhere.",
+  "overdue.deliveryUnreadable":
+    "The channel record could not be read, so this says nothing about whether reminders are going out.",
 
   // ── The copy itself ─────────────────────────────────────────────────────
   "copy.title": "This copy",
@@ -1008,6 +1138,33 @@ export const en = {
   "error.sessionEnded.action": "Sign in again",
   "error.backToLibrary": "Back to the library",
   "error.reload": "Reload the page",
+
+  // ── The published catalogue ─────────────────────────────────────────────
+  //
+  // Read by people with no account, so nothing here may assume the reader
+  // knows what Endpaper is or who runs this library.
+  "public.title": "Catalogue",
+  "public.skipToContent": "Skip to the catalogue",
+  "public.signIn": "Sign in",
+  "public.search": "Search this catalogue...",
+  "public.searchLabel": "Search this catalogue",
+  "public.resultCount": "{count} books",
+  "public.resultCountOne": "1 book",
+  "public.noResults": "Nothing found",
+  "public.noResultsHint": "Try fewer words, or a different spelling.",
+  "public.emptyHint": "This catalogue has nothing in it yet.",
+  "public.loadMore": "Show more",
+  "public.backToCatalogue": "Back to the catalogue",
+  "public.closedTitle": "Nothing here",
+  "public.closedHint": "This library does not publish its catalogue.",
+  "public.classifications": "Classification",
+  "public.fact.isbn": "ISBN",
+  "public.fact.publisher": "Publisher",
+  "public.fact.year": "Year",
+  "public.fact.language": "Language",
+  "public.fact.pages": "Pages",
+  "public.fact.format": "Format",
+  "public.fact.series": "Series",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

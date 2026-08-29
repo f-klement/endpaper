@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import respx
 
 # ── Environment must be set before the app is imported ────────────────────────
 
@@ -122,6 +123,7 @@ from ratelimit import (  # noqa: E402
     import_limiter,
     login_limiter,
     metadata_limiter,
+    public_catalogue_limiter,
     register_limiter,
 )
 
@@ -216,6 +218,7 @@ def reset_rate_limits() -> None:
     metadata_limiter.reset()
     authority_limiter.reset()
     cover_backfill_limiter.reset()
+    public_catalogue_limiter.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -263,6 +266,48 @@ def offline_covers(monkeypatch: pytest.MonkeyPatch) -> None:
         # which is how a stub stops standing for the thing it replaces.
         lambda book_id, isbn, supplied, budget=None: None,
     )
+
+
+@pytest.fixture(autouse=True)
+def refuse_unmocked_network() -> Iterator[None]:
+    """No test reaches the internet, whether or not it remembered to say so.
+
+    **The suite had no such rule and it was one handler away from mattering.**
+    Every outbound call in this app went through a handler that a test either
+    wrapped in `respx.mock` or never triggered, so forgetting one was
+    theoretical. `POST /authors/identifiers` then grew a lobid request, and
+    **seven** existing tests that had never made one began making a real one: on
+    a machine with no route they timed out, and on one with a route they would
+    have reached a national library from a unit test.
+
+    That seven is measured rather than counted by eye, and the eye was wrong.
+    Nine tests call `confirm()` with no router of their own; making
+    `authority.resolve` raise on entry and reading the failures back showed that
+    two of the nine never get there, one refused at validation and one at the
+    author lookup.
+
+    An empty router refuses everything with `AllMockedAssertionError`.
+
+    **It does not make those seven fail, and claiming so was this docstring's
+    first draft.** `authority._lobid` catches bare `Exception` and re-raises
+    `AuthorityUnavailable`, and the handler treats that as "the file was not
+    reachable" and answers 201 with an empty `cross_references`. So the guard
+    stops the request; it does not turn a forgotten mock into a red test. What
+    it buys is that the suite is hermetic and fast, not that a missing mock is
+    announced. A test that needs the call to *happen* still has to say so, and
+    the ones added here assert on what came back rather than on a status alone.
+
+    **Nested routers still work**, which is what makes it safe to add under
+    hundreds of existing tests: a `with respx.mock(...)` inside a test pushes
+    its own router and pops back to this one after. Verified on respx 0.23.1,
+    all three ways: a bare request is refused, a nested route answers, and the
+    refusal is back once the nested router exits.
+
+    `assert_all_called=False` because this router declares no routes at all and
+    the strict form would fail every test for not calling them.
+    """
+    with respx.mock(assert_all_called=False):
+        yield
 
 
 @pytest.fixture(autouse=True)

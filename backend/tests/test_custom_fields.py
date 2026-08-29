@@ -141,6 +141,21 @@ NOT_OFFENCES = {
 def _imported_names(source: str) -> set[str]:
     """Every name one module imports, under both its spellings.
 
+    **Both, not `alias.asname or alias.name`, and that one word is the rule.**
+    The question here is "does this module reach a custom field value", and the
+    answer to that is the name it **imported**: `from models import
+    CustomFieldValue as CFV` binds `CFV` and imports `CustomFieldValue`, so
+    taking the local alias alone lets one rename walk past the guard. The local
+    name is kept too, because the star expansion below binds names rather than
+    importing them. `test_reading.py` states the same reasoning about `UserBook`.
+
+    That reason is written out here rather than left to be inferred from
+    `test_reading.py`. It arrived as correct code with no argument attached, and
+    correct code with no argument is what gets tidied into `asname or name` by
+    somebody reading it as a verbose idiom. `test_shelf.py` had exactly that
+    tidied form and one aliased import evaded it; verified on 2026-08-28, this
+    file and `test_reading.py` did not.
+
     Its own copy rather than `test_reading.py`'s, and that is not duplication
     for its own sake: that one expands a star against **its** allowlist, so
     importing it here would ask whether `shelf.py` re-exports a custom field.

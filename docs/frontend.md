@@ -19,6 +19,15 @@ ScanPage's tag step and BookDetail's tag editor, so it is
 `pages/components/TagPicker.tsx`. `Spinner` and `EmptyState` mention no domain concept at
 all, so they are in `src/components/`.
 
+Two moved up on the same day and both are the rule working rather than a tidy-up.
+`LoanRow` was LoansPage's alone until the overdue page drew the same card, and
+`SenderHealthLine` was the Lending settings route's alone until the overdue page drew the
+same standing record. A page may not import another page's internals, so the choice at
+that point is one move or one copy; the copy is what put a second, drifting channel name
+table in the library page's banner before `i18n/senderNames.ts` existed. Its companion
+`SENDER_ROW_REASONS` moved a level further out for that reason: a lookup from a domain
+value to a message key belongs to the catalogue, beside `tagNames.ts`.
+
 The bar for `src/components/` is deliberately high: if a component mentions a book, a loan
 or a tag, it does not belong there.
 
@@ -37,7 +46,7 @@ src/
 │   ├── query-client.ts     cache and retry defaults
 │   └── generated/          Orval output, committed, never hand-edited
 ├── components/             general dumb components only
-├── i18n/                    en.ts · de.ts · tagNames.ts · index.tsx (provider + useTranslation)
+├── i18n/                    en.ts · de.ts · tagNames.ts · senderNames.ts · index.tsx
 ├── lib/                     isbn.ts, goodreads.ts: pure functions, no React
 ├── pages/
 │   ├── components/         shared by several pages (TagPicker, BookCard)
@@ -47,7 +56,8 @@ src/
 │   ├── Home/               index.ts · Home.tsx · hooks.ts · types.ts · components/
 │   ├── BookDetail/         index.ts · BookDetail.tsx · hooks.ts · components/
 │   ├── ScanPage/           index.ts · ScanPage.tsx · hooks.ts · types.ts · components/
-│   ├── LoansPage/          index.ts · LoansPage.tsx · hooks.ts · components/
+│   ├── LoansPage/          index.ts · LoansPage.tsx · hooks.ts
+│   ├── OverduePage/        index.ts · OverduePage.tsx · hooks.ts · types.ts · components/
 │   ├── LoginPage/          index.ts · LoginPage.tsx · hooks.ts · components/
 │   ├── SeriesPage/         index.ts · SeriesPage.tsx · hooks.ts · components/
 │   ├── AuthorsPage/        index.ts · AuthorsPage.tsx · hooks.ts · components/
@@ -350,13 +360,14 @@ controls, the scrollbar, and the paint before first render.
 
 ### The background patterns
 
-`src/theme/patterns.ts` holds ten tileable SVGs, one picked at random per visit: five
-William Morris repeats grown along curves, and five decorated papers set out on a lattice.
+`src/theme/patterns.ts` holds sixteen tileable SVGs, one picked at random per visit: eight
+William Morris repeats grown along curves, and eight decorated papers set out on a lattice.
 They are drawn rather than shipped as images. Morris designs are public domain, but the
 scans in circulation are mostly museum photographs under their own terms, so "it is a
 Morris" is not by itself a licence; and an SVG is a few kilobytes against a few hundred for
 a repeating raster, and it takes its colour from the theme instead of needing a second file
-for dark.
+for dark. What each one reproduces, and on what basis it is free to reproduce, is tabulated
+in [theming.md](theming.md).
 
 The choice is stored only if somebody makes one: a null wallpaper means a different one
 each time, which is the behaviour this was built around and what a new account starts at.
@@ -367,7 +378,7 @@ Two things about the engine are worth knowing before touching it, and both are m
 [theming.md](theming.md):
 
 - **A layer states a weight, not an opacity.** The alpha is solved from it against the
-  palette's own ink and page, because the same alpha over seven inks is seven different
+  palette's own ink and page, because the same alpha over ten inks is ten different
   weights and the spread was as wide as the whole ink budget.
 - **A pattern is admitted by two measurements**, tint contrast and peak coverage, both read
   off the generated tile by `frontend/tests/theme/rasterise.ts`. Adding a pattern that looks

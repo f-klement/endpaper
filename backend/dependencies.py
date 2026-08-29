@@ -50,6 +50,83 @@ from shelf import Loading, Shelf
 #: exactly as `routers/covers.py` already spells it.
 RowId = Annotated[int, PathParam(ge=1, le=MAX_ROW_ID)]
 
+#: The longest a comma separated list of row ids may be, as characters.
+#:
+#: **The bound has to be on the string, because the ids are inside it.** `RowId`
+#: and `RowIdField` both work by annotating an `int`, and neither can see a
+#: number that arrives as part of a `str`: measured on the public catalogue with
+#: no session at all, `?tags=18446744073709551616` raised `OverflowError` from
+#: inside the query, `?tags=<5000 digits>` exceeded `sys.int_max_str_digits`, and
+#: a thousand ids exceeded SQLite's expression tree depth. All three answered
+#: **500**, which is the app calling its own code buggy at a value the caller
+#: chose.
+#:
+#: 400 characters is far past any real filter (32 ids of six digits is 224) and
+#: far under `sys.int_max_str_digits`, which is 4300, so no single token in a
+#: list this long can be expensive to parse.
+MAX_ID_LIST_CHARS = 400
+
+#: How many ids one filter may name.
+#:
+#: **A cost bound, not a product limit.** Each tag id becomes its own correlated
+#: `EXISTS` and they are ANDed, so the work is linear in the count: measured on
+#: the public listing against a one book catalogue, 500 ids took 0.789s and 900
+#: took 0.900s of CPU, and the public rate limit of 120 requests a minute would
+#: have allowed one address to spend more than a minute of CPU per minute
+#: without ever tripping it.
+#:
+#: 32 against a seeded vocabulary of 105 tags, and the filter is a conjunction,
+#: so a query naming 32 tags returns nothing on any real library. Measured after
+#: the bound, on the same one book catalogue: 1 id 10.8ms, 32 ids **23.7ms**, 33
+#: ids a 422 in 9.4ms. So the ceiling costs about 13ms over an unfiltered
+#: request, against the 900ms one request could spend before it.
+MAX_IDS_IN_A_FILTER = 32
+
+#: One spelling of the parameter, so the two listings cannot bound it
+#: differently. `routers/books.py` and `routers/public.py` both use it.
+TagIdList = Annotated[
+    str | None,
+    Query(max_length=MAX_ID_LIST_CHARS, description="Comma-separated tag ids"),
+]
+
+
+def row_ids(raw: str | None, *, field: str) -> list[int]:
+    """A comma separated list of row ids, bounded at both ends and in length.
+
+    **The one parser, shared, because the line it replaces was copied.** It was
+    written inline in `routers/books.py` and copied verbatim onto the public
+    listing, where it became reachable with no session; the defect was already
+    there and the copy is what made it worth fixing rather than filing.
+
+    Two rules, and they are deliberately different from each other:
+
+    * **A token that is not a row id is dropped**, which is the existing
+      contract: `?tags=abc` has always been ignored rather than refused. An id
+      past `MAX_ROW_ID` is dropped by the same rule, because it is not a row id
+      either, and dropping it is what stops it reaching the driver.
+    * **Too many ids is refused**, with a 422 naming the ceiling. Truncating
+      instead would answer a different question from the one asked and say
+      nothing about it, and this is a filter: a wrong answer looks like a
+      correct one.
+    """
+    if not raw:
+        return []
+    found = [
+        number
+        for token in raw.split(",")
+        if (stripped := token.strip()).isdigit()
+        and 1 <= (number := int(stripped)) <= MAX_ROW_ID
+    ]
+    if len(found) > MAX_IDS_IN_A_FILTER:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Name at most {MAX_IDS_IN_A_FILTER} ids in `{field}`; "
+                f"this asked for {len(found)}."
+            ),
+        )
+    return found
+
 
 def _not_found() -> HTTPException:
     """The answer for a book that is absent, and for one that is not yours.

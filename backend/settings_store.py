@@ -14,8 +14,9 @@ A container that behaves differently depending on database contents is harder
 to reason about, so the second list is kept deliberately short.
 """
 
+import json
 import secrets
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy.orm import Session
 
@@ -63,6 +64,25 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.OVERDUE_TELEGRAM_ENABLED: "false",
     SettingKey.TELEGRAM_BOT_TOKEN: "",
     SettingKey.TELEGRAM_CHAT_ID: "",
+    # The in app notice, and it is the one sender that is **on** by default.
+    # The other three start silent because they send catalogue content
+    # somewhere outside this app, and that should be a choice somebody makes.
+    # This one sends nothing anywhere: it shows a member their own overdue
+    # loans, scoped exactly as every other page they can already open. A
+    # household that has configured nothing being told nothing is the whole
+    # complaint this channel answers, and an off switch would reproduce it.
+    SettingKey.OVERDUE_IN_APP_ENABLED: "true",
+    # Library mode and the public catalogue, both off. The second is the only
+    # setting in this table that makes catalogue rows readable **without a
+    # session at all**, so its default is the one that matters most here: a
+    # household that reads no setting publishes nothing.
+    SettingKey.LIBRARY_MODE: "false",
+    SettingKey.PUBLIC_CATALOGUE_ENABLED: "false",
+    # Off, so a published catalogue is `noindex` until somebody says otherwise.
+    SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED: "false",
+    # An empty JSON object: no sender has run yet. Not a preference, so it has
+    # no field in `SettingsUpdate` and never reaches `_read_settings`.
+    SettingKey.SENDER_HEALTH: "{}",
 }
 
 # Settings whose value must never be sent back to a browser in full.
@@ -119,6 +139,32 @@ def get_int(db: Session, key: SettingKey, *, minimum: int, maximum: int) -> int:
     except ValueError:
         value = int(DEFAULTS[key])
     return max(minimum, min(maximum, value))
+
+
+def get_json(db: Session, key: SettingKey) -> dict[str, Any]:
+    """A stored JSON object, falling back to `{}` rather than raising.
+
+    Same degrade rule as `get_int` and `get_locale`, and it matters more here:
+    the one caller reads this on the hourly ticker, so a row a restore or a
+    hand edit left as `null`, a list, or half a document would otherwise raise
+    inside the background task and stop it for the life of the container.
+
+    Objects only. A list parses as valid JSON and would then be indexed by a
+    string somewhere downstream, which is a `TypeError` at a distance from the
+    row that caused it.
+    """
+    try:
+        parsed = json.loads(get_raw(db, key))
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def set_json(db: Session, key: SettingKey, value: dict[str, Any]) -> None:
+    """Write a JSON object. `sort_keys` so an unchanged record writes an
+    unchanged string, which is what makes a diff of the settings table
+    readable and a backup comparison meaningful."""
+    set_value(db, key, json.dumps(value, sort_keys=True))
 
 
 def get_locale(db: Session, key: SettingKey) -> Locale:
@@ -193,6 +239,54 @@ def is_from_env(key: SettingKey) -> bool:
 def google_books_api_key(db: Session) -> str:
     """The key actually in force. See `in_force`; this name has its own callers."""
     return in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+
+
+def library_mode(db: Session) -> bool:
+    """Whether the catalogue is presented to a **cataloguer** rather than a household.
+
+    Call number, Classification and record status in; ownership, lending
+    willingness and reading status out. It publishes nothing, which is why it
+    is a separate switch from the one below: an institution wanting the
+    cataloguer's columns should not have to put its catalogue on the internet
+    to get them.
+    """
+    return get_bool(db, SettingKey.LIBRARY_MODE)
+
+
+def public_catalogue_is_published(db: Session) -> bool:
+    """Whether a reader with no session may search and read item records.
+
+    **Both rows, and the conjunction is enforced here rather than in the UI.**
+    A publish switch left on while library mode is off has to be treated as
+    off, or flipping library mode back off would leave a catalogue public with
+    nothing on screen saying so. Disabling the control in the browser is not
+    that guarantee: it is advice to one client.
+
+    This is the single answer to "is anything served", and the public router is
+    the only caller. Which **rows** a public reader may see is a different
+    question and belongs to `Shelf.seen_by_the_public`; which **columns** is a
+    third and belongs to `schemas/public.py`. Nothing here relaxes either: a
+    Private Book stays private in every mode, and that rule is not this
+    switch's to change.
+    """
+    return library_mode(db) and get_bool(db, SettingKey.PUBLIC_CATALOGUE_ENABLED)
+
+
+def public_catalogue_may_be_indexed(db: Session) -> bool:
+    """Whether a search engine is invited to crawl the published catalogue.
+
+    Off by default and separately from publishing, because they are different
+    decisions: a reading room's catalogue can be public without wanting to be
+    the first result for every patron's name in it. False is what makes the
+    public routes send `X-Robots-Tag: noindex`.
+
+    Reads the publish state too, so an indexing row left on while nothing is
+    published cannot invite a crawler to a catalogue that answers 404. The
+    conjunction is the same shape as the one above and for the same reason.
+    """
+    return public_catalogue_is_published(db) and get_bool(
+        db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
+    )
 
 
 def token_epoch(db: Session) -> str:

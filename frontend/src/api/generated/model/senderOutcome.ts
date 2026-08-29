@@ -11,12 +11,12 @@ import type { OverdueSender } from "./overdueSender.ts";
 /**
  * What one channel did with the digest.
  *
- * **The withheld count is here rather than only at the top, and that is the
- * point of the shape.** All three senders withhold the same private books
- * today, because all three go to a channel rather than to a person, so the
- * three numbers agree. They are reported per sender anyway: the moment one
- * sender's audience differs, a single figure would be a lie on the other two,
- * and a reader has no way to tell a shared number from a coincidence.
+ * **The withheld count is here rather than only at the top, and the case it
+ * was written for has now arrived.** The three senders that push outward
+ * withhold the same private books, because each goes to a channel rather than
+ * to a person, so their three numbers agree. The in app channel reports **0**,
+ * because its audience is a member and nothing is withheld from it. A single
+ * figure at the top would now be wrong on one row of four.
  */
 export interface SenderOutcome {
   detail?: string | null;

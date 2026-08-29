@@ -33,8 +33,14 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 **The distinction that matters here.** A **classification** says where a book sits in a
 scheme, which is a statement about the book. An **authority file** gives a person, place
 or subject a stable identifier, which is a statement about a thing the book mentions.
-Endpaper stores the first in `classifications` and, as of round 2, deliberately does not
-store the second for authors. See [data-model.md](data-model.md).
+Endpaper stores the first in `classifications` and the second, for authors, in
+`author_identifiers`. See [data-model.md](data-model.md).
+
+**That sentence used to end "and, as of round 2, deliberately does not store the second
+for authors", and it stopped being true on 2026-08-28** when confirming a GND number began
+keeping the record's cross references. It is corrected rather than deleted because the
+distinction above is what makes the two tables two tables: the same GND number can be a
+subject heading in one and a person in the other, and they are not the same claim.
 
 | Term | What it is |
 |---|---|
@@ -42,7 +48,10 @@ store the second for authors. See [data-model.md](data-model.md).
 | **LCC** | Library of Congress Classification. The alphanumeric alternative to Dewey, common in American academic libraries. |
 | **LCSH** | Library of Congress Subject Headings. Not a classification: a controlled vocabulary of subject *phrases*, with subdivisions joined by two hyphens (`Computer software -- Development`). Read here out of the `<subject authority="lcsh">` elements in the MODS record the search path already fetches, not from `id.loc.gov`, which this app does not call. The record carries no identifier for a heading, so the phrase itself is the access point. |
 | **GND** | Gemeinsame Normdatei, the shared authority file of the German speaking library world, covering people, organisations, subjects, places and works. Every entry carries an identifier. |
-| **VIAF** | Virtual International Authority File. Clusters authority records for the *same person* across national libraries, so one author's German, American and French records share a cluster identifier. |
+| **VIAF** | Virtual International Authority File. Clusters authority records for the *same person* across national libraries, so one author's German, American and French records share a cluster identifier. **A cluster id is a discovery route and not an identity here**: clusters split and merge, so what a cluster is read for is the national numbers it lists. |
+| **ISNI** | International Standard Name Identifier, ISO 27729. Sixteen characters, language neutral, and scoped to a **public identity** rather than to a record, which is what makes it the spine: it says two spellings are one person where a cluster id only says two records were grouped. |
+| **LCNAF** | Library of Congress Name Authority File. The people half of `id.loc.gov`, which also serves a subject file under the same host and a near identical URL shape. |
+| **BLBNB**, **ARBABN**, **BNE**, **PTBNP**, **ICCU**, **BNCHL** | The national authority files of Brazil, Argentina, Spain, Portugal, Italy and Chile, spelled as VIAF spells them in a cluster's source list. Endpaper **stores** these and cannot look one up: two of the six refuse every request and the rest speak Z39.50, which this app has no client for. |
 | **Sachgruppe** | Not an acronym. The DNB's own coarse subject group scheme, derived from Dewey, assigned to everything it receives. |
 
 ## Codes that appear inside records

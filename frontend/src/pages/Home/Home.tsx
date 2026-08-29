@@ -3,17 +3,24 @@ import { Link } from "react-router-dom";
 
 import { OwnershipStatus } from "../../api/generated/model";
 import { Button, EmptyState, ErrorState } from "../../components";
-import { Page, PageCount, PageHeader } from "../components";
+import { Page, PageCount, PageHeader, SearchBar } from "../components";
 import { useTranslation } from "../../i18n";
 import BookFilters from "./components/BookFilters";
 import BookGrid from "./components/BookGrid";
 import BookList from "./components/BookList";
 import BookTable from "./components/BookTable";
+import ChannelAlertBanner from "./components/ChannelAlertBanner";
+import OverdueBanner from "./components/OverdueBanner";
 import SavedSearches from "./components/SavedSearches";
-import SearchBar from "./components/SearchBar";
 import SelectionBar from "./components/SelectionBar";
 import UnconfirmedBanner from "./components/UnconfirmedBanner";
-import { useBookSelection, useLibrary, useUnconfirmedCount } from "./hooks";
+import {
+  useBookSelection,
+  useBrokenSenders,
+  useLibrary,
+  useMyOverdue,
+  useUnconfirmedCount,
+} from "./hooks";
 import { hasActiveFilters, isWishlist } from "./types";
 
 /**
@@ -28,6 +35,8 @@ export default function Home() {
   const library = useLibrary();
   const selection = useBookSelection();
   const unconfirmed = useUnconfirmedCount();
+  const overdue = useMyOverdue();
+  const brokenSenders = useBrokenSenders();
   const [showTagPanel, setShowTagPanel] = useState(false);
 
   const filtered = hasActiveFilters(library.filters);
@@ -66,9 +75,20 @@ export default function Home() {
       />
 
       {/* Hidden while selecting: the reader is already doing the thing the
-          banner would be asking them to do. */}
+          banner would be asking them to do. All three, for the same reason.
+
+          Overdue first: a book somebody else is holding past its date is the
+          one of the three with a person waiting at the other end. The broken
+          channel is next because it is about the app rather than the shelf,
+          and the unconfirmed nudge is last because its books are not going
+          anywhere. Each renders nothing when its own count is zero, so the
+          usual library page still has none of them. */}
       {!selection.isSelecting && (
-        <UnconfirmedBanner count={unconfirmed} onReview={reviewUnconfirmed} />
+        <>
+          <OverdueBanner count={overdue} />
+          <ChannelAlertBanner senders={brokenSenders} />
+          <UnconfirmedBanner count={unconfirmed} onReview={reviewUnconfirmed} />
+        </>
       )}
 
       <SearchBar onSearch={(query) => library.update({ query })} />

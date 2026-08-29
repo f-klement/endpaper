@@ -267,14 +267,34 @@ class AuthorAlias(Base):
 
 #: The longest identifier an authority file gives one person.
 #:
-#: A GND number is at most 11 characters (`118181505`, `4203576-4`), and the
-#: longest identifier any authority file in scope issues is a VIAF cluster id,
-#: which is 9 digits today. 60 is far past both and is not a guess about a
+#: A GND number is at most 11 characters (`118181505`, `4203576-4`). The longest
+#: identifier any authority file in scope issues is a **Biblioteca Nacional de
+#: Chile control number, 23 digits**: `10000000000000000011923`, measured
+#: 2026-08-28 in the VIAF cluster for Clarice Lispector. That sentence used to
+#: name a VIAF cluster id at 9 digits, and the six national schemes retired it.
+#: 60 is far past both and is not a guess about a
 #: format: it is a **stored denial of service bound**, the same job
 #: `CUSTOM_FIELD_VALUE_MAX` does. A catalogue response has no size cap anywhere
 #: in `metadata.py`, so without a bound here a hostile `$0` writes as many bytes
 #: into this column as the record holds.
 AUTHORITY_IDENTIFIER_MAX = 60
+
+
+def _scheme_check(members: type[AuthorityScheme]) -> str:
+    """A SQL `IN` list holding every member of an enum, in declaration order.
+
+    **Not sorted, and the order is a readability property rather than a
+    correctness one.** `StrEnum` iterates in declaration order, so the text this
+    renders reads in the same order as the enum above it and as the literal the
+    migration spells out. Nothing checks that the two texts match: the guard
+    that exists,
+    `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase
+    ::test_every_scheme_the_enum_offers_is_storable`, asks the migrated database
+    whether each member is **storable**, which is the question that matters and
+    is indifferent to the order. Keeping them in step is for whoever reads the
+    two files against each other.
+    """
+    return "scheme IN (" + ", ".join(f"'{member.value}'" for member in members) + ")"
 
 
 class AuthorIdentifier(Base):
@@ -334,8 +354,21 @@ class AuthorIdentifier(Base):
             "scheme",
             unique=True,
         ),
+        # **Built from the enum rather than written out, and that is a fix for a
+        # drift that had nowhere to be caught.** The list used to be the literal
+        # `('gnd')`, so adding a member to `AuthorityScheme` left a value the
+        # application accepts and the database rejects, with the failure landing
+        # as an `IntegrityError` at the first write rather than at import. The
+        # migration still spells the list out, because a revision has to say
+        # what it did on the day it ran, and
+        # `tests/test_schema.py::TestTheAuthorityIdentifierConstraintsOnAMigrated
+        # Database::test_every_scheme_the_enum_offers_is_storable` is what keeps
+        # the two from separating again: it asks the **migrated** database
+        # whether each member is storable, which a model built one cannot,
+        # because this function derives that constraint from the same enum and
+        # so can only ever agree with itself.
         CheckConstraint(
-            "scheme IN ('gnd')",
+            _scheme_check(AuthorityScheme),
             name="ck_author_identifiers_scheme",
         ),
         CheckConstraint(
@@ -513,6 +546,36 @@ class User(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Where a reminder addressed to this member would go. Nullable, and NULL is
+    # every row on upgrade: no address means the household mailbox, which is the
+    # only mode the mail sender has, so the column changes nothing until
+    # somebody fills a field in.
+    #
+    # **Deliberately NOT on `UserOut`**, for the same reason the three
+    # appearance columns are not: that schema is served inside every book
+    # payload and the member list, so a field on it is disclosed to every member
+    # who can see a book. An address reaches the four routes named in
+    # `routers/users.py` and nothing else: **not the mailer**, which still takes
+    # its recipients from `overdue_mail_to`, so filling this in changes no
+    # behaviour. `tests/test_house_rules.py::TestAnAddressIsServedOnlyWhereItIsNamed`
+    # is what keeps that true rather than intended, and its reader pass is what
+    # would fail the moment the mailer did read it.
+    #
+    # 320 is the RFC 5321 maximum for a path, and `mailer.MAX_ADDRESS` is the
+    # same number. A literal rather than that constant because importing it
+    # here is an import cycle: `mailer` imports `settings_store`, which imports
+    # this module. So the two are tied by a test instead,
+    # `tests/test_schema.py::TestAnAddressPerMember::test_the_column_is_as_wide_as_the_rule_allows`,
+    # and SQLite enforces neither: the width is applied before the write, at
+    # `schemas/user.py` and `auth_backends._directory_email`.
+    #
+    # Who owns the value is `auth_backends.directory_owns_email`, not this
+    # column: under a directory configured to carry an address the directory
+    # writes it on every sign in, exactly as it re-applies `is_admin`. That
+    # function is the one place the question is answered; three call sites in
+    # two modules ask it.
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
 
     # ── Appearance ────────────────────────────────────────────────────────
     # Three columns here rather than a `user_preferences` table. They are a

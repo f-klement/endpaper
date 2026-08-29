@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.11.0
+
+_2026-08-29_
+
 **Internal: the privacy rule now covers the tables that hang off a book.** A book
 can be private, and one function decides who may see which books. That rule is
 enforced by a test which reads the source of every backend file, and it only
@@ -15,10 +19,234 @@ which statements are safe is written down by hand, ten of them, each with a
 reason. Which tables belong to a book is read from the schema rather than listed,
 so a new one is covered the day it is added.
 
+**Confirming an author's GND number now stores the other identifiers that come
+with it.** The same authority record already carried an ISNI, an LCNAF number, a
+VIAF cluster and a Wikidata item on every lookup; all four were shown once and
+dropped. They are now kept, so an author has a stable identity outside the German
+catalogue as well as inside it. Confirming an identifier answers with everything
+it wrote, rather than with the one row.
+
+**An identifier the two authority files disagree about is shown and never
+stored.** A disagreement means they point at different records, and storing
+either side would be resolution by precedence, which this feature refuses to do
+anywhere. The conflict is reported beside the identifier instead. The two files
+are now compared on ISNI as well as on the Wikidata item and the VIAF cluster.
+
+**Internal: no test can reach the internet.** Existing tests began making real
+requests to lobid the moment the confirmation endpoint made one, and nothing in
+the suite would have said so.
+
 **Internal: Settings is a route tree.** Six sections, each a heading and a line
 saying what it routes to, with a page of its own behind it. A section only an
 admin can use is not offered to a member, and still refuses them if they follow a
 link to it directly.
+
+**Author identifiers for six national libraries.** Confirming a GND number now
+also stores the author's number in the national libraries of Brazil, Argentina,
+Spain, Portugal, Italy and Chile. A GND record's own cross references carry ISNI,
+the Library of Congress number, the VIAF cluster and Wikidata, and no national
+file at all; the VIAF cluster that record names carries all six. `AuthorityScheme`
+grows from five members to eleven, in one migration.
+
+**VIAF is read as an enrichment and never as an entry point.** A lookup is
+unchanged and costs nothing extra: it still asks lobid and Wikidata only. A
+confirmation asks VIAF for the national identifiers, and only then. The cluster is
+verified against the identifier that was confirmed rather than trusted, so a
+cluster that does not name the same GND record back is discarded.
+
+**Internal: a refusal test that had gone vacuous twice.** The check that the
+scheme constraint rejects an unknown scheme used `viaf` until `viaf` became a
+member, then `blbnb` until `blbnb` became one on the same day. It now uses a
+classification scheme, which cannot become a person's scheme, and a new test pins
+the two enums' overlap so the next widening cannot quietly disarm it.
+
+**Overdue reminders in the app.** A fourth reminder channel beside the webhook,
+mail and Telegram, and the only one that needs nothing obtained first: no receiver
+to run, no SMTP account, no bot token. A banner on the library page says how many
+of your loans are overdue and links to the list. It is on to begin with, unlike
+the three that send catalogue content outward, because a household that has
+configured nothing being told nothing is the problem the reminder feature was
+filed to solve.
+
+It is the one channel with a reader, so it is the one that can carry a member's
+own private books: each person sees the overdue loans they lent or borrowed, an
+admin sees every overdue loan on their shelf, and neither can reach a private book
+somebody else added.
+
+**It switches itself on for an existing install**, not only for a fresh one: the
+default applies to a settings row nobody has written, and no household has written
+this one. A library that upgrades will find the banner there without having asked
+for it. That is intended rather than an oversight, since the channel sends nothing
+outward and discloses nothing a member could not already see, but it is a change
+to a running installation and it is said here rather than discovered.
+
+**A reminder channel that has stopped working now says so.** Each run records what
+every channel did, so a failure survives the run that produced it. The lending
+settings screen shows the standing record under each switch: never run, working,
+failed once, or not working since a date with the number of attempts. A channel
+failing for a day is also called out on the library page.
+
+The bar for that banner is deliberately high, because a notice that cannot tell a
+network blip from a broken configuration is one people switch off. A refusal the
+app made itself, a missing address or a setting it will not use, is reported at
+once, since nothing was dialled and nothing will work until somebody changes it. A
+destination that could not be reached is reported only after 24 hours and at least
+two consecutive failures. Any write to a channel's own settings clears its record,
+so repairing a bot token is what makes the notice go, and nothing else clears one.
+
+**Internal: the image now carries YAZ, and the compile does not run on every
+build.** National library catalogues speak Z39.50, and reaching them needs a client
+library that Alpine does not package. It is compiled from source in a build stage
+and the shipped image takes the library and one diagnostic binary, about 11 MB in
+all. The compile takes a minute, and it runs when the YAZ version, the tarball it
+was built from, the base image or the build recipe changes, rather than on every
+push. The tree carries a stamp naming all four, and both the build stage and the
+runtime stage check it, so a prebuilt tree that does not match is recompiled or
+refused rather than shipped. Nothing in the application calls it yet.
+
+**An email address per member.** A reminder can be addressed to the borrower rather
+than only to the household mailbox. A member sets their own under Settings, Your
+account; an admin sets anybody's on the same screen. **Nothing sends to it yet**:
+overdue mail still goes to the household mailbox, and a member with no address is what
+every row is on upgrade, so the column changes no behaviour until somebody fills a
+field in.
+
+**`LDAP_EMAIL_ATTRIBUTE` and `PROXY_EMAIL_HEADER`, both empty by default.** Set either
+and the directory owns each member's address: it is re-applied at every sign in, exactly
+as admin status already is, and the field becomes read only in the app. Left empty, the
+directory is not asked and a member's own address is never overwritten. With the shipped
+defaults an LDAP deployment's search asks for exactly what it asked for before.
+**Turning either on clears the stored address of any member the directory has none for**,
+and the field is read only from then on, so populate the directory first.
+
+**A public catalogue, off by default and behind two switches.** Library mode changes
+what a cataloguer sees and publishes nothing; publishing is a second, separate decision.
+A publish switch left on while library mode is off is treated as off by the server, so
+turning library mode back off cannot leave a catalogue public. Both are runtime settings
+rather than environment variables, because an environment variable takes a redeploy to
+correct.
+
+**`GET /api/public/books` and `GET /api/public/books/{id}`** are the first routes in this
+application reachable without a session: search and one item record, and nothing else.
+Rate limited at 120 requests a minute, and `noindex` until indexing is separately
+allowed. **`/robots.txt`** is generated from the same switches: disallow everything until
+a catalogue is both published and allowed to be indexed, then allow the catalogue paths
+and nothing else.
+
+**`docs/featurelist.md` no longer says "No public catalogue. Nothing is readable without
+a session."** That sentence was rewritten in the same commit as the code that made it
+false, and `README.md` with it.
+
+**A Wikipedia button on an author card, where the shelf knows who the author is.** An
+author you have identified against an authority file now carries a second button beside
+"Show these books": the Wikipedia W, linking out to the article about them. It opens in
+the language you are reading the app in; where no article exists in that language it
+falls back to the other one, then to any language at all, on the grounds that a page you
+cannot read is still about the right person and beats no page. Where Wikipedia has
+nothing, or cannot be reached, it links to the Wikidata entry instead, so the button
+never leads nowhere.
+
+**It appears only for an author whose identity has been confirmed**, which is what makes
+it safe rather than merely available: two different writers share the name Robert Louis
+Stevenson in the German authority file, and a biography of the wrong one is worse than
+none. Nothing is stored, nothing is fetched but the list of which language editions
+exist, and no biography or portrait is read.
+
+**A second route to the six national library numbers, for when VIAF is down.** Those six
+reach this library through a VIAF cluster, and until now that was the only route: an
+outage there cost every one of them. Wikidata carries the same six and is now asked for
+them when VIAF produces no cluster. One source answers per confirmation, never both, so
+the two can never disagree and nothing changes on the ordinary path.
+
+**Internal: a national number Wikidata states twice is dropped rather than picked from.**
+The same rule already applied to a VIAF cluster naming one file twice. It is not a corner
+case: 4,955 people on Wikidata carry more than one Spanish national number, and Cervantes
+carries eight Argentine ones. A statement Wikidata has marked deprecated, which means it
+knows the value is wrong, is not read at all.
+
+**Internal: a Z39.50 transport**, a second door outward beside the HTTP one, bounded in
+bytes and in time by construction. **Nothing asks a Z39.50 target during a lookup yet**
+and the source chain is unchanged. It exists so that adding a national library catalogue
+is a mapping rather than a protocol.
+
+**Internal: `mailer.looks_like_address` accepted a trailing newline**, because it was
+anchored with `$` under `match` and `$` matches before a final newline; it also accepted
+NUL, ESC and every other C0 control, because its character class excluded only whitespace
+and five punctuation characters. It is the rule the household recipient list, the sender
+address and now the member address all check against, and four docstrings called it the
+header injection control. Nothing was exploitable, because four independent `.strip()`
+calls stood in front of it. It is `fullmatch` plus a Unicode category test now, and it is
+tested with none of those callers in front of it.
+
+**Six more wallpapers, and each family goes from five to eight.** Three more William
+Morris repeats, Trellis (1862), Marigold (1875) and Jasmine (1872), and three more
+decorated papers: Shippo, the Japanese linked circles; Meander, the Greek fret; and
+Curl, the marbler's snail, which is Nonpareil worked a second time with a stylus. None
+of them is an image: a wallpaper here is a rule that generates a tile, so a new one
+costs a few kilobytes and takes its colours from whichever palette is in force.
+
+What each reproduces, and on what basis it is free to reproduce, is tabulated in
+`docs/theming.md`. The short version is that Morris died in 1896 and his firm's chief
+designer in 1932, the eight paper traditions are geometric constructions with no author
+at all, and nothing here is traced from anybody's photograph of anything.
+
+**Three more palettes, taking the picker from seven to ten.** Kanagawa, Tokyo Night and
+Ayu, each a port of a published scheme rather than an invention, each MIT licensed and
+credited on the screen that offers it. Kanagawa is the fourth palette whose upstream names
+both of its members, after Catppuccin, Rose Pine and Everforest, so the picker says Lotus
+in light and Wave in dark; Tokyo Night and Ayu each publish a third theme with a name of its own, Storm
+and Mirage, and neither of those is what is ported, so neither prints a member name rather
+than printing one for a theme this app does not ship.
+
+Every one of the six new blocks was generated to the same contrast contract the
+seven existing palettes hold, and measured against it rather than eyeballed: body text at
+7:1 on the card, the muted rungs at 4.5, the focus ring at 3.0, and the dark body ink
+inside the anti glare band. `text-green-800`, the one raw Tailwind hue this app holds to a
+floor at a call site, still clears on all ten; the darkest card of the ten is now Tokyo
+Night's rather than Nord's and it holds there by 1.28.
+
+**Overdue loans have their own page.** The library page keeps the reminder, which is a
+count and a link, and the list of what is actually late has moved to a page of its own at
+`/loans/overdue`, with the reminder channels' standing state beside it. A household
+wanting to know whether a borrower was told had to look under a switch in Lending
+settings; it is now on the screen the books are on.
+
+**The overdue list and the count beside it now agree.** The banner counts the loans this
+member is party to, and the loans page it used to link to shows every loan over a book
+they can see, so the link handed some readers a screen with more rows on it than the
+sentence they had just read. The new page asks an endpoint that applies the banner's own
+rule.
+
+**An overdue loan is visibly overdue on the loans page.** It stays in the list, and it
+carries an edge bar as well as the badge that names the date the book was due.
+
+**The loans page nudge counts the same loans the page it opens will list.** It counted a
+wider set, so for most people it named a number the next screen disagreed with, and with
+the reminder switched off it offered a page that had nothing on it.
+
+**The channel panel no longer says where the loans appear.** It reports on channels that
+send outward and knows nothing about the in app reminder's switch, so with that switch off
+it promised the loans appeared on a page that was saying the opposite three lines below.
+
+**Internal: the delivery status says what it can support and no more.** The health record
+is written once per channel per run and holds no loan id, so no screen can say a
+particular borrower was or was not told. The overdue page's note says that in as many
+words, and a test pins the note to the lines it qualifies in both languages.
+
+**The overdue page says so when it is showing you part of the list.** It asks for fifty
+loans and the count beside the title counts all of them, so a household with more than
+fifty overdue books saw a number the list disagreed with and no way to reach the rest.
+It now names how many of how many are on screen.
+
+**The overdue banners no longer call somebody else's loan yours.** An admin sees every
+overdue loan in the household, so "{count} of your loans are overdue" was false for the
+one reader who sees the most. Both banners now say the loans need chasing without saying
+whose they are.
+
+**Internal: two loan routes each made one database query per request that fetched
+something already fetched.** Both listed a book's tags eagerly, and the serialiser loads
+those tags for every book on the page regardless, so the work was thrown away. Removed
+from both, measured at one statement fewer whether the page holds three loans or ten.
 
 ## v0.10.1
 

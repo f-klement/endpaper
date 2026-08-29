@@ -21,6 +21,8 @@ from schemas.author import (
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
+    AuthorWikipediaOut,
+    ConfirmedIdentifierOut,
     RefusedAssertionOut,
 )
 from schemas.book import (
@@ -65,15 +67,22 @@ from schemas.custom_field import (
     CustomFieldValueUpdate,
 )
 from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
-from schemas.loan import LoanCreate, LoanOut
+from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
 from schemas.note import NoteCreate, NoteOut
 from schemas.progress import ProgressCreate, ProgressOut
+from schemas.public import (
+    PublicBookOut,
+    PublicBookSort,
+    PublicClassificationOut,
+    PublicTagOut,
+)
 from schemas.quote import QuoteCreate, QuoteOut, QuoteWithBookOut
 from schemas.settings import (
     FeatureFlagsOut,
     LoginImageOut,
     OverdueNotifyResult,
     RestoreResult,
+    SenderHealth,
     SenderOutcome,
     SettingsOut,
     SettingsUpdate,
@@ -84,7 +93,9 @@ from schemas.user import (
     AppearanceOut,
     AppearanceUpdate,
     AuthConfigOut,
+    EmailUpdate,
     LoginRequest,
+    MemberEmailOut,
     Token,
     UserCreate,
     UserOut,
@@ -111,6 +122,8 @@ __all__ = [
     "AuthorMergeRequest",
     "AuthorOut",
     "AuthorSuggestionOut",
+    "AuthorWikipediaOut",
+    "ConfirmedIdentifierOut",
     "BookCreate",
     "BookDetailsUpdate",
     "BookDiscussUpdate",
@@ -136,16 +149,19 @@ __all__ = [
     "CustomFieldValueOut",
     "CustomFieldValueUpdate",
     "DuplicateGroup",
+    "EmailUpdate",
     "ImportResultOut",
     "ImportPreviewOut",
     "ImportPreviewRow",
     "BookMatch",
     "LoanCreate",
     "LocationOut",
+    "MemberEmailOut",
     "MergeRequest",
     "SeriesOut",
     "LoginRequest",
     "LoanOut",
+    "MyOverdueOut",
     "FeatureFlagsOut",
     "LoginImageOut",
     "RestoreResult",
@@ -155,6 +171,7 @@ __all__ = [
     "NoteCreate",
     "NoteOut",
     "OverdueNotifyResult",
+    "SenderHealth",
     "SenderOutcome",
     "OwnershipUpdate",
     "Page",
@@ -163,6 +180,10 @@ __all__ = [
     "ProgressCreate",
     "ProgressOut",
     "PurgeResult",
+    "PublicBookOut",
+    "PublicBookSort",
+    "PublicClassificationOut",
+    "PublicTagOut",
     "QuoteCreate",
     "QuoteOut",
     "QuoteWithBookOut",

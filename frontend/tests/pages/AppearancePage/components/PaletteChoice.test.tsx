@@ -9,7 +9,7 @@ import { PALETTES } from "../../../../src/theme";
 import { renderLocalised } from "../../../utils";
 
 describe("PaletteChoice", () => {
-  it("offers all seven", () => {
+  it("offers every palette the catalogue lists", () => {
     renderLocalised(<PaletteChoice />);
 
     expect(screen.getAllByRole("button")).toHaveLength(PALETTES.length);

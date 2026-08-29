@@ -49,6 +49,7 @@ from routers import (
     covers,
     imports,
     loans,
+    public,
     settings,
     stats,
     users,
@@ -331,6 +332,12 @@ app.include_router(books.router)
 app.include_router(collections.router)
 app.include_router(imports.router)
 app.include_router(loans.router)
+# Before the SPA mount, like every router, and that matters more here than
+# elsewhere: this one owns `/robots.txt`, which a build emitting one would
+# otherwise be answered from disk. It is also the one router whose routes
+# answer without a session, which is why its own module opens by naming the
+# four rules that apply to it.
+app.include_router(public.router)
 app.include_router(settings.router)
 app.include_router(stats.router)
 app.include_router(users.router)

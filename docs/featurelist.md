@@ -89,8 +89,25 @@ mistaken for the other.
 
 **Loans** record who has a book and when it is due, including people who are not
 members. Overdue loans are chased on a schedule you set, and the digest goes out
-on every channel switched on: **email** over SMTP, a **Telegram** chat, and a
-**webhook** of your choosing. Private books are left out of all three.
+on every channel switched on: **in the app**, **email** over SMTP, a **Telegram**
+chat, and a **webhook** of your choosing. The three that send outward land in a
+mailbox or a chat, so private books are left out of all of them and reported
+only as a count. The in app notice is the one with a reader, so it carries what
+that reader may already see, their own private books included; it is also the
+only one that needs nothing set up, and it is on to begin with.
+
+**Overdue loans have a page of their own**, with the reminder channels' standing
+state beside them. The library page says how many and links to it; the loans
+page keeps every loan in one list and marks the late ones in place. What the
+channel lines can say is bounded, and the page says so: the app records what
+each channel did on its last run, not which reminder reached which borrower.
+
+**A reminder channel that has stopped working says so**, under the switch that
+configures it, on the overdue page beside the loans, and, once it has been
+failing for a day, on the library page. A setting the app will not use is
+reported at once, because nothing was tried; a destination that could not be
+reached only after it has failed repeatedly, so a network blip does not raise an
+alarm.
 
 **Willingness to lend** is a property of a book, so somebody can see what you
 would part with before asking.
@@ -143,7 +160,7 @@ whose volume vanished reports unhealthy rather than staying green.
 
 ## The interface
 
-Seven palettes, light and dark, decorated papers, and a per account choice.
+Ten palettes, light and dark, decorated papers, and a per account choice.
 English and German throughout, the seeded tag vocabulary included: a predefined
 tag reads in the language you chose, while a tag you invented or renamed is
 shown exactly as you typed it. Installable as a PWA. Keyboard reachable, and
@@ -153,18 +170,33 @@ The book page folds into sections whose defaults follow the book: a loan section
 opens on a book that is out, copies on a book with more than one, and your own
 choice to open or close one is remembered.
 
-**Settings is an index of six screens**, each with a sentence saying what is
-behind it: appearance, catalogue sources, your library, lending, data and
-accounts, and about. Nothing there folds. Every screen has its own address, so a
+**Settings is an index of eight screens**, each with a sentence saying what is
+behind it: appearance, your account, catalogue sources, your library, the public
+catalogue, lending, data and accounts, and about. Nothing there folds. Every screen has its own address, so a
 setting can be linked to rather than described as "third card down".
 
 **An About screen** names the version it is running, links the source, and asks
 once, in one sentence, whether you want to buy the author a coffee. Nothing else
 in the app asks at all.
 
-## Deliberately not built
+**A public catalogue, off by default and behind two switches.** Library mode
+changes what a cataloguer sees: call number, Classification and record status in,
+ownership and reading status out. It publishes nothing. The publish switch is a
+second, separate decision, and a library running library mode internally without
+publishing is the common case rather than an edge one. Publishing is refused by
+the server whenever library mode is off, so turning library mode back off cannot
+leave a catalogue public.
 
-**No public catalogue.** Nothing is readable without a session.
+What a reader with no account gets is **search and one item record, and nothing
+else**. Ownership, lending willingness, reading status, member names, notes,
+purchase details, the trash and every per member field are absent from the
+payload, not merely hidden by a client. **Private books stay private in every
+mode**: that rule is not the switch's to relax. The public routes are rate
+limited, and a published catalogue is `noindex` until indexing is separately
+allowed, because publishing a catalogue and inviting a search engine to crawl it
+are different decisions.
+
+## Deliberately not built
 
 **No offline mode.** Everything on every screen comes from the API, so an
 offline shell could only lie.
@@ -175,7 +207,17 @@ offline shell could only lie.
 fines, no MARC, no Z39.50 as a client. Koha exists and is better at all of it.
 
 **No author biographies or portraits.** The shelf stores a name and, where a
-catalogue asserted one, that authority file's identifier for that spelling.
-Dates and a one line description are shown while you tell two same named writers
-apart, and are not kept. An author stays a derived fact rather than a second
-thing to maintain.
+catalogue asserted one or somebody confirmed one, that spelling's number in an
+authority file. Confirming a GND number keeps the ISNI, Library of Congress
+number, VIAF cluster and Wikidata item the same record carries, **and the
+national library numbers for Brazil, Argentina, Spain, Portugal, Italy and
+Chile**, which the GND record does not carry and the VIAF cluster it names does.
+That is what lets an author be looked up outside German. Dates and a one line
+description are shown while you tell two same named writers apart, and are not
+kept. An author stays a derived fact rather than a second thing to maintain.
+
+Those six are **stored and not resolved**, and the difference is honest rather
+than a limitation being dressed up: Brazil's and Argentina's catalogues refuse
+every request, and the rest speak a protocol this app has no client for. The
+identifier arrives free with a confirmation, which is what would make an adapter
+for one of them cheap on the day it becomes possible.

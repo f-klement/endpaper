@@ -17,15 +17,25 @@ which is exactly where the leaks were. `list_tags` counted Books without the
 filter and disclosed which Tags existed only on somebody's Private Books.
 
 So visibility is applied **by construction** here. There is no way to build a
-many-Book query through this module that is not narrowed to a viewer, and the
-two cases **in this module** that must read past a viewer are two named
-functions at the bottom of this file rather than a comment a reader has to
-notice. They are not the only ways past a viewer in the backend: see "What this
-module does not own" below, which names the third.
+many-Book query through this module that is not narrowed, and the two cases
+**in this module** that must read past a viewer are two named functions at the
+bottom of this file rather than a comment a reader has to notice. They are not
+the only ways past a viewer in the backend: see "What this module does not own"
+below, which names the third.
+
+Narrowed, rather than narrowed to a viewer, because since 2026-08-28 there is
+one constructor with no viewer: `seen_by_the_public`, for a reader who has no
+account and so has no id to compare a Book's owner against. It is not an
+exception to the rule and does not weaken it. It applies a **stricter**
+predicate than `seen_by` (public and on the shelf, with no "or mine" arm at
+all), so a request routed through it by mistake sees less rather than more, and
+the property the whole design rests on is pinned by
+`tests/test_shelf.py::TestThePublicShelfHasNoOwnershipArm`.
 
 ## The interface, in the order a caller meets it
 
     shelf = Shelf.seen_by(db, member.id)     # or trashed_by, for the trash
+    shelf = Shelf.seen_by_the_public(db)     # a reader with no account
     shelf = shelf.where(Book.location == "study")
     shelf = shelf.matching(filters)          # the listing's own filter chain
     total = shelf.count()
@@ -141,16 +151,28 @@ class Loading(Enum):
       not one per Book.
     * `EXPORTED`: two as well. `collection` is another many to one, so it
       joins rather than adding a statement.
+    * `PUBLISHED`: three. `tags` and `classifications` are both collections and
+      cost one each for the whole page, and there is no many to one to ride on
+      the row: the public payload names no member, so `added_by` is not loaded.
     """
 
     NOTHING = "nothing"
     SERIALISED = "serialised"
     EXPORTED = "exported"
+    PUBLISHED = "published"
 
 
 _LOADING_OPTIONS: dict[Loading, tuple[Any, ...]] = {
     Loading.NOTHING: (),
     Loading.SERIALISED: (joinedload(Book.added_by), selectinload(Book.tags)),
+    # No `added_by`, and that omission is the point rather than an economy:
+    # `PublicBookOut` has no member on it, so loading the User who added a Book
+    # would fetch a row nothing may render. Two statements, like SERIALISED,
+    # because both of these are collections.
+    Loading.PUBLISHED: (
+        selectinload(Book.tags),
+        selectinload(Book.classifications),
+    ),
     Loading.EXPORTED: (
         joinedload(Book.added_by),
         # `Book.collection` eagerly, because the CSV writes its name per row.
@@ -232,6 +254,12 @@ class Shelf:
     be handed to two callers and mutated by one of them. The viewer is carried
     rather than re-passed, because a narrowing that took a viewer could be
     given a different one than the query was built for.
+
+    **A Shelf may have no viewer at all**, which is what
+    `seen_by_the_public` builds and is the only way that happens. `_viewer`
+    rather than `_viewer_id` is what the two per-member narrowings read, and
+    it raises rather than returning None: see its docstring for what the
+    silent version answered.
     """
 
     __slots__ = ("_criteria", "_db", "_joined", "_query", "_viewer_id")
@@ -240,16 +268,20 @@ class Shelf:
         self,
         db: Session,
         query: Query[Book],
-        viewer_id: int,
+        viewer_id: int | None,
         criteria: tuple[ColumnElement[bool], ...],
         joined: bool = False,
     ) -> None:
-        # Private by convention and by the absence of any other caller: the two
-        # class methods below are the only ways in, and they are what applies
-        # the predicate. A caller that builds one of these directly has already
-        # decided to write its own privacy rule.
+        # Private by convention and by the absence of any other caller: the
+        # three class methods below are the only ways in, and they are what
+        # applies the predicate. A caller that builds one of these directly has
+        # already decided to write its own privacy rule.
         self._db = db
         self._query = query
+        # `int | None`, and None means there is no viewer rather than a viewer
+        # whose id is unknown. Widened here and nowhere else: `seen_by` and
+        # `trashed_by` still take a plain `int`, so no existing call site
+        # loosens. See `seen_by_the_public` for why a sentinel id was refused.
         self._viewer_id = viewer_id
         # Kept beside the query rather than read back off it with
         # `Query.whereclause`, which returns the WHERE and **not** the FROM.
@@ -280,6 +312,65 @@ class Shelf:
         """
         predicate = in_trash_for(viewer_id)
         return cls(db, db.query(Book).filter(predicate), viewer_id, (predicate,))
+
+    @classmethod
+    def seen_by_the_public(cls, db: Session) -> Self:
+        """The Books a reader with no account may see: on the shelf and public.
+
+        **No ownership arm at all**, and that absence is the whole design.
+        `visible_to(viewer_id)` is `deleted_at IS NULL AND (is_private IS false
+        OR added_by_user_id = :viewer)`, and a public reader has no id to put
+        in that second disjunct. Two other shapes were available and both were
+        refused, 2026-08-28:
+
+        * **A sentinel id** (`0`, `-1`). `added_by_user_id == 0` is a real
+          comparison against a real column, so it is safe only while no account
+          holds that id, and nothing enforces that. The leak is silent and
+          answers 200.
+        * **`visible_to(user_id: int | None)` with a branch inside it.** That
+          loosens the type at every call site to serve one caller, and a `None`
+          arriving somewhere by accident becomes a silent mode change.
+
+        This one is safe **by construction** rather than by invariant: there is
+        no value any input can take that makes a Private Book match, because
+        the clause that could match one is not in the query. It fails safe in
+        the other direction too, since an authenticated request wrongly routed
+        through here sees **less** than it should, never more.
+
+        It goes through the Shelf, so `TestTheShelfIsTheOnlyWayIn` keeps
+        holding with no exemption and no allowlist entry. The property the rest
+        of it rests on is pinned separately, by
+        `tests/test_shelf.py::TestThePublicShelfHasNoOwnershipArm`.
+
+        Nothing here decides whether the catalogue is published: that is
+        `settings_store.public_catalogue_is_published`, and the router is what
+        asks. This answers only which rows a public reader may be shown.
+        """
+        # Written out rather than composed from `visible_to`, because
+        # composing it is exactly what cannot be done: this is that predicate
+        # with its second disjunct removed, not that predicate with an
+        # argument. `.is_(False)`, never `not Book.is_private`, which
+        # evaluates the Column's Python truthiness and matches every row.
+        criteria = (Book.deleted_at.is_(None), Book.is_private.is_(False))
+        return cls(db, db.query(Book).filter(*criteria), None, criteria)
+
+    @property
+    def _viewer(self) -> int:
+        """The Member this shelf was built for, or a refusal.
+
+        The two per-member narrowings below read this rather than
+        `_viewer_id`, and the difference is not defensiveness. With no viewer,
+        `UserBook.user_id == None` compiles to `IS NULL`: the outer join in
+        `_with_read_status` then matches nothing, so `status=unread` returns
+        the **whole** public catalogue and every other status returns nothing,
+        with no error anywhere. A wrong answer, not a failure.
+        """
+        if self._viewer_id is None:
+            raise ValueError(
+                "This shelf has no viewer, so it cannot be narrowed by one "
+                "member's reading state. A public reader has no reading state."
+            )
+        return self._viewer_id
 
     def where(self, *criteria: ColumnElement[bool]) -> Shelf:
         """This shelf, narrowed further. The predicate is already on it.
@@ -374,7 +465,7 @@ class Shelf:
         """Narrowed to the Books this viewer has put in one reading state."""
         query = self._query.join(
             UserBook,
-            (UserBook.book_id == Book.id) & (UserBook.user_id == self._viewer_id),
+            (UserBook.book_id == Book.id) & (UserBook.user_id == self._viewer),
             isouter=True,
         )
         if status is ReadStatus.UNREAD:
@@ -404,7 +495,7 @@ class Shelf:
         """
         rated = (
             self._db.query(UserBook.id)
-            .filter(UserBook.book_id == Book.id, UserBook.user_id == self._viewer_id)
+            .filter(UserBook.book_id == Book.id, UserBook.user_id == self._viewer)
             .filter(UserBook.rating.isnot(None))
             .correlate(Book)
         )

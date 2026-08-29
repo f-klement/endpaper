@@ -193,6 +193,23 @@ def ldap_admin_group() -> str:
     return os.getenv("LDAP_ADMIN_GROUP", "").strip()
 
 
+def ldap_email_attribute() -> str:
+    """Attribute carrying a member's address. Empty means the directory has none.
+
+    **Empty by default, and the default is the load-bearing part.** It is the
+    same shape as `LDAP_ADMIN_GROUP`: unset, the directory has no opinion about
+    addresses, so the app does not ask for one, does not overwrite one and lets
+    the member keep their own. Set (`mail` in most directories), the directory
+    owns the value and re-applies it on every sign in, which is the rule
+    `upsert_directory_user` already runs for admin status.
+
+    Defaulting this to `mail` instead would add an attribute to every search
+    this app makes and silently start overwriting locally typed addresses on an
+    upgrade nobody configured.
+    """
+    return os.getenv("LDAP_EMAIL_ATTRIBUTE", "").strip()
+
+
 def ldap_start_tls() -> bool:
     return os.getenv("LDAP_START_TLS", "false").strip().lower() == "true"
 
@@ -209,6 +226,19 @@ def proxy_groups_header() -> str:
 def proxy_admin_group() -> str:
     """Group that grants admin. Empty means nobody is admin via the proxy."""
     return os.getenv("PROXY_ADMIN_GROUP", "").strip()
+
+
+def proxy_email_header() -> str:
+    """Header asserting the member's address. Empty means the upstream sends none.
+
+    Empty by default for the reason `ldap_email_attribute` carries in full: an
+    upstream that does not send this must not be read as saying a member has no
+    address. Authelia's spelling is `Remote-Email`, which is what to set it to.
+
+    Unlike `PROXY_USER_HEADER` this is not validated at startup, because an
+    absent address is a supported state and an empty header is how you say so.
+    """
+    return os.getenv("PROXY_EMAIL_HEADER", "").strip()
 
 
 def validate_auth_config() -> None:

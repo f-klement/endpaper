@@ -1,12 +1,12 @@
 /**
- * Wallpaper: five William Morris repeats and five decorated papers.
+ * Wallpaper: eight William Morris repeats and eight decorated papers.
  *
- * The second half are the papers a book is actually bound with: a marbled
- * nonpareil, two Japanese repeats, an Insular plait and a Persian marquetry
- * field. They are here for the same reason the Morris repeats are, and they
- * pull the engine in the other direction: a Morris tile is grown along curves
- * and a decorated paper is set out on a lattice, so between them they need both
- * halves of what is below.
+ * The second half are the papers a book is actually bound with: two marbled
+ * sheets, three Japanese repeats, a Greek fret, an Insular plait and a Persian
+ * marquetry field. They are here for the same reason the Morris repeats are,
+ * and they pull the engine in the other direction: a Morris tile is grown along
+ * curves and a decorated paper is set out on a lattice, so between them they
+ * need both halves of what is below.
  *
  * Drawn here rather than shipped as images, for three reasons. Morris designs
  * themselves are public domain (he died in 1896), but the high-resolution scans
@@ -14,6 +14,13 @@
  * so "it is a Morris" is not on its own a licence. A tileable SVG is a few
  * kilobytes against a few hundred for a repeating raster, and it takes its
  * colour from the theme instead of needing a second file for dark mode.
+ *
+ * The papers raise the same question and answer it more easily: every one of
+ * them is a geometric construction from a living tradition, with no author to
+ * have held a copyright in a rule for setting out circles on a lattice. What
+ * each of the sixteen reproduces, and on what basis, is tabulated in
+ * `docs/theming.md`. Nothing here is traced from an image; each pattern is
+ * written as a rule, and the rule is what follows.
  *
  * ## The foliage is grown along the stems, not placed beside them
  *
@@ -42,7 +49,7 @@
  *
  * ## A motif is written once
  *
- * Willow places two shapes 166 times, Asanoha places one 84 times, and the
+ * Willow places three shapes 166 times, Asanoha places two 112 times, and the
  * plait places its lozenge 32 times. Written out at every placement that is
  * kilobytes of repeated `d` attributes, and it is what makes detail
  * unaffordable, because a detail costs its own bytes times every instance. Each
@@ -54,9 +61,10 @@
  * A layer states a **weight**, which is how far one of its marks should move
  * the page, in OKLab lightness. The opacity that reaches it is solved against
  * the palette's own ink and page. It has to be that way round: the ink follows
- * the palette, and one opacity over seven inks is seven different weights,
- * measured 1.27x apart in light and 1.32x in dark, which is the width of the
- * whole budget the tile is supposed to sit inside.
+ * the palette, and one opacity over ten inks is ten different weights, measured
+ * 1.27x apart in light and 1.32x in dark across the seven palettes that shipped
+ * when that was measured, which is the width of the whole budget the tile is
+ * supposed to sit inside.
  *
  * ## Motifs are spaced along the curve, not along the parameter
  *
@@ -738,7 +746,7 @@ export function mirror(
  * The width is one number and not a function of the arc. A width that varies
  * along the branch is what a tapering Morris stem needs, and the Morris stems
  * stayed stroked: measured, the taper moves nothing that the underfoliage plane
- * does not, and it changes all five silhouettes at once. Generality nothing
+ * does not, and it changes every Morris silhouette at once. Generality nothing
  * calls is generality nobody has checked.
  */
 export function ribbon(
@@ -779,6 +787,94 @@ export function ribbon(
     }
   }
   return parts.join("");
+}
+
+/**
+ * A rotation about each of a set of centres, dying to nothing at `reach`.
+ *
+ * What a marbler's stylus does to a combed bath: the pigment is carried round
+ * the point the stylus is drawn at, further round the closer it is, and not at
+ * all beyond the stylus's pull. A rotation about a point maps every circle
+ * about that point to itself, so the displaced lines shear but can never cross
+ * each other; what varies is how close together they are pulled, which is the
+ * ring of compression a real curl has around its eye.
+ *
+ * This is the first thing in this file that is a function of absolute position
+ * rather than of a branch parameter, so the header's periodicity condition
+ * binds it directly, and it is the reason for the guard. The field is a sum of
+ * terms that are zero outside `reach`, and such a sum repeats with the tile
+ * exactly when no two of those terms overlap. **Two centres closer than twice
+ * the reach make it periodic nowhere**, and the failure is a discontinuity along
+ * a line inside the tile rather than at its seam, so it is not the sort of thing
+ * the nine offsets rescue.
+ *
+ * Both the guard and the displacement measure the offset between two points
+ * **reduced into the tile**, rather than comparing against the eight
+ * neighbouring copies. The two agree for a centre written inside the tile and
+ * they do not for one written outside it: at nine offsets, centres at `[0, 0]`
+ * and `[2 * size, 4]` measure a whole tile apart and are 4px apart, which is
+ * the same lattice written differently and an accepted overlap. There is no
+ * further arm that fixes that, because there is no bound on how far out a
+ * centre may be written.
+ */
+export function swirl(
+  centres: Point[],
+  reach: number,
+  turn: number,
+  size: number,
+): (point: Point) => Point {
+  // The coordinates, not the caller's array and not its tuples. A guard that
+  // checks an argument and then closes over it checks a snapshot and displaces
+  // whatever the caller holds afterwards: pushing a centre past the returned
+  // function moves the field with nothing verified, and so does writing to a
+  // tuple already in the list. Copying the array alone fixes only the first,
+  // which is why this copies the numbers out.
+  const fixed: Point[] = centres.map(([x, y]) => [x, y]);
+
+  /** The offset to the nearest image, in one axis. Never more than half a tile. */
+  const nearest = (value: number): number => {
+    const inside = ((value % size) + size) % size;
+    return inside > size / 2 ? inside - size : inside;
+  };
+
+  for (const [index, centre] of fixed.entries()) {
+    for (const [other, against] of fixed.entries()) {
+      // A centre's own nearest image is one tile away, which is the check that
+      // a single centre with too long a reach has to fail.
+      const apart =
+        index === other
+          ? size
+          : Math.hypot(
+              nearest(centre[0] - against[0]),
+              nearest(centre[1] - against[1]),
+            );
+      if (apart < 2 * reach) {
+        throw new Error(
+          `swirl centres ${round(apart)}px apart overlap at reach ${reach}`,
+        );
+      }
+    }
+  }
+
+  return ([x, y]) => {
+    for (const centre of fixed) {
+      const ox = nearest(x - centre[0]);
+      const oy = nearest(y - centre[1]);
+      const radius = Math.hypot(ox, oy);
+      // At most one centre can reach a point, because the guard above made the
+      // pulls disjoint. So the first one found is the only one.
+      if (radius >= reach) continue;
+      // Quadratic rather than linear, so the field's slope reaches zero at the
+      // reach as well as its value. A linear falloff leaves a crease on the
+      // circle where the pull stops.
+      const fade = 1 - radius / reach;
+      const angle = turn * fade * fade;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      return [x + (ox * cos - oy * sin - ox), y + (ox * sin + oy * cos - oy)];
+    }
+    return [x, y];
+  };
 }
 
 /**
@@ -869,6 +965,18 @@ const BERRY = "M0 0C9 -8 18 -3 16 7C14 16 5 20 -2 16C-8 11 -7 5 0 0Z";
 
 /** A small bud or seed head, for filling the gaps a repeat leaves. */
 const BUD = "M0 0C3 -6 10 -6 14 0C10 6 3 6 0 0Z";
+
+/** A broad rounded petal, for the five petalled wild rose Trellis is grown with. */
+const ROSE_PETAL = "M0 0C4 -10 14 -14 22 -9C24 -5 24 5 22 9C14 14 4 10 0 0Z";
+
+/**
+ * A ray floret: the narrow petal a marigold has dozens of, and a jasmine five.
+ *
+ * One shape for both because it is one shape in the plants: what separates a
+ * marigold's head from a jasmine's flower is how many are set round the centre
+ * and how large, which is what `radial` states, not the outline of a petal.
+ */
+const RAY = "M0 0C7 -4 18 -4 26 0C18 4 7 4 0 0Z";
 
 // ── The designs ───────────────────────────────────────────────────────────────
 
@@ -1112,6 +1220,274 @@ const LILY_TWIGS: Branch[] = [
   twig([210, 104], [284, 86], 18),
   twig([210, 176], [136, 158], -18),
   twig([210, 244], [284, 226], 18),
+];
+
+const TRELLIS_SIZE = 280;
+/** Px between battens, and the width of the wood itself. */
+const TRELLIS_BAY = 140;
+const TRELLIS_BATTEN = 10;
+/**
+ * The two edges of a batten, stopped where another batten crosses in front.
+ *
+ * A trellis is half lapped, so at every crossing one piece of wood is in front
+ * and the other stops at its edge. That break is the whole reason this is not
+ * `stems`: a grid of strokes is a grid, and a grid of interrupted pairs is
+ * joinery.
+ *
+ * The wood is drawn as its two edges rather than as one thick stroke because
+ * the original draws it that way, and because a stroke wide enough to read as a
+ * batten is a stroke wide enough to swallow the rose growing over it.
+ */
+function battenEdges(
+  across: number,
+  breaks: number[],
+  vertical: boolean,
+): string {
+  const half = TRELLIS_BATTEN / 2;
+  // Two px of daylight past the crossing batten's own edge, so the break reads
+  // as a stop rather than as a butt joint. `PLAIT_MARGIN` is the same number
+  // for the same reason.
+  const gap = half + 2;
+  const spans: [number, number][] = [];
+  let cursor = 0;
+  for (const at of breaks) {
+    spans.push([cursor, at - gap]);
+    cursor = at + gap;
+  }
+  spans.push([cursor, TRELLIS_SIZE]);
+  return [across - half, across + half]
+    .flatMap((edge) =>
+      spans
+        .filter(([from, to]) => to - from > 1e-6)
+        .map(([from, to]) =>
+          vertical
+            ? `<path d="M${edge} ${from}L${edge} ${to}"/>`
+            : `<path d="M${from} ${edge}L${to} ${edge}"/>`,
+        ),
+    )
+    .join("");
+}
+
+/** Where the battens run. Two each way on the tile, so the bays are square. */
+const TRELLIS_LINES = [TRELLIS_BAY / 2, TRELLIS_BAY + TRELLIS_BAY / 2];
+const TRELLIS_FRAME =
+  TRELLIS_LINES.map((at) => battenEdges(at, [], true)).join("") +
+  TRELLIS_LINES.map((at) => battenEdges(at, TRELLIS_LINES, false)).join("");
+
+/** The rose, climbing one bay and crossing into the next. */
+const TRELLIS_ROSE: Branch[] = [
+  [
+    [
+      [35, 0],
+      [12, 46],
+      [92, 92],
+      [96, 140],
+    ],
+    [
+      [96, 140],
+      [100, 188],
+      [16, 232],
+      [35, 280],
+    ],
+  ],
+];
+/** The second rose is the first mirrored, so the design is written once. */
+TRELLIS_ROSE.push(...mirror(TRELLIS_ROSE, TRELLIS_SIZE, "x"));
+const TRELLIS_TWIGS: Branch[] = [
+  twig([96, 140], [158, 112], 18),
+  twig([184, 140], [122, 168], 18),
+  twig([35, 0], [96, 32], -16),
+  twig([245, 280], [184, 248], -16),
+  twig([70, 62], [24, 96], 14),
+  twig([210, 218], [256, 184], 14),
+];
+/** Where a rose sits. The one at the origin is drawn at all four corners. */
+const TRELLIS_ROSES: At[] = [
+  { x: 140, y: 140, r: 12, s: 0.76 },
+  { x: 0, y: 0, r: 200, s: 0.68 },
+  { x: 96, y: 140, r: 118, s: 0.55 },
+  { x: 184, y: 140, r: 298, s: 0.55 },
+  { x: 140, y: 0, r: 84, s: 0.6 },
+];
+
+const MARIGOLD_SIZE = 300;
+/**
+ * Half the turnover: one scroll from the foot of the tile to its head.
+ *
+ * A turnover is symmetric about a vertical line, and the whole point of stating
+ * it as a mirror rather than as two scrolls is that a Marigold's two halves
+ * cannot drift apart under an edit. Both ends sit on the centre line, so the
+ * scroll continues into the copy above rather than stopping at the seam.
+ *
+ * **A turnover has two mirror axes and this had one.** The scroll used to bow
+ * out only to x = 52, so with its mirror at x = 248 the tile carried one ogee
+ * about the centre line and nothing at all at the edges: **68 columns of the
+ * 300px tile were empty**, one contiguous run on the torus, and 77 columns sat
+ * under a quarter of the tile mean. Every other tile of the sixteen has no
+ * empty column or row at all, bar Meander's and Curl's own 11px mark gaps, and
+ * the next thinnest column anywhere is Strawberry's at 0.086 of mean.
+ *
+ * The repeat's second axis is the seam, so the waist belongs on it. The knot is
+ * at x = 0 with both of its control points at x = -14, which makes the tangent
+ * there vertical, so the scroll meets its own mirror at x = 300 smoothly rather
+ * than in a corner, and the curve reaches x = -1.33, which is real ink across
+ * the seam rather than ink that stops at it.
+ *
+ * **Neither admission number could see this, and one of them rewarded it.** The
+ * blur is 3.46px against a 68px void, so the tint measure never resolves it, and
+ * Marigold scored the highest tint contrast of the sixteen, 1.749, partly
+ * *because* a large empty region raises the variance the measure is built on; it
+ * reads 1.526 now. Peak coverage asks only that a mark somewhere reaches full
+ * weight.
+ *
+ * There is a third measure now, `widestEmptyRun` in `rasterise.ts`, asserted at
+ * zero for this family. What took a round to get right is that it has **no
+ * derivable threshold in pixels**, the tempting one being wrong rather than
+ * merely unproven: see that function. What is derivable is the scope.
+ */
+const MARIGOLD_SCROLL: Branch = [
+  [
+    [150, 300],
+    [86, 276],
+    [-14, 224],
+    [0, 154],
+  ],
+  [
+    [0, 154],
+    [-14, 84],
+    [86, 24],
+    [150, 0],
+  ],
+];
+/**
+ * The link from each waist to the bloom at the centre of the ogee.
+ *
+ * **Mirroring it does not break it, it completes it.** This said the opposite
+ * for a round: the two halves meet at the bloom and again at the seam waist, so
+ * what is drawn is one continuous path right across the tile, exactly like
+ * Strawberry's stems. There is nothing wrong with that, and there was something
+ * wrong with the shape it had, which sagged 2px over 150px: measured on the
+ * ground layer alone, the widest 8px row band it inked ran to **1.000 of the
+ * tile's width**, the only layer of the sixteen to do that, against 0.268 to
+ * 0.547 for every other Morris ground. A stroke that crosses the tile at one
+ * height is a rule ruled across the paper, which is the one thing a scrolling
+ * turnover is not.
+ *
+ * What fixes it is arching rather than breaking, because the link is what closes
+ * the ogee and a scrolling stem is what the design is made of. At this arch,
+ * about 66px deep, the widest band is **0.527**, inside the range the other
+ * seven already occupy.
+ *
+ * The measure is worth knowing for the next repeat: not "is the path
+ * continuous", which is normal and which Strawberry passes at 0.547, but "does
+ * one layer ink a whole row band across". Trellis reads 0.986 and is the
+ * deliberate exception, its battens being joinery that the half-lap breaks.
+ */
+const MARIGOLD_BAR: Branch = [
+  [
+    [0, 154],
+    [40, 84],
+    [114, 92],
+    [150, 152],
+  ],
+];
+const MARIGOLD_STEMS: Branch[] = [
+  MARIGOLD_SCROLL,
+  ...mirror([MARIGOLD_SCROLL], MARIGOLD_SIZE, "x"),
+  MARIGOLD_BAR,
+  ...mirror([MARIGOLD_BAR], MARIGOLD_SIZE, "x"),
+];
+/** Twigs off the scroll, at points taken from the curve rather than guessed. */
+const MARIGOLD_TWIGS: Branch[] = [
+  twig([32, 232], [104, 258], 18),
+  twig([34, 71], [106, 45], 18),
+  twig([0, 154], [70, 186], -20),
+  twig([88, 272], [150, 246], -16),
+];
+MARIGOLD_TWIGS.push(...mirror(MARIGOLD_TWIGS, MARIGOLD_SIZE, "x"));
+/**
+ * Where the heads sit. Each is a ring of rays about one of these.
+ *
+ * The one at the waist is written once and drawn at both edges by the tiling,
+ * which is the same thing the seam is: one point, not two.
+ */
+const MARIGOLD_HEADS: At[] = [
+  { x: 150, y: 0, r: 0, s: 1.05 },
+  { x: 150, y: 152, r: 18, s: 0.95 },
+  { x: 0, y: 154, r: 96, s: 0.85 },
+];
+
+const JASMINE_SIZE = 280;
+/**
+ * The hawthorn behind, which is the ground of the original and not more leaves.
+ *
+ * Morris's Jasmine is two plants: a mass of small hawthorn foliage filling the
+ * tile, and the jasmine trailing across it. That is what the underfoliage
+ * weight exists for, and it is the reason this pattern carries four layers
+ * where Pimpernel carries three.
+ */
+const JASMINE_HAWTHORN: Branch[] = [
+  [
+    [
+      [36, 0],
+      [8, 62],
+      [70, 108],
+      [44, 168],
+    ],
+    [
+      [44, 168],
+      [20, 224],
+      [56, 250],
+      [36, 280],
+    ],
+  ],
+];
+JASMINE_HAWTHORN.push(...mirror(JASMINE_HAWTHORN, JASMINE_SIZE, "x"));
+/** One jasmine trail, crossing the tile and meeting its own copy at the seam. */
+const JASMINE_TRAIL: Branch = [
+  [
+    [0, 56],
+    [66, 106],
+    [128, -6],
+    [196, 44],
+  ],
+  [
+    [196, 44],
+    [238, 75],
+    [258, 84],
+    [280, 56],
+  ],
+];
+/**
+ * The second trail is the first turned over in y, not translated down it.
+ *
+ * A translation would put two identical trails on the tile, and `grow` phases
+ * its lean and scale cycles from the branch's start point, so identical curves
+ * a whole number of cycles apart come out close to identical. A reflection is a
+ * different curve, and it is also what the design does.
+ */
+const JASMINE_TRAILS: Branch[] = [
+  JASMINE_TRAIL,
+  ...mirror([JASMINE_TRAIL], JASMINE_SIZE, "y"),
+];
+const JASMINE_TWIGS: Branch[] = [
+  twig([66, 78], [116, 40], 14),
+  twig([196, 44], [244, 84], 14),
+  twig([66, 202], [116, 240], -14),
+  twig([196, 236], [244, 196], -14),
+  twig([44, 168], [96, 148], 12),
+  twig([236, 112], [184, 132], 12),
+];
+/** Where a jasmine flower opens. Five rays about each. */
+const JASMINE_FLOWERS: At[] = [
+  { x: 30, y: 78, r: 30, s: 0.62 },
+  { x: 128, y: 22, r: 128, s: 0.7 },
+  { x: 232, y: 66, r: 250, s: 0.62 },
+  { x: 30, y: 202, r: 330, s: 0.62 },
+  { x: 128, y: 258, r: 232, s: 0.7 },
+  { x: 232, y: 214, r: 110, s: 0.62 },
+  { x: 116, y: 40, r: 20, s: 0.5 },
+  { x: 116, y: 240, r: 340, s: 0.5 },
 ];
 
 // ── The decorated papers ──────────────────────────────────────────────────────
@@ -1389,6 +1765,160 @@ const KHATAM_STAR = starPath(8, 34, 17);
 /** The cross between four stars, filling the opening their points leave. */
 const KHATAM_CROSS = starPath(4, 20, 8);
 
+const SHIPPO_SIZE = 240;
+/**
+ * The one radius that makes circles link rather than merely overlap.
+ *
+ * Shippo is a single circle repeated on a square lattice, and the radius is the
+ * half diagonal of that lattice, `pitch / sqrt(2)`. Every circle then passes
+ * through the four **cell centres** around its own, which is where four circles
+ * meet: the two edge neighbours cross there at a right angle, their radii to
+ * that point being perpendicular, and the two diagonal neighbours are exactly
+ * tangent to each other there, being `2 * radius` apart. That single point,
+ * carrying two crossings and a tangency, is what makes the field read as linked
+ * rather than as a heap of rings, and at any other radius it does not exist.
+ *
+ * **Not through the neighbours' own centres**, which this said at first and
+ * which is a different construction: an edge neighbour's centre is `pitch` away
+ * and the circle passes 17.6px clear of it. The `SHIPPO_EYE` note below is that
+ * same clearance seen from the other side, and the two contradicted each other
+ * for a round.
+ */
+const SHIPPO_PITCH = 60;
+const SHIPPO_RADIUS = SHIPPO_PITCH / Math.SQRT2;
+const SHIPPO_RING = arcPath(SHIPPO_RADIUS, 0, 360);
+/**
+ * The small ring at each circle's own centre.
+ *
+ * It sits inside the four petal opening the neighbouring arcs cut there, which
+ * is where chiyogami puts a dot or a floret. It is also what gives the pattern
+ * a second plane: sixteen identical circles are one weight, and one weight
+ * reads as a wire fence rather than as a paper.
+ *
+ * 9px because the nearest arc to a centre is the edge neighbour's, which passes
+ * `pitch - radius` away, or 17.6px. That leaves 8.6px of ground between the two
+ * and the eye stays an eye rather than joining the field.
+ */
+const SHIPPO_EYE = arcPath(9, 0, 360);
+
+/**
+ * A Greek fret, laid as a field rather than as a border.
+ *
+ * `MEANDER_STEP` is the whole design: every parallel run in it is one step
+ * apart, so the step is the pattern's mark pitch and the admission rule's 12px
+ * floor is what sets it. At 15 the fret measures well clear; at 12 it would sit
+ * on the floor itself, which is the value a grating measures 0.196 at.
+ *
+ * The cell is four steps wide and five tall, and the fifth step is not spare
+ * space. The spiral occupies four and the rail closes it, so without the fifth
+ * a rail would land exactly on the next row's top run and the two would be
+ * drawn one on top of the other: invisible in a diff, and a row of doubled ink
+ * on every repeat.
+ */
+const MEANDER_SIZE = 300;
+const MEANDER_STEP = 15;
+const MEANDER_CELL = { x: 4 * MEANDER_STEP, y: 5 * MEANDER_STEP };
+/**
+ * The key itself: a rectangular spiral hanging off the rail below it.
+ *
+ * Its corners are in **steps**, not pixels, because every one of them is on the
+ * step grid and stating them any other way invites one that is not. A run of
+ * this shape is one step from its neighbour everywhere, which is the whole
+ * reason the step is the admission rule's business.
+ *
+ * Drawn as one polyline rather than as a closed shape, because a fret is a line
+ * that turns rather than an outline that is filled. It runs up from the rail,
+ * along the top, and inward through three turns, which is the single meander;
+ * the double meander interlocks two of these and would halve the step to reach
+ * the same ink, which the floor forbids at this size.
+ */
+const MEANDER_TURNS: Point[] = [
+  [0, 4],
+  [0, 0],
+  [3, 0],
+  [3, 3],
+  [1, 3],
+  [1, 1],
+  [2, 1],
+];
+const MEANDER_KEY =
+  `M0 ${4 * MEANDER_STEP}` +
+  MEANDER_TURNS.slice(1)
+    .map(([x, y]) => `L${x * MEANDER_STEP} ${y * MEANDER_STEP}`)
+    .join("");
+
+const CURL_SIZE = 240;
+/** Px between combed lines, as in Nonpareil: the comb comes first. */
+const CURL_LINE_PITCH = 15;
+/**
+ * Where the stylus was drawn, and how far each turn of it reached.
+ *
+ * A curl marble is a nonpareil that has been worked a second time: the marbler
+ * draws a stylus in a small circle through the combed bath and the lines are
+ * carried round with it. So the pattern here is the comb, displaced, rather
+ * than a set of spirals drawn on top of one.
+ *
+ * `CURL_REACH` is half the closest distance between two centres and no more,
+ * which is the periodicity condition of the header applied to a displacement
+ * field: the field is a sum of terms that vanish outside `reach`, so it repeats
+ * with the lattice exactly when no two of those terms overlap. `swirl` refuses
+ * centres that are closer, rather than leaving it to be remembered here.
+ */
+const CURL_REACH = 38;
+/** Radians of rotation at a centre, falling to nothing at the reach. */
+const CURL_TURN = 5;
+/**
+ * The glide the curl lattice is built on, and what makes eight shapes serve
+ * sixteen lines.
+ *
+ * The second row of curls is the first translated by this, and the second row
+ * translated by it again lands back on the first a tile down. So the whole set
+ * of centres is invariant under it, and so is the field they displace: a comb
+ * line `CURL_ROW` down the tile is the line above it translated by the same
+ * amount, rather than a new shape.
+ *
+ * The alternative was an unstaggered lattice, which has the same saving as a
+ * plain translation and reads as a grid of curls rather than as a sheet
+ * somebody worked across. It was the first arrangement here, and it was drawn
+ * with the stagger and the plain translation both, which is neither: the lines
+ * in the lower half showed curls where the field has none. The glide is what
+ * makes the stagger and the saving the same fact.
+ */
+const CURL_GLIDE: Point = [40, 120];
+const CURL_ROW = CURL_GLIDE[1];
+const CURL_CENTRES: Point[] = [0, 80, 160].flatMap((x): Point[] => [
+  [x, 0],
+  [x + CURL_GLIDE[0], CURL_GLIDE[1]],
+]);
+/**
+ * A combed line, carried round every curl it passes.
+ *
+ * Sampled every 4px rather than emitted as cubics, because the displacement has
+ * no closed form tangent and a Hermite fit to it would be guessing at the
+ * curvature exactly where the curvature is the pattern. 4px is what the
+ * rasteriser's own sampling resolves and it costs about 60 points a line.
+ *
+ * Periodic for free in both axes. In x because the field is, so the point at
+ * `size` is the point at 0 displaced by the same rotation and translated one
+ * tile; in y because a line whose y is a multiple of the lattice's own y pitch
+ * away from another sees an identical field, which is why eight shapes serve
+ * sixteen lines.
+ */
+function curlLine(warp: (point: Point) => Point, y: number): string {
+  const points: string[] = [];
+  for (let x = 0; x <= CURL_SIZE; x += 4) {
+    const [px, py] = warp([x, y]);
+    points.push(`${round(px)} ${round(py)}`);
+  }
+  return (
+    `M${points[0]}` +
+    points
+      .slice(1)
+      .map((p) => `L${p}`)
+      .join("")
+  );
+}
+
 interface PatternSpec {
   id: string;
   name: string;
@@ -1432,7 +1962,8 @@ export const PATTERNS: Pattern[] = [
         // It is here because Willow needed the weight. At two layers it
         // measured 0.00485 mean tile dL against a floor of 0.0070, the only
         // tile under the band and by 31%, and it was under because it is the
-        // sparsest of the five rather than because it is drawn faint. Adding
+        // sparsest of the five that then shipped rather than because it is
+        // drawn faint. Adding
         // ink to the foliage would have made it denser; adding a plane behind
         // makes it deeper, which is the same number and a different tile.
         weight: "under",
@@ -1458,8 +1989,9 @@ export const PATTERNS: Pattern[] = [
           ),
       },
       {
-        // The densest of the five, which is faithful: the original is a mass of
-        // small leaves with barely any ground showing between them.
+        // The most densely grown of the eight, at 166 placements against
+        // Jasmine's 124, which is faithful: the original is a mass of small
+        // leaves with barely any ground showing between them.
         weight: "foliage",
         body:
           filled(
@@ -1715,6 +2247,170 @@ export const PATTERNS: Pattern[] = [
     ],
   }),
   define({
+    id: "trellis",
+    name: "Trellis",
+    family: "morris",
+    size: TRELLIS_SIZE,
+    build: (m) => [
+      {
+        // Joinery and plant in one weight, because both are structure: the
+        // trellis is what the rose is growing on, not a frame around it.
+        weight: "ground",
+        body:
+          stroked(TRELLIS_FRAME, 1.6) +
+          stems(TRELLIS_ROSE, 2.2) +
+          stems(TRELLIS_TWIGS, 1.1),
+      },
+      {
+        // Cut leaves throughout: a rose leaf is serrated, and it is the one
+        // place in this set where the serration is the plant's own mark rather
+        // than a way of adding interest to a lobe.
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, TRELLIS_ROSE, {
+              shape: CUT_LEAF,
+              spacing: 30,
+              lean: 58,
+              scale: [0.95, 0.75, 1.05],
+              taper: 0.85,
+              jitter: 0.3,
+            }),
+          ) +
+          filled(
+            grow(m, TRELLIS_TWIGS, {
+              shape: CUT_LEAF,
+              spacing: 26,
+              lean: 48,
+              scale: [0.85, 0.65],
+              jitter: 0.35,
+            }),
+          ),
+      },
+      {
+        // Five petals from one point, which is what makes it a wild rose and
+        // not a garden one. The ring closes, so `spread` is 360 / count.
+        weight: "bloom",
+        body: filled(
+          TRELLIS_ROSES.map((at) =>
+            radial(m, ROSE_PETAL, at, {
+              count: 5,
+              spread: 72,
+              scale: [0.95, 1.05, 0.9],
+            }),
+          ).join(""),
+        ),
+      },
+    ],
+  }),
+  define({
+    id: "marigold",
+    name: "Marigold",
+    family: "morris",
+    size: MARIGOLD_SIZE,
+    build: (m) => [
+      {
+        weight: "ground",
+        body: stems(MARIGOLD_STEMS, 2.4) + stems(MARIGOLD_TWIGS, 1.2),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, MARIGOLD_STEMS, {
+              shape: CUT_LEAF,
+              spacing: 32,
+              lean: 60,
+              scale: [0.95, 0.75, 1.05],
+              taper: 0.85,
+              jitter: 0.3,
+            }),
+          ) +
+          filled(
+            grow(m, MARIGOLD_TWIGS, {
+              shape: ROUND_LEAF,
+              spacing: 36,
+              lean: 46,
+              scale: [0.85, 0.65],
+              jitter: 0.35,
+            }),
+          ),
+      },
+      {
+        // A marigold head is a ring of narrow rays about one point, and the
+        // rays start at that point, so nothing is needed at the centre: ten
+        // inner ends meeting is the centre.
+        weight: "bloom",
+        body: filled(
+          MARIGOLD_HEADS.map((at) =>
+            radial(m, RAY, at, { count: 10, spread: 36, scale: [1.15, 1] }),
+          ).join(""),
+        ),
+      },
+    ],
+  }),
+  define({
+    id: "jasmine",
+    name: "Jasmine",
+    family: "morris",
+    size: JASMINE_SIZE,
+    build: (m) => [
+      {
+        weight: "ground",
+        body:
+          stems(JASMINE_HAWTHORN, 1.8) +
+          stems(JASMINE_TRAILS, 2.2) +
+          stems(JASMINE_TWIGS, 1.1),
+      },
+      {
+        // The hawthorn, carried on its own stems rather than grown more
+        // faintly on the jasmine's. It is a second plant in the design, which
+        // is the difference between a ground and a paler copy of the subject.
+        weight: "under",
+        body: filled(
+          grow(m, JASMINE_HAWTHORN, {
+            shape: ROUND_LEAF,
+            spacing: 22,
+            lean: 92,
+            scale: [1.05, 0.85],
+            jitter: 0.4,
+          }),
+        ),
+      },
+      {
+        weight: "foliage",
+        body:
+          filled(
+            grow(m, JASMINE_TRAILS, {
+              shape: WILLOW_LEAF,
+              spacing: 17,
+              lean: 56,
+              scale: [1.15, 0.9, 1.25],
+              taper: 0.9,
+              jitter: 0.3,
+            }),
+          ) +
+          filled(
+            grow(m, JASMINE_TWIGS, {
+              shape: WILLOW_LEAF,
+              spacing: 16,
+              lean: 44,
+              scale: [1, 0.8],
+              jitter: 0.35,
+            }),
+          ),
+      },
+      {
+        weight: "bloom",
+        body: filled(
+          JASMINE_FLOWERS.map((at) =>
+            radial(m, RAY, at, { count: 5, spread: 72, scale: [0.9, 1, 0.9] }),
+          ).join(""),
+        ),
+      },
+    ],
+  }),
+  define({
     id: "nonpareil",
     name: "Nonpareil",
     family: "papers",
@@ -1877,6 +2573,109 @@ export const PATTERNS: Pattern[] = [
       },
     ],
   }),
+  define({
+    id: "shippo",
+    name: "Shippo",
+    family: "papers",
+    size: SHIPPO_SIZE,
+    build: (m) => {
+      const field = (shape: string) =>
+        lattice(SHIPPO_SIZE, { x: SHIPPO_PITCH, y: SHIPPO_PITCH }, ({ x, y }) =>
+          place(m.id(shape), x, y, 0, 1),
+        );
+      return [
+        { weight: "ground", body: stroked(field(SHIPPO_EYE), 2.2) },
+        {
+          weight: "foliage",
+          body: stroked(field(SHIPPO_RING), 2.2, "{bloom}"),
+        },
+      ];
+    },
+  }),
+  define({
+    id: "meander",
+    name: "Meander",
+    family: "papers",
+    size: MEANDER_SIZE,
+    build: (m) => [
+      {
+        // The rail a row of keys stands on, drawn once per row rather than once
+        // per cell. The cells abut, so a per cell segment would lay the same
+        // rule down in five pieces and put a round cap at each join.
+        weight: "ground",
+        body: stroked(
+          Array.from({ length: MEANDER_SIZE / MEANDER_CELL.y }, (_, row) => {
+            const at = row * MEANDER_CELL.y + 4 * MEANDER_STEP;
+            return `<path d="M0 ${at}L${MEANDER_SIZE} ${at}"/>`;
+          }).join(""),
+          3.2,
+        ),
+      },
+      {
+        weight: "foliage",
+        body: stroked(
+          lattice(MEANDER_SIZE, MEANDER_CELL, ({ x, y }) =>
+            place(m.id(MEANDER_KEY), x, y, 0, 1),
+          ),
+          3.2,
+          "{bloom}",
+        ),
+      },
+    ],
+  }),
+  define({
+    id: "curl",
+    name: "Curl",
+    family: "papers",
+    size: CURL_SIZE,
+    build: (m) => {
+      const warp = swirl(CURL_CENTRES, CURL_REACH, CURL_TURN, CURL_SIZE);
+      // Eight shapes for sixteen lines, along the glide rather than straight
+      // down: see `CURL_GLIDE`. The comb's pitch divides the row spacing, so
+      // every line in the lower half is one from the upper half moved by it.
+      const period = CURL_ROW / CURL_LINE_PITCH;
+      const lines = (parity: number) =>
+        Array.from({ length: CURL_SIZE / CURL_LINE_PITCH }, (_, index) => index)
+          .filter((index) => index % 2 === parity)
+          .map((index) => {
+            const row = Math.floor(index / period);
+            return place(
+              m.id(curlLine(warp, (index % period) * CURL_LINE_PITCH)),
+              row * CURL_GLIDE[0],
+              row * CURL_GLIDE[1],
+              0,
+              1,
+            );
+          })
+          .join("");
+      return [
+        { weight: "ground", body: stroked(lines(0), 2.9) },
+        // The alternate lines in the second pigment, as in Nonpareil and for
+        // the same reason: two colours go on the bath before the comb does.
+        //
+        // Thinner than Nonpareil's 3.2 although the comb pitch is the same,
+        // because a curl compresses the lines it carries: the shear peaks at
+        // half the turn, so two lines 15px apart close at the tightest ring.
+        //
+        // Three numbers, and they are not the same number. The analytic bound,
+        // `15 / sqrt(1 + (turn / 2)^2)`, is 5.571px; the displacement itself,
+        // resampled at a quarter pixel, measures 5.418px; and the polylines
+        // that actually ship, sampled at 4px of x, measure **about 5.0px**, the
+        // chords cutting the corner where the curve is tightest.
+        //
+        // Two decimals on that last one and no more: two measurements of it,
+        // point to segment and segment to segment, disagree in the third
+        // significant figure, and the emitted coordinates are rounded to 0.1px
+        // by `round` anyway, so a third decimal describes the measuring rather
+        // than the tile.
+        //
+        // The last is the one the page gets, so 2.9 leaves about 2.1px of
+        // daylight there and keeps the densest 7x7 window at 0.722, beside
+        // Seigaiha's 0.718 and under Shippo's 0.786.
+        { weight: "foliage", body: stroked(lines(1), 2.9, "{bloom}") },
+      ];
+    },
+  }),
 ];
 
 /**
@@ -1884,11 +2683,13 @@ export const PATTERNS: Pattern[] = [
  *
  * These are OKLab lightness deltas: how far one mark of that layer moves the
  * page it sits on. They were opacities until the ink started following the
- * palette, and then they could not be, because one alpha over seven inks is
- * seven weights. Measured at the shipped alphas the mean tile weight ran 1.27x
- * apart across the seven palettes in light and 1.32x in dark, against a budget
- * band 1.31x wide: the palette alone consumed the whole budget, and the dimmer
- * inks landed up to 30% under target in dark.
+ * palette, and then they could not be, because one alpha over ten inks is ten
+ * weights. Measured at the shipped alphas the mean tile weight ran 1.27x apart
+ * in light and 1.32x in dark, against a budget band 1.31x wide: the palette
+ * alone consumed the whole budget, and the dimmer inks landed up to 30% under
+ * target in dark. That measurement was taken across the seven palettes that
+ * shipped then, and is left attached to seven rather than restated over ten,
+ * because nobody has re-run it.
  *
  * Solving the alpha from the weight instead takes that spread to 1.052x in
  * light and 1.030x in dark, and what is left is not the palette: in continuous
@@ -1916,13 +2717,16 @@ const TARGETS: Record<ResolvedTheme, Record<LayerWeight, number>> = {
  * Not the weight ceiling: that is `TARGETS`, and it is the same perceptual
  * number for every palette. This is the guard on what an ink is allowed to
  * spend reaching it, and it binds only where the ink is so close to its own
- * page that no reasonable alpha gets there. The highest solve across the
- * fourteen palette-modes is Solarized dark's bloom at 0.2082, so at 0.30 this
- * catches an ink that is genuinely unusable rather than one that is merely dim.
+ * page that no reasonable alpha gets there. The highest solve across the twenty
+ * palette-modes is **still** Solarized dark's bloom at 0.2082, recounted
+ * against all ten palettes when the eighth, ninth and tenth landed, so at 0.30
+ * this catches an ink that is genuinely unusable rather than one that is merely
+ * dim.
  *
  * It replaced a flat 0.15, which was the right number while the alpha was the
- * instrument and is the wrong one now: five of the seven palettes need more
- * than 0.15 in dark to reach a weight Endpaper reaches at 0.13.
+ * instrument and is the wrong one now: seven of the ten palettes need more than
+ * 0.15 in dark to reach a weight Endpaper reaches at 0.1322, and the dark
+ * ground alpha alone runs 0.0720 (Ayu) to 0.1093 (Rose Pine).
  */
 const ALPHA_CEILING = 0.3;
 

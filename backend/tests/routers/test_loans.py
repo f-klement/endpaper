@@ -5,8 +5,67 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from database import engine
 from models import Loan
+from tests.conftest import _make_account
 from tests.helpers import items
+
+
+def selects_for(client, headers: dict, url: str) -> tuple[int, int]:
+    """The SELECTs one request issues, and the `total` it answered with.
+
+    The total comes back with the count so a cost met by answering with
+    nothing cannot pass for a cheap page.
+    """
+    from sqlalchemy import event
+
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *rest):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = client.get(url, headers=headers).json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    selects = [row for row in statements if row.lstrip().upper().startswith("SELECT")]
+    return len(selects), body["total"]
+
+
+def lend_between_strangers(client, make_book, password_hash: str, index: int) -> dict:
+    """One overdue loan whose adder, lender and borrower are three fresh accounts.
+
+    **A cost test is only a cost test if every relationship on the page names a
+    different row.** With one account adding, lending and borrowing everything,
+    a dropped `joinedload` resolves out of the session's identity map and costs
+    nothing at all. Measured 2026-08-29: on the fixtures these tests used to
+    build, each of the four eager load options on `list_loans` and
+    `list_overdue` could be deleted on its own with this whole file green, and
+    one of the four was a wasted statement nobody had noticed. Three distinct
+    parties per loan turn a missing option back into a lazy load per row, which
+    is the only shape in which these tests assert anything.
+
+    `_make_account` rather than the account fixtures, because a fixture is one
+    account and this needs one per loan.
+    """
+    adder = _make_account(password_hash, f"adder{index}", is_admin=False)
+    lender = _make_account(password_hash, f"lender{index}", is_admin=False)
+    borrower = _make_account(password_hash, f"borrower{index}", is_admin=False)
+    book = make_book(adder["headers"], title=f"Stranger {index}")
+    res = client.post(
+        "/api/loans",
+        json={
+            "book_id": book["id"],
+            "loaned_to_user_id": borrower["user"]["id"],
+            "due_at": (datetime.now(UTC) - timedelta(days=3))
+            .replace(tzinfo=None)
+            .isoformat(),
+        },
+        headers=lender["headers"],
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
 
 
 @pytest.fixture
@@ -394,46 +453,81 @@ class TestTheNestedBook:
 
         assert loan["book"]["active_loan"] is not None
 
-    def test_a_page_of_loans_costs_a_bounded_number_of_queries(
-        self, client, admin, member, make_book
+    def test_a_page_of_loans_costs_the_same_whatever_its_length(
+        self, client, admin, make_book, _password_hash
     ):
-        """It was 53 statements for 25 loans: the N+1 the docs say was fixed."""
-        from sqlalchemy import event
+        """It was 53 statements for 25 loans: the N+1 the docs say was fixed.
 
-        from database import engine
+        **Two lengths, not a ceiling.** This asserted `<= 12` and a smaller
+        count is a weaker inequality, so it went on passing with an option
+        deleted and the count down at 11. What is claimed is that the cost is
+        constant in the number of loans, which two measurements decide and one
+        cannot.
 
+        The equality on the number is exact for the same reason: a constant
+        statement added **or removed** is then noticed rather than absorbed.
+        Moving it is allowed when the change is deliberate and measured.
+
+        What it pins, measured 2026-08-29 by deleting each option alone:
+        `joinedload(Loan.book).joinedload(Book.added_by)`. Dropping the
+        `.joinedload(Book.added_by)` link alone is +3 and +10, one member per
+        loan; dropping the whole option takes the Book with it and is +6 and
+        +20. The figures answer different mutations, so both are stated.
+        `Loan.loaned_to` and `Loan.loaned_by` are free on an active page and
+        are pinned by the returned page below instead.
+        """
+        for index in range(3):
+            lend_between_strangers(client, make_book, _password_hash, index)
+        short_cost, short_total = selects_for(client, admin["headers"], "/api/loans")
+
+        for index in range(3, 10):
+            lend_between_strangers(client, make_book, _password_hash, index)
+        long_cost, long_total = selects_for(client, admin["headers"], "/api/loans")
+
+        # The rows really were built, so a cost met by returning nothing cannot
+        # pass, and the two runs really do differ in length.
+        assert (short_total, long_total) == (3, 10)
+
+        assert short_cost == long_cost, (
+            f"{short_cost} selects for 3 loans and {long_cost} for 10: "
+            "the cost moves with the page, which is the N+1 this exists to catch"
+        )
+        # What makes up the constant is stated once, in
+        # `serialisation.books_to_out`, and deliberately not enumerated here:
+        # this repository has restated that breakdown wrongly twice, both times
+        # by editing prose rather than measuring.
+        assert long_cost == 11, f"{long_cost} selects for 10 loans"
+
+    def test_a_page_of_returned_loans_costs_the_same_whatever_its_length(
+        self, client, admin, make_book, _password_hash
+    ):
+        """`active_only=false` is the page `Loan.loaned_to` and `Loan.loaned_by`
+        are eager loaded for, and the only page on which they are observable.
+
+        `books_to_out` fetches the page's **active** loans with both users
+        joinedloaded, so on the default page those two options are satisfied by
+        somebody else's query and deleting either changes nothing at all. A
+        returned loan is in no such fetch. Measured 2026-08-29 on this page:
+        deleting either alone costs +3 at three loans and +10 at ten.
+        """
         for index in range(10):
-            book = make_book(admin["headers"], title=f"Book {index}")
-            client.post(
-                "/api/loans",
-                json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
-                headers=admin["headers"],
-            )
+            row = lend_between_strangers(client, make_book, _password_hash, index)
+            client.put(f"/api/loans/{row['id']}/return", headers=admin["headers"])
+            if index == 2:
+                short_cost, short_total = selects_for(
+                    client, admin["headers"], "/api/loans?active_only=false"
+                )
+        long_cost, long_total = selects_for(
+            client, admin["headers"], "/api/loans?active_only=false"
+        )
 
-        statements: list[str] = []
+        assert (short_total, long_total) == (3, 10)
 
-        def record(conn, cursor, statement, *rest):
-            statements.append(statement)
-
-        event.listen(engine, "before_cursor_execute", record)
-        try:
-            client.get("/api/loans", headers=admin["headers"])
-        finally:
-            event.remove(engine, "before_cursor_execute", record)
-
-        selects = [s for s in statements if s.lstrip().upper().startswith("SELECT")]
-        # Constant in the number of loans, not linear. What makes up the
-        # constant is stated once, in `serialisation.books_to_out`, and
-        # deliberately not enumerated here: this repository has restated that
-        # breakdown wrongly twice, both times by editing prose rather than
-        # measuring. The number this test exists to catch is a linear one, and
-        # it was 53 for 25 loans.
-        #
-        # 12 rather than 11 since classifications became a second `selectinload`
-        # on the same re-read. Moving this ceiling is allowed when a **constant**
-        # statement is added and measured; moving it because the number crept up
-        # with the page size is the defect it exists to catch.
-        assert len(selects) <= 12, f"{len(selects)} selects for 10 loans"
+        assert short_cost == long_cost, (
+            f"{short_cost} selects for 3 returned loans and {long_cost} for 10: "
+            "the cost moves with the page, which is the N+1 this exists to catch"
+        )
+        assert long_cost == 11, f"{long_cost} selects for 10 returned loans"
 
 
 class TestOneOpenLoanPerBook:
@@ -621,3 +715,312 @@ class TestOverdueNotify:
         matched against `{loan_id}`."""
         res = client.post("/api/loans/overdue/notify", headers=admin["headers"])
         assert res.status_code == 200
+
+
+class TestMyOverdue:
+    """`GET /api/loans/overdue/mine`: the in app reminder (#86).
+
+    Who sees what is pinned in `tests/test_notifications.py`, on
+    `overdue_for_viewer`. What is here is the route: that it needs a session and
+    not an admin, that the toggle reaches it, and that `overdue` is not read as
+    a loan id.
+    """
+
+    def past(self) -> str:
+        return (datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None).isoformat()
+
+    def lend(self, client, admin, member, book):
+        return client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": member["user"]["id"],
+                "due_at": self.past(),
+            },
+            headers=admin["headers"],
+        )
+
+    def test_it_needs_a_token(self, client):
+        assert client.get("/api/loans/overdue/mine").status_code == 401
+
+    def test_a_member_may_read_their_own(self, client, admin, member, make_book):
+        """Not admin only, and that is the point: it is the channel a household
+        with no mailbox, no bot and no receiver still has."""
+        book = make_book(admin["headers"])
+        self.lend(client, admin, member, book)
+
+        body = client.get("/api/loans/overdue/mine", headers=member["headers"]).json()
+
+        assert body == {"enabled": True, "count": 1}
+
+    def test_it_is_on_without_anybody_configuring_anything(self, client, member):
+        """A fresh install, nothing set up. Every other channel answers nothing
+        here, which is the complaint #86 was filed about."""
+        body = client.get("/api/loans/overdue/mine", headers=member["headers"]).json()
+        assert body["enabled"] is True
+
+    def test_switching_it_off_reports_nothing_rather_than_a_count(
+        self, client, admin, member, make_book
+    ):
+        """A household that turned the banner off should see no banner, and the
+        page should not have to read the admin-only settings record to find
+        that out."""
+        book = make_book(admin["headers"])
+        self.lend(client, admin, member, book)
+        client.put(
+            "/api/settings",
+            json={"overdue_in_app_enabled": False},
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/loans/overdue/mine", headers=member["headers"]).json()
+
+        assert body == {"enabled": False, "count": 0}
+
+    def test_the_literal_path_is_not_read_as_a_loan_id(self, client, member):
+        """The route-order rule. A 422 here would mean `overdue` had been
+        matched against a path parameter."""
+        assert client.get("/api/loans/overdue/mine", headers=member["headers"]).status_code == 200
+
+
+class TestListOverdue:
+    """`GET /api/loans/overdue`: the list behind the banner (#102).
+
+    Who may read which loan is pinned in `tests/test_notifications.py`, on
+    `overdue_for_viewer`. What is here is the route: that it uses that rule
+    rather than the loans list's wider one, that the in app switch reaches it,
+    and that `overdue` is not read as a loan id.
+    """
+
+    def past(self) -> str:
+        return (datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None).isoformat()
+
+    def lend(self, client, headers, book, to_user_id):
+        res = client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": to_user_id,
+                "due_at": self.past(),
+            },
+            headers=headers,
+        )
+        assert res.status_code == 201, res.text
+        return res.json()
+
+    def test_it_needs_a_token(self, client):
+        assert client.get("/api/loans/overdue").status_code == 401
+
+    def test_the_literal_path_is_not_read_as_a_loan_id(self, client, member):
+        """The route-order rule. A 422 here would mean `overdue` had been
+        matched against a path parameter."""
+        assert client.get("/api/loans/overdue", headers=member["headers"]).status_code == 200
+
+    def test_it_lists_the_loan_a_member_borrowed(self, client, admin, member, make_book):
+        book = make_book(admin["headers"], title="Lent out")
+        self.lend(client, admin["headers"], book, member["user"]["id"])
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert body["total"] == 1
+        assert [row["book"]["title"] for row in body["items"]] == ["Lent out"]
+        assert body["items"][0]["is_overdue"] is True
+
+    def test_a_loan_that_is_not_yet_due_is_absent(self, client, admin, member, make_book):
+        book = make_book(admin["headers"], title="Still fine")
+        soon = (datetime.now(UTC) + timedelta(days=3)).replace(tzinfo=None).isoformat()
+        client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": member["user"]["id"],
+                "due_at": soon,
+            },
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert body["total"] == 0
+
+    def test_a_member_does_not_read_a_loan_they_are_not_party_to(
+        self, client, admin, member, other_user, make_book
+    ):
+        """The whole reason this is a new endpoint rather than
+        `overdue_only=true` on the loans list. That one is rooted at the Shelf
+        and stops there, so it answers with this row; this one applies
+        `sees_every_loan` and does not."""
+        book = make_book(admin["headers"], title="Somebody else's business")
+        self.lend(client, admin["headers"], book, other_user["user"]["id"])
+
+        overdue = client.get("/api/loans/overdue", headers=member["headers"]).json()
+        wider = client.get(
+            "/api/loans", params={"overdue_only": True}, headers=member["headers"]
+        ).json()
+
+        assert overdue["total"] == 0
+        assert wider["total"] == 1
+
+    def test_an_admin_reads_every_overdue_loan_on_their_shelf(
+        self, client, admin, member, other_user, make_book
+    ):
+        book = make_book(admin["headers"], title="Staff can see this")
+        self.lend(client, admin["headers"], book, other_user["user"]["id"])
+        # Lent by the admin, so `loaned_by` alone would have matched. Re-lend
+        # through the member so neither party is the admin.
+        second = make_book(member["headers"], title="Neither party is the admin")
+        self.lend(client, member["headers"], second, other_user["user"]["id"])
+
+        body = client.get("/api/loans/overdue", headers=admin["headers"]).json()
+
+        assert sorted(row["book"]["title"] for row in body["items"]) == [
+            "Neither party is the admin",
+            "Staff can see this",
+        ]
+
+    def test_a_private_book_somebody_else_added_never_appears(
+        self, client, admin, member, other_user, make_book
+    ):
+        """The Shelf, not the loan clauses, is what stops this. An admin is not
+        a superuser over another member's private books anywhere else in this
+        app and is not made one here."""
+        book = make_book(member["headers"], title="Members only", is_private=True)
+        self.lend(client, member["headers"], book, other_user["user"]["id"])
+
+        body = client.get("/api/loans/overdue", headers=admin["headers"]).json()
+
+        assert body["total"] == 0
+
+    def test_switching_the_in_app_channel_off_empties_it(
+        self, client, admin, member, make_book
+    ):
+        """The setting is spelled "show overdue loans in the app", and this page
+        is what it shows."""
+        book = make_book(admin["headers"], title="Hidden by the switch")
+        self.lend(client, admin["headers"], book, member["user"]["id"])
+        client.put(
+            "/api/settings",
+            json={"overdue_in_app_enabled": False},
+            headers=admin["headers"],
+        )
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert body == {"items": [], "total": 0, "page": 1, "page_size": 50}
+
+    def test_the_loans_list_is_not_affected_by_that_switch(
+        self, client, admin, member, make_book
+    ):
+        """A loan list is not the reminder channel. Switching the channel off
+        must not hide a household's loans from the loans page."""
+        book = make_book(admin["headers"], title="Still on the loans page")
+        self.lend(client, admin["headers"], book, member["user"]["id"])
+        client.put(
+            "/api/settings",
+            json={"overdue_in_app_enabled": False},
+            headers=admin["headers"],
+        )
+
+        body = client.get(
+            "/api/loans", params={"overdue_only": True}, headers=member["headers"]
+        ).json()
+
+        assert body["total"] == 1
+
+    def test_the_most_overdue_comes_first(self, client, admin, member, make_book):
+        """`overdue_for_viewer` orders by `due_at`, and the page is read from
+        the top: the book somebody has had longest is the one to chase."""
+        older = make_book(admin["headers"], title="Older")
+        newer = make_book(admin["headers"], title="Newer")
+        for book, days in ((newer, 2), (older, 40)):
+            client.post(
+                "/api/loans",
+                json={
+                    "book_id": book["id"],
+                    "loaned_to_user_id": member["user"]["id"],
+                    "due_at": (datetime.now(UTC) - timedelta(days=days))
+                    .replace(tzinfo=None)
+                    .isoformat(),
+                },
+                headers=admin["headers"],
+            )
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert [row["book"]["title"] for row in body["items"]] == ["Older", "Newer"]
+
+    def test_a_returned_loan_is_gone_however_late_it_was(
+        self, client, admin, member, make_book
+    ):
+        book = make_book(admin["headers"], title="Came back")
+        loan = self.lend(client, admin["headers"], book, member["user"]["id"])
+        client.put(f"/api/loans/{loan['id']}/return", headers=member["headers"])
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert body["total"] == 0
+
+    def test_the_overdue_page_costs_the_same_whatever_its_length(
+        self, client, admin, make_book, _password_hash
+    ):
+        """The eager loads were copied from `list_loans`; this is the test that
+        makes them mean something.
+
+        `overdue_for_viewer` deliberately carries no eager loading, because its
+        other caller wants a count and no ORM objects. So every join this route
+        needs it adds itself, and a route that adds them by copying is a route
+        that can be edited back to an N+1 with nothing failing.
+
+        **Measured twice rather than compared with a written down number.** A
+        ceiling is the weaker half of the property: a smaller count is a weaker
+        inequality, so a bound can stop guarding without ever failing, and this
+        repository has recorded exactly that. What is actually being claimed is
+        that the cost is **constant in the number of loans**, which two
+        measurements at two lengths decide and one measurement cannot.
+
+        **Every party is a different account, and that is what makes it a
+        test.** This built its page with one admin adding, lending and
+        borrowing everything, so a deleted `joinedload` resolved out of the
+        session's identity map: measured 2026-08-29, all four options could be
+        deleted one at a time with the file green, and one of them was a
+        wasted statement. `lend_between_strangers` is where the reasoning sits.
+
+        **What it pins**: `joinedload(Loan.book).joinedload(Book.added_by)`, at
+        +3 and +10 with the `Book.added_by` link deleted, +6 and +20 with the
+        whole option deleted. `Loan.loaned_to` and `Loan.loaned_by` cost
+        nothing here whatever the page, because this route returns unreturned
+        loans only and `books_to_out` fetches exactly those with both users
+        joinedloaded. Nothing pins them and nothing can: see the comment beside
+        them in the route.
+
+        The number is exact rather than a ceiling so that a constant statement
+        added **or removed** is noticed. It is one higher than `list_loans` and
+        the one is named: this route reads `overdue_in_app_enabled` first.
+
+        The viewer is an admin because the borrowers are strangers to each
+        other: `sees_every_loan` is what puts them all on one page. Who may
+        read which loan is pinned in `tests/test_notifications.py`.
+        """
+        for index in range(3):
+            lend_between_strangers(client, make_book, _password_hash, index)
+        short_cost, short_total = selects_for(
+            client, admin["headers"], "/api/loans/overdue"
+        )
+
+        for index in range(3, 10):
+            lend_between_strangers(client, make_book, _password_hash, index)
+        long_cost, long_total = selects_for(
+            client, admin["headers"], "/api/loans/overdue"
+        )
+
+        # The rows really were built, so a cost met by returning nothing cannot
+        # pass, and the two runs really do differ in length.
+        assert (short_total, long_total) == (3, 10)
+
+        assert short_cost == long_cost, (
+            f"{short_cost} selects for 3 loans and {long_cost} for 10: "
+            "the cost moves with the page, which is the N+1 this exists to catch"
+        )
+        # 12 rather than `list_loans`'s 11: this route reads the in app
+        # channel's switch before it queries anything.
+        assert long_cost == 12, f"{long_cost} selects for 10 overdue loans"

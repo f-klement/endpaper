@@ -1,7 +1,8 @@
 """Chasing overdue loans, by sending one digest on every channel that is on.
 
-Three senders, one digest. **A webhook, mail over SMTP, and Telegram**, each
-switched on independently, all carrying the same content.
+Four senders. **The app itself, a webhook, mail over SMTP, and Telegram**, each
+switched on independently. The three that push outward carry the same content;
+the fourth is read rather than sent, and carries what its reader may see.
 
 **The webhook was once the only one, on an argument this module used to make and
 that is now overruled.** It said a self-hosted app should not ship an
@@ -15,26 +16,45 @@ something nobody else runs" costs one constant here rather than a service.
 Recorded so the next reader does not think a decision was quietly reversed:
 issue #8, and `docs/decisions.md`.
 
-**Private books are excluded, on every sender.** A channel has no member
-identity behind it and lands where the whole household reads, so putting a
-private book's title through one defeats the single promise the data model
-makes. The in-app overdue view is per member and already scoped, so the owner
-still gets chased there. See `docs/decisions.md` and `docs/security.md`.
+**Private books are excluded from every sender that pushes.** A channel has no
+member identity behind it and lands where the whole household reads, so putting
+a private book's title through one defeats the single promise the data model
+makes. See `docs/decisions.md` and `docs/security.md`.
+
+**The in app channel is the exception, and it is the rule rather than a hole in
+it.** Its audience is a member, so `overdue_for_viewer` roots the query at
+`Shelf.seen_by` and each reader gets exactly what `visible_to` already says they
+may see, their own private books included. Being told about your own book is not
+a disclosure. That is the one capability the other three cannot have, and the
+reason this module's exemption from the Shelf rule covers the digest only: the
+digest has no viewer, and that query does.
 
 **A per borrower mail would be the one audience that could carry a private
 book**, because being reminded of a book you borrowed is not a disclosure. It is
-not built, and the reason is a missing fact rather than a decision: no member
-here has an address. `models.User` carries none and the LDAP backend requests
-none, so there is nowhere to send it. Mail therefore goes to the household's own
-mailbox, which is a channel like the other two and excludes private books like
-the other two.
+**still not built**, and what changed is only the fact it was blocked on:
+`models.User` now carries an `email` column (issue #80), so an address can
+exist. Nothing here reads it. Mail goes to the household's own mailbox, which is
+a channel like the other two and excludes private books like the other two, and
+that stays true for a member who has filled the field in, because no code path
+consults it yet.
 
-`notified_at` is stamped when **at least one** enabled sender delivered, because
-the column records that the loan was chased and it was. The alternative,
-stamping only when every sender delivered, turns one broken receiver into an
-hourly repeat of the same list on the channels that work, which `build_digest`
-calls the behaviour people switch off. A sender that failed is reported in its
-own entry rather than compensated for.
+So the column's arrival is invisible to this module by construction rather than
+by discipline: `send_mail` takes its recipients from `mailer.checked_config`,
+which reads `overdue_mail_to` and nothing else. A per borrower mode is a second
+audience for `build_digest` and a second recipient list, which is issue #8's
+remaining work rather than a column.
+
+`notified_at` is stamped when **at least one sender that pushes** delivered,
+because the column records that a reminder went out and one did. The
+alternative, stamping only when every sender delivered, turns one broken
+receiver into an hourly repeat of the same list on the channels that work,
+which `build_digest` calls the behaviour people switch off. A sender that
+failed is reported in its own entry rather than compensated for, and its
+standing record is kept by `record_run` rather than left in the log.
+
+The in app channel is outside that condition on purpose: it delivers nothing,
+so counting it would stamp every loan on every run and cut the pushing senders
+from hourly attempts to one per interval. `pushes_outward` carries the number.
 
 The reminder interval is the library's, not this module's. Handy Library's
 named differentiator in this space is configurable timing, and it is the right
@@ -59,15 +79,17 @@ from typing import Any, Final, assert_never
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
 import mailer
 import settings_store
 from database import SessionLocal
 from enums import OverdueNotifyReason, OverdueSender, SettingKey
-from models import Book, Loan
+from models import Book, Loan, User
 from schemas.settings import MAX_REMINDER_DAYS, MIN_REMINDER_DAYS
+from shelf import Shelf
 
 logger = logging.getLogger("endpaper.notifications")
 
@@ -268,10 +290,20 @@ def count_private_overdue(db: Session, now: datetime) -> int:
 
     **A per borrower mail is that audience, and it does not exist yet.** Being
     reminded of a book you borrowed is not a disclosure, so such a mail could
-    include one. No member here has an address (`models.User` carries none and
-    the LDAP backend requests none), so mail goes to the household's mailbox and
-    is a channel like the other two. When that changes, this function grows a
-    caller that asks for a different number, not a second definition of the rule.
+    include one.
+
+    **What has changed, and what has not.** `models.User` now carries an `email`
+    column and the LDAP backend requests an attribute where one is configured
+    (issue #80), so an address can exist: the premise this paragraph used to
+    rest on is gone. What has not changed is the conclusion. Nothing reads that
+    column here: `send_mail` takes its recipients from `mailer.checked_config`,
+    which reads `overdue_mail_to` and nothing else, so mail still goes to the
+    household's mailbox and is a channel like the other two. A member who has
+    filled the field in is in exactly the position of one who has not.
+
+    So this count is still every private overdue book in the library, and when a
+    per borrower audience arrives this function grows a caller that asks for a
+    different number, not a second definition of the rule.
 
     **No reminder interval here, and that is the difference from
     `due_for_reminder`.** A private book is never sent, so nothing in this
@@ -290,6 +322,108 @@ def count_private_overdue(db: Session, now: datetime) -> int:
         .filter(*_overdue_clauses(now), Book.is_private.is_(True))
         .count()
     )
+
+
+def count_overdue(db: Session, now: datetime) -> int:
+    """Every open overdue loan, private books included.
+
+    The number the in app channel is showing, across the whole household. Not
+    the number any one member sees: each of them sees the slice
+    `overdue_for_viewer` gives them, and the slices overlap. It is reported to
+    an admin pressing "Send now", who already reads `count_private_overdue`
+    beside it, so it discloses nothing new.
+
+    No reminder interval, for the reason `count_private_overdue` states: the in
+    app notice is read rather than sent, so nothing about it is quieted by
+    `notified_at`.
+    """
+    return (
+        db.query(Loan)
+        .join(Book, Loan.book_id == Book.id)
+        .filter(*_overdue_clauses(now))
+        .count()
+    )
+
+
+def sees_every_loan(viewer: User) -> bool:
+    """Whether this viewer reads the whole overdue list rather than their own.
+
+    **The seam library mode (#18) will widen, named rather than guessed.** The
+    owner settled the audiences per sender: the household channels go to a
+    mailbox or a chat, mail is addressed to the borrower, and the in app notice
+    is per member **except in library mode or for an admin**, where the reader
+    is staff checking open reminders and outstanding books.
+
+    Library mode does not exist yet, so today this answers one question and
+    that is the whole of it. What it must not become is `admins see all`: an
+    admin is not a superuser over another member's private books anywhere else
+    in this app, and this is not the thing that makes them one. Both arms of
+    `overdue_for_viewer` are narrowed by the Shelf either way; this decides
+    only whether the loans are further narrowed to the ones the viewer is
+    party to.
+
+    So when library mode lands, this function gains a clause and nothing else
+    changes: the staff rule is already "every loan over a book this viewer may
+    see", and that mode changes what the set contains rather than how it is
+    computed.
+    """
+    return viewer.is_admin
+
+
+def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
+    """The overdue loans the in app notice tells **this member** about.
+
+    **Rooted at the Shelf, which is what makes this different from every other
+    query in this module.** The digest has no viewer and is exempt from the
+    house rule for that reason; this one has a viewer, so it is not covered by
+    that exemption and does not inherit it. `Shelf.seen_by` applies
+    `visible_to` by construction, so a private book somebody else added cannot
+    reach here whatever the clauses below do.
+
+    That is also the capability the outward channels cannot have. A mailbox or
+    a chat has no member behind it, so the digest excludes every private book
+    and reports a count instead. This audience **is** a member, so their own
+    private books belong in it: `visible_to()` has always said a private book
+    is visible to the member who added it, and telling somebody about their own
+    book is not a disclosure.
+
+    Two arms, and `sees_every_loan` is the only place the difference is
+    decided. Staff read every overdue loan on their shelf. A member reads the
+    ones they are party to: they borrowed it, or they lent it out. Both are
+    facts about the loan rather than about the book, which is why neither arm
+    needs a second privacy rule on top of the Shelf's.
+
+    No `notified_at` clause, deliberately. That column records that a reminder
+    went **out**, and nothing goes out here: an overdue loan is on the member's
+    screen for as long as it is overdue, and quieting it for a week would be
+    the app forgetting something it is still looking at.
+
+    **The query, not the rows, and the caller chooses.** The one production
+    caller wants a number, and `len(query.all())` for a number is the defect it
+    reads like: measured against 500 overdue loans it built 500 ORM objects, on
+    every visit to the library page, to call `len` on them. `.count()` is one
+    statement and none. `Shelf.select()` hands its own query out for the same
+    reason, and the privacy predicate is already on this one by construction, so
+    there is nothing a caller can widen: `.filter()` on it can only narrow.
+
+    No eager loading here for the same reason. It was `joinedload(Loan.book)`
+    and `joinedload(Loan.loaned_to)`, which were for rendering titles, and the
+    notice reports a count and never a title.
+    """
+    query = (
+        Shelf.seen_by(db, viewer.id)
+        .select(Loan)
+        .join(Loan, Loan.book_id == Book.id)
+        .filter(*_overdue_clauses(now))
+    )
+    if not sees_every_loan(viewer):
+        query = query.filter(
+            or_(
+                Loan.loaned_to_user_id == viewer.id,
+                Loan.loaned_by_user_id == viewer.id,
+            )
+        )
+    return query.order_by(Loan.due_at, Loan.id)
 
 
 def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
@@ -506,10 +640,103 @@ async def send_mail(db: Session, subject: str, text: str) -> None:
 #: Which setting switches each sender on. One table, so "is this on" is asked
 #: the same way for all three and adding a fourth is one line.
 _ENABLED_KEY: Final[dict[OverdueSender, SettingKey]] = {
+    OverdueSender.IN_APP: SettingKey.OVERDUE_IN_APP_ENABLED,
     OverdueSender.WEBHOOK: SettingKey.OVERDUE_WEBHOOK_ENABLED,
     OverdueSender.EMAIL: SettingKey.OVERDUE_MAIL_ENABLED,
     OverdueSender.TELEGRAM: SettingKey.OVERDUE_TELEGRAM_ENABLED,
 }
+
+
+#: Every settings row that configures one sender, keyed by sender.
+#:
+#: **Not the toggle alone, and that distinction is the whole of #82's exit.** A
+#: health record describes a channel *as it was configured*, so any write that
+#: changes what the next send will do to that channel makes the record describe
+#: something that no longer exists. The case the ticket names is a household
+#: replacing an expired bot token, and that write is not a toggle: with only the
+#: switches owned, the record survived it, `_is_broken` compares `now` against a
+#: `failing_since` that only grows, and the steady state of a household is
+#: nothing overdue, so no later run would overwrite it either. The banner was
+#: permanent and the only exit was switching the channel off and on again.
+#:
+#: **Every field, not just the credential.** `mail_use_tls` and `mail_use_ssl`
+#: are the pair `mailer.checked_config` refuses a password over, so they produce
+#: the `MISCONFIGURED` the banner reports at once; `mail_port` and `mail_server`
+#: decide whether a socket opens at all; `overdue_mail_to` and `telegram_chat_id`
+#: are destinations. A rule covering "credentials" would have left the commonest
+#: mail fix outside it.
+#:
+#: `OVERDUE_REMINDER_DAYS` is deliberately absent: it says how often a loan is
+#: chased, not whether a channel works, so changing it is not evidence about any
+#: channel. `SENDER_HEALTH` is absent for the obvious reason.
+_CONFIGURED_BY: Final[dict[OverdueSender, frozenset[SettingKey]]] = {
+    OverdueSender.IN_APP: frozenset({SettingKey.OVERDUE_IN_APP_ENABLED}),
+    OverdueSender.WEBHOOK: frozenset(
+        {
+            SettingKey.OVERDUE_WEBHOOK_ENABLED,
+            SettingKey.OVERDUE_WEBHOOK_URL,
+            SettingKey.OVERDUE_WEBHOOK_SECRET,
+        }
+    ),
+    OverdueSender.EMAIL: frozenset(
+        {
+            SettingKey.OVERDUE_MAIL_ENABLED,
+            SettingKey.OVERDUE_MAIL_TO,
+            *settings_store.MAIL_KEYS,
+        }
+    ),
+    OverdueSender.TELEGRAM: frozenset(
+        {
+            SettingKey.OVERDUE_TELEGRAM_ENABLED,
+            SettingKey.TELEGRAM_BOT_TOKEN,
+            SettingKey.TELEGRAM_CHAT_ID,
+        }
+    ),
+}
+
+
+def sender_for(key: SettingKey) -> OverdueSender | None:
+    """Which sender this settings row configures, if it configures one.
+
+    **The door the settings router writes through**, so that "this write
+    invalidates that channel's health record" is a fact about the sender rather
+    than a second table in a router. The router used to carry one keyed on the
+    payload field, and it covered the four switches only, which is the defect
+    above.
+    """
+    for sender, keys in _CONFIGURED_BY.items():
+        if key in keys:
+            return sender
+    return None
+
+
+def pushes_outward(sender: OverdueSender) -> bool:
+    """Whether this sender hands the digest to something outside the app.
+
+    **The one place the difference is decided, and it decides two things a
+    reader would otherwise have to infer.** Which senders `run_digest` attempts
+    at all, and which of them may advance `notified_at`.
+
+    The stamp is the reason this is a function rather than a comment.
+    `notified_at` records that a reminder went **out**, and `due_for_reminder`
+    reads it, so counting the in app notice as a delivery would stamp every
+    overdue loan on every run and then select nothing until the interval
+    expired. Measured against the shipped default of 7 days: a broken mail
+    server would be attempted **once a week instead of once an hour**, from a
+    channel that is on by default. That is one sample a week for the failure
+    window in `_is_broken`, which is the mechanism #82 exists to build.
+
+    A `match` with an `assert_never` tail rather than a tuple of the three that
+    push: a tuple is a list somebody adds to, and forgetting is silent. Here a
+    fifth sender is a mypy error at this line, in the same shape `_deliver` and
+    `_destination` already use.
+    """
+    match sender:
+        case OverdueSender.WEBHOOK | OverdueSender.EMAIL | OverdueSender.TELEGRAM:
+            return True
+        case OverdueSender.IN_APP:
+            return False
+    assert_never(sender)
 
 #: Every transport failure, from three protocols, as one clause.
 #:
@@ -608,7 +835,13 @@ def _destination(sender: OverdueSender, db: Session) -> str:
         return _host(TELEGRAM_API)
     if sender is OverdueSender.EMAIL:
         return settings_store.in_force(db, SettingKey.MAIL_SERVER).strip() or "unknown"
-    # A fourth sender added to `_ENABLED_KEY` and not here used to fall through
+    if sender is OverdueSender.IN_APP:
+        # Reached by nothing today: `_run_sender` is the only caller and
+        # `run_digest` hands it pushing senders only. Answered rather than
+        # raised because a destination is a log line, and a log line is not
+        # worth a second failure on the failure path.
+        return "the app"
+    # A fifth sender added to `_ENABLED_KEY` and not here used to fall through
     # to the mail branch and log the mail server's hostname for it. mypy fails
     # this line when the chain stops being exhaustive; nothing else does.
     assert_never(sender)
@@ -627,6 +860,18 @@ async def _deliver(
         await send_mail(db, subject, render_text(digest))
     elif sender is OverdueSender.TELEGRAM:
         await send_telegram(db, render_text(digest, limit=TELEGRAM_MAX_UNITS))
+    elif sender is OverdueSender.IN_APP:
+        # There is nothing to hand off. The notice is the app: a member reads
+        # it from `GET /api/loans/overdue/mine`, scoped to them, which is what
+        # `pushes_outward` says and what keeps this branch unreachable.
+        #
+        # A raise rather than a quiet return, because reaching it would mean
+        # `run_digest` had started treating a pull channel as a delivery, and
+        # that silently stamps `notified_at` on loans nothing chased. Pinned by
+        # `test_the_in_app_channel_is_never_handed_to_a_sender`.
+        raise AssertionError(
+            "The in app channel does not push. See notifications.pushes_outward."
+        )
     else:
         # The `else` used to *be* the Telegram branch, so a fourth sender added
         # to `_ENABLED_KEY` and not here posted the digest to the household's
@@ -705,19 +950,303 @@ async def _run_sender(
     return _sender_entry(sender, loans=loans, skipped_private=skipped_private)
 
 
+#: How long a channel must have been failing before the app interrupts anybody.
+#:
+#: **Deliberately not `overdue_reminder_days`**, and the two must not be read as
+#: one number. That interval says how often a loan is chased. This says how long
+#: a channel may be broken before somebody is told on a screen they did not go
+#: looking at. They answer different questions and a household is free to set
+#: the first to 24 hours without meaning anything by it.
+BROKEN_AFTER_HOURS: Final = 24
+
+#: How many consecutive failures the window above must contain.
+#:
+#: **The window alone is not enough, and the case that breaks it is the common
+#: one.** A working webhook beside a broken mail server stamps `notified_at`, so
+#: mail is attempted once per reminder interval rather than once an hour. A
+#: single failed attempt would then sit there while the clock ran, and cross 24
+#: hours having failed exactly once, which is the network event this bar exists
+#: to ignore. Two failures and a day together mean every attempt failed.
+MIN_FAILURES_TO_INTERRUPT: Final = 2
+
+#: The reasons the app decided by itself, before opening a socket.
+#:
+#: This is the whole of the network versus configuration distinction, and it is
+#: a property of the code rather than a guess about the world: every one of
+#: these comes out of `_REFUSALS`, and all three of those are raised before
+#: anything is dialled. `checked_url` is string handling, `send_telegram`
+#: matches both of its regexes before `_post`, and `mailer.checked_config`
+#: raises long before `smtplib.SMTP(...)` is constructed.
+#:
+#: So a refusal is not an outage: nothing was tried, and nothing will succeed
+#: until somebody changes a setting. Waiting a day to say so would tell the
+#: household nothing it could not have been told at once. `UNREACHABLE` is the
+#: opposite case and is the one the window is for.
+_CONFIGURATION_REASONS: Final = frozenset(
+    {OverdueNotifyReason.NO_URL, OverdueNotifyReason.MISCONFIGURED}
+)
+
+
+def _in_app_entry(db: Session, now: datetime) -> dict[str, Any]:
+    """The in app channel's line in a run's report.
+
+    `sent` is true and it is not a claim that anything was delivered: the
+    entry's meaning is "this channel is carrying the notice", which for a
+    channel read out of the app is true whenever it is switched on. The one way
+    it stops being true is the app not running, and then nothing is reporting
+    anything.
+
+    `skipped_private` is **0**, and that is a number rather than an omission.
+    The other three withhold every private book because their audience is a
+    mailbox or a chat with no member behind it. This audience is the viewer, so
+    nothing is withheld from it: each private book is shown to the member who
+    added it and to nobody else, which is `visible_to`'s rule unchanged.
+
+    `loans` is the household's whole overdue count, not one member's. There is
+    no single per member number to report here, because there is a different
+    one per member. Reported to an admin, beside `count_private_overdue`, which
+    is a stronger figure than this one.
+    """
+    return _sender_entry(
+        OverdueSender.IN_APP,
+        loans=count_overdue(db, now),
+        skipped_private=0,
+    )
+
+
+# ── The standing record of what each channel last did ─────────────────────────
+#
+# #82. `ticker()` used to call `run_digest` and throw the result away, so a
+# household running mail and Telegram whose bot token expired got mail
+# delivered, the loan stamped, and Telegram failing hourly and indefinitely with
+# nothing anywhere but a warning in the container log. For a household running
+# the published image, "read the container log" is not a worse form of alerting;
+# it is the absence of one.
+#
+# One settings row holds it, keyed by sender. Not a table: a table needs a
+# migration, a retention rule and a `backup._TABLES` entry, and what is wanted
+# is one record per sender rather than a history. `settings` is already in
+# `backup._TABLES`, so this survives a restore with everything else. A record
+# restored from an old archive describes runs that happened before it, and the
+# next tick overwrites it.
+
+
+def _parsed(value: Any) -> datetime | None:
+    """A stored timestamp as a **naive UTC** datetime, or None.
+
+    Every read of this record goes through here rather than
+    `datetime.fromisoformat` directly, because the row is settings data: a
+    restore, a hand edit or an older release can put anything in it, and this
+    is read on the hourly ticker where a raise stops the task for the life of
+    the container.
+
+    **The offset is stripped, and that is not tidying.** Everything in this app
+    stores naive UTC (`datetime.now(UTC).replace(tzinfo=None)`), and `_is_broken`
+    subtracts `failing_since` from a `now` of that shape. A row carrying
+    `2020-01-01T00:00:00+00:00`, which `fromisoformat` parses perfectly happily,
+    made that subtraction raise `TypeError: can't subtract offset-naive and
+    offset-aware datetimes`, and the only thing between that row and a 500 on
+    `GET /api/settings/sender-health` was that nothing here writes one. `settings`
+    is in `backup._TABLES`, so the row crosses a restore, and the whole point of
+    this function is the row nobody validated.
+
+    Converted rather than merely stripped: dropping the offset off a `+02:00`
+    timestamp would move it two hours, which is the kind of wrong that reads as
+    right.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed
+    return parsed.astimezone(UTC).replace(tzinfo=None)
+
+
+def _reason(value: Any) -> OverdueNotifyReason | None:
+    """A stored reason, or None if it is not one this release knows."""
+    try:
+        return OverdueNotifyReason(value)
+    except ValueError:
+        return None
+
+
+def _is_broken(entry: dict[str, Any], now: datetime) -> bool:
+    """Whether this channel's failure is worth interrupting somebody about.
+
+    The bar the ticket set, in one expression: **one failed send is a network,
+    every send failing for a day is a configuration**, and a design that cannot
+    tell them apart is one a household switches off.
+
+    Two ways past it and they are different kinds of evidence.
+
+    A **refusal** is immediate, because the app refused it: see
+    `_CONFIGURATION_REASONS`. Nothing was dialled, so there is no outage to wait
+    out and no attempt that could succeed without somebody changing a setting.
+
+    A **transport failure** has to persist: at least `BROKEN_AFTER_HOURS` since
+    the first failure of the current run of them, and at least
+    `MIN_FAILURES_TO_INTERRUPT` failures inside it. Both, for the reason
+    `MIN_FAILURES_TO_INTERRUPT` states.
+    """
+    if entry.get("sent") is not False:
+        return False
+    if _reason(entry.get("reason")) in _CONFIGURATION_REASONS:
+        return True
+    since = _parsed(entry.get("failing_since"))
+    failures = entry.get("failures")
+    if since is None or not isinstance(failures, int):
+        return False
+    return (
+        failures >= MIN_FAILURES_TO_INTERRUPT
+        and now - since >= timedelta(hours=BROKEN_AFTER_HOURS)
+    )
+
+
+def record_run(db: Session, result: dict[str, Any], now: datetime) -> None:
+    """Keep what each sender in this run did, so the next reader can see it.
+
+    **Only the senders this run actually attempted.** A run that found nothing
+    overdue reports no sender, and overwriting a standing failure with silence
+    is how the record would come to say a broken channel is fine.
+
+    `failing_since` is the start of the current unbroken run of failures and
+    `failures` counts it, so a channel that failed once at 3am and has worked
+    since reads differently from one that has failed every hour for a week.
+    Both are needed: see `MIN_FAILURES_TO_INTERRUPT`.
+    """
+    record = settings_store.get_json(db, SettingKey.SENDER_HEALTH)
+    for entry in result.get("senders", []):
+        sender_key = OverdueSender(entry["sender"])
+        # Only the channels that can fail. The in app notice hands the digest to
+        # nobody, so "it worked" is not a measurement of anything: recording it
+        # would put a row in the record whose only possible value is a success
+        # nothing checked. `health()` filters on the same seam, and the settings
+        # screen draws no line for it, for the same one reason stated once.
+        if not pushes_outward(sender_key):
+            continue
+        sender = sender_key.value
+        previous = record.get(sender)
+        previous = previous if isinstance(previous, dict) else {}
+        if entry["sent"]:
+            record[sender] = {
+                "sent": True,
+                "reason": None,
+                "detail": None,
+                "at": now.isoformat(),
+                "failing_since": None,
+                "failures": 0,
+            }
+            continue
+        was_failing = previous.get("sent") is False
+        earlier = _parsed(previous.get("failing_since")) if was_failing else None
+        count = previous.get("failures") if was_failing else 0
+        record[sender] = {
+            "sent": False,
+            "reason": entry["reason"].value if entry["reason"] else None,
+            "detail": entry["detail"],
+            "at": now.isoformat(),
+            "failing_since": (earlier or now).isoformat(),
+            "failures": (count if isinstance(count, int) else 0) + 1,
+        }
+    settings_store.set_json(db, SettingKey.SENDER_HEALTH, record)
+
+
+def forget_health(db: Session, sender: OverdueSender) -> None:
+    """Drop a channel's record, because it describes a channel that changed.
+
+    Called when a sender's own switch is written. A record from before somebody
+    turned a channel off, or on again, is about a different configuration, and
+    the case that matters is the second one: a household that fixes a bot token
+    and switches Telegram back on should not meet a banner about the token they
+    just replaced.
+    """
+    record = settings_store.get_json(db, SettingKey.SENDER_HEALTH)
+    if record.pop(sender.value, None) is not None:
+        settings_store.set_json(db, SettingKey.SENDER_HEALTH, record)
+
+
+def health(db: Session, now: datetime) -> list[dict[str, Any]]:
+    """What every switched-on channel that **pushes** last did, in sender order.
+
+    **Switched on only.** A record for a channel nobody is using is a line
+    about something that is not happening, and the banner would go on
+    interrupting an admin about a webhook they turned off a month ago.
+    `forget_health` covers the toggle; this covers a channel switched off by a
+    restore or by an environment variable.
+
+    **Pushing only, and the in app notice is therefore absent.** It hands the
+    digest to nobody, so its outcome is never a failure and a row for it could
+    only ever report a success: an assertion that a delivery worked, about a
+    delivery nothing performed. That is worse than saying nothing, because a
+    reader cannot tell it from a channel that was checked. The settings screen
+    drew no line for it for this reason and the endpoint should not have gone on
+    serving one, which is one fact with two spellings until it is one.
+
+    A channel that has never run reports `last_run_at` of None rather than a
+    success, because "not yet" and "fine" are the two answers a household most
+    needs to tell apart on the day they configure one.
+    """
+    record = settings_store.get_json(db, SettingKey.SENDER_HEALTH)
+    entries = []
+    for sender in OverdueSender:
+        if not pushes_outward(sender):
+            continue
+        if not settings_store.get_bool(db, _ENABLED_KEY[sender]):
+            continue
+        stored = record.get(sender.value)
+        stored = stored if isinstance(stored, dict) else {}
+        failures = stored.get("failures")
+        entries.append(
+            {
+                "sender": sender,
+                "last_run_at": _parsed(stored.get("at")),
+                "sent": stored.get("sent") if isinstance(stored.get("sent"), bool) else None,
+                "reason": _reason(stored.get("reason")),
+                "detail": stored.get("detail") if isinstance(stored.get("detail"), str) else None,
+                "failing_since": _parsed(stored.get("failing_since")),
+                "failures": failures if isinstance(failures, int) and failures >= 0 else 0,
+                "broken": _is_broken(stored, now),
+            }
+        )
+    return entries
+
+
 async def run_digest(db: Session) -> dict[str, Any]:
-    """One pass: select, send on every channel that is on, stamp.
+    """One pass: select, send on every channel that pushes, stamp, record.
 
     `notified_at` is stamped **after** at least one delivery that succeeded,
     never before. With nothing delivered it is left alone so the next run
     retries the same loans, which is why the state is a timestamp on the loan
     rather than a flag set when the first request goes out.
 
-    **One selection for all three senders, not one each.** They carry the same
-    content by construction, and re-running `due_for_reminder` between senders
-    would let a loan returned mid run reach one channel and not another.
+    **Only a sender that pushes may stamp it.** The in app channel is switched
+    on in the same list and reported in the same shape, and it delivers nothing
+    anywhere: counting it would advance `notified_at` on every run and quiet the
+    three that do push for the length of the interval. `pushes_outward` carries
+    the measurement.
+
+    **One selection for every pushing sender, not one each.** They carry the
+    same content by construction, and re-running `due_for_reminder` between
+    senders would let a loan returned mid run reach one channel and not another.
+
+    **The result is recorded before it is returned**, which is #82. It used to
+    be returned to `ticker()` and thrown away, so a channel that failed every
+    hour existed only as a warning in the container log. Recorded here rather
+    than in the ticker because `POST /api/loans/overdue/notify` runs the same
+    pass and had the same defect: with the write in one caller, a household
+    pressing "Send now" would leave the health panel describing an older run.
     """
     now = datetime.now(UTC).replace(tzinfo=None)
+    result = await _run_digest(db, now)
+    record_run(db, result, now)
+    return result
+
+
+async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
+    """The pass itself. `run_digest` is what records it; see there for why."""
     days = reminder_days(db)
 
     enabled = [
@@ -728,26 +1257,51 @@ async def run_digest(db: Session) -> dict[str, Any]:
     if not enabled:
         return _outcome(OverdueNotifyReason.DISABLED, "Overdue reminders are switched off.")
 
+    # In sender order, so a report reads the same way every run. The in app
+    # entry is built rather than attempted: it hands the digest to nothing.
+    in_app = [_in_app_entry(db, now)] if OverdueSender.IN_APP in enabled else []
+    pushing = [sender for sender in enabled if pushes_outward(sender)]
+
     loans = due_for_reminder(db, now, days)
     skipped = count_private_overdue(db, now)
+
+    if not pushing:
+        # In app is on and nothing else is. Nothing was sent and nothing was
+        # meant to be, which is a different answer from "reminders are off" and
+        # reads differently on the screen.
+        return _outcome(
+            OverdueNotifyReason.IN_APP_ONLY,
+            "Nothing was sent: the in app notice is the only channel switched on.",
+            loans=len(loans),
+            skipped_private=skipped,
+            senders=in_app,
+        )
+
     if not loans:
         return _outcome(
-            OverdueNotifyReason.NOTHING_DUE, "Nothing is overdue.", skipped_private=skipped
+            OverdueNotifyReason.NOTHING_DUE,
+            "Nothing is overdue.",
+            skipped_private=skipped,
+            senders=in_app,
         )
 
     digest = build_digest(loans, now)
     subject = f"{len(loans)} overdue {'book' if len(loans) == 1 else 'books'}"
-    outcomes = [
+    pushed = [
         await _run_sender(
             sender, db, digest, subject, loans=len(loans), skipped_private=skipped
         )
-        for sender in enabled
+        for sender in pushing
     ]
+    outcomes = in_app + pushed
 
-    if not any(entry["sent"] for entry in outcomes):
+    # Asked of `pushed`, never of `outcomes`. The in app entry always reports
+    # `sent`, so reading the whole list here would make every run look like a
+    # delivery and stamp loans nothing chased.
+    if not any(entry["sent"] for entry in pushed):
         # The first failure in sender order, so a single sender library reads
         # exactly as it did before there were three.
-        first = outcomes[0]
+        first = pushed[0]
         return _outcome(
             first["reason"],
             first["detail"],
@@ -787,6 +1341,15 @@ async def ticker() -> None:
     Every failure is swallowed and logged. A raise here kills the task
     silently for the life of the container, so the loop that chases overdue
     books would stop without anything in the app looking wrong.
+
+    **The result is no longer thrown away here, and it is not read here
+    either.** It used to be discarded, which is what made a broken channel
+    invisible: an hourly tick stamped `notified_at` on one success, the next
+    "Send now" answered `nothing_due` with an empty `senders`, and the only
+    standing record of the channel that failed was a warning line in the
+    container log. `run_digest` records every run itself, so this caller and
+    `POST /api/loans/overdue/notify` both leave the same record rather than one
+    of them racing the other to it.
     """
     while True:
         await asyncio.sleep(TICK_SECONDS)

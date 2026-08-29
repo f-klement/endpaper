@@ -28,6 +28,7 @@ and `split_authors`: `models.py`, `schemas/author.py` and `schemas/book.py`.
     authorship.display_name(name)
     authorship.record_catalogue_assertions(assertions, credited=book.author)
     authorship.confirm_identifier(name, scheme, value, by_user_id=member.id)
+    authorship.record_cross_references(name, refs, by_user_id=member.id)
     authorship.forget_identifier(identifier_id)
 
 `seen_by` mirrors `Shelf.seen_by`, and for the same reason: an author index is a
@@ -78,7 +79,7 @@ coming back.
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -706,6 +707,97 @@ class Authorship:
         self._db.add(row)
         self._db.commit()
         return row
+
+    def record_cross_references(
+        self,
+        author: str,
+        references: Mapping[AuthorityScheme, str],
+        *,
+        by_user_id: int,
+    ) -> RecordedAssertions:
+        """Store the other files' numbers that came with a confirmed record.
+
+        **The second half of `confirm_identifier`, not a second door into the
+        table.** A Member confirms a *person*, and a GND record for that person
+        already carries their ISNI, LCNAF number, VIAF cluster and Wikidata
+        item, and names the VIAF cluster that carries their six national library
+        numbers. Before this, all of it was shown once and dropped.
+
+        **`references` must come from `authority.cross_references` or
+        `authority.national_identifiers` on a candidate the server itself
+        resolved, never from a request body.** This
+        is the rule `record_catalogue_assertions` states and the reason is the
+        same: a payload the client posted back would let a member type any
+        number and have it stored, which is the laundering `IdentifierConflict`
+        exists to prevent, from the other end. Nothing in this signature can
+        enforce it, so the router is where it is kept and where it is tested.
+
+        **A conflict here is reported, not raised**, and that is the difference
+        from `confirm_identifier`. The primary write is what the Member asked
+        for and a refusal of it is an error they must see. These are facts that
+        arrived with it, so one of them colliding with a value already held must
+        not undo a confirmation that succeeded. `RecordedAssertions` is the
+        shape `record_catalogue_assertions` already returns for exactly this,
+        and `RefusedAssertion.kept_provenance` is what tells the reader whether
+        a person's earlier guess or another record is what is being outranked.
+
+        **Provenance is `MEMBER` on every row, and `created_by_user_id` is set.**
+        The identifier is the authority file's, but nothing tied it to this
+        author until a person said the record was theirs. Filing it as
+        `CATALOGUE` would say the DNB asserted it about a Book this Library
+        holds, which is what `record_catalogue_assertions` means and is not what
+        happened here. It would also violate `ck_author_identifiers_asserter`,
+        which forbids a named asserter on a `CATALOGUE` row, so the honest
+        answer and the enforceable one are the same one.
+
+        **Bounded by the enum**, which is why there is no slice here. The key
+        type is `AuthorityScheme`, so a mapping cannot hold more entries than
+        the enum has members. `record_catalogue_assertions` takes an `Iterable`
+        off a catalogue record and needs `MAX_ASSERTIONS_PER_RECORD` for it.
+
+        Raises `AuthorNotFound` on a name naming nobody this Member can see, the
+        same authority rule `confirm_identifier` applies.
+        """
+        entry = self._entry_for(author)
+        if entry is None:
+            raise AuthorNotFound
+        key = _confirmable_key(entry)
+        if key is None:
+            raise AuthorNotFound
+
+        stored: list[AuthorIdentifier] = []
+        refused: list[RefusedAssertion] = []
+        for scheme, identifier in references.items():
+            if not _storable_identifier(identifier):
+                logger.info("Dropped an unstorable cross reference: %r", scheme)
+                continue
+            existing = self._identifier_row(key, scheme)
+            if existing is not None:
+                if existing.identifier != identifier:
+                    refused.append(
+                        RefusedAssertion(
+                            name=entry.name,
+                            scheme=scheme,
+                            asserted=identifier,
+                            kept=existing.identifier,
+                            kept_provenance=AuthorityProvenance(existing.provenance),
+                        )
+                    )
+                    continue
+                stored.append(existing)
+                continue
+            row = AuthorIdentifier(
+                author_key=key,
+                scheme=scheme,
+                identifier=identifier,
+                provenance=AuthorityProvenance.MEMBER,
+                created_by_user_id=by_user_id,
+            )
+            self._db.add(row)
+            stored.append(row)
+        if stored:
+            self._db.commit()
+        return RecordedAssertions(stored=stored, refused=refused)
 
     def forget_identifier(self, identifier_id: int) -> None:
         """Remove a wrong identifier. A later import may write it again.

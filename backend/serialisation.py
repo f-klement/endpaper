@@ -24,7 +24,14 @@ import ddc
 from enums import ClassificationScheme
 from models import Book, Collection, Loan, ReadingProgress, Tag, User
 from reading import Reading, discussers
-from schemas import BookOut, ClassificationIn, ClassificationOut, LoanOut, UserOut
+from schemas import (
+    BookOut,
+    ClassificationIn,
+    ClassificationOut,
+    LoanOut,
+    PublicBookOut,
+    UserOut,
+)
 from shelf import Shelf, rereading_filtered_rows
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
@@ -455,3 +462,24 @@ def book_to_out(book: Book, current_user: User, db: Session) -> BookOut:
     return books_to_out([book], current_user, db)[0]
 
 
+
+
+def books_to_public_out(books: Sequence[Book]) -> list[PublicBookOut]:
+    """Serialise Books for a reader with no account.
+
+    **It takes no `Session` and no `User`, and that signature is the guarantee
+    rather than a convenience.** `books_to_out` above needs both because half
+    of `BookOut` depends on who is asking; `PublicBookOut` has no such field, so
+    this one structurally cannot issue a per member query. There is no viewer to
+    scope one by and no argument that would let a caller supply one.
+    `tests/test_serialisation.py::TestThePublicSerialiserCannotAskWhoIsAsking`
+    is what holds that, because it is a property of the signature and the
+    signature is the only place it can be read off.
+
+    **Zero statements**, provided the caller loaded the two collections
+    (`Loading.PUBLISHED`). Without it `model_validate` reads `book.tags` and
+    `book.classifications` lazily and the page costs two statements per Book,
+    which is the N+1 `books_to_out` exists to avoid, arrived at through the
+    door that has no batching helper to reach for.
+    """
+    return [PublicBookOut.model_validate(book) for book in books]

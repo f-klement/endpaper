@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   Locale,
+  OverdueNotifyReason,
+  OverdueSender,
+  type SenderHealth,
   type SettingsOut,
 } from "../../../../../src/api/generated/model";
 import ReminderSendersSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/ReminderSendersSection";
@@ -43,22 +46,34 @@ function makeSettings(overrides: Partial<SettingsOut> = {}): SettingsOut {
   };
 }
 
-function renderSection(settings: Partial<SettingsOut> = {}) {
+function renderSection(
+  settings: Partial<SettingsOut> = {},
+  health: Partial<Record<OverdueSender, SenderHealth>> = {},
+) {
   const onSave = vi.fn();
   const rendered = renderLocalised(
     <ReminderSendersSection
       settings={makeSettings(settings)}
       isSaving={false}
       onSave={onSave}
+      // Empty by default: nothing has run, so no channel draws a line.
+      health={health}
     />,
   );
   return { ...rendered, onSave };
 }
 
 describe("ReminderSendersSection", () => {
-  it("says on the page that private books are left out of both channels", () => {
+  it("says on the page that private books are left out of the mailbox and the chat", () => {
+    // Matched on the sentence rather than on "private books", which now
+    // appears twice: the in app channel below carries the opposite note, and
+    // that is the pair a reader has to be able to tell apart.
     renderSection();
-    expect(screen.getByText(/private books/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /left out of them exactly as they are left out of the webhook/i,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("switches mail on by itself", () => {
@@ -209,5 +224,89 @@ describe("ReminderSendersSection", () => {
     // channel has that the webhook does not. A field here would give it away.
     renderSection();
     expect(screen.queryByText(/api\.telegram\.org/)).toBeNull();
+  });
+});
+
+describe("the in app channel", () => {
+  it("offers it first, above the channels that need setting up", () => {
+    // It is the one that needs nothing obtained first, which is why it ships
+    // switched on and why it heads the list rather than trailing it.
+    renderSection();
+
+    // A real checkbox under the styled track, which is what makes it reachable
+    // by keyboard, so that is the role to ask for.
+    const switches = screen.getAllByRole("checkbox");
+    expect(switches[0]).toHaveAccessibleName("Show overdue loans in the app");
+  });
+
+  it("shows it as on when the settings say so", () => {
+    renderSection({ overdue_in_app_enabled: true });
+
+    expect(
+      screen.getByLabelText("Show overdue loans in the app"),
+    ).toBeChecked();
+  });
+
+  it("switches it off through the settings record", () => {
+    const { onSave } = renderSection({ overdue_in_app_enabled: true });
+
+    fireEvent.click(screen.getByLabelText("Show overdue loans in the app"));
+
+    expect(onSave).toHaveBeenCalledWith({ overdue_in_app_enabled: false });
+  });
+
+  it("says that this is the one channel private books reach", () => {
+    // The note above it says private books are left out of every channel,
+    // which is true of the ones that go to a mailbox or a chat and not of this
+    // one. An unqualified rule beside an exception is how a reader concludes
+    // the app is lying about one of them.
+    renderSection();
+
+    expect(
+      screen.getByText(/including their own private books/i),
+    ).toBeInTheDocument();
+  });
+
+  it("draws each channel's standing record under its own switch", () => {
+    renderSection(
+      { overdue_telegram_enabled: true },
+      {
+        telegram: {
+          sender: OverdueSender.telegram,
+          sent: false,
+          broken: true,
+          reason: OverdueNotifyReason.misconfigured,
+          failing_since: "2026-08-20T09:00:00",
+          last_run_at: "2026-08-26T09:00:00",
+          failures: 9,
+        },
+      },
+    );
+
+    expect(
+      screen.getByText(/not working since august 20, 2026/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("the in app channel draws no health line", () => {
+  it("says nothing about a channel that cannot fail", () => {
+    // It hands the digest to nobody, so its recorded outcome is never a
+    // failure and a line for it could only ever read "working": a reassurance
+    // about a delivery nothing checked.
+    renderSection(
+      { overdue_in_app_enabled: true },
+      {
+        in_app: {
+          sender: OverdueSender.in_app,
+          sent: true,
+          last_run_at: "2026-08-27T09:00:00",
+        },
+      },
+    );
+
+    expect(
+      screen.queryByText(/working\. last run on/i),
+    ).not.toBeInTheDocument();
   });
 });

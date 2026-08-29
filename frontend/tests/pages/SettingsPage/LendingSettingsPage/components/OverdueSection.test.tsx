@@ -9,6 +9,7 @@ import {
   OverdueNotifyReason,
   type OverdueNotifyResult,
   OverdueSender,
+  type SenderHealth,
   type SettingsOut,
 } from "../../../../../src/api/generated/model";
 import OverdueSection from "../../../../../src/pages/SettingsPage/LendingSettingsPage/components/OverdueSection";
@@ -32,7 +33,10 @@ function makeSettings(overrides: Partial<SettingsOut> = {}): SettingsOut {
 
 function renderSection(
   settings: Partial<SettingsOut> = {},
-  extra: { sendResult?: OverdueNotifyResult | null } = {},
+  extra: {
+    sendResult?: OverdueNotifyResult | null;
+    health?: SenderHealth;
+  } = {},
 ) {
   const onSave = vi.fn();
   const onSendNow = vi.fn();
@@ -45,6 +49,9 @@ function renderSection(
       isSending={false}
       sendResult={extra.sendResult ?? null}
       sendError={null}
+      // Undefined by default, which is what a channel that is switched off
+      // reports and what draws no line at all.
+      health={extra.health}
     />,
   );
   return { ...rendered, onSave, onSendNow };
@@ -218,10 +225,12 @@ describe("OverdueSection", () => {
     expect(screen.getByRole("status")).toHaveTextContent(fragment);
   });
 
-  it("gives five distinct sentences, not one repeated", () => {
-    // A Record keyed off the generated union is only worth having if the five
-    // values it maps to actually differ. It read "four" until `misconfigured`
-    // arrived with the mail and Telegram channels.
+  it("gives a distinct sentence per reason, not one repeated", () => {
+    // A Record keyed off the generated union is only worth having if the values
+    // it maps to actually differ. Counted from the union rather than written
+    // down: it read "four" until `misconfigured` arrived with the mail and
+    // Telegram channels, and "five" until `in_app_only` arrived with the in app
+    // one, and a literal is what made each of those an edit rather than a pass.
     const seen = new Set<string>();
     for (const reason of Object.values(OverdueNotifyReason)) {
       const { unmount } = renderSection(
@@ -231,7 +240,7 @@ describe("OverdueSection", () => {
       seen.add(screen.getByRole("status").textContent ?? "");
       unmount();
     }
-    expect(seen.size).toBe(5);
+    expect(seen.size).toBe(Object.values(OverdueNotifyReason).length);
   });
 
   it("names how many private books were held back", () => {
@@ -365,6 +374,8 @@ describe("the per channel rows", () => {
 
   it("gives a distinct fragment per reason", () => {
     // A Record over the union is only worth having if its values differ.
+    // Counted from the union, so a reason added on the server cannot be given
+    // a duplicate fragment and still pass.
     const seen = new Set<string>();
     for (const reason of Object.values(OverdueNotifyReason)) {
       const { unmount } = withSenders([
@@ -379,6 +390,6 @@ describe("the per channel rows", () => {
       seen.add(screen.getByRole("listitem").textContent ?? "");
       unmount();
     }
-    expect(seen.size).toBe(5);
+    expect(seen.size).toBe(Object.values(OverdueNotifyReason).length);
   });
 });

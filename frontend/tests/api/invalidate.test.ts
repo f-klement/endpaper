@@ -16,10 +16,12 @@ import * as books from "../../src/api/generated/endpoints/books/books";
 import * as collections from "../../src/api/generated/endpoints/collections/collections";
 import * as covers from "../../src/api/generated/endpoints/covers/covers";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
+import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
 import * as settings from "../../src/api/generated/endpoints/settings/settings";
 import * as stats from "../../src/api/generated/endpoints/stats/stats";
 import * as system from "../../src/api/generated/endpoints/system/system";
 import * as users from "../../src/api/generated/endpoints/users/users";
+import { Locale } from "../../src/api/generated/model";
 import { invalidateWith, isCatalogueQuery } from "../../src/api/invalidate";
 
 /**
@@ -67,14 +69,26 @@ const KEYS: Record<string, readonly unknown[]> = {
   authorAuthority: books.getAuthorAuthorityQueryKey({
     author: "Ursula K. Le Guin",
   }),
+  authorWikipedia: books.getAuthorWikipediaQueryKey({ lang: Locale.en }),
   listCollections: collections.getListCollectionsQueryKey(),
+  // The published catalogue, and the **first three keys in this file with no
+  // session behind them**. They are deliberately not part of any write: see
+  // "leaves the published catalogue to its own staleness rule" below.
+  listPublicBooks: publicCatalogue.getListPublicBooksQueryKey(),
+  listPublicBooksInfinite: publicCatalogue.getListPublicBooksInfiniteQueryKey(),
+  getPublicBook: publicCatalogue.getGetPublicBookQueryKey(7),
   listLoans: loans.getListLoansQueryKey(),
+  listOverdue: loans.getListOverdueQueryKey(),
+  myOverdue: loans.getMyOverdueQueryKey(),
   getStats: stats.getGetStatsQueryKey(),
   getSettings: settings.getGetSettingsQueryKey(),
   getFeatureFlags: settings.getGetFeatureFlagsQueryKey(),
   getLoginImage: settings.getGetLoginImageQueryKey(),
+  getSenderHealth: settings.getGetSenderHealthQueryKey(),
   listUsers: users.getListUsersQueryKey(),
   getMyAppearance: users.getGetMyAppearanceQueryKey(),
+  getMyEmail: users.getGetMyEmailQueryKey(),
+  listEmails: users.getListEmailsQueryKey(),
   listTestAccounts: users.getListTestAccountsQueryKey(),
   authConfig: auth.getAuthConfigQueryKey(),
   me: auth.getMeQueryKey(),
@@ -147,13 +161,21 @@ describe("the inventory is complete", () => {
 
   it("is reading the generated tree at all", () => {
     // A glob that matched nothing would make the assertion above pass for
-    // ever, by comparing an empty list against an empty list. Measured
-    // 2026-08-27: 11 modules, 37 getters. The count moves whenever an endpoint
-    // is added, and that is the point: it is the second half of the tripwire,
-    // so a glob that quietly stopped matching cannot hide behind a KEYS list
-    // that also stopped growing.
+    // ever, by comparing an empty list against an empty list. Recounted
+    // 2026-08-28 after four features landed together: 12 modules, 45 getters.
+    // The count moves whenever an endpoint is added, and that is the point: it
+    // is the second half of the tripwire, so a glob that quietly stopped
+    // matching cannot hide behind a KEYS list that also stopped growing.
+    //
+    // Six arrived and five were anticipated, which is the useful part. Every
+    // seat that wave derived the target as 44, from 39 plus an address pair, a
+    // public pair and one author lookup. It is 45, because adding
+    // `list_public_books` to orval's `operations` generates an INFINITE query
+    // getter beside the plain one: a config line meant to fix a paging bug
+    // produced a sixth key nobody had counted. Derive this number from the
+    // tree rather than from an expected delta.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(37);
+    expect(Object.keys(KEYS).length).toBe(46);
   });
 });
 
@@ -173,10 +195,16 @@ describe("the catalogue is everything derived from the books table", () => {
       "listDuplicates",
       "listLoans",
       "listLocations",
+      // The overdue page's list (#102), beside the count it is the detail of.
+      "listOverdue",
       "listQuotes",
       "listSeries",
       "listTags",
       "listTrash",
+      // The in app overdue banner. A count over loans and books, so trashing a
+      // book or returning a loan moves it, and it is drawn above the grid: the
+      // one entry here whose staleness a reader meets before any list.
+      "myOverdue",
     ]);
   });
 
@@ -192,9 +220,51 @@ describe("the catalogue is everything derived from the books table", () => {
     // Wikidata, so it is not derived from the books table and no write to the
     // library can make it stale. It is also rate limited at 10 a minute
     // against lobid's published 30, which an invalidate would spend.
+    //
+    // `authorWikipedia` is the fourth, and it arrived the same way. It asks
+    // Wikidata for which language editions hold an article about an author, so
+    // no write to the library can make it stale either, and it shares
+    // `authorAuthority`'s counter: an invalidate would spend a confirmation's
+    // budget on a page render. It is the one of the four whose cost is paid on
+    // navigation rather than on a deliberate act, which is why joining every
+    // write would be the most expensive of the four mistakes.
     expect(isCatalogueQuery(query(KEYS.lookupIsbn!))).toBe(false);
     expect(isCatalogueQuery(query(KEYS.searchBooks!))).toBe(false);
     expect(isCatalogueQuery(query(KEYS.authorAuthority!))).toBe(false);
+    expect(isCatalogueQuery(query(KEYS.authorWikipedia!))).toBe(false);
+  });
+
+  it("leaves the published catalogue to its own staleness rule", () => {
+    // **Excluded by decision, and the decision is not the one the four outward
+    // lookups get.** Those four are excluded because no write can make them
+    // stale. These three can: editing a book does change what a visitor sees.
+    //
+    // What decides it is who pays. The public queries are the only ones in
+    // this file with no session behind them, and they are answered under a
+    // rate limit keyed on the **source address**, which behind a reverse proxy
+    // is close to a global cap shared with every real visitor. Joining the
+    // catalogue group would make a signed-in member's writes spend that budget:
+    // a bulk import would fire a public request per write and could 429 the
+    // catalogue for the people it was published for. That is the same shape as
+    // `searchBooks` spending a billed quota, arrived at from the other side.
+    //
+    // What is given up is small and bounded. A signed-out reader never calls
+    // any of this, because a session with no writes never invalidates
+    // anything; the only client holding both is an admin previewing through
+    // "See what a visitor sees", and both public hooks carry
+    // `staleTime: 60_000`, so that preview is at most a minute behind.
+    //
+    // Measured rather than read off the regex: `/api/public/books` is not in
+    // `LIBRARY_WIDE`, and `BOOK_RECORD` is anchored at `^/api/books/`, so
+    // `/api/public/books/7` misses it. The infinite spelling resolves to the
+    // same path, because `pathOf` steps over orval's marker.
+    for (const name of [
+      "listPublicBooks",
+      "listPublicBooksInfinite",
+      "getPublicBook",
+    ]) {
+      expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
+    }
   });
 
   it("leaves a book's children to the hooks that write them", () => {
@@ -226,9 +296,21 @@ describe("the catalogue is everything derived from the books table", () => {
   it("leaves the accounts and the settings alone", () => {
     for (const name of [
       "getSettings",
+      // A measurement of the reminder channels rather than anything derived
+      // from the books table, and admin only: no write to the library can make
+      // it stale, and a member's copy of it does not exist.
+      "getSenderHealth",
       "getFeatureFlags",
       "listUsers",
       "getMyAppearance",
+      // A member's own address and, for an admin, every member's. Per member
+      // data on `/api/users`, so no write to the books table can make either
+      // stale, and the only writes that can are their own two routes, which
+      // invalidate their own keys. Named here rather than left to the count:
+      // the grouping is decided by the query's **path**, so a key joins or
+      // misses a group by its URL rather than by anything about its name.
+      "getMyEmail",
+      "listEmails",
       "listTestAccounts",
       "authConfig",
       "me",
@@ -260,6 +342,31 @@ describe("listings covers both spellings of the library list", () => {
   });
 });
 
+describe("loans covers the lending views and the list that draws one", () => {
+  it("takes the loans list, the overdue list, the count and the listings", () => {
+    // The reason it is a group at all: the loans page and the overdue page
+    // perform the same write, and the loans page's hand-assembled version was
+    // missing the overdue list.
+    expect(invalidatedBy((client) => invalidateWith(client).loans())).toEqual([
+      "listBooks",
+      "listBooksInfinite",
+      "listLoans",
+      "listOverdue",
+      "myOverdue",
+    ]);
+  });
+
+  it("leaves a book's own record alone", () => {
+    // Narrower than `book()` on purpose: returning a loan from a list has no
+    // book id to hand, and dropping every cached record to avoid naming one
+    // is what this module exists to stop.
+    const client = populated();
+    invalidateWith(client).loans();
+    expect(client.getQueryState(KEYS.getBook!)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(KEYS.getStats!)?.isInvalidated).toBe(false);
+  });
+});
+
 describe("book covers one book and the lists that show it", () => {
   it("takes the record, its copies, the listings, the loans and the stats", () => {
     expect(invalidatedBy((client) => invalidateWith(client).book(7))).toEqual([
@@ -269,6 +376,8 @@ describe("book covers one book and the lists that show it", () => {
       "listBooksInfinite",
       "listCopies",
       "listLoans",
+      "listOverdue",
+      "myOverdue",
     ]);
   });
 
