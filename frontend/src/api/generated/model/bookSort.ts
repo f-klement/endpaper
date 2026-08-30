@@ -22,4 +22,5 @@ export const BookSort = {
   year_desc: "year_desc",
   newest: "newest",
   series: "series",
+  ddc: "ddc",
 } as const;

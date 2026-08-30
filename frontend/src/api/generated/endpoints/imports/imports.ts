@@ -15,11 +15,15 @@ import type {
 
 import type {
   BodyImportCsv,
+  BodyImportMarc,
   BodyPreviewImport,
+  BodyPreviewMarc,
   HTTPValidationError,
   ImportCsvParams,
+  ImportMarcParams,
   ImportPreviewOut,
   ImportResultOut,
+  MarcPreviewOut,
   PreviewImportParams,
 } from "../../model";
 
@@ -150,6 +154,253 @@ export const useImportCsv = <TError = HTTPValidationError, TContext = unknown>(
   TContext
 > => {
   return useMutation(getImportCsvMutationOptions(options), queryClient);
+};
+export const getImportMarcUrl = (params?: ImportMarcParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/imports/marc?${stringifiedParams}`
+    : `/api/imports/marc`;
+};
+
+/**
+ * Apply a MARC21 file another library exported.
+ *
+ * MARCXML only. `enums.ExportFormat` says why the binary serialisation is not
+ * read, and it is the same reason it is not written.
+ *
+ * **Declared `def`, not `async def`, for `import_csv`'s reason**, which is
+ * load bearing rather than stylistic: everything below blocks, and an `async`
+ * handler runs on the event loop, so a running import stops the whole
+ * application answering. Measured on a 3000 row file, `GET /api/books` went
+ * from 7ms to 14.4 seconds.
+ *
+ * **Nothing personal is written.** A catalogue record carries no reading
+ * status, no rating and no review, so this touches no `user_books` row and
+ * changes nothing about what anybody has read. `statuses_updated` comes back
+ * zero for that reason rather than because nothing needed changing.
+ *
+ * **`create_missing` defaults to true, where the CSV importer defaults it to
+ * false.** A reading history is mostly books the household does not own, so
+ * creating them by default would fill the shelf; a catalogue transfer that
+ * adds no records has transferred nothing.
+ *
+ * Records added this way arrive `ownership=unknown`: another institution's
+ * record says that institution holds the book. They are confirmed together
+ * from the library view, which is what the bulk ownership endpoint is for.
+ * @summary Import Marc
+ */
+export const importMarc = async (
+  bodyImportMarc: BodyImportMarc,
+  params?: ImportMarcParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ImportResultOut> => {
+  const formData = new FormData();
+  formData.append(`file`, bodyImportMarc.file);
+
+  return customFetch<ImportResultOut>(getImportMarcUrl(params), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getImportMarcMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof importMarc>>,
+    TError,
+    { data: BodyImportMarc; params?: ImportMarcParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof importMarc>>,
+  TError,
+  { data: BodyImportMarc; params?: ImportMarcParams },
+  TContext
+> => {
+  const mutationKey = ["importMarc"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof importMarc>>,
+    { data: BodyImportMarc; params?: ImportMarcParams }
+  > = (props) => {
+    const { data, params } = props ?? {};
+
+    return importMarc(data, params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ImportMarcMutationResult = NonNullable<
+  Awaited<ReturnType<typeof importMarc>>
+>;
+export type ImportMarcMutationBody = BodyImportMarc;
+export type ImportMarcMutationError = HTTPValidationError;
+
+/**
+ * @summary Import Marc
+ */
+export const useImportMarc = <TError = HTTPValidationError, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof importMarc>>,
+      TError,
+      { data: BodyImportMarc; params?: ImportMarcParams },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof importMarc>>,
+  TError,
+  { data: BodyImportMarc; params?: ImportMarcParams },
+  TContext
+> => {
+  return useMutation(getImportMarcMutationOptions(options), queryClient);
+};
+export const getPreviewMarcUrl = () => {
+  return `/api/imports/marc/preview`;
+};
+
+/**
+ * Read a MARC file and report what it holds, writing nothing.
+ *
+ * **`already_held` is the number this exists for.** Importing the same file
+ * twice is the ordinary accident in a catalogue transfer, and "will this
+ * double my catalogue" has to be answerable before the write.
+ *
+ * **Both of the import's refusals are modelled, not one.** `already_held`
+ * counts what it will match and `blocked` counts what it will refuse for an
+ * ISBN this member cannot see, through `MarcIndex.holds` and
+ * `MarcIndex.would_refuse`, which are the same index and the same predicates
+ * `MarcImport` applies, over the same `bounded_fields`. Counting only the
+ * first overstated what an import would add by exactly the number of records
+ * another member holds privately.
+ *
+ * **What is left is an upper bound rather than an equality, and it errs
+ * towards promising less.** The index is read once here and mutated during an
+ * import: `MarcIndex.remember` makes a freshly created Book findable, so a
+ * work listed twice in one file is created once and matched once, while this
+ * counts both as additions. Measured, two identical records: the preview would
+ * add 2 and the import created 1 and matched 1.
+ *
+ * **`blocked` describes the default.** `would_refuse` is the refusal
+ * `create_missing` reaches, and this endpoint takes no `create_missing`
+ * because the import defaults it true. With it off nothing is created, so
+ * nothing can be refused for a collision.
+ *
+ * **And it under-counts** where a record's ISBN is held invisibly but its
+ * title and author match a visible Book: that is a match, not a refusal. See
+ * `MarcPreviewOut`.
+ *
+ * Rate limited together with the import, so a preview and the import that
+ * follows it spend two of the three a minute allows. Parsing is the expensive
+ * half and `_read_upload` caps the body without capping the rate.
+ * @summary Preview Marc
+ */
+export const previewMarc = async (
+  bodyPreviewMarc: BodyPreviewMarc,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MarcPreviewOut> => {
+  const formData = new FormData();
+  formData.append(`file`, bodyPreviewMarc.file);
+
+  return customFetch<MarcPreviewOut>(getPreviewMarcUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getPreviewMarcMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewMarc>>,
+    TError,
+    { data: BodyPreviewMarc },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewMarc>>,
+  TError,
+  { data: BodyPreviewMarc },
+  TContext
+> => {
+  const mutationKey = ["previewMarc"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewMarc>>,
+    { data: BodyPreviewMarc }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewMarc(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewMarcMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewMarc>>
+>;
+export type PreviewMarcMutationBody = BodyPreviewMarc;
+export type PreviewMarcMutationError = HTTPValidationError;
+
+/**
+ * @summary Preview Marc
+ */
+export const usePreviewMarc = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof previewMarc>>,
+      TError,
+      { data: BodyPreviewMarc },
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof previewMarc>>,
+  TError,
+  { data: BodyPreviewMarc },
+  TContext
+> => {
+  return useMutation(getPreviewMarcMutationOptions(options), queryClient);
 };
 export const getPreviewImportUrl = (params?: PreviewImportParams) => {
   const normalizedParams = new URLSearchParams();

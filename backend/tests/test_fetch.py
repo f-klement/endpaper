@@ -38,6 +38,7 @@ import pytest
 import respx
 
 import fetch
+import sources
 
 # **Imported, not copied.** "What does this statement bind" is one fact, and
 # `test_shelf.py`'s guard already answers it, including the `AnnAssign` half
@@ -51,36 +52,34 @@ BACKEND = Path(__file__).resolve().parent.parent
 
 
 def _concurrent_search_sources() -> int:
-    """How many catalogues `metadata.search` has in flight at once.
+    """How many catalogues `metadata.search` can have in flight at once.
 
     **Derived from the tree rather than written down**, because the literal 6
     that used to sit in `test_the_default_cap_fits_the_pod_it_runs_in` went on
-    passing after a seventh source joined that list: it bounded six sources
-    against the pod while `MAX_RESPONSE_BYTES`'s own docstring had started
-    claiming seven, so the only enforcement of that arithmetic was enforcing
-    the wrong arithmetic.
+    passing after a seventh source joined: it bounded six sources against the
+    pod while `MAX_RESPONSE_BYTES`'s own docstring had started claiming seven,
+    so the only enforcement of that arithmetic was enforcing the wrong
+    arithmetic.
 
-    Reads the list literal handed to `_within_deadline`, which is the fan out
-    itself. If that call stops taking a list literal this raises rather than
-    guessing, because a silently wrong count here is the exact failure it
-    exists to prevent.
+    **It used to read the list literal handed to `_within_deadline`, and that
+    stopped being possible.** The fan out is now built from the library's own
+    provider list, so the call takes a comprehension over `plan.searched` and
+    there is no literal to count. Reading it would have raised rather than
+    guessing, which is what it was written to do.
+
+    **So the number is the roster, not the enabled subset, and that is the
+    honest bound rather than a convenient one.** `plan.searched` is a subset of
+    `sources.SEARCH_SOURCES` by construction, so the roster is the worst case a
+    household can produce by switching everything on, and a worst case is what
+    this pins against a 512Mi pod. A count taken from whatever happened to be
+    enabled would make the memory bound depend on a settings row.
+
+    What keeps the two in step is `test_house_rules.TestTheProviderRosterIsOneList`,
+    which pins the fan out's own table of search adapters equal to
+    `sources.SEARCH_SOURCES`. Without it a source could be added to one and not
+    the other, and this count would follow the wrong one.
     """
-    tree = ast.parse((BACKEND / "metadata.py").read_text())
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_within_deadline"
-            and node.args
-        ):
-            argument = node.args[0]
-            if not isinstance(argument, ast.List):
-                raise AssertionError(
-                    "_within_deadline no longer takes a list literal, so the "
-                    "concurrent source count cannot be read off it"
-                )
-            return len(argument.elts)
-    raise AssertionError("no call to _within_deadline found in metadata.py")
+    return len(sources.SEARCH_SOURCES)
 
 
 _CONCURRENT_SOURCES = _concurrent_search_sources()

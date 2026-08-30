@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+import ddc
 from enums import ClassificationScheme
 from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 
@@ -18,7 +19,7 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: page.
 #:
 #: **Both capped writers, and there are exactly two of those.**
-#: `_write_classifications` serves the create and selected enrichment paths.
+#: `classifications.add_headings` serves the create and selected enrichment paths.
 #: `_repoint_relations` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and
@@ -46,9 +47,9 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: selectin-loaded onto every listing row.
 #:
 #: **What survives the overflow is decided by order, not by luck**, and the
-#: ordering is applied in `routers/books._headings`, which is the only place it
+#: ordering is applied in `classifications.bounded_headings`, which is the only place it
 #: can be: a parser can order the record in front of it, and by then `_merge`
-#: has concatenated several. See `_SCHEME_ORDER` for which scheme wins and why.
+#: has concatenated several. See `classifications.SCHEME_ORDER` for which scheme wins and why.
 MAX_CLASSIFICATIONS_PER_BOOK = 8
 
 
@@ -81,6 +82,41 @@ class ClassificationIn(BaseModel):
             raise ValueError("A classification needs a number.")
         return cleaned
 
+    @model_validator(mode="after")
+    def dewey_numbers_are_notations(self) -> ClassificationIn:
+        """A `ddc` row holds a Dewey notation, refused here rather than assumed.
+
+        **Two things read this column as a notation and both were assuming.**
+        `ddc.division` projects it onto a division for the browse facet, and
+        `shelf._division_key` does the same projection in SQL for the filter.
+        Both carried a comment saying every write path goes through
+        `ddc.notation`. Neither did: `ddc.notation` is called from nowhere
+        outside `ddc.py`, and `POST /api/books` with
+        `{"scheme": "ddc", "number": "Hello world"}` answered 201 and stored it.
+
+        What that cost was not a stored oddity, it was a **fail open filter fed
+        by the app's own output**: the facet then published a division `He0`,
+        and the chip linking to `?ddc=He0` dropped the unparseable token, applied
+        no clause, and returned the whole library. Both critic seats found it
+        independently.
+
+        Refused rather than dropped, which is the opposite of the query
+        parameter rule twelve modules away and is deliberate. A filter value
+        that means nothing is a link somebody typed and there is nobody to tell.
+        A stored row is a catalogue assertion, and one that cannot be read as
+        the scheme it claims is worth a 422 naming the field.
+
+        Only `ddc`. LCC has no canonical form this app parses, and for GND and
+        LCSH the number is an identifier or a phrase, so there is nothing to
+        check against.
+        """
+        if self.scheme is ClassificationScheme.DDC and ddc.notation(self.number) is None:
+            raise ValueError(
+                f"{self.number!r} is not a Dewey number: three digits, "
+                "optionally a decimal fraction."
+            )
+        return self
+
     @field_validator("label")
     @classmethod
     def tidy_label(cls, value: str | None) -> str | None:
@@ -101,3 +137,53 @@ class ClassificationOut(BaseModel):
     #: 082. A client showing a heading has to be ready for the number by itself.
     label: str | None = None
     model_config = {"from_attributes": True}
+
+
+class HeadingFacetOut(BaseModel):
+    """One distinct heading in the library, with how many Books carry it.
+
+    The facet a reader picks from, and the same shape a Book's own heading has
+    plus the count, so a client can render both with one component.
+    """
+
+    scheme: ClassificationScheme
+    number: str
+    label: str | None = None
+    book_count: int
+
+
+class DivisionFacetOut(BaseModel):
+    """One Dewey division in the library, with how many Books fall in it."""
+
+    #: Three digits ending in zero, as `ddc.division` produces.
+    division: str
+    #: **This library's own word for the division, not Dewey's caption.**
+    #:
+    #: The distinction is worth the sentence, because the two look alike and
+    #: are not the same claim. Dewey's published captions are the schedule,
+    #: which is OCLC's and is not ours to redistribute; what this carries is
+    #: the entry from `ddc.DIVISION_TAGS`, the map from a division onto the
+    #: seeded tag it is closest to, which this app already computes and already
+    #: shows people as a tag suggestion. So `010` reads as `Reference` here
+    #: where Dewey says Bibliography: a coarser word, chosen from a vocabulary
+    #: the library curated, and correct as far as it goes.
+    #:
+    #: Absent where the division maps to no tag, which is a real answer rather
+    #: than a gap: 040 is unassigned in the schedule, 080 is quotations and 310
+    #: is general statistics, and inventing a word for those is the failure
+    #: `DIVISION_TAGS` exists to avoid. A client shows the number alone.
+    label: str | None = None
+    book_count: int
+
+
+class ClassificationFacets(BaseModel):
+    """Everything the classification filter panel needs, in one response.
+
+    Two lists rather than two endpoints, because they are drawn in one panel
+    and a caller that wants one always wants the other. A division count is not
+    derivable from the heading counts, so this is genuinely two questions with
+    one answer rather than one padded out.
+    """
+
+    headings: list[HeadingFacetOut]
+    divisions: list[DivisionFacetOut]

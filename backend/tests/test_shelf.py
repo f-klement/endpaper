@@ -173,9 +173,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, ForeignKey, Integer, MetaData, Select, Table, event, func
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    Integer,
+    MetaData,
+    Select,
+    Table,
+    event,
+    func,
+    literal,
+    select,
+)
 from sqlalchemy.orm import Query
 
+import ddc
 import models
 
 # `Base` from `database`, which defines it, rather than from `models`,
@@ -185,9 +197,13 @@ from database import Base
 from enums import BookSort, ReadStatus
 from models import Book, Collection, Tag, User, UserBook, book_tags
 from shelf import (
+    _MULTI_COLUMN_ORDERS,
+    _SORT_CLAUSES,
     BookFilters,
     Loading,
     Shelf,
+    _division_key,
+    _looks_like_a_notation,
     order_for,
     rereading_filtered_rows,
     whole_table_for_uniqueness,
@@ -2486,6 +2502,13 @@ class TestTheShelfIsTheOnlyWayIn:
         # `routers/books.py`, so a fifth added there would leave the set
         # unchanged and pass green, which is exactly the quiet growth the
         # deleted exemption counter existed to prevent.
+        #
+        # **Four, and it went 4 to 5 to 4 rather than staying put.** MARC import
+        # added a second index builder in `importing.py` that needs the same
+        # whole table read, which would have been a fifth. It is a third way
+        # past the viewer only if it is written a second time, so the read moved
+        # into `importing._taken_isbns` and both builders call that. The number
+        # here is the same as before and the module count fell.
         assert len(calls["whole_table_for_uniqueness"]) == 4, calls
         assert len(calls["rereading_filtered_rows"]) == 1, calls
 
@@ -2780,21 +2803,46 @@ class TestStatementCost:
             event.remove(db.get_bind(), "before_cursor_execute", record)
         return statements
 
-    def test_a_page_with_serialised_loading_costs_three_statements(self, db, user):
-        """One count, one page of rows, and one `selectinload` for the Tags of
-        the whole page. `added_by` is a many to one and rides on the row itself,
-        which is why it adds none."""
-        db.add_all(Book(title=f"Book {n}", added_by_user_id=user.id) for n in range(25))
+    def test_a_page_with_serialised_loading_costs_two_statements(self, db, user, other):
+        """One count and one page of rows, and nothing else. `added_by` is a
+        many to one and rides on the row itself, and Tags are deliberately not
+        loaded here: `serialisation.books_to_out` re-reads the page with its
+        own `selectinload(Book.tags)`, so an option here would be a second load
+        of the same collection.
+
+        **Exactly two, not at most two.** This assertion read `== 3` while the
+        option was present, and a ceiling would have gone on passing when it
+        was removed: a smaller count is a weaker inequality, which is this
+        repository's recorded way of not noticing a statement.
+
+        **The `expunge_all` is what pins the one option left.** Every fixture
+        User in this file is created in this same session, so `book.added_by`
+        is answered out of the identity map and the `joinedload` could be
+        deleted with this test green. Measured by a critic on 2026-08-30, and
+        the same hole is why `test_exported_loading_costs_two_statements`
+        expunges too.
+
+        `expunge_all`, not `expunge(other)`: the loading option puts a **new**
+        `User` instance in the session on every call, so expunging the fixture's
+        object works once and then raises "not present in this Session".
+        Measured, on the first version of this test. The ids are read before
+        the window for the matching reason: the commit above expired both rows,
+        and a detached expired instance raises rather than reloading.
+        """
+        db.add_all(Book(title=f"Book {n}", added_by_user_id=other.id) for n in range(25))
         db.commit()
+        viewer_id = user.id
 
         def page():
-            books, total = Shelf.seen_by(db, user.id).page(
+            db.expunge_all()
+            books, total = Shelf.seen_by(db, viewer_id).page(
                 0, 25, Book.id.asc(), load=Loading.SERIALISED
             )
             assert len(books) == 25 and total == 25
+            assert books[0].added_by is not None
 
         page()  # warm up outside the window
-        assert len(self._count(db, page)) == 3
+        assert len(self._count(db, page)) == 2
 
     def test_the_count_does_not_pay_for_the_eager_loading(self, db, user):
         """`page()` counts from the query without the loading options. Counting
@@ -2808,25 +2856,59 @@ class TestStatementCost:
         count()
         assert len(self._count(db, count)) == 1
 
-    def test_exported_loading_costs_two_statements(self, db, user, shelved):
+    def test_exported_loading_costs_two_statements(self, db, user, other, shelved):
         """The third `Loading` member, pinned because the enum's docstring
         states a cost for it. One for the rows, one `selectinload` for the tags
         of the whole page; `added_by` and `collection` are both many to one and
-        ride on the row itself, which is the claim being checked."""
+        ride on the row itself, which is the claim being checked.
+
+        The `expunge_all` is the same one the SERIALISED test above explains:
+        the adder is created in this session, so without it the `joinedload` on
+        `added_by` is answered from the identity map and nothing here pins it.
+        """
         db.add_all(
-            Book(title=f"Book {n}", collection_id=shelved.id, added_by_user_id=user.id)
+            Book(title=f"Book {n}", collection_id=shelved.id, added_by_user_id=other.id)
             for n in range(5)
         )
         db.commit()
+        viewer_id = user.id
 
         def export():
-            books = Shelf.seen_by(db, user.id).all(Book.title.asc(), load=Loading.EXPORTED)
+            db.expunge_all()
+            books = Shelf.seen_by(db, viewer_id).all(Book.title.asc(), load=Loading.EXPORTED)
             assert len(books) == 5
             assert books[0].collection is not None
             assert books[0].added_by is not None
 
         export()
         assert len(self._count(db, export)) == 2
+
+    def test_published_loading_costs_three_statements(self, db, user):
+        """The fourth member. One for the rows and one for each of the two
+        collections; `added_by` is not loaded at all, because the public
+        payload names no member.
+
+        It was the one cost the enum stated and nothing measured, which is why
+        the docstring could say "each of the three" above a list of four
+        without anything failing.
+
+        **Every book, not `books[0]`.** Reading one book's collections inside
+        the window pays a dropped eager load back as exactly one lazy load, so
+        the count is 3 with the options and 3 without them and the test passes
+        with its own subject deleted. Both critics measured that separately on
+        2026-08-30, on the first version of this test.
+        """
+        db.add_all(Book(title=f"Book {n}", added_by_user_id=user.id) for n in range(5))
+        db.commit()
+
+        def read():
+            books = Shelf.seen_by_the_public(db).all(Book.id.asc(), load=Loading.PUBLISHED)
+            assert len(books) == 5
+            assert all(book.tags == [] for book in books)
+            assert all(book.classifications == [] for book in books)
+
+        read()
+        assert len(self._count(db, read)) == 3
 
     def test_nothing_loading_costs_one_statement(self, db, user):
         """The first member, pinned through `all()` rather than only through
@@ -3288,3 +3370,109 @@ class TestAShelfWithNoViewerRefusesAPerMemberNarrowing:
         db.add(Book(title="Public", added_by_user_id=user.id))
         db.commit()
         assert Shelf.seen_by_the_public(db).matching(BookFilters(discuss=True)).count() == 0
+
+
+class TestEverySortHasAnOrdering:
+    """`order_for` reads two tables, and a value in neither is a 500.
+
+    Both docstrings in `shelf.py` claimed this file pinned the partition and it
+    did not, which is the shape a critic seat is for: the claim was true about
+    the code and false about the test. A ninth `BookSort` member added to the
+    enum and to neither table would have shipped as a `KeyError` on a request,
+    at a value the caller chooses.
+    """
+
+    def test_the_two_tables_partition_the_enum(self):
+        one_column = set(_SORT_CLAUSES)
+        many_columns = set(_MULTI_COLUMN_ORDERS)
+
+        assert one_column | many_columns == set(BookSort)
+        assert one_column & many_columns == set()
+
+    @pytest.mark.parametrize("sort", list(BookSort))
+    def test_every_value_produces_an_ordering(self, sort):
+        """The property the partition exists for, asserted directly.
+
+        Parametrised over the enum rather than over a list written here, so a
+        new member is covered the day it is added rather than the day somebody
+        remembers this file.
+        """
+        clauses = order_for(sort)
+
+        assert clauses
+        assert clauses[-1].compare(Book.id.asc())
+
+
+class TestTheDivisionProjectionsAgree:
+    """The Dewey division is projected twice, in Python and in SQL, and the two
+    have to give the same answer.
+
+    `ddc.division` serves the parser and the facet's labels; `shelf._division_key`
+    serves the filter and the facet's grouping. They are different expressions
+    over the same rule, so nothing but a comparison keeps them together.
+    `_division_key` claimed this test existed before it did.
+    """
+
+    @staticmethod
+    def _sql(db, expression):
+        """One scalar, evaluated by the database rather than reimplemented here.
+
+        That is the point of the whole class: a test that recomputed `substr`
+        in Python would agree with itself and say nothing about SQLite.
+        """
+        return db.execute(select(expression)).scalar_one()
+
+    def test_across_every_three_digit_number(self, db):
+        """All 1,000 of them, not a sample."""
+        mismatches = [
+            (number, in_sql, ddc.division(number))
+            for number in (f"{n:03d}" for n in range(1000))
+            if f"{(in_sql := self._sql(db, _division_key(literal(number))))}0"
+            != ddc.division(number)
+        ]
+
+        assert mismatches == []
+
+    def test_the_sql_guard_never_admits_what_cannot_be_projected(self, db):
+        """The other half of the pair, over the shapes that are not notations.
+
+        `_looks_like_a_notation` is deliberately weaker than `ddc.notation`: it
+        tests three leading digits and nothing else, because it guards a row
+        written before the validator existed rather than parsing one. What must
+        hold is that it never *admits* something the projection cannot turn into
+        a division, which is what put a fabricated `He0` in the facet.
+        """
+        admitted_but_unprojectable = []
+        for candidate in [
+            "Hello world",
+            "</script><b>x",
+            "BF575.S75 E64 2022",
+            "12x",
+            "1",
+            "",
+            "04",
+            "0004",
+            "004",
+            "155.9042",
+        ]:
+            if not self._sql(db, _looks_like_a_notation(literal(candidate))):
+                continue
+            key = self._sql(db, _division_key(literal(candidate)))
+            if not (len(key) == 2 and key.isdigit()):
+                admitted_but_unprojectable.append((candidate, key))
+
+        assert admitted_but_unprojectable == []
+
+    def test_admits_the_numbers_a_catalogue_actually_supplies(self, db):
+        """So the guard above cannot pass by refusing everything."""
+        admitted = [
+            number
+            for number in ("004", "005.133", "155.9042", "330", "830")
+            if self._sql(db, _looks_like_a_notation(literal(number)))
+        ]
+
+        assert admitted == ["004", "005.133", "155.9042", "330", "830"]
+
+    def test_refuses_the_row_that_produced_a_fabricated_division(self, db):
+        """`He0` was a real facet entry. Pinned so it cannot come back."""
+        assert self._sql(db, _looks_like_a_notation(literal("Hello world"))) is False

@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   useBulkAction,
   useListBooks,
+  useListClassifications,
   useListLocations,
   useListBooksInfinite,
   useListTags,
@@ -30,6 +31,7 @@ import {
   OwnershipStatus,
   type BookOut,
   type BulkResult,
+  type ClassificationFacets,
   type CollectionOut,
   type LocationOut,
   type OverdueSender,
@@ -78,6 +80,12 @@ export interface UseLibraryResult {
   collections: CollectionOut[];
   toggleTag: (tagId: number) => void;
   clearTags: () => void;
+  /** One heading, as `scheme:number`. ANDed with the others, like a tag. */
+  toggleHeading: (heading: string) => void;
+  /** One Dewey division. ORed with the others: see `docs/decisions.md`. */
+  toggleDivision: (division: string) => void;
+  clearClassifications: () => void;
+  classifications: ClassificationFacets | undefined;
 
   /** Covers, dense rows or metadata. Remembered in this browser, not on the account. */
   view: LibraryView;
@@ -156,6 +164,12 @@ export function useLibrary(): UseLibraryResult {
   // Cached like the locations, and for the same reason: how a library has
   // divided its shelf changes far less often than what is on it.
   const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
+  // Cached longer than the tags beside it. A heading arrives from a catalogue
+  // during enrichment rather than from somebody typing, so this list moves when
+  // books are added and not while one is being read.
+  const classifications = useListClassifications({
+    query: { staleTime: 5 * 60_000 },
+  });
   // The filter panel and the selection bar both draw this one field, so they
   // are collated once here rather than twice at the two call sites.
   // `locations` is left alone: it arrives most-populated first, which answers
@@ -186,6 +200,23 @@ export function useLibrary(): UseLibraryResult {
           : [...current.tagIds, tagId],
       })),
     clearTags: () => setFilters((current) => ({ ...current, tagIds: [] })),
+    toggleHeading: (headingKey) =>
+      setFilters((current) => ({
+        ...current,
+        headings: current.headings.includes(headingKey)
+          ? current.headings.filter((entry) => entry !== headingKey)
+          : [...current.headings, headingKey],
+      })),
+    toggleDivision: (division) =>
+      setFilters((current) => ({
+        ...current,
+        ddcDivisions: current.ddcDivisions.includes(division)
+          ? current.ddcDivisions.filter((entry) => entry !== division)
+          : [...current.ddcDivisions, division],
+      })),
+    clearClassifications: () =>
+      setFilters((current) => ({ ...current, headings: [], ddcDivisions: [] })),
+    classifications: classifications.data,
 
     view,
     setView: (next) => {

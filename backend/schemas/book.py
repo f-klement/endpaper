@@ -15,7 +15,7 @@ from enums import (
     ReadStatus,
 )
 from google_books import split_categories
-from models import MAX_PAGE_NUMBER_IN_A_BOOK
+from models import DESCRIPTION_MAX, MAX_PAGE_NUMBER_IN_A_BOOK
 from schemas.author import RefusedAssertionOut
 from schemas.classification import (
     MAX_CLASSIFICATIONS_PER_BOOK,
@@ -56,7 +56,7 @@ class BookLookup(BaseModel):
     author: str | None = None
     publisher: str | None = None
     year: int | None = None
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     cover_url: str | None = None
     series_name: str | None = None
     series_index: float | None = None
@@ -73,7 +73,7 @@ class BookLookup(BaseModel):
     #: `ClassificationIn`, not `ClassificationOut`, and that is the point: this
     #: whole model is a draft the client posts straight back to
     #: `POST /api/books`, so what it carries has to be what that accepts. The
-    #: bounds are applied where the record is parsed (`_headings`), so a
+    #: bounds are applied where the record is parsed (`classifications.bounded_headings`), so a
     #: caption longer than the column is dropped there rather than 422ing the
     #: member's own request.
     classifications: list[ClassificationIn] = []
@@ -93,7 +93,7 @@ class BookCreate(BaseModel):
     author: str | None = Field(default=None, max_length=500)
     publisher: str | None = Field(default=None, max_length=255)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     cover_url: str | None = Field(default=None, max_length=500)
     is_private: bool = False
     series_name: str | None = Field(default=None, max_length=255)
@@ -110,7 +110,7 @@ class BookCreate(BaseModel):
     format: BookFormat | None = None
     #: The headings the lookup returned, posted back so the scan flow stores
     #: them. Bounded: every entry becomes a row. Duplicates within one payload
-    #: are dropped by `_write_classifications` rather than refused, because the
+    #: are dropped by `classifications.add_headings` rather than refused, because the
     #: catalogues themselves repeat a number across sources.
     classifications: list[ClassificationIn] = Field(
         default=[], max_length=MAX_CLASSIFICATIONS_PER_BOOK
@@ -394,7 +394,7 @@ class BookMatch(BaseModel):
     # The bounds are the same as `BookCreate`'s, because the value ends up in
     # the same column.
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     language: str | None = None
     categories: str | None = None
@@ -458,7 +458,7 @@ class BookDetailsUpdate(BaseModel):
     author: str | None = Field(default=None, max_length=500)
     publisher: str | None = Field(default=None, max_length=255)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     series_name: str | None = Field(default=None, max_length=255)
     series_index: float | None = Field(default=None, ge=0, le=1000)
     location: str | None = Field(default=None, max_length=120)

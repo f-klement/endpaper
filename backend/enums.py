@@ -310,7 +310,10 @@ class ClassificationScheme(StrEnum):
     rather than something this app will see, the DNB being its only supplier
     here and German its only caption: `4203576-4` names one heading whatever a
     record calls it. What differs is that a Dewey number also sorts, and a GND
-    number does not, which costs nothing because nothing here sorts on it.
+    number does not. That is now a visible difference rather than a latent one:
+    `BookSort.DDC` orders a shelf by Dewey and there is deliberately no
+    counterpart for the other three, because two of them have no order and the
+    third does not sort as text.
 
     **LCSH is the one member with no identifier at all, and that is measured
     rather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a
@@ -321,7 +324,7 @@ class ClassificationScheme(StrEnum):
     honest and worth knowing: a heading the Library of Congress later revises
     (`Afro-Americans` became `African Americans`) changes this scheme's
     identifier, where a GND number or a Dewey notation survives its own
-    recaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.
+    recaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.
 
     **A person's identifier is not one of these**, though the DNB writes it in
     the same `$0`: `100 $0` says who wrote the book, and every scheme here says
@@ -329,9 +332,10 @@ class ClassificationScheme(StrEnum):
     `author_identifiers` table, which is a different store keyed on a name
     rather than on a book.
 
-    Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three
-    are stored because a catalogue heading is worth keeping whole, not because
-    anything reads them yet.
+    Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
+    now: a book shows the headings it carries, and any of them can be filtered
+    on. What DDC has that the others do not is a second reading, the division,
+    which is what makes it browsable and sortable as well as filterable.
     """
 
     DDC = "ddc"
@@ -455,8 +459,22 @@ class AuthorityProvenance(StrEnum):
 
 
 class ExportFormat(StrEnum):
+    """What `GET /api/books/export` may write.
+
+    Two of these are for a person and one is for another institution, and the
+    difference decides who may ask for it. CSV and plain text carry a
+    household's own columns (what a book cost, which room it is in, who added
+    it) and go to a spreadsheet. MARCXML carries the catalogue record and goes
+    to another library's system, so it is offered only in library mode: see
+    `routers/books.export_books`.
+    """
+
     CSV = "csv"
     TXT = "txt"
+    #: MARC21 in XML, and deliberately not ISO 2709. The binary serialisation
+    #: needs a directory of byte offsets that has to agree with the field data
+    #: after every change, and every system that reads it reads this too.
+    MARCXML = "marcxml"
 
 
 class BookSort(StrEnum):
@@ -476,6 +494,24 @@ class BookSort(StrEnum):
     # no series sort last: mixing them in by a NULL index would scatter them
     # through the list rather than grouping them at the end.
     SERIES = "series"
+    # Shelf order, by Dewey number, with the unclassified last for the reason
+    # SERIES puts the un-serialised last.
+    #
+    # **Dewey and no other scheme, which is a measurement rather than a
+    # preference.** A DDC notation always carries exactly three leading digits
+    # (`ddc._NOTATION` refuses anything else), so ordering the text orders the
+    # numbers: `004` then `155.9042` then `830`. A Library of Congress call
+    # number does not have that property. Its class letters are followed by a
+    # number that sorts numerically, so `BF75` precedes `BF575` on a real
+    # shelf and text order reverses them, measured against the live row
+    # `BF575.S75 E64 2022` on 2026-08-29. Sorting on LCC would ship an order
+    # that is wrong exactly where somebody would trust it. GND and LCSH are
+    # subject vocabularies and have no order at all: they filter.
+    #
+    # So this value is named for the scheme it sorts rather than for
+    # "classification", because a reader who sees the latter will assume their
+    # LCC numbers are in it.
+    DDC = "ddc"
 
 
 class AppEnv(StrEnum):
@@ -586,6 +622,16 @@ class SettingKey(StrEnum):
     # Never edited from the settings screen: it is a measurement, not a
     # preference, which is why it has no field in `SettingsUpdate`.
     SENDER_HEALTH = "sender_health"
+
+    # The provider list: which catalogues are asked, and in what order. One
+    # JSON object rather than a row per source, for the reason SENDER_HEALTH is
+    # one: a table would need a migration, a `backup._TABLES` entry and a
+    # restore path to hold seven booleans and an order.
+    #
+    # **Never read directly.** `sources.parse` turns whatever the row holds
+    # into a full roster, so a hand edit or a restore cannot produce a name
+    # `metadata._SOURCES` has no function for. See `settings_store.catalogue_sources`.
+    CATALOGUE_SOURCES = "catalogue_sources"
 
 
 class OverdueSender(StrEnum):
@@ -707,3 +753,27 @@ class CustomFieldKind(StrEnum):
 
     TEXT = "text"
     URL = "url"
+
+
+class CatalogueSource(StrEnum):
+    """A catalogue this build can ask about a book.
+
+    **The values are the strings `metadata.py` already used**, because they are
+    not only a settings vocabulary: `catalogue.Record.source` and
+    `Record.sources` carry them, `metadata._SOURCES` is keyed on them, and
+    `metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing
+    downstream and buys two things: a closed union in the generated client, and
+    a roster `sources.parse` can validate a stored row against.
+
+    **Not every source answers every question**, and the split is real rather
+    than incidental: BNF and LOC are title search only, because neither was
+    worth an ISBN request. See `sources.LOOKUP_SOURCES`.
+    """
+
+    OPEN_LIBRARY = "open_library"
+    GOOGLE_BOOKS = "google_books"
+    DNB = "dnb"
+    K10PLUS = "k10plus"
+    OENB = "oenb"
+    BNF = "bnf"
+    LOC = "loc"

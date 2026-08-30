@@ -1138,6 +1138,31 @@ class Note(Base):
 #: be used to hold a chapter. It is also the stored-denial-of-service bound,
 #: which is why an unbounded Text column is not the answer. Enforced by
 #: `ck_quotes_text_bounds`, not by the column width: SQLite ignores that.
+#: The longest description a client may write.
+#:
+#: **The column is `Text` and stays `Text`**, so this bounds new writes and
+#: leaves every stored row readable: a `max_length` on the schema needs no
+#: migration and cannot make an existing book uneditable, which a `CheckConstraint`
+#: would.
+#:
+#: It exists because there was no bound at all, and both critic seats found the
+#: same hole from opposite ends on 2026-08-30. `description` is on the **list**
+#: payload, so one oversized value is paid for on every page of every listing:
+#: measured, a single 3,000,256 byte upload through MARC import made
+#: `GET /api/books` answer with 3,203,366 bytes. `POST /api/books` accepted a
+#: 200,000 character description with a 201, so this was never a MARC hole; the
+#: importer honouring the API's contract is what made the contract's absence
+#: visible.
+#:
+#: **10,000 is argued rather than measured, and the arithmetic is the honest
+#: half.** No real population was available to measure: the captured catalogue
+#: fixtures in this tree hold descriptions of 8 to 23 characters. What the
+#: number has to do is bound a page rather than describe a blurb, and 25 books
+#: at 10,000 is 250 KB against the 3.2 MB above. Roughly 1,500 words is past any
+#: publisher's blurb and past a MARC `520` summary note, which is one paragraph
+#: in every record this app has parsed.
+DESCRIPTION_MAX = 10_000
+
 QUOTE_TEXT_MAX = 2_000
 
 #: What the member wants to say *about* the passage. Half the excerpt's

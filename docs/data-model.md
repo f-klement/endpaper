@@ -165,7 +165,8 @@ is the authority record number (`gnd`, `4203576-4`, `Schatz`). What those three 
 job the column does: the identifier is stable and the caption is whatever the supplying
 record wrote. That was measured across languages for Dewey; for GND the DNB is the only
 supplier here, so every caption is German today. What differs is that a Dewey number also
-sorts and a GND number does not, which costs nothing here because nothing sorts on it.
+sorts and a GND number does not. `sort=ddc` is the one that reads that difference: it orders
+a shelf by Dewey, and there is no equivalent for the other three.
 
 **LCSH is the exception and is stored as one.** The Library of Congress supplies no
 identifier for a subject heading: no `valueURI` on any of 2,280 `<subject>` elements across
@@ -222,7 +223,7 @@ reinstates a database rather than adding to one): they are additive across reque
 nor the merge carries a rate limiter, and `BookOut.classifications` is on every listing row,
 so an inflated book is paid for on every page that contains it. At the ceiling an incoming
 heading is dropped rather than a stored one evicted, and **which one survives is decided by
-order**: `_headings` sorts by scheme before it slices, so a Dewey number outranks a subject
+order**: `classifications.bounded_headings` sorts by scheme before it slices, so a Dewey number outranks a subject
 heading, and that is done there rather than in a parser because by then `_merge` has
 concatenated up to four catalogues. The order is DDC, LCC, GND, LCSH; the two subject
 vocabularies come last because a record supplies several of each and one classification, and

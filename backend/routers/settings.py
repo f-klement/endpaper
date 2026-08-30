@@ -1,19 +1,22 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import config
 import covers
+import metadata
 import notifications
 import settings_store
+import sources
 from auth import require_admin
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import DbSession
 from enums import SettingKey
 from models import User
 from schemas import (
+    CatalogueSourceOut,
     FeatureFlagsOut,
     LoginImageOut,
     SenderHealth,
@@ -78,7 +81,7 @@ _SENDER_BOOL: Final[dict[str, SettingKey]] = {
     "overdue_in_app_enabled": SettingKey.OVERDUE_IN_APP_ENABLED,
 }
 
-def _store(db: DbSession, key: SettingKey, value: str) -> None:
+def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
     """Write one settings row, and drop the health record it invalidates.
 
     **Every write in `update_settings` goes through here**, which is what makes
@@ -93,8 +96,19 @@ def _store(db: DbSession, key: SettingKey, value: str) -> None:
     row configure", and it lives with the senders rather than here. A row that
     configures nothing (the locale, the Google key, the reminder interval)
     answers `None` and this is then an ordinary write.
+
+    **A `dict` goes to `set_json` and a `str` to `set_value`, through this same
+    door rather than a second one.** The provider list is the first row here
+    that holds an object, and giving it a `_store_json` sibling would have made
+    "every write goes through one door" a sentence about two doors.
+    `TestEverySettingsWriteClearsWhatItInvalidates` counts the writers in this
+    module and expects exactly one, and it caught the bypass that produced this
+    paragraph.
     """
-    settings_store.set_value(db, key, value)
+    if isinstance(value, dict):
+        settings_store.set_json(db, key, value)
+    else:
+        settings_store.set_value(db, key, value)
     sender = notifications.sender_for(key)
     if sender is not None:
         notifications.forget_health(db, sender)
@@ -232,6 +246,18 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
         public_catalogue_published=settings_store.public_catalogue_is_published(db),
+        # **The stored list, not the one in force.** An admin has to see what
+        # they set: a screen that hid Google Books because no key is configured
+        # would be one they cannot use, since they would switch it on and watch
+        # it come back off. `ready` beside it is what says it cannot answer yet.
+        catalogue_sources=[
+            CatalogueSourceOut(**vars(described))
+            for described in sources.describe(
+                settings_store.stored_catalogue_sources(db),
+                ready=settings_store.ready_sources(db),
+                credentials=settings_store.source_credentials(db),
+            )
+        ],
     )
 
 
@@ -253,6 +279,10 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
             db, SettingKey.GOODREADS_LOOKUP_ENABLED
         ),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
+        # The raw row here, because the two MARC routes gate on the raw row and
+        # a client reading this has to get the answer they give. The field
+        # below is a conjunction for the opposite reason.
+        library_mode=settings_store.library_mode(db),
         # The conjunction, never the raw row: this is the flag a browser with
         # no token reads to decide whether there is a public catalogue to
         # offer, and it has to give the same answer the routes do.
@@ -370,6 +400,24 @@ def update_settings(
         # webhook secret. `None` never reaches here.
         _store(db, key, value.strip())
 
+    if payload.catalogue_sources is not None:
+        # Merged against what is stored rather than taken whole: a payload that
+        # names one source must not be read as switching the other six on. See
+        # `sources.from_wire`.
+        _store(
+            db,
+            SettingKey.CATALOGUE_SOURCES,
+            sources.serialise(
+                sources.from_wire(
+                    [
+                        sources.Preference(entry.source, entry.enabled)
+                        for entry in payload.catalogue_sources
+                    ],
+                    settings_store.stored_catalogue_sources(db),
+                )
+            ),
+        )
+
     for field, key in _LIBRARY_MODE_BOOL.items():
         value = getattr(payload, field)
         if value is None:
@@ -382,5 +430,23 @@ def update_settings(
             continue
         _refuse_if_pinned(key)
         _store(db, key, "true" if value else "false")
+
+    # **Every write that can change which catalogues are asked drops the lookup
+    # cache**, and there are three rather than one: the provider list, and the
+    # two Google Books rows that `settings_store.ready_sources` reads. Clearing
+    # on only the first was the shape of the defect it was meant to fix, since
+    # switching Google off through its own card takes it out of the plan at once
+    # while the records it had already supplied stayed served for another day.
+    #
+    # Decided from the payload rather than from what changed, because a write
+    # storing the same value still means somebody looked at that switch, and a
+    # needless cache drop costs one re-fetch where a missed one costs a stale
+    # answer nobody can explain.
+    if (
+        payload.catalogue_sources is not None
+        or payload.google_books_enabled is not None
+        or payload.google_books_api_key is not None
+    ):
+        metadata.clear_cache()
 
     return _read_settings(db)

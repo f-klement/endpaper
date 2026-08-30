@@ -83,7 +83,15 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 - **Author pages**: everybody your shelf credits, with their books behind one click. Where
   one person has ended up under two spellings, fold them together: your books are never
   edited, and any fold can be undone
-- **PWA installable**: "Add to Home Screen" on iOS and Android
+- **Installable from the browser**: Endpaper is a progressive web app, so "Add to
+  Home Screen" gives it its own icon and its own window, with no app store and
+  nothing to sign. It is still the web interface talking to your instance, so it
+  needs the instance reachable: there is no offline mode, by choice, because an
+  offline shell could only lie about a library it cannot read. **On iPhone, iPad
+  and Mac this is the only option there is**, and it is not a placeholder for a
+  native app: Endpaper ships no Apple build and is not planning one, because
+  building for Apple platforms requires Apple hardware to build on. An Android
+  client is planned separately
 - **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
 
 **That is the shape of it. The complete list, including what Endpaper

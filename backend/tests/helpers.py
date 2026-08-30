@@ -29,6 +29,40 @@ WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 8
 NOT_AN_IMAGE = b"<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>"
 
 
+def selects_for(client: Any, headers: dict[str, str], url: str) -> tuple[int, int]:
+    """The SELECTs one request issues, and the `total` it answered with.
+
+    The total comes back with the count so a cost met by answering with nothing
+    cannot pass for a cheap page.
+
+    **One function, two callers**: `tests/routers/test_loans.py` for the two loan
+    pages and `tests/routers/test_books.py` for the books listing. It was written
+    in the loans file first and copied here for one wave, while the two files
+    belonged to different seats; the copy is gone and both import this.
+
+    Every caller asserts an **exact** count at two page lengths rather than a
+    ceiling, and that is the reason this returns the total as well: a smaller
+    count is a weaker inequality, so a ceiling goes on passing with an eager load
+    deleted, and a cost met by answering with nothing looks like a cheap page.
+    """
+    from sqlalchemy import event
+
+    from database import engine
+
+    statements: list[str] = []
+
+    def record(conn: Any, cursor: Any, statement: str, *rest: Any) -> None:
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = client.get(url, headers=headers).json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    selects = [row for row in statements if row.lstrip().upper().startswith("SELECT")]
+    return len(selects), body["total"]
+
+
 def items(response: httpx.Response) -> list[Any]:
     """Unwrap a paginated response body.
 
@@ -284,3 +318,25 @@ def proxy_headers(username: str, groups: str | None = None) -> dict[str, str]:
     if groups is not None:
         headers[proxy_groups_header()] = groups
     return headers
+
+
+def enable_google_books(db: Any, key: str = "a-test-key") -> None:
+    """Switch Google Books on and give it a key, so it is actually asked.
+
+    **Both, because either alone leaves it unasked**, and that is the point
+    rather than a setup detail. `settings_store.catalogue_sources` conjoins the
+    provider list with whether a source can answer, so a test that mocks
+    `googleapis.com` and never sets these gets no request at all.
+
+    Four tests needed this when the conjunction arrived, and every one of them
+    had been passing on the defect: they asserted that a lookup falls back to
+    Google **with the feature switched off and no key stored**, which is exactly
+    the request that should never have been made. Two review seats found that
+    hole independently. The tests still assert the fallback; they now configure
+    the source first, which is what a library that wants the fallback does.
+    """
+    import settings_store
+    from enums import SettingKey
+
+    settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, key)

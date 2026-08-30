@@ -120,12 +120,19 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Self
 
-from sqlalchemy import func, nullslast, or_
+from sqlalchemy import func, nullslast, or_, select
 from sqlalchemy.orm import Query, Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
-from enums import BookFormat, BookSort, LendingWillingness, OwnershipStatus, ReadStatus
-from models import Book, Tag, UserBook, in_trash_for, visible_to
+from enums import (
+    BookFormat,
+    BookSort,
+    ClassificationScheme,
+    LendingWillingness,
+    OwnershipStatus,
+    ReadStatus,
+)
+from models import Book, Classification, Tag, UserBook, in_trash_for, visible_to
 
 
 class Loading(Enum):
@@ -138,22 +145,51 @@ class Loading(Enum):
     `joinedload(Book.collection)` beside it for the export, and a seventh caller
     that forgot it got the N+1 back with no error anywhere.
 
-    `routers/loans.py:111` writes the same pair through `Loan.book` and is left
-    alone: it eager-loads from a Loan rather than from a Shelf, so it is not a
-    call site this enum can reach. Seven of eight, not eight of eight.
+    `routers/loans.py` used to write the same pair through `Loan.book` and was
+    left alone, because it eager-loads from a Loan rather than from a Shelf and
+    so is not a call site this enum can reach. It writes only the `added_by`
+    half now: the tags half was deleted there on 2026-08-29 for the reason this
+    one was deleted here a day later, and the comment above `loans.py:141`
+    records that measurement.
 
     Statement cost, which is the number that matters and the one
-    `tests/test_shelf.py` pins for each of the three:
+    `tests/test_shelf.py` pins for each of the four:
 
     * `NOTHING`: one statement.
-    * `SERIALISED`: two. `added_by` is a many to one and rides on the row
-      itself; `tags` is a collection and costs one more for the whole page,
-      not one per Book.
-    * `EXPORTED`: two as well. `collection` is another many to one, so it
-      joins rather than adding a statement.
+    * `SERIALISED`: one. `added_by` is a many to one and rides on the row
+      itself, and nothing else is loaded.
+    * `EXPORTED`: two. `collection` is another many to one, so it joins rather
+      than adding a statement; `tags` is a collection and costs one more for
+      the whole page, not one per Book.
     * `PUBLISHED`: three. `tags` and `classifications` are both collections and
       cost one each for the whole page, and there is no many to one to ride on
       the row: the public payload names no member, so `added_by` is not loaded.
+
+    **`SERIALISED` deliberately does not load `tags`, and `EXPORTED` does.**
+    That asymmetry is the whole of it, and what decides it is whether a second
+    reader exists. Everything fetched with `SERIALISED` is serialised by
+    `serialisation.books_to_out`, which re-reads the page with a
+    `selectinload(Book.tags)` of its own, so an option here loads a collection
+    that is loaded again a moment later and can never do work. The CSV export
+    has no such second reader: it reads `book.tags` per row itself, so there
+    the option is the only thing standing between it and an N+1.
+
+    Measured 2026-08-30 by dropping the option and counting the statements
+    that read `book_tags`, at all six call sites, at two lengths each, and by
+    a viewer who added none of the books, with the owner's view taken beside it
+    on four of the routes as a control (identical, because a collection load is
+    never answered from the identity map): 2 to 1 on `GET /api/books`,
+    `/api/books/trash`, `/api/books/duplicates` and `/api/books/{id}`; 3 to 1
+    on `/api/books/{id}/copies` and `POST /api/books/{id}/restore`, which read
+    the shelf twice in one request; 1 to 0 on `/api/books/{id}/notes`, which
+    serialises nothing; 3 to 2 on `POST /api/books/{id}/copies`, the one route
+    that reads `book.tags` outside the serialiser; and unchanged at 1 on
+    `DELETE /api/books/{id}/permanent`, whose cascade loads the collection
+    either way. Nothing rose anywhere.
+
+    A caller that serialises a page of Books by any route other than
+    `books_to_out` has to load the collection itself, or it pays one statement
+    per Book. That is the trap this paragraph exists to name.
     """
 
     NOTHING = "nothing"
@@ -164,11 +200,15 @@ class Loading(Enum):
 
 _LOADING_OPTIONS: dict[Loading, tuple[Any, ...]] = {
     Loading.NOTHING: (),
-    Loading.SERIALISED: (joinedload(Book.added_by), selectinload(Book.tags)),
+    # No `tags`, deliberately: `books_to_out` re-reads every page it serialises
+    # with a `selectinload(Book.tags)` of its own, so an option here is a
+    # second load of the same collection. See the enum's docstring for the
+    # measurement and for why EXPORTED below keeps the option it drops.
+    Loading.SERIALISED: (joinedload(Book.added_by),),
     # No `added_by`, and that omission is the point rather than an economy:
     # `PublicBookOut` has no member on it, so loading the User who added a Book
-    # would fetch a row nothing may render. Two statements, like SERIALISED,
-    # because both of these are collections.
+    # would fetch a row nothing may render. Three statements in all: the rows,
+    # then one each for the two collections.
     Loading.PUBLISHED: (
         selectinload(Book.tags),
         selectinload(Book.classifications),
@@ -205,13 +245,95 @@ _SERIES_ORDER: tuple[UnaryExpression[Any], ...] = (
 )
 
 
+def _looks_like_a_notation(number: Any) -> ColumnElement[bool]:
+    """True where the first three characters are digits, which is what a Dewey
+    number opens with and what makes the division projection meaningful.
+
+    **This exists because the projection used to trust a comment.**
+    `_division_key` carried "every write path goes through `ddc.notation`", and
+    `ddc.notation` is called from nowhere outside `ddc.py`: `POST /api/books`
+    with `{"scheme": "ddc", "number": "Hello world"}` stored it, and the facet
+    then published a division `He0` whose own filter link matched nothing,
+    dropped the token and returned the whole library. Both critic seats found
+    that independently on 2026-08-29.
+
+    `ClassificationIn.dewey_numbers_are_notations` now refuses that at the door,
+    which is the real fix. This is the read side of it, and it is not
+    redundant: a database written before that validator existed still holds
+    whatever it was given, and a facet is exactly where such a row surfaces.
+
+    Three `BETWEEN`s rather than `GLOB` or a regex, because those are SQLite's
+    and this expression has no reason to know which database it is on.
+    """
+    return (
+        func.substr(number, 1, 1).between("0", "9")
+        & func.substr(number, 2, 1).between("0", "9")
+        & func.substr(number, 3, 1).between("0", "9")
+    )
+
+
+def _division_key(number: Any) -> Any:
+    """The first two digits of a Dewey number, which identify its division.
+
+    **Two characters rather than the division itself**, so nothing has to build
+    `"15" || "0"` in SQL to compare against `"150"`. A division's third
+    character is always `0` by construction, so the first two carry all of it,
+    and a caller comparing against `division[:2]` asks the same question with
+    one fewer expression in it.
+
+    Meaningful only on a row `_looks_like_a_notation` admits, and every caller
+    here pairs the two. `ddc.division` is the Python side of the same
+    projection, and `tests/test_shelf.py::TestTheDivisionProjectionsAgree`
+    compares them across all 1,000 three digit numbers rather than trusting
+    that they agree.
+    """
+    return func.substr(number, 1, 2)
+
+
+#: This Book's Dewey number, as one value, for the shelf order.
+#:
+#: A correlated subquery rather than a join, because a join would multiply the
+#: listing: a Book carries up to eight classifications, so joining the table to
+#: order by it returns that Book once per row. The count would follow, and a
+#: page of 25 would hold fewer than 25 Books.
+#:
+#: `min` because a Book may carry more than one Dewey number, from more than
+#: one catalogue, and an ORDER BY needs one value per row. The lowest is the
+#: one a shelf would file it under.
+_DDC_NUMBER = (
+    select(func.min(Classification.number))
+    .where(
+        Classification.book_id == Book.id,
+        Classification.scheme == ClassificationScheme.DDC,
+    )
+    .scalar_subquery()
+)
+
+#: Shelf order. `nullslast` for the reason `_SERIES_ORDER` has it: a library is
+#: mostly unclassified until somebody enriches it, and scattering those through
+#: the list wherever SQLite puts NULL would make the sort look broken rather
+#: than partial.
+_DDC_ORDER: tuple[UnaryExpression[Any], ...] = (nullslast(_DDC_NUMBER.asc()),)
+
+#: The sorts that need more than one column. `_SORT_CLAUSES` holds one each;
+#: series needs two and a null rule, and Dewey needs a subquery. A second table
+#: rather than a special case in an `if`, so a third one is an entry rather than
+#: another branch. The two tables partition `BookSort` between them, which
+#: `tests/test_shelf.py` pins: a value in neither raises `KeyError` on a
+#: request rather than failing a test.
+_MULTI_COLUMN_ORDERS: dict[BookSort, tuple[UnaryExpression[Any], ...]] = {
+    BookSort.SERIES: _SERIES_ORDER,
+    BookSort.DDC: _DDC_ORDER,
+}
+
+
 def order_for(sort: BookSort) -> tuple[UnaryExpression[Any], ...]:
     """The ordering one `sort=` value asks for, with the tie broken.
 
     `Book.id` last so paging is stable: two Books with the same title would
     otherwise be free to swap between pages.
     """
-    clauses = _SERIES_ORDER if sort is BookSort.SERIES else (_SORT_CLAUSES[sort],)
+    clauses = _MULTI_COLUMN_ORDERS.get(sort) or (_SORT_CLAUSES[sort],)
     return (*clauses, Book.id.asc())
 
 
@@ -245,6 +367,46 @@ class BookFilters:
     unfiled: bool = False
     unrated: bool = False
     discuss: bool = False
+    #: Exact headings, each a scheme and that scheme's own identifier.
+    #:
+    #: A pair rather than a string, because the number alone means nothing:
+    #: `004` is computing in Dewey and is not a Library of Congress call number
+    #: at all. Parsed at the edge (`dependencies.headings`), so what reaches
+    #: here is already a closed-enum scheme and a bounded string.
+    headings: Sequence[tuple[ClassificationScheme, str]] = ()
+    #: Dewey divisions, as the three digit strings `ddc.division` produces.
+    ddc_divisions: Sequence[str] = ()
+
+
+#: How many distinct headings the facet list will offer.
+#:
+#: A bound on the response rather than on the library: a book keeps every
+#: heading it carries and shows them all, and this decides only how many the
+#: filter panel offers to pick from. See `Shelf._heading_counts` for the
+#: measurement.
+#:
+#: 500 because the panel is a list of chips and nobody reads a thousand of
+#: them, and because at 120 characters a heading that is about 60 KB, which is
+#: the same order as the listing payload beside it.
+MAX_HEADING_FACETS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class HeadingCount:
+    """One distinct heading on a shelf, and how many Books carry it."""
+
+    scheme: ClassificationScheme
+    number: str
+    label: str | None
+    book_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class DivisionCount:
+    """One Dewey division on a shelf, and how many Books fall in it."""
+
+    division: str
+    book_count: int
 
 
 class Shelf:
@@ -459,6 +621,40 @@ class Shelf:
         for tag_id in filters.tag_ids:
             shelf = shelf.where(Book.tags.any(Tag.id == tag_id))
 
+        # **Headings narrow, divisions widen, and the two are deliberately not
+        # the same operator.**
+        #
+        # A heading is ANDed, one clause each, exactly as a tag is: asking for
+        # "Mental health" and "Stress management" together means the Books
+        # carrying both, and that is what selecting two chips in a filter panel
+        # has always meant here.
+        #
+        # A division is ORed, and the reason is what a division *is*. It is a
+        # shelf location, and a Book has essentially one, so ANDing two of them
+        # returns only the Books carrying two Dewey numbers that fall in
+        # different divisions: a question nobody means to ask. A browse facet
+        # whose every multiple selection returns the empty set is worse than one
+        # that disagrees with the filter beside it. Argued in
+        # `docs/decisions.md`.
+        for scheme, number in filters.headings:
+            shelf = shelf.where(
+                Book.classifications.any(
+                    (Classification.scheme == scheme)
+                    & (Classification.number == number)
+                )
+            )
+
+        if filters.ddc_divisions:
+            shelf = shelf.where(
+                Book.classifications.any(
+                    (Classification.scheme == ClassificationScheme.DDC)
+                    & _looks_like_a_notation(Classification.number)
+                    & _division_key(Classification.number).in_(
+                        [division[:2] for division in filters.ddc_divisions]
+                    )
+                )
+            )
+
         return shelf
 
     def _with_read_status(self, status: ReadStatus) -> Shelf:
@@ -574,6 +770,106 @@ class Shelf:
             .all()
         )
         return books, total
+
+    def classification_facets(self) -> tuple[list[HeadingCount], list[DivisionCount]]:
+        """Every heading on this shelf and every Dewey division, each with a count.
+
+        **This is the query the house rule was written for.** The guard in
+        `tests/test_shelf.py` names it in so many words: "every DDC number in
+        the library, with a count" publishes what is on every member's Private
+        Books without returning one of them. `classifications` carries no
+        member, so nothing about a row says who may see it, and a facet list
+        built with a bare `db.query` would disclose the subject headings of
+        other people's private reading. Built through `select()`, so the
+        viewer's predicate is applied by construction.
+
+        Two lists rather than two methods, because they are drawn in one panel
+        and a caller wanting one always wants the other. Two statements, not
+        one: a division count is not derivable from the heading counts, for the
+        reason on `_division_counts`.
+        """
+        return self._heading_counts(), self._division_counts()
+
+    def _heading_counts(self) -> list[HeadingCount]:
+        """The most carried headings on this shelf, with how many Books carry each.
+
+        Grouped on scheme and number and **not** on label, with the caption
+        picked with `max`. The unique constraint is on book, scheme and number,
+        so a caption is per Book rather than per heading: two catalogues can
+        supply the same GND number with different words, and grouping on the
+        label as well would split one heading into two facet rows carrying one
+        Book each. `max` is a representative rather than a judgement, and the
+        halves it chooses between are the same assertion.
+
+        A plain `count` rather than a count of distinct Books, because that same
+        constraint makes one row per Book per heading already.
+
+        **Capped, unlike `/tags` and `/locations`, and the difference is real
+        rather than an oversight.** Those two are bounded by what people write:
+        a curated vocabulary of about a hundred tags, and however many shelves a
+        house has. This is bounded by what catalogues supply, which is up to
+        eight rows per book of up to 120 characters. Against the constants in
+        this tree and the per record rates measured on 2026-08-24 (2.03 LCSH per
+        Library of Congress record, 2.9 GND per DNB record), a 5,000 book
+        library reaches 40,000 rows and roughly 13 MB in one uncached response.
+        That is a panel nobody can use as well as a payload nobody should send.
+
+        **Ordered by count to choose what survives the cap**, which is the one
+        ordering that makes a truncated facet list still worth having: the
+        headings most of the library shares are the ones worth offering as a
+        filter, and a heading on one book is reachable from that book. `number`
+        breaks the tie so the cap is deterministic rather than SQLite's choice.
+        Presentation order is the caller's and the router re-sorts.
+        """
+        rows = (
+            self.select(
+                Classification.scheme,
+                Classification.number,
+                func.max(Classification.label),
+                func.count(Classification.book_id).label("book_count"),
+            )
+            .join(Classification, Classification.book_id == Book.id)
+            .group_by(Classification.scheme, Classification.number)
+            .order_by(func.count(Classification.book_id).desc(), Classification.number)
+            .limit(MAX_HEADING_FACETS)
+            .all()
+        )
+        return [
+            HeadingCount(
+                scheme=ClassificationScheme(scheme),
+                number=number,
+                label=label,
+                book_count=count,
+            )
+            for scheme, number, label, count in rows
+        ]
+
+    def _division_counts(self) -> list[DivisionCount]:
+        """Dewey divisions on this shelf, with how many Books fall in each.
+
+        **`count(distinct book_id)`, and the distinct is load bearing.** A Book
+        classified at both `004` and `005.133` carries two rows that project to
+        the same division, and counting the rows would report it as two Books.
+        That is also why this cannot be summed out of `_heading_counts`: those
+        counts are per heading, and adding them double counts exactly the Books
+        a catalogue described most precisely.
+        """
+        rows = (
+            self.select(
+                _division_key(Classification.number),
+                func.count(func.distinct(Classification.book_id)),
+            )
+            .join(Classification, Classification.book_id == Book.id)
+            .filter(
+                Classification.scheme == ClassificationScheme.DDC,
+                _looks_like_a_notation(Classification.number),
+            )
+            .group_by(_division_key(Classification.number))
+            .all()
+        )
+        return [
+            DivisionCount(division=f"{key}0", book_count=count) for key, count in rows
+        ]
 
     def select(self, *columns: Any) -> Query[Any]:
         """A query over other columns, already narrowed to this shelf.

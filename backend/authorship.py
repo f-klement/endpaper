@@ -985,7 +985,7 @@ def _confirmable_key(entry: AuthorEntry) -> str | None:
 def _storable_key(name: str) -> str | None:
     """The key a name is filed under, or None if the column cannot hold it.
 
-    **Dropped rather than raised**, the same call `routers/books._headings`
+    **Dropped rather than raised**, the same call `classifications.bounded_headings`
     makes for a heading: a catalogue record is a third party value with no size
     cap anywhere in `metadata.py`, and nothing in one is worth failing a
     member's refresh for.

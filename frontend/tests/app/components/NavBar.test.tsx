@@ -301,6 +301,19 @@ describe("the account entries", () => {
 });
 
 describe("export", () => {
+  /** The feature flags endpoint, which the bar reads to decide the formats. */
+  function stubFlags(libraryMode: boolean) {
+    api.on("/api/settings/features", {
+      body: {
+        google_books_enabled: false,
+        google_books_ready: false,
+        goodreads_lookup_enabled: false,
+        default_locale: "en",
+        library_mode: libraryMode,
+      },
+    });
+  }
+
   it("reveals the format picker", async () => {
     renderNav();
     const { user, menu } = await openMenu();
@@ -323,6 +336,60 @@ describe("export", () => {
 
     await waitFor(() =>
       expect(api.lastCall("/api/books/export")?.url).toContain("format=txt"),
+    );
+  });
+
+  it("does not offer MARCXML to a household", async () => {
+    // An exchange format for handing a catalogue to another institution. The
+    // server refuses it without library mode, so this is about not putting a
+    // format nobody here can use in front of everybody.
+    stubFlags(false);
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+
+    expect(screen.getByRole("button", { name: "csv" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "marcxml" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers MARCXML in library mode", async () => {
+    stubFlags(true);
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "marcxml" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("exports MARCXML when it is chosen", async () => {
+    stubFlags(true);
+    api.on("/api/books/export", {
+      body: "<collection/>",
+      headers: { "content-type": "application/marcxml+xml" },
+    });
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "marcxml" }),
+      ).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "marcxml" }));
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/export")?.url).toContain(
+        "format=marcxml",
+      ),
     );
   });
 });

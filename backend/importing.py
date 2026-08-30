@@ -46,17 +46,24 @@ be the oracle again by another route.
 """
 
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, time
+from typing import Any, Final
 
+import annotated_types
 from sqlalchemy.orm import Session
 
 import csv_import
+import marc
+from catalogue import Record
+from classifications import add_headings, bounded_headings
 from enums import OwnershipStatus, ReadStatus, TagCategory
 from models import Book, Note, Tag
 from reading import Reading, Records
 from schemas import ImportResultOut
+from schemas.book import BookCreate
 from schemas.tag import MAX_TAG_NAME
 from shelf import Shelf, whole_table_for_uniqueness
 
@@ -67,6 +74,33 @@ logger = logging.getLogger("endpaper.importing")
 #: A 5000 book export with nothing matching would otherwise return a response
 #: larger than the file that produced it.
 MAX_UNMATCHED_REPORTED = 50
+
+
+def _taken_isbns(db: Session) -> set[str]:
+    """Every ISBN in the Library, whoever can see the Book carrying it.
+
+    **One of the two named ways past a viewer, and the only one this module
+    uses.** The ISBN is unique across the whole table, so an incoming row that
+    collides with a Book this Member cannot see still collides. Filtering to the
+    visible rows would let the import write a row the database then refuses, and
+    that refusal aborts the transaction: a five thousand row file would write
+    nothing at all, with a 500, because of one Private Book somebody else owns.
+
+    **One call site, shared by both index builders.** It was two, one per
+    importer, which is two ways past the viewer where the rule is one. Counted
+    by `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`,
+    so adding a third is allowed and doing it quietly is not.
+
+    What the caller must not do with the answer is report a title from it: see
+    this module's docstring. Knowing an ISBN is taken is what stops the 500;
+    saying whose Book it is would be the oracle the 404-not-403 rule withholds.
+    """
+    return {
+        isbn
+        for (isbn,) in whole_table_for_uniqueness(db, Book.isbn).filter(
+            Book.isbn.isnot(None)
+        )
+    }
 
 
 @dataclass
@@ -128,17 +162,7 @@ class _CatalogueIndex:
             # title collide, which is acceptable for a status and would not be
             # for anything destructive.
             by_title=_first_wins((title.lower(), book_id) for book_id, _isbn, title in visible),
-            # `whole_table_for_uniqueness`: the ISBN is unique across the whole
-            # table, so an import row that collides with a Book this Member
-            # cannot see still collides. Filtering here would let the import
-            # write a row the database then refuses, turning a reported
-            # conflict into a 500.
-            taken_isbns={
-                isbn
-                for (isbn,) in whole_table_for_uniqueness(db, Book.isbn).filter(
-                    Book.isbn.isnot(None)
-                )
-            },
+            taken_isbns=_taken_isbns(db),
             # The Member's whole reading record rather than the matched Books':
             # which Books a 5,000 row file will match is not known until it has
             # been walked, and per row would be one SELECT per line.
@@ -506,5 +530,567 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
         ("page_count", row.pages),
         ("format", row.format),
     ):
+        if value is not None and getattr(book, attribute) is None:
+            setattr(book, attribute, value)
+
+
+# ── MARC ──────────────────────────────────────────────────────────────────────
+#
+# A second reader on the same application. `csv_import.py` reads a service's
+# export of somebody's shelf; `marc.py` reads a library's export of its
+# catalogue. They meet here because everything below the parse is the same
+# question: is this book already held, and if not, is it wanted.
+#
+# Three things differ, and each one is why this is not `apply` with a flag.
+#
+# **A MARC record carries a catalogue, not a reading history.** There is no
+# status, no rating, no date read and no review, so nothing personal is
+# written at all: a MARC import touches no `user_books` row. That is the whole
+# reason the two paths do not share `_apply_one`, which exists to write them.
+#
+# **It carries classifications**, which a CSV never does. That is the field a
+# cataloguer least wants to retype and the one this whole ticket turns on.
+#
+# **It matches on author and title together, never on title alone.** See
+# `identity_key`.
+
+
+#: Words a title may start with that say nothing about which book it is.
+#:
+#: Taken from `routers/books._ARTICLES` when `_duplicate_key` moved here, so
+#: the duplicate finder and the importer agree about what "the same book" is.
+_ARTICLES: Final = ("the ", "a ", "an ", "der ", "die ", "das ", "ein ", "eine ")
+
+
+def identity_key(title: str | None, author: str | None) -> str:
+    """Normalise a book to something two editions of it will share.
+
+    **The one notion of "this is the same book" in the app**, and it was two
+    until this function existed: `routers/books._duplicate_key` computed it for
+    the duplicate finder, and `_CatalogueIndex.by_title` matched an import row
+    on a lower cased title with no author in it at all.
+
+    That second one is the reason this is here rather than left alone. A CSV
+    export is somebody's reading history and a title collision costs a reading
+    status attached to the wrong edition. A MARC file is another institution's
+    catalogue, and a title collision **merges two different books**: every
+    library holds more than one *Selected poems*, and an import that folded
+    them would be discovered by a cataloguer months later with no record of
+    what was lost.
+
+    Deliberately lossy, as it has always been. Punctuation is dropped, case is
+    folded, whitespace is collapsed and a leading article is removed, because
+    two catalogues spell one book six ways.
+
+    **Only the first author**, split before normalising: `normalise` strips the
+    comma, so splitting afterwards finds nothing to split on and the whole
+    credit list becomes the key. "Terry Pratchett" and "Terry Pratchett, Neil
+    Gaiman" are the same book credited differently on two editions.
+    """
+
+    def normalise(value: str | None) -> str:
+        text = (value or "").casefold().strip()
+        text = re.sub(r"[^\w\s]", "", text)
+        text = re.sub(r"\s+", " ", text)
+        for article in _ARTICLES:
+            if text.startswith(article):
+                text = text[len(article) :]
+                break
+        return text
+
+    first_author = (author or "").split(",")[0]
+    return f"{normalise(title)}|{normalise(first_author)}"
+
+
+def bounded_fields(record: Record) -> dict[str, Any]:
+    """The record as this Library will store it, computed once.
+
+    **Matching reads this, not the record, and that is a correctness fix rather
+    than a tidy-up.** The identity key is built from a title and an author; the
+    column holds the truncated value; `MarcIndex.by_identity` is keyed on what
+    is stored. Bounding after matching therefore meant a record with a 600
+    character title never matched itself: measured end to end, importing the
+    same file twice created the Book twice and the preview reported
+    `already_held: 0`, which is the one number that screen exists for, wrong for
+    exactly the records the new guard acts on.
+
+    So the truncation happens once, before anything looks at the values, and
+    `identity_key`, `holds`, `would_refuse`, `remember` and the column all see
+    one string.
+
+    `isbn` rides along unbounded because it is bounded already:
+    `metadata._marc_isbn` returns `isbn.parse`'s output or None, which is
+    thirteen digits.
+
+    **What matching on a truncated key costs, since it is the obvious
+    objection.** Two records whose titles differ only past character 500, by the
+    same first author, now collide: measured, two 503 character titles agreeing
+    for 500 give one key. Once stored the two are byte identical in `title` and
+    `author`, so creating both would produce two Books the duplicate finder
+    immediately flags as one.
+
+    **What that costs is not nothing, and the first statement of this reason
+    said it was.** It said the catalogue could not represent the difference. It
+    can: `isbn`, `year` and `publisher` are columns, the two records carry
+    different values in them, and all three are lost, because `_fill_marc_gaps`
+    fills only where the Book has nothing. Measured on two 503 character titles
+    with different ISBNs: `created: 1, matched: 1`, and the second record's ISBN
+    is nowhere in the database.
+
+    So the trade is a real one and is made deliberately. What is bought is that
+    matching agrees with storage, which is the whole reason this function
+    exists; what is paid is the second record's identifiers on a collision that
+    needs 500 identical leading characters and the same first author. The same
+    silent drop happens on **every** title and author match, truncated or not,
+    and is `_fill_marc_gaps`'s never-overwrite rule rather than anything this
+    truncation introduced.
+
+    A Book already on the shelf is never truncated by this, since **no write
+    path a member can reach** can put more than 500 characters in that column.
+    `backup.restore` is the exception and it is why that clause is qualified: it
+    inserts raw rows through `table.insert()` with no schema and no clipping, so
+    an admin restoring a hand edited archive can produce one. The property still
+    holds, because such a row simply fails to match and the import creates a
+    duplicate: fail safe rather than fail open.
+    """
+    fields = {
+        name: within_bounds(name, getattr(record, name))
+        for name in _MARC_RECORD_FIELDS
+    }
+    fields["isbn"] = record.isbn
+    return fields
+
+
+@dataclass
+class MarcIndex:
+    """The catalogue keyed the two ways a MARC record is matched.
+
+    A separate index from `_CatalogueIndex` rather than two more fields on it,
+    because the two importers ask different questions and the difference is not
+    a detail. A CSV row is matched on ISBN then on **title alone**, which is
+    right for a reading history: the worst case is a status on the wrong
+    edition of a book somebody read. A MARC record is matched on ISBN then on
+    **author and title together**, because the worst case there is two
+    different books folded into one catalogue entry, and every library holds
+    more than one *Selected poems*.
+
+    Built from one query over what the Member can see, like `_CatalogueIndex`,
+    for the same reason: the per row lookup was one statement per row and a
+    catalogue transfer is thousands of rows.
+    """
+
+    by_isbn: dict[str, int]
+    by_identity: dict[str, int]
+    taken_isbns: set[str]
+
+    @classmethod
+    def build(cls, db: Session, user_id: int) -> MarcIndex:
+        visible = (
+            Shelf.seen_by(db, user_id)
+            .select(Book.id, Book.isbn, Book.title, Book.author)
+            .order_by(Book.id)
+            .all()
+        )
+        return cls(
+            by_isbn=_first_wins(
+                (isbn, book_id) for book_id, isbn, _title, _author in visible if isbn
+            ),
+            by_identity=_first_wins(
+                (identity_key(title, author), book_id)
+                for book_id, _isbn, title, author in visible
+            ),
+            taken_isbns=_taken_isbns(db),
+        )
+
+    def _matched_id(self, fields: dict[str, Any]) -> int | None:
+        """The id of the Book this record is about, without loading it.
+
+        Takes `bounded_fields`, never a `Record`: see that function for what
+        matching on the unbounded values cost.
+        """
+        isbn = fields["isbn"]
+        if isbn:
+            book_id = self.by_isbn.get(isbn)
+            if book_id is not None:
+                return book_id
+        return self.by_identity.get(identity_key(fields["title"], fields["author"]))
+
+    def holds(self, fields: dict[str, Any]) -> bool:
+        """Whether this Library already has the Book this record describes.
+
+        **A boolean, and it costs no statement**, which is why it is not
+        `find(...) is not None`. `build` selects columns rather than entities, so
+        nothing is in the identity map and every `db.get` below is a real query.
+        The preview asks this once per record and writes nothing: measured, 50
+        held records cost 50 statements through `find` and 0 through this, and
+        `marc.MAX_RECORDS` puts the ceiling at 20,000 on a route that writes
+        nothing.
+        """
+        return self._matched_id(fields) is not None
+
+    def would_refuse(self, fields: dict[str, Any]) -> bool:
+        """Whether the import will skip this record without touching a Book.
+
+        **The preview's headline number is wrong without this.** A record whose
+        ISBN belongs to a Book this Member cannot see is neither held (it is not
+        in `by_isbn`, which is built from the Shelf) nor creatable (the unique
+        index would refuse it), so `_apply_one` counts it and returns. A preview
+        that modelled only `holds` would promise a record the import then
+        refuses, and the screen's whole job is answering what the import will do.
+        """
+        return not self.holds(fields) and self.isbn_is_taken(fields["isbn"])
+
+    def find(self, db: Session, fields: dict[str, Any]) -> Book | None:
+        """The Book this record is about, loaded, or None.
+
+        `holds` is the question the preview asks and this is the one the applier
+        asks: it needs the object to write to. Keep them apart, or the preview
+        pays for a load it throws away.
+        """
+        book_id = self._matched_id(fields)
+        return db.get(Book, book_id) if book_id is not None else None
+
+    def isbn_is_taken(self, isbn: str | None) -> bool:
+        return bool(isbn) and isbn in self.taken_isbns
+
+    def remember(self, book: Book) -> None:
+        """Keep a freshly created Book findable by later records of the same file.
+
+        A catalogue export listing one work twice would otherwise create it
+        twice, or raise on the ISBN index the second time and take the whole
+        transfer with it.
+        """
+        if book.isbn:
+            self.by_isbn[book.isbn] = book.id
+            self.taken_isbns.add(book.isbn)
+        self.by_identity.setdefault(identity_key(book.title, book.author), book.id)
+
+
+def within_bounds(attribute: str, value: Any) -> Any:
+    """One incoming value, held to the bound the API would hold it to.
+
+    **The MARC importer was the one writer of these columns that bounded
+    nothing.** `POST /api/books` bounds through `BookCreate`; the CSV importer
+    truncates in `csv_import.parse` (`title[:500]`, `author[:500]`,
+    `publisher[:255]`) and bounds its numbers in `csv_import._int`. A MARC file
+    is an upload, so it is exactly as untrusted as either, and a record's values
+    come out of free text subfields: `245 $n` is not a number and `264 $c` is
+    not a date.
+
+    **What that cost is not an untidy row, and both halves were measured.**
+
+    * One 3.7 MB upload of a single record stored a 3,000,000 character title,
+      a 100,000 character author and a 500,000 character description, and
+      `GET /api/books` then answered 3.8 MB. `Book.title` is `String(500)`;
+      SQLite does not enforce a `VARCHAR` length, so the row is kept for ever
+      and `title` is selected on every listing page, every search, the CSV
+      export and the backup. On an engine that does enforce it the flush raises
+      mid batch and the whole transfer is lost with a 500.
+    * `series_index` is `ge=0, le=1000` on every API path.
+      `metadata._marc_title` reads the first digit run of `245 $n` and calls
+      `float()` on it, so a ten character `$n` stores `1e9`.
+      `routers/books.list_series` then computes `set(range(1, max(held) + 1))`,
+      which at a measured **70.5 bytes and 0.624 seconds per million elements**
+      is roughly **70 GB and ten minutes**: the container is OOM killed, again
+      on the next request, for every member, until somebody finds that row.
+      `year` has the same shape, `le=2200` against a four digit `264 $c`, and
+      `9999` is MARC's own open ended date for a continuing resource.
+
+    **The bounds are read off the declarations, never retyped.**
+    `BookCreate.model_fields` carries the `Ge`, `Le` and `MaxLen` the API
+    applies and `Book.__table__` carries the column width. A literal here would
+    be a second statement of both, and a list of arms is the shape this
+    repository records as wrong on every first attempt: a field added to the
+    importer later inherits this without anybody remembering.
+
+    **Both widths are consulted and the smaller wins.** They disagree today:
+    `language` is `max_length=16` on `BookCreate` and `String(10)` in the
+    column. SQLite enforces neither, so the disagreement is invisible until a
+    database that does.
+
+    **Strings truncate, numbers are dropped.** Truncating a title keeps the
+    record, which is what a batch wants. Clamping a year of `9999` to 2200 would
+    assert a date nobody supplied, so an out of range number is stored as
+    absent.
+
+    **Every field the importer writes derives a bound, and one did not.**
+    `description` is a `Text` column, which reports no length, and
+    `BookCreate.description` carried no `max_length`, so this returned it whole
+    while the sentence above said otherwise. It was not a MARC hole:
+    `POST /api/books` accepted a 200,000 character description with a 201, so
+    the importer was honouring a contract that had a gap in it. `DESCRIPTION_MAX`
+    closes it at the declaration, which is where the guard reads, and
+    `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` walks
+    `_MARC_RECORD_FIELDS` so a field added later cannot inherit the absence
+    instead of the guard.
+    """
+    if value is None:
+        return None
+
+    field = BookCreate.model_fields.get(attribute)
+    limits = list(field.metadata) if field is not None else []
+
+    if isinstance(value, str):
+        widths = [
+            width
+            for width in (
+                getattr(Book.__table__.c[attribute].type, "length", None),
+                *(m.max_length for m in limits if isinstance(m, annotated_types.MaxLen)),
+            )
+            if width is not None
+        ]
+        return value[: min(widths)] if widths else value
+
+    for limit in limits:
+        if isinstance(limit, annotated_types.Ge) and value < limit.ge:
+            return None
+        if isinstance(limit, annotated_types.Le) and value > limit.le:
+            return None
+    return value
+
+
+#: Every column `MarcImport` writes out of a record, and the single list both
+#: writers walk.
+#:
+#: **One tuple rather than a keyword list in `_create` and a second in
+#: `_fill_marc_gaps`**, because a guard applied to one writer and not the one
+#: beside it is the shape this repository keeps finding. A column added here is
+#: bounded on both paths or on neither.
+#:
+#: `isbn` is deliberately absent and is bounded already: `metadata._marc_isbn`
+#: returns `isbn.parse`'s output or None, which is thirteen digits.
+_MARC_RECORD_FIELDS: Final = (
+    "title",
+    "subtitle",
+    "author",
+    "publisher",
+    "year",
+    "description",
+    "language",
+    "page_count",
+    "series_name",
+    "series_index",
+)
+
+#: The columns a matched Book takes from an incoming record where it has none.
+#:
+#: **Never an overwrite**, which is `_fill_gaps`'s rule and the same one
+#: metadata enrichment follows: a Book already here was catalogued by somebody
+#: who had it in their hands, and an uploaded file did not.
+#:
+#: Wider than the CSV importer's four, because a MARC record carries more and
+#: because the fields it adds are the ones a cataloguer would otherwise retype.
+#: Derived from `_MARC_RECORD_FIELDS` rather than written out again: the gap
+#: filler takes everything the create path writes **except the title**, which a
+#: matched Book already has by definition, since the title is half of what
+#: matched it.
+#:
+#: **`isbn` is in neither tuple, and that is what stops a 500 rather than an
+#: economy.** It is written once, on the create path, and never filled in on a
+#: matched Book. Adding it here would reach this shape: a record whose ISBN
+#: belongs to a Book this Member cannot see, whose title and author match one
+#: they can. `MarcIndex.find` matches on the identity key, so `isbn_is_taken` is
+#: never consulted, and the gap filler would then write the invisible Book's
+#: ISBN onto the visible one, tripping `books.isbn`'s unique index.
+#:
+#: **The assignment is silent, and no lazy load can surface it**, which is the
+#: first thing to know because it is the first thing a reader guesses. This
+#: application's sessions come from `database.SessionLocal`, which is
+#: `sessionmaker(autocommit=False, autoflush=False)`, so reading
+#: `book.classifications` in `add_headings` emits its SELECT without flushing
+#: anything.
+#:
+#: **The count of that SELECT is the tell, and it needs no traceback.** Same
+#: record, same collision, one argument apart:
+#:
+#: | session | classifications SELECTs | raises at |
+#: |---|---|---|
+#: | `autoflush=False`, which is this app's | 1 | the commit |
+#: | `autoflush=True`, which is SQLAlchemy's default | 0 | `add_headings` |
+#:
+#: One means the lazy load was issued and flushed nothing. Zero means the
+#: autoflush raised **before** the SELECT was reached. So a probe that reports
+#: zero is measuring a session this application never constructs, which is what
+#: three seats spent five rounds not noticing.
+#:
+#: **So it surfaces at the next explicit flush, and which one that is depends on
+#: the rest of the file.** Measured through the route, both arms:
+#:
+#: | file | records entered | frames |
+#: |---|---|---|
+#: | the collider alone | `['Stoner']` | `apply > commit > flush` |
+#: | the collider, then a new record | both | `_apply_one > _create > flush` |
+#:
+#: So a later record that has to be created surfaces the earlier record's write
+#: at **its** insert, and with nothing after the collision it waits for the
+#: commit.
+#:
+#: The conclusion never depended on which: it is one transaction, so the whole
+#: transfer writes nothing and answers 500, which is the exact failure
+#: `_taken_isbns` exists to prevent by another route. The incoming ISBN is
+#: dropped instead, silently, and that is the cheaper loss.
+#:
+#: **Written down anyway, because five statements of this mechanism were made
+#: across three seats and every one was wrong**, two of them in this comment. A
+#: comment naming a mechanism is what the next reader trusts **instead of
+#: measuring**: "at the commit" sends somebody debugging this to the end of the
+#: run, and "at the autoflush" sends them to a flush this session never
+#: performs.
+#:
+#: It was settled by one `grep` of the session factory rather than by a sixth
+#: traceback. **A measurement is only evidence about the configuration it was
+#: taken under**, and every round of this argument measured the symptom while
+#: none of them read `database.py:18`.
+#:
+#: `tests/routers/test_imports_marc.py::TestAMatchedBookNeverGainsAnIsbn` pins
+#: it, because nothing else would notice the tuple gaining one entry.
+_MARC_GAP_FIELDS: Final = tuple(
+    name for name in _MARC_RECORD_FIELDS if name != "title"
+)
+
+
+class MarcImport:
+    """One parsed MARC file, applied to the Library as one Member.
+
+    Separate from `Import` rather than a mode on it, and the reason is the
+    absence rather than the presence: **a MARC import writes nothing personal.**
+    A catalogue record carries no reading status, no rating, no date read and
+    no review, so there is no `user_books` row to write and no
+    `Reading.by(member)` call anywhere below. Folding this into `Import.apply`
+    would have meant threading "and skip everything that makes this an import
+    of somebody's shelf" through the one method whose job is writing exactly
+    that.
+
+    The viewer is still fixed at construction, for `Import`'s reason: what is
+    read is what this Member may see, and a created Book is attributed to them.
+    """
+
+    __slots__ = ("_db", "_member_id")
+
+    def __init__(self, db: Session, member_id: int) -> None:
+        self._db = db
+        self._member_id = member_id
+
+    @classmethod
+    def for_member(cls, db: Session, member_id: int) -> MarcImport:
+        return cls(db, member_id)
+
+    def apply(
+        self, parsed: marc.ParsedMarc, *, create_missing: bool = True
+    ) -> ImportResultOut:
+        """Apply every record, and report what happened.
+
+        **`create_missing` defaults to true here and to false on the CSV
+        path**, which looks like an inconsistency and is the two files meaning
+        different things. A Goodreads export is a reading history, so most of
+        its rows are books the household does not own and creating them by
+        default would fill the shelf with books nobody has. A MARC file is a
+        catalogue somebody is transferring, and importing it without adding the
+        records is importing nothing.
+
+        Commits once at the end. One record that cannot be acted on is counted
+        and skipped: a catalogue export is the product of years and is not
+        uniformly clean, and failing the transfer on record 412 of 5,000 gives
+        the cataloguer nothing to act on.
+        """
+        index = MarcIndex.build(self._db, self._member_id)
+        tally = _Tally()
+
+        for record in parsed.records:
+            self._apply_one(record, index, tally, create_missing)
+
+        self._db.commit()
+
+        return ImportResultOut(
+            rows_read=len(parsed.records),
+            matched=tally.matched,
+            created=tally.created,
+            # Nothing personal is written, so nothing personal changed. Reported
+            # as zero rather than omitted, because the field is on the shared
+            # result model and a client that hid it for one importer would have
+            # to know which one it was looking at.
+            statuses_updated=0,
+            # Records with no title, plus records whose ISBN belongs to a Book
+            # this Member cannot see. Counted together for `Import.apply`'s
+            # reason: separating them would be an oracle for "does a Book with
+            # this ISBN exist in this house", which the 404-not-403 rule
+            # withholds.
+            skipped=parsed.skipped + tally.unmatched_private,
+            unmatched_titles=tally.unmatched,
+        )
+
+    def _apply_one(
+        self,
+        record: Record,
+        index: MarcIndex,
+        tally: _Tally,
+        create_missing: bool,
+    ) -> None:
+        # Once, before anything reads a value: matching and writing have to see
+        # the same strings or a truncated record cannot match itself. See
+        # `bounded_fields`.
+        fields = bounded_fields(record)
+        book = index.find(self._db, fields)
+
+        if book is None and create_missing and index.isbn_is_taken(fields["isbn"]):
+            tally.unmatched_private += 1
+            return
+
+        if book is None and create_missing:
+            book = self._create(fields, index)
+            tally.created += 1
+        elif book is None:
+            if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
+                # A title the caller supplied in their own file, so reporting it
+                # discloses nothing they did not already have.
+                tally.unmatched.append(fields["title"] or "")
+            return
+        else:
+            tally.matched += 1
+            _fill_marc_gaps(book, fields)
+
+        # After the create and after the gap fill, so a matched Book gains the
+        # headings it lacked as well as a new one getting all of them.
+        # `bounded_headings` drops an entry the column cannot hold and
+        # `add_headings` counts what the Book already carries, so neither a
+        # long caption nor a repeated import can push a Book past the ceiling.
+        add_headings(book, bounded_headings(record.headings), self._db)
+
+    def _create(self, fields: dict[str, Any], index: MarcIndex) -> Book:
+        """Add a Book the file catalogues and this Library does not hold.
+
+        **`ownership=UNKNOWN`, exactly as the CSV path does it**, and the reason
+        is the same one said differently: another institution's record says that
+        institution holds the book, not that this one does. Confirmed in bulk
+        afterwards, which is what `POST /api/books/bulk/ownership` is for.
+
+        **No cover is fetched**, for `Import._create`'s reason: a fetch per
+        record over a whole catalogue is thousands of round trips holding one
+        request open. `POST /api/books/covers/backfill` does it afterwards, in
+        bounded batches.
+        """
+        book = Book(
+            # `fields` is already bounded, over one list both writers walk, so a
+            # column added here cannot skip the guard by being forgotten.
+            **{name: fields[name] for name in _MARC_RECORD_FIELDS},
+            isbn=fields["isbn"],
+            added_by_user_id=self._member_id,
+            ownership=OwnershipStatus.UNKNOWN,
+        )
+        self._db.add(book)
+        self._db.flush()
+        index.remember(book)
+        return book
+
+
+def _fill_marc_gaps(book: Book, fields: dict[str, Any]) -> None:
+    """Add what the incoming record knows and this catalogue does not.
+
+    Never overwrites: see `_MARC_GAP_FIELDS`. Takes the bounded fields, like
+    every other reader of a record here, so a matched Book cannot be given a
+    value the create path would have cut.
+    """
+    for attribute in _MARC_GAP_FIELDS:
+        value = fields[attribute]
         if value is not None and getattr(book, attribute) is None:
             setattr(book, attribute, value)

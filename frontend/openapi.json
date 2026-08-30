@@ -501,6 +501,20 @@
         "title": "Body_import_csv",
         "type": "object"
       },
+      "Body_import_marc": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_marc",
+        "type": "object"
+      },
       "Body_preview_import": {
         "properties": {
           "file": {
@@ -513,6 +527,20 @@
           "file"
         ],
         "title": "Body_preview_import",
+        "type": "object"
+      },
+      "Body_preview_marc": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_preview_marc",
         "type": "object"
       },
       "Body_restore_backup": {
@@ -620,6 +648,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 10000,
                 "type": "string"
               },
               {
@@ -795,6 +824,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 10000,
                 "type": "string"
               },
               {
@@ -1052,6 +1082,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 10000,
                 "type": "string"
               },
               {
@@ -1209,6 +1240,7 @@
           "description": {
             "anyOf": [
               {
+                "maxLength": 10000,
                 "type": "string"
               },
               {
@@ -1821,7 +1853,8 @@
           "year_asc",
           "year_desc",
           "newest",
-          "series"
+          "series",
+          "ddc"
         ],
         "title": "BookSort",
         "type": "string"
@@ -1918,6 +1951,111 @@
         "title": "BulkResult",
         "type": "object"
       },
+      "CatalogueSource": {
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `metadata._SOURCES` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental: BNF and LOC are title search only, because neither was\nworth an ISBN request. See `sources.LOOKUP_SOURCES`.",
+        "enum": [
+          "open_library",
+          "google_books",
+          "dnb",
+          "k10plus",
+          "oenb",
+          "bnf",
+          "loc"
+        ],
+        "title": "CatalogueSource",
+        "type": "string"
+      },
+      "CatalogueSourceOut": {
+        "description": "One catalogue, as the settings screen needs to draw it.\n\n**Only `source` and `enabled` are stored; every other field is derived**,\nand they are served rather than recomputed in the browser for the reason\n`public_catalogue_published` is: two places deciding one rule is how a\nscreen comes to promise something the server does not do.\n\n`sources.describe` is the one place that decides them, and each field below\nsays what it means rather than being enumerated here. This paragraph used to\nlist them and was stale on two within a round, which is what a summary of\nfive fields six lines above the five fields is for.",
+        "properties": {
+          "answers_lookup": {
+            "title": "Answers Lookup",
+            "type": "boolean"
+          },
+          "answers_search": {
+            "title": "Answers Search",
+            "type": "boolean"
+          },
+          "asked_first": {
+            "title": "Asked First",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_key": {
+            "title": "Has Key",
+            "type": "boolean"
+          },
+          "needs_a_key": {
+            "title": "Needs A Key",
+            "type": "boolean"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CatalogueSource"
+          }
+        },
+        "required": [
+          "source",
+          "enabled",
+          "answers_lookup",
+          "answers_search",
+          "asked_first",
+          "needs_a_key",
+          "has_key",
+          "ready"
+        ],
+        "title": "CatalogueSourceOut",
+        "type": "object"
+      },
+      "CatalogueSourcePreference": {
+        "description": "One row of the provider list, as a client sends it back.\n\n**Two fields, because they are the only two a household sets.** Everything\nelse on `CatalogueSourceOut` is derived, and accepting a derived field back\nwould be accepting a client's opinion about a rule the server owns.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CatalogueSource"
+          }
+        },
+        "required": [
+          "source",
+          "enabled"
+        ],
+        "title": "CatalogueSourcePreference",
+        "type": "object"
+      },
+      "ClassificationFacets": {
+        "description": "Everything the classification filter panel needs, in one response.\n\nTwo lists rather than two endpoints, because they are drawn in one panel\nand a caller that wants one always wants the other. A division count is not\nderivable from the heading counts, so this is genuinely two questions with\none answer rather than one padded out.",
+        "properties": {
+          "divisions": {
+            "items": {
+              "$ref": "#/components/schemas/DivisionFacetOut"
+            },
+            "title": "Divisions",
+            "type": "array"
+          },
+          "headings": {
+            "items": {
+              "$ref": "#/components/schemas/HeadingFacetOut"
+            },
+            "title": "Headings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "headings",
+          "divisions"
+        ],
+        "title": "ClassificationFacets",
+        "type": "object"
+      },
       "ClassificationIn": {
         "description": "One heading, as a client posts it back after a lookup.\n\nAccepted from the client rather than re-fetched, because the lookup that\nproduced it is the expensive part and the member may sit on the confirm\nscreen for a while. Nothing here is trusted beyond its own bounds: the\nscheme is a closed enum, and both strings are bounded and stripped.",
         "properties": {
@@ -1979,7 +2117,7 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not, which costs nothing because nothing here sorts on it.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three\nare stored because a catalogue heading is worth keeping whole, not because\nanything reads them yet.",
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` orders a shelf by Dewey and there is deliberately no\ncounterpart for the other three, because two of them have no order and the\nthird does not sort as text.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable and sortable as well as filterable.",
         "enum": [
           "ddc",
           "lcc",
@@ -2392,6 +2530,36 @@
         "title": "CustomFieldValueUpdate",
         "type": "object"
       },
+      "DivisionFacetOut": {
+        "description": "One Dewey division in the library, with how many Books fall in it.",
+        "properties": {
+          "book_count": {
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "division": {
+            "title": "Division",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "required": [
+          "division",
+          "book_count"
+        ],
+        "title": "DivisionFacetOut",
+        "type": "object"
+      },
       "DuplicateGroup": {
         "description": "Books that look like the same work.\n\nMatched on normalised title plus author rather than ISBN: an accidental\nexact repeat is already refused by `uq_books_isbn_single_copy`, and the\ncase worth catching is a hardback and a paperback, which are legitimately\ntwo different ISBNs.\n\n**Deliberate copies are not duplicates and never appear here.** They share\na `copy_group`, and the endpoint collapses each group to one row before\ndeciding whether anything is left over.",
         "properties": {
@@ -2434,9 +2602,11 @@
         "type": "object"
       },
       "ExportFormat": {
+        "description": "What `GET /api/books/export` may write.\n\nTwo of these are for a person and one is for another institution, and the\ndifference decides who may ask for it. CSV and plain text carry a\nhousehold's own columns (what a book cost, which room it is in, who added\nit) and go to a spreadsheet. MARCXML carries the catalogue record and goes\nto another library's system, so it is offered only in library mode: see\n`routers/books.export_books`.",
         "enum": [
           "csv",
-          "txt"
+          "txt",
+          "marcxml"
         ],
         "title": "ExportFormat",
         "type": "string"
@@ -2458,6 +2628,11 @@
           "google_books_ready": {
             "default": false,
             "title": "Google Books Ready",
+            "type": "boolean"
+          },
+          "library_mode": {
+            "default": false,
+            "title": "Library Mode",
             "type": "boolean"
           },
           "public_catalogue_published": {
@@ -2485,6 +2660,40 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeadingFacetOut": {
+        "description": "One distinct heading in the library, with how many Books carry it.\n\nThe facet a reader picks from, and the same shape a Book's own heading has\nplus the count, so a client can render both with one component.",
+        "properties": {
+          "book_count": {
+            "title": "Book Count",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "number": {
+            "title": "Number",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/ClassificationScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "number",
+          "book_count"
+        ],
+        "title": "HeadingFacetOut",
         "type": "object"
       },
       "ImportPreviewOut": {
@@ -2892,6 +3101,102 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MarcPreviewOut": {
+        "description": "What a MARC upload turned out to hold, before anything is written.\n\n**A different model from `ImportPreviewOut` rather than a superset**, and\nthe difference is what the reader is being asked. A CSV preview exists to\nlet somebody correct a **column guess**, so it carries the headers, the\nmapping and the delimiter. MARC has no columns to guess: `245 $a` is the\ntitle because the standard says so. What a cataloguer checks instead is\nwhether the records came through, which of them this app could not read,\nand how many are already held.\n\n`already_held` is why the model exists at all. Importing the same file\ntwice is the ordinary accident here, and the answer to \"will this double my\ncatalogue\" has to be visible before the write rather than in the result\nafterwards.\n\n**`blocked` is what makes `readable - already_held` the truth rather than an\noverstatement.** The import has a second refusal: a record whose ISBN\nbelongs to a Book the member cannot see is neither matched nor created,\nbecause the unique index is on the whole table while the shelf is not. A\npreview that modelled only `already_held` would promise records the import\nthen refuses. It is a count and never a title, for `importing.py`'s reason:\nnaming them would be an oracle for \"does a private book with this ISBN exist\nin this house\".\n\n**A count is still an oracle, and this one is cheaper than the import's.**\nThe same fact has been readable off `ImportResultOut.skipped` since the CSV\nimporter, and `importing.py` argues why: the alternative is letting the\ninsert reach the unique index, which raises and writes nothing for the whole\nfile. What is new is the **price**. The import pays for each probe by\nwriting a Book for every ISBN that does not collide; a preview writes\nnothing. Measured: 20,000 records, 3,860,064 bytes, answered 200 in 1.08\nseconds with zero books written, against a rate limit of three a minute.\n\nAccepted rather than closed, and the reasoning is in `docs/decisions.md`\nrather than here, because no arithmetic hides it: `readable`,\n`already_held` and `blocked` are the three numbers the screen exists for,\nand publishing any two publishes the third.\n\n**It under-counts in one shape, which narrows the oracle rather than\nwidening it.** A record whose ISBN belongs to an invisible Book but whose\ntitle and author match a visible one is matched, not blocked:\n`MarcIndex.find` resolves it on the identity key and `isbn_is_taken` is\nnever consulted. So a hit here means the ISBN is held **and** nothing on\nthis shelf matches the record, which is less than \"this ISBN exists\". The\nimport agrees, and drops the incoming ISBN rather than writing it: see\n`importing._MARC_GAP_FIELDS` for why that is what stops a 500.",
+        "properties": {
+          "already_held": {
+            "description": "Records matching a book this member can already see",
+            "minimum": 0.0,
+            "title": "Already Held",
+            "type": "integer"
+          },
+          "blocked": {
+            "default": 0,
+            "description": "Records the import will refuse: their ISBN belongs to a book this member cannot see",
+            "minimum": 0.0,
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "readable": {
+            "description": "Records with a title this app can store",
+            "minimum": 0.0,
+            "title": "Readable",
+            "type": "integer"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarcPreviewRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "skipped": {
+            "description": "Records with no title",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total_records": {
+            "description": "Records in the file",
+            "minimum": 0.0,
+            "title": "Total Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_records",
+          "readable",
+          "skipped",
+          "already_held"
+        ],
+        "title": "MarcPreviewOut",
+        "type": "object"
+      },
+      "MarcPreviewRow": {
+        "description": "One MARC record as the reader read it, for the confirmation step.\n\nWider than `ImportPreviewRow` by exactly the fields a MARC record carries\nand a CSV does not, because those are the ones a cataloguer is checking:\na `245` split into the wrong subfields shows up here as a title with the\nsubtitle inside it, and a `082` that did not parse shows up as no call\nnumber at all.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "classifications": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Classifications",
+            "type": "array"
+          },
+          "isbn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "MarcPreviewRow",
         "type": "object"
       },
       "MemberEmailOut": {
@@ -4197,6 +4502,13 @@
       "SettingsOut": {
         "description": "The admin view. The API key is masked, never returned in full.",
         "properties": {
+          "catalogue_sources": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSourceOut"
+            },
+            "title": "Catalogue Sources",
+            "type": "array"
+          },
           "default_locale": {
             "$ref": "#/components/schemas/Locale"
           },
@@ -4374,6 +4686,21 @@
       "SettingsUpdate": {
         "description": "A partial update. Every field is optional; absent means \"leave alone\".\n\nThat matters for the API key: a form that always submitted every field\nwould blank the key whenever an admin toggled something else, since the\nbrowser never received the real value to send back.",
         "properties": {
+          "catalogue_sources": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueSourcePreference"
+                },
+                "maxItems": 7,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Sources"
+          },
           "default_locale": {
             "anyOf": [
               {
@@ -5394,6 +5721,45 @@
             }
           },
           {
+            "description": "Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 128,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed.",
+              "title": "Classification"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ddc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ddc"
+            }
+          },
+          {
             "in": "query",
             "name": "sort",
             "required": false,
@@ -5925,6 +6291,33 @@
         ]
       }
     },
+    "/api/books/classifications": {
+      "get": {
+        "description": "Every heading in the library and every Dewey division, each with a count.\n\nThe source for the classification filter panel, and the counterpart of\n`/tags` and `/locations`. Ordered here so the response is deterministic:\nheadings by scheme then number, divisions by number, both ascending, which\nfor Dewey is shelf order and for a subject vocabulary is at least stable.\nThe order a reader sees is the client's, as it is for tags.\n\n**The counting is the shelf's**, and this handler deliberately holds none of\nit. A row in `classifications` carries no member, so nothing about it says\nwho may see it, and a facet list built here with a bare query would publish\nthe subject headings of other people's private reading without returning a\nsingle Book. `Shelf.classification_facets` applies the viewer's predicate by\nconstruction, and `tests/test_shelf.py` names this exact disclosure as the\nreason its fourth pass exists.",
+        "operationId": "list_classifications",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationFacets"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Classifications",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/covers/backfill": {
       "post": {
         "description": "Fetch and store the covers of books that are missing one.\n\nThis is what repairs a library that already exists. Storing covers on the\nway in only helps books added afterwards, and the books that need it most\nare the thousands that arrived through a CSV import, which never resolved a\ncover at all.\n\n**Scoped to the books the caller can see**, like every other query here. An\nadmin-only backfill would be worse, not better: `visible_to` has no admin\nbypass, so an admin running it could never repair another member's private\nbooks, and those books would have no way to be repaired at all. Each member\nrepairs their own shelf instead, and the privacy rule is not bent to make an\noperator action work.\n\nTargets every book with **no cover file behind its id**, which is the set\nthat needs one: a book that never had a cover, a book whose `cover_url`\npoints at a third party (that is what rots, a file on this volume is not),\nand a book whose column claims a local cover the directory does not have.\nThe last case is why this reads the directory rather than the column: they\ncan drift, files being the one thing a database row does not carry with it.\n\n**`after_id` is a cursor, and it is what lets this finish.** Without it the\nbatch is the first hundred candidates by id, and a book that cannot be fixed\nstays a candidate, so it sits at the front of every subsequent run for ever.\nMeasured across ten ISBNs, only eight resolved to an image, so roughly a\nfifth of any batch is permanently unfixable and accumulates; a pod with no\negress produces the same shape on the first run. With the cursor each run\nstarts past what the last one tried, and `next_after_id` comes back as 0\nonce the end is reached, so pressing again starts over and re-tries the ones\nthat failed, which may since have become fixable.\n\nIdempotent either way: a book with a file behind it is never a candidate, so\na second pass over the same range examines nothing it fixed.",
@@ -6188,6 +6581,7 @@
     },
     "/api/books/export": {
       "get": {
+        "description": "The shelf this member can see, as a file.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
         "operationId": "export_books",
         "parameters": [
           {
@@ -7370,7 +7764,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain (the\nDNB and K10plus together, then the Austrian National Library, then Open\nLibrary, then Google), and by title and author otherwise, which runs the\nranked search across all seven sources.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings; a new install asks the DNB and K10plus together, then the\nAustrian National Library, then Open Library, then Google, and searches all\nseven. A source switched off is not asked on either path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {
@@ -8973,6 +9367,114 @@
           }
         ],
         "summary": "Import Csv",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/imports/marc": {
+      "post": {
+        "description": "Apply a MARC21 file another library exported.\n\nMARCXML only. `enums.ExportFormat` says why the binary serialisation is not\nread, and it is the same reason it is not written.\n\n**Declared `def`, not `async def`, for `import_csv`'s reason**, which is\nload bearing rather than stylistic: everything below blocks, and an `async`\nhandler runs on the event loop, so a running import stops the whole\napplication answering. Measured on a 3000 row file, `GET /api/books` went\nfrom 7ms to 14.4 seconds.\n\n**Nothing personal is written.** A catalogue record carries no reading\nstatus, no rating and no review, so this touches no `user_books` row and\nchanges nothing about what anybody has read. `statuses_updated` comes back\nzero for that reason rather than because nothing needed changing.\n\n**`create_missing` defaults to true, where the CSV importer defaults it to\nfalse.** A reading history is mostly books the household does not own, so\ncreating them by default would fill the shelf; a catalogue transfer that\nadds no records has transferred nothing.\n\nRecords added this way arrive `ownership=unknown`: another institution's\nrecord says that institution holds the book. They are confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.",
+        "operationId": "import_marc",
+        "parameters": [
+          {
+            "description": "Add records this catalogue does not already hold",
+            "in": "query",
+            "name": "create_missing",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Add records this catalogue does not already hold",
+              "title": "Create Missing",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_marc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Import Marc",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/imports/marc/preview": {
+      "post": {
+        "description": "Read a MARC file and report what it holds, writing nothing.\n\n**`already_held` is the number this exists for.** Importing the same file\ntwice is the ordinary accident in a catalogue transfer, and \"will this\ndouble my catalogue\" has to be answerable before the write.\n\n**Both of the import's refusals are modelled, not one.** `already_held`\ncounts what it will match and `blocked` counts what it will refuse for an\nISBN this member cannot see, through `MarcIndex.holds` and\n`MarcIndex.would_refuse`, which are the same index and the same predicates\n`MarcImport` applies, over the same `bounded_fields`. Counting only the\nfirst overstated what an import would add by exactly the number of records\nanother member holds privately.\n\n**What is left is an upper bound rather than an equality, and it errs\ntowards promising less.** The index is read once here and mutated during an\nimport: `MarcIndex.remember` makes a freshly created Book findable, so a\nwork listed twice in one file is created once and matched once, while this\ncounts both as additions. Measured, two identical records: the preview would\nadd 2 and the import created 1 and matched 1.\n\n**`blocked` describes the default.** `would_refuse` is the refusal\n`create_missing` reaches, and this endpoint takes no `create_missing`\nbecause the import defaults it true. With it off nothing is created, so\nnothing can be refused for a collision.\n\n**And it under-counts** where a record's ISBN is held invisibly but its\ntitle and author match a visible Book: that is a match, not a refusal. See\n`MarcPreviewOut`.\n\nRate limited together with the import, so a preview and the import that\nfollows it spend two of the three a minute allows. Parsing is the expensive\nhalf and `_read_upload` caps the body without capping the rate.",
+        "operationId": "preview_marc",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_marc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarcPreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Preview Marc",
         "tags": [
           "imports"
         ]

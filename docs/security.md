@@ -694,6 +694,92 @@ at all could be stored as `12.png` and then served back from this app's own orig
 - A RIFF container that is not WebP (a WAV, say) is refused rather than accepted on the
   strength of its first four bytes.
 
+### The two catalogue uploads, which are not images
+
+`POST /api/imports/csv` and `POST /api/imports/marc` take a file that is parsed
+rather than stored, so magic bytes decide nothing and the bounds are different
+ones. Both go through `_read_upload`, so both are capped at `MAX_UPLOAD_BYTES`
+and both spend one of `/api/imports/*`'s three a minute.
+
+**MARC adds two refusals a byte cap cannot make, and both are about a parser
+whose cost is not the body's size.**
+
+* **A doctype anywhere in the file.** `xml.etree` expands internal entities, so
+  a body carrying one can define an entity worth a thousand times its own bytes:
+  measured on this project's Python, ten characters nested six deep expand to a
+  million. This is `metadata._parsed`'s refusal applied where the surface is
+  larger, since an upload is chosen by the caller and a catalogue response is
+  not.
+* **A NUL byte in the first kilobyte**, which is a UTF-16 or UTF-32 file. The
+  doctype check is a byte scan, so it is exact for the ASCII compatible
+  encodings and blind to the rest; refusing the rest is what makes the scan a
+  guarantee rather than a guess. Measured over every encoding pyexpat's
+  unknown-encoding handler accepts: all of them are ASCII compatible and none
+  maps a byte above 0x7F onto a character of `<!DOCTYPE`, and the two codecs
+  that would, `mac_arabic` and `mac_farsi`, expat refuses by name.
+  `tests/test_marc.py` carries the evasion this exists for: the same entity
+  bomb, encoded UTF-16 so that `<!DOCTYPE` is not a byte substring of it,
+  **referencing the entity from a real `245 $a`** and asserting the refusal by
+  message. That fixture was written twice: the first was an empty
+  `<collection/>` with a bare `pytest.raises`, and it passed with the guard
+  deleted because the reader then fell through to "no MARC records". Both
+  critic seats found that independently.
+
+**A record count cap on top of the byte cap**, 20,000, refused rather than
+truncated. Both bounds are needed and neither substitutes for the other: minimal
+MARCXML records are small, so a body well inside the cap can still be tens of
+thousands of records, each of which costs a parse, a match against an in memory
+index and possibly an insert.
+
+**The writer drops what XML 1.0 cannot carry.** `ElementTree` serialises a
+control character verbatim, so one `\x0c` in a member typed description would
+produce an export no parser will read, this app's own included. Nothing upstream
+refuses them: a description is `Text` with no character class, and a catalogue's
+`520` is whatever that catalogue sent. This is an availability guard on the
+export rather than an injection one; MARCXML has no executable construct and
+`ElementTree` escapes the rest.
+
+**A declared multi-byte encoding is a 400, not a 500.**
+`ElementTree.fromstring` raises `ValueError` rather than `ParseError` for an XML
+declaration naming `EUC-JP`, `Shift_JIS`, `gb2312`, `big5` or `UTF-7`, and a
+handler catching only the second answered a 92 byte body with a traceback. Both
+are caught.
+
+**A MARC record is held to the bounds `POST /api/books` applies.** It was not,
+and the cost was measured rather than imagined: one 3.7 MB upload of a single
+record stored a 3,000,000 character title into a `String(500)` column and made
+`GET /api/books` answer with 3.8 MB. SQLite does not enforce a `VARCHAR` length,
+so nothing failed; on an engine that does, the flush aborts the whole transfer.
+The sharper one is `series_index`, which the API bounds at 1000: a ten character
+`245 $n` stored `1e9`, and `GET /api/books/series` computes
+`set(range(1, max(held) + 1))`, which at a measured 70.5 bytes and 0.624 seconds
+per million elements is roughly 70 GB and ten minutes, again on every request
+until the row is found. `importing.within_bounds` reads the bounds off
+`BookCreate.model_fields` and the column widths off `Book.__table__`, so a field
+added later inherits them.
+
+**The MARC preview publishes an ISBN existence oracle, and it is accepted
+rather than closed.** `MarcPreviewOut.blocked` counts records whose ISBN belongs
+to a book the caller cannot see. The **fact** is not new: it has been readable
+off `ImportResultOut.skipped` since the CSV importer, which
+`backend/importing.py` argues for, since the alternative is letting the insert
+reach the unique index, raise, and write nothing for the whole file. What is new
+is the price. The import pays for each probe by writing a book for every ISBN
+that does not collide; a preview writes nothing: measured, 20,000 records and
+3,860,064 bytes answered 200 in 1.08 seconds with zero books written, against a
+rate limit of three a minute.
+
+It is kept because no arithmetic hides it. `readable`, `already_held` and
+`blocked` are the three numbers the screen exists for, and publishing any two
+publishes the third; removing the screen removes the answer to "will this double
+my catalogue", which is the accident this whole feature is shaped around. What
+it discloses is that **some** book in this house carries an ISBN, never whose,
+never its title, and never anything about the book. `docs/decisions.md` carries
+the decision.
+
+**Library mode gates both**, on the server, at 403. See
+[api.md](api.md#marc21-in-and-out).
+
 ## Downloaded covers
 
 A cover resolved from an image service is **fetched by the server and stored here**, and

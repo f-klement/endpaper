@@ -27,9 +27,11 @@ from fastapi import Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
 from sqlalchemy.orm import Session
 
+import ddc
 from auth import get_current_user, get_current_user_for_cover
 from database import get_db
-from models import Book, User
+from enums import ClassificationScheme
+from models import CLASSIFICATION_NUMBER_MAX, Book, User
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID
 from shelf import Loading, Shelf
 
@@ -128,6 +130,143 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
     return found
 
 
+#: The longest `scheme:number` that could name a stored row.
+#:
+#: `lcsh` is the longest scheme spelling at four characters, plus the colon,
+#: plus `CLASSIFICATION_NUMBER_MAX`. A value longer than this cannot match any
+#: row, whatever it says.
+MAX_HEADING_CHARS = 5 + CLASSIFICATION_NUMBER_MAX
+
+#: How many values the repeated heading parameter may carry before Pydantic
+#: refuses the request outright.
+#:
+#: **This bounds the list and nothing else**, which is the correction rather
+#: than the design: on `list[str] | None` Pydantic renders `max_length` as
+#: OpenAPI `maxItems`, so it counts the values and says nothing about how long
+#: one may be. Written first as a per value bound with a docstring asserting
+#: exactly that, it left the parameter with no length bound at all: a single
+#: 20,000 character value answered 200 and parsed into one heading. Both
+#: critic seats found it independently, which is what that costs.
+#:
+#: The per value bound is `MAX_HEADING_CHARS`, applied inside `headings()` by
+#: dropping, because a value too long to match a row is a value that is not a
+#: heading and this module drops those rather than refusing them. Above the
+#: `MAX_IDS_IN_A_FILTER` ceiling so the useful refusal is the one naming the
+#: count.
+MAX_HEADING_VALUES = 128
+
+#: One spelling of the heading filter, so a second listing cannot bound it
+#: differently, in the way `TagIdList` already serves two.
+#:
+#: **Repeated rather than comma separated, and that is forced by the data.**
+#: `?tags=1,2,3` works because a tag id is a number. An LCSH `number` is the
+#: authorised heading string itself, and those carry commas
+#: (`Mental health, Public`) and colons. A comma separated list of them cannot
+#: be taken apart again, so the parameter repeats instead:
+#: `?classification=lcsh:Mental health&classification=ddc:004`.
+HeadingList = Annotated[
+    list[str] | None,
+    Query(
+        max_length=MAX_HEADING_VALUES,
+        description=(
+            "Only books carrying this heading, as `scheme:number`. Repeat the "
+            "parameter for more than one; they are ANDed."
+        ),
+    ),
+]
+
+#: The Dewey division filter. Comma separated is safe here where it is not for a
+#: heading: a division is three digits by construction.
+DivisionList = Annotated[
+    str | None,
+    Query(max_length=MAX_ID_LIST_CHARS, description="Comma-separated Dewey divisions"),
+]
+
+
+def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
+    """`["lcsh:Mental health"]` as the pairs the shelf filters on.
+
+    **Split on the first colon only.** An LCSH heading may contain one
+    (`Photography: a history`), and splitting on every colon would turn that
+    into a scheme nobody recognises plus a fragment. Taking the first is
+    unambiguous because the left half is then checked against a closed enum: a
+    value whose prefix is not one of four known schemes is dropped.
+
+    **Dropped rather than refused**, which is `row_ids`'s contract and the
+    reason to match it: `?tags=abc` has always been ignored, a link is not a
+    form, and there is nobody to show an error to. Too many is still refused,
+    for `row_ids`'s reason: truncating answers a different question from the one
+    asked and says nothing about it.
+
+    **A value too long to match a row is dropped**, by the same rule and for a
+    reason worth stating: the parameter's own `max_length` bounds the number of
+    values rather than their length, so without this check the filter has no
+    length bound at all. See `MAX_HEADING_VALUES`.
+
+    **Interior whitespace is collapsed**, because `ClassificationIn.tidy_number`
+    collapses it on the way in. Without the same collapse here,
+    `?classification=lcsh:Mental  health` never matches the stored
+    `Mental health`, and nothing says why.
+
+    Deduplicated, keeping the order asked for. Each one adds a separate
+    correlated EXISTS, so a repeated heading is a repeated subquery that cannot
+    change the answer, and `MAX_IDS_IN_A_FILTER` bounds the work rather than the
+    spelling.
+    """
+    if not raw:
+        return []
+    found: dict[tuple[ClassificationScheme, str], None] = {}
+    for value in raw:
+        if len(value) > MAX_HEADING_CHARS:
+            continue
+        scheme_name, separator, number = value.partition(":")
+        if not separator:
+            continue
+        try:
+            scheme = ClassificationScheme(scheme_name.strip().lower())
+        except ValueError:
+            continue
+        collapsed = " ".join(number.split())
+        if collapsed:
+            found.setdefault((scheme, collapsed), None)
+    if len(found) > MAX_IDS_IN_A_FILTER:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Name at most {MAX_IDS_IN_A_FILTER} headings in `classification`; "
+                f"this asked for {len(found)}."
+            ),
+        )
+    return list(found)
+
+
+def divisions(raw: str | None) -> list[str]:
+    """`"150,330"` as the Dewey divisions the shelf filters on.
+
+    Through `ddc.division`, so what reaches the shelf is a canonical division
+    rather than whatever was typed: `155.9042` asked for as a division resolves
+    to `150` instead of being dropped, and a token that is not a Dewey number at
+    all is dropped by the same call. Dropping rather than refusing is
+    `row_ids`'s contract, for its reasons.
+    """
+    if not raw:
+        return []
+    found: dict[str, None] = {}
+    for token in raw.split(","):
+        division = ddc.division(token.strip())
+        if division is not None:
+            found.setdefault(division, None)
+    if len(found) > MAX_IDS_IN_A_FILTER:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Name at most {MAX_IDS_IN_A_FILTER} divisions in `ddc`; "
+                f"this asked for {len(found)}."
+            ),
+        )
+    return list(found)
+
+
 def _not_found() -> HTTPException:
     """The answer for a book that is absent, and for one that is not yours.
 
@@ -153,8 +292,10 @@ def book_for_read(
 ) -> Book:
     """The book at `book_id`, if the caller is allowed to see it.
 
-    Eager-loads the relationships every caller serialises, so resolving the
-    book does not cost a query per related row later.
+    Eager-loads `added_by`, so resolving the book does not cost a query for the
+    member who added it. The collections are not loaded here: `books_to_out`
+    re-reads the page and loads them itself, and `shelf.Loading` carries the
+    measurement.
     """
     book = (
         Shelf.seen_by(db, current_user.id)

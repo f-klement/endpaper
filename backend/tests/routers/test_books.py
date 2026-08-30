@@ -16,7 +16,9 @@ from tests.helpers import (
     JPEG_BYTES,
     NOT_AN_IMAGE,
     PNG_BYTES,
+    enable_google_books,
     items,
+    selects_for,
     silence_covers,
     silence_oenb,
     titles,
@@ -242,7 +244,8 @@ class TestIsbnLookup:
         assert "Literary Fiction" in suggested
         assert "Historical Fiction" in suggested
 
-    def test_falls_back_to_google_books(self, client, admin, open_library_miss):
+    def test_falls_back_to_google_books(self, client, admin, db, open_library_miss):
+        enable_google_books(db)
         open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
             return_value=httpx.Response(
                 200,
@@ -270,7 +273,8 @@ class TestIsbnLookup:
         assert body["title"] == "Dune"
         assert body["year"] == 1965
 
-    def test_google_books_joins_multiple_authors(self, client, admin, open_library_miss):
+    def test_google_books_joins_multiple_authors(self, client, admin, db, open_library_miss):
+        enable_google_books(db)
         open_library_miss.get(url__startswith=GOOGLE_BOOKS).mock(
             return_value=httpx.Response(
                 200,
@@ -295,7 +299,8 @@ class TestIsbnLookup:
         )
         assert res.status_code == 404
 
-    def test_a_throttled_source_is_503_not_404(self, client, admin, open_library_miss):
+    def test_a_throttled_source_is_503_not_404(self, client, admin, db, open_library_miss):
+        enable_google_books(db)
         """A quota that will reset is not the same answer as "no such book".
 
         A 404 sends the reader off to type the whole record in by hand. This
@@ -1091,3 +1096,76 @@ class TestTheDuplicateConflictPointsAtTheBook:
         )
 
         assert res.json()["detail"]["book_id"] == existing["id"]
+
+
+class TestTheCostOfAListing:
+    """`GET /api/books` costs the same whatever the page holds.
+
+    **The N+1 this repository keeps meeting, on the route that meets it most.**
+    `serialisation.books_to_out` states the breakdown and pins its own 7 with a
+    test; the end to end 11 was a measurement in the same docstring that nothing
+    checked, which is the condition under which every number in this tree has
+    eventually been wrong. `tests/routers/test_loans.py` already asserts the
+    equivalent figure for both loan routes, exactly, after the same class of
+    defect, so the books listing was the odd one out.
+    """
+
+    def _shelf_of(self, make_book, owner: dict, count: int, start: int = 0) -> None:
+        """Books added by somebody who is not the caller.
+
+        **That is the condition the cost depends on, not decoration.**
+        `serialisation.books_to_out` says so: the caller's own row is already in
+        the request's session, because the auth dependency put it there before
+        the handler touched a book, so books the caller added cost nothing for
+        `added_by` whether the eager load is there or not. Measured with
+        `joinedload(Book.added_by)` removed in process: 13 selects when another
+        member wrote them against 12 when the caller did. A fixture that had the
+        caller write its own books would leave a mutation half visible.
+
+        A distinct `author` string per book as well, so nothing is shared that
+        could make a per row cost look constant.
+        """
+        for index in range(start, start + count):
+            make_book(owner["headers"], title=f"Cost {index}", author=f"Author {index}")
+
+    def test_a_page_of_books_costs_the_same_whatever_its_length(
+        self, client, admin, member, make_book
+    ):
+        """Two lengths, and an exact number rather than a ceiling.
+
+        **A ceiling cannot see the regression it exists for.** The loans twin
+        asserted `<= 12` and went on passing with an eager load deleted and the
+        count down at 11: a smaller count is a weaker inequality. An equality
+        fails when a statement is added **and** when one is removed, and moving
+        it is allowed when the change is deliberate and measured.
+
+        **No `expunge_all`, and its absence is measured rather than assumed.**
+        Each request gets a fresh `SessionLocal`, so the request's identity map
+        starts empty however full the test's own session is; adding the call
+        would be a setup line nobody could show was doing anything. What makes
+        the eager load observable is the fixture above, not a session reset.
+
+        What it pins, measured 2026-08-30 by removing the option in process:
+        `Loading.SERIALISED`'s `joinedload(Book.added_by)`. Dropping it is
+        **+1**, 11 to 12, one member for the whole page rather than one per
+        book, because `books_to_out` already re-reads the page for its own
+        relationships. The number is stated once, in `books_to_out`, and
+        deliberately not broken down here: this repository has restated that
+        breakdown wrongly twice, both times by editing prose rather than
+        measuring.
+        """
+        self._shelf_of(make_book, member, 5)
+        short_cost, short_total = selects_for(client, admin["headers"], "/api/books")
+
+        self._shelf_of(make_book, member, 20, start=5)
+        long_cost, long_total = selects_for(client, admin["headers"], "/api/books")
+
+        # The rows really were built, so a cost met by returning an empty page
+        # cannot pass, and the two runs really do differ in length.
+        assert (short_total, long_total) == (5, 25)
+
+        assert short_cost == long_cost, (
+            f"{short_cost} selects for 5 books and {long_cost} for 25: "
+            "the cost moves with the page, which is the N+1 this exists to catch"
+        )
+        assert long_cost == 11, f"{long_cost} selects for 25 books"

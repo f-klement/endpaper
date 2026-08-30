@@ -24,7 +24,9 @@ import {
 } from "../../../api/generated/endpoints/books/books";
 import {
   useImportCsv,
+  useImportMarc,
   usePreviewImport,
+  usePreviewMarc,
 } from "../../../api/generated/endpoints/imports/imports";
 import type {
   CoverBackfillOut,
@@ -32,6 +34,7 @@ import type {
   CustomFieldOut,
   ImportPreviewOut,
   ImportResultOut,
+  MarcPreviewOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
 
@@ -210,5 +213,80 @@ export function useCustomFields(): UseCustomFieldsResult {
     remove: (fieldId) => remove.mutate({ fieldId }),
     isBusy: define.isPending || rename.isPending || remove.isPending,
     error: fields.error ?? define.error ?? rename.error ?? remove.error,
+  };
+}
+
+/**
+ * Taking a catalogue across from another library.
+ *
+ * The same two steps as `useLibraryImport` and for a sharper reason. A CSV
+ * preview exists so a column guessed wrong can be corrected; MARC has no
+ * columns to guess, so what the preview answers instead is "will this double
+ * my catalogue". `already_held` is that answer, and it has to be visible
+ * before the write rather than in the result afterwards.
+ *
+ * A separate hook rather than a mode on the one above, because the two write
+ * different things: a CSV import writes the member's reading record and a MARC
+ * import writes none at all. Sharing the state would mean one `result` object
+ * whose `statuses_updated` means something on one path and nothing on the
+ * other.
+ */
+export function useMarcImport() {
+  const invalidate = useInvalidate();
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<MarcPreviewOut | null>(null);
+  const [result, setResult] = useState<ImportResultOut | null>(null);
+
+  const previewing = usePreviewMarc({
+    mutation: { onSuccess: (data: MarcPreviewOut) => setPreview(data) },
+  });
+
+  const importing = useImportMarc({
+    mutation: {
+      onSuccess: (data: ImportResultOut) => {
+        setResult(data);
+        setPreview(null);
+        setFile(null);
+        // Books, authors and classifications, so every catalogue view is
+        // stale. Not the accounts or the settings: a MARC import writes
+        // neither, and it writes no reading record either.
+        invalidate.catalogue();
+      },
+    },
+  });
+
+  return {
+    file,
+    preview,
+    result,
+
+    // `mutate`, not `mutateAsync`: the failure is surfaced through `error`
+    // rather than by rejecting a promise nobody is holding.
+    choose: (chosen: File) => {
+      setFile(chosen);
+      setResult(null);
+      importing.reset();
+      previewing.mutate({ data: { file: chosen } });
+    },
+
+    confirm: (options: { createMissing: boolean }) => {
+      if (!file) return;
+      importing.mutate({
+        data: { file },
+        params: { create_missing: options.createMissing },
+      });
+    },
+
+    isPreviewing: previewing.isPending,
+    isImporting: importing.isPending,
+    error: previewing.error ?? importing.error,
+
+    reset: () => {
+      setFile(null);
+      setPreview(null);
+      setResult(null);
+      previewing.reset();
+      importing.reset();
+    },
   };
 }

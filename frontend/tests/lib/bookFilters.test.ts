@@ -141,6 +141,12 @@ const CARRIED_BY_A_LINK: { [K in keyof BookFilters]?: [string, string] } = {
   collection: ["collection", "3"],
   discuss: ["discuss", "1"],
   sort: ["sort", BookSort.author],
+  // Both spellings the classification filter uses. `classification` repeats
+  // rather than joining, because an LCSH heading carries commas; `ddc` joins,
+  // because a division is three digits. One entry each is enough here: the
+  // repetition and the encoding are pinned by their own tests below.
+  headings: ["classification", "lcsh:Mental health"],
+  ddcDivisions: ["ddc", "150"],
 };
 
 /**
@@ -242,6 +248,62 @@ describe("toParams", () => {
     expect(toParams({ ...DEFAULT_FILTERS, discuss: true }).discuss).toBe(true);
     expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("discuss");
   });
+
+  it("sends headings as a repeated parameter, not a joined string", () => {
+    // The one filter that cannot follow `tags`. An LCSH number is the
+    // authorised heading string and those carry commas, so a joined list
+    // cannot be taken apart again on the other side.
+    expect(
+      toParams({
+        ...DEFAULT_FILTERS,
+        headings: ["lcsh:Mental health, Public", "ddc:004"],
+      }).classification,
+    ).toEqual(["lcsh:Mental health, Public", "ddc:004"]);
+  });
+
+  it("joins divisions, which is safe because a division is three digits", () => {
+    expect(
+      toParams({ ...DEFAULT_FILTERS, ddcDivisions: ["150", "330"] }).ddc,
+    ).toBe("150,330");
+  });
+
+  it("omits both when nothing is selected", () => {
+    expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("classification");
+    expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("ddc");
+  });
+});
+
+describe("a link carrying classifications", () => {
+  it("reads a repeated heading parameter, commas and all", () => {
+    const filters = readFilters(
+      new URLSearchParams(
+        "classification=lcsh:Mental health, Public&classification=ddc:004",
+      ),
+    );
+
+    expect(filters.headings).toEqual(["lcsh:Mental health, Public", "ddc:004"]);
+  });
+
+  it("reads divisions from one comma separated parameter", () => {
+    expect(
+      readFilters(new URLSearchParams("ddc=150,330")).ddcDivisions,
+    ).toEqual(["150", "330"]);
+  });
+
+  it("carries neither when the link names neither", () => {
+    const filters = readFilters(new URLSearchParams(""));
+
+    expect(filters.headings).toEqual([]);
+    expect(filters.ddcDivisions).toEqual([]);
+  });
+
+  it("drops an empty value rather than filtering on nothing", () => {
+    // `?ddc=` and `?classification=` are what a cleared control puts in a URL.
+    const filters = readFilters(new URLSearchParams("ddc=&classification="));
+
+    expect(filters.headings).toEqual([]);
+    expect(filters.ddcDivisions).toEqual([]);
+  });
 });
 
 /**
@@ -263,6 +325,8 @@ const SAMPLES: { [K in keyof BookFilters]-?: BookFilters[K] } = {
   discuss: true,
   sort: BookSort.year_desc,
   tagIds: [1, 2],
+  headings: ["lcsh:Mental health", "ddc:004"],
+  ddcDivisions: ["150", "330"],
 };
 
 const SCHEMA = import.meta.glob("../../openapi.json", {

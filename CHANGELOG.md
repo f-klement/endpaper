@@ -2,6 +2,97 @@
 
 ## Unreleased
 
+### Added
+
+- **MARC21 import and export**, in library mode. A MARCXML file another library
+  exported can be read at Settings, Your library, Take a catalogue across, and
+  the whole shelf can be written back out from the export menu. Records are
+  matched on ISBN, then on author and title together, so importing the same file
+  twice fills gaps rather than doubling the catalogue. The preview says how many
+  records the file holds, how many this app can store and how many are already
+  on the shelf, before anything is written.
+- The export carries the **classifications**, which is the half another
+  institution shelves by: `082` for Dewey, `050` for a Library of Congress call
+  number, `650` with `$0` and `$2` for a GND or LCSH heading.
+- `GET /api/settings/features` now reports `library_mode`, so a client with no
+  admin session can tell whether to offer any of this.
+- A bound on `description`, `models.DESCRIPTION_MAX`. It had none anywhere:
+  `POST /api/books` accepted a 200,000 character description with a 201, and
+  `description` is on the listing payload, so one oversized value was paid for
+  on every page of every list.
+
+### Changed
+
+- The duplicate finder and the importers now compute one identity key
+  (`importing.identity_key`) rather than two. The CSV importer's title only
+  fallback is unchanged; MARC never matches on a title alone.
+- `GET /api/books` now has its statement count pinned exactly, at 11, over two
+  page lengths. It was a measurement in a docstring that nothing checked.
+
+---
+
+### Added
+
+- **A provider list in Settings, Catalogue sources.** Every catalogue this build
+  can ask is listed, with a switch and a position. Off means not asked, on every
+  path that reaches it. The order is the order they are asked in: on an ISBN
+  lookup the top two are asked together and the rest one at a time, and on a
+  title search every enabled source goes out at once. A new install asks exactly
+  what it asked before, so nothing changes until somebody moves something.
+
+### Fixed
+
+- **Every book listing loaded its tags twice.** `Loading.SERIALISED` fetched
+  `Book.tags` and `books_to_out` fetched them again a moment later, so one
+  statement per request bought nothing on the app's busiest read path. The
+  shelf side is gone: `GET /api/books` costs 11 SELECTs where it cost 12, at 5
+  books and at 25, and the routes that read the shelf twice in one request
+  (`/api/books/{id}/copies`, `POST /api/books/{id}/restore`) drop two each.
+
+---
+
+- **Google Books was asked with the feature switched off.** Two of the six call
+  sites that reach a catalogue passed the API key without consulting
+  `google_books_enabled`, so scanning a barcode and refreshing a record both
+  sent the ISBN to Google with the feature off, and with no key stored they sent
+  it anonymously rather than not at all. Both switches are now conjoined in one
+  place and every call site inherits it.
+- **A request with every catalogue switched off said the book did not exist.**
+  All four routes that reach a catalogue now answer 409 naming the setting,
+  rather than a 404 that was a claim about the book made by an app that had
+  asked nobody, or an empty result page that reads the same way.
+- **Turning Google Books off left the records it had already supplied in the
+  lookup cache for another day.** Every write that changes which catalogues are
+  asked now drops it: the provider list, the Google Books switch and the Google
+  Books key.
+
+**Classifications are shown, filtered and sorted.** The catalogues have been
+supplying Dewey numbers, Library of Congress call numbers and subject headings
+for a while, and the app stored every one of them and displayed none. A book now
+shows the headings it carries, each with the scheme named, because `004` is
+computing in Dewey and is not a Library of Congress call number at all. Every one
+is a link that narrows the library to the books sharing it.
+
+The library gains a classification filter beside the tag filter, with counts: the
+subject headings and numbers in the collection, and the Dewey shelf as its 100
+divisions. It is deliberately a separate control rather than more chips in the tag
+panel, because a tag is this library's own word and a heading is a published
+scheme's, and flattening the two is what the store was built to avoid.
+
+Books can also be ordered by Dewey number, with the unclassified last. Only Dewey,
+because only Dewey sorts: a Library of Congress call number puts `BF75` before
+`BF575` on a real shelf and text order reverses them.
+
+
+**The Back and Upload Cover buttons on a book were unreadable in dark mode.** Both
+painted their pill with the top surface token and their label with a dark mode
+ink. That token is the one surface no palette and no mode redefines, so the label
+moved and the pill did not: light text on a white pill, measured at 1.26:1 against
+the 4.5:1 needed. They are the shared button now, which states the fill and the
+foreground together, at 14.25:1 in light and 15.79:1 in dark. They also gained the
+press state, the standard height and an icon in place of an arrow glyph, which
+takes the spoken label from "arrow Back" to "Back".
+
 ## v0.11.0
 
 _2026-08-29_

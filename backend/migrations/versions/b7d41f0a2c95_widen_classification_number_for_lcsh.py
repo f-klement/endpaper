@@ -38,7 +38,7 @@ stored value already fits in 40.
 
 **No backfill and nothing to recover.** Before this revision an LCSH heading
 could not be stored at all, and a heading longer than 40 characters was dropped
-at parse time by `routers/books._headings` rather than truncated, so no row
+at parse time by `classifications.bounded_headings` rather than truncated, so no row
 holds a clipped value.
 
 Downgrade narrows the column back to 40. Any stored value longer than that is

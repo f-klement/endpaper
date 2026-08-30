@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+import metadata
 import notifications
 import settings_store
+import sources
 from enums import OverdueNotifyReason, OverdueSender
 from routers import settings as settings_router
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
@@ -909,7 +911,33 @@ class TestEverySenderFieldIsActuallyWritten:
         # is the only direction that fails safe.
         declared = set(SettingsUpdate.model_fields) - _BEFORE_THE_SENDERS
 
-        assert declared - written == set()
+        # **A field may also carry a rule no table can express**, and the
+        # provider list is the first: its write merges the payload against what
+        # is stored and then drops a cache, which is not "trim it and store it".
+        # Exempting it by name would be a second `_BEFORE_THE_SENDERS`, and the
+        # next field dropped in there would be forgiven for nothing. So the
+        # exemption is earned rather than declared: `update_settings` has to
+        # actually name the field. `test_a_field_nobody_writes_is_not_forgiven`
+        # below is what keeps this arm from becoming a hole.
+        source = inspect.getsource(settings_router.update_settings)
+        by_hand = {
+            field
+            for field in declared - written
+            if re.search(rf"payload\.{re.escape(field)}\b", source)
+        }
+
+        assert declared - written - by_hand == set()
+
+    def test_a_field_nobody_writes_is_not_forgiven(self):
+        """The by-hand arm above must not forgive a field nothing mentions."""
+        source = inspect.getsource(settings_router.update_settings)
+        assert not re.search(r"payload\.a_field_nothing_writes\b", source)
+
+    def test_the_provider_list_is_written_by_a_rule_of_its_own(self):
+        """Named here so the arm above has a subject rather than a maybe."""
+        source = inspect.getsource(settings_router.update_settings)
+        assert re.search(r"payload\.catalogue_sources\b", source)
+        assert "catalogue_sources" not in _written_fields()
 
     def test_no_two_tables_overlap(self):
         """A field in two tables is written twice, the second write deciding,
@@ -1261,3 +1289,282 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
 
         after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
         assert next(e for e in after if e["sender"] == "telegram")["failures"] == 1
+
+
+class TestTheProviderList:
+    """`/api/settings` carries the catalogue roster, and a write merges it.
+
+    The rules themselves are `tests/test_sources.py`. What is tested here is the
+    round trip: what an admin sees, what a write does to what they did not send,
+    and the two ways a source can be in the list and still not asked.
+    """
+
+    def _sources(self, client, admin) -> list[dict]:
+        response = client.get("/api/settings", headers=admin["headers"])
+        assert response.status_code == 200
+        return response.json()["catalogue_sources"]
+
+    def test_the_whole_roster_is_returned_in_order(self, client, admin):
+        listed = [row["source"] for row in self._sources(client, admin)]
+        assert listed == [source.value for source in sources.DEFAULT_ORDER]
+
+    def test_a_switched_off_source_is_still_listed(self, client, admin):
+        """Or "off" and "not in this build" would look the same on screen."""
+        client.put(
+            "/api/settings",
+            json={"catalogue_sources": [{"source": "dnb", "enabled": False}]},
+            headers=admin["headers"],
+        )
+        rows = {row["source"]: row for row in self._sources(client, admin)}
+        assert rows["dnb"]["enabled"] is False
+        assert len(rows) == len(sources.DEFAULT_ORDER)
+
+    def test_a_write_leaves_the_sources_it_did_not_name_alone(self, client, admin):
+        """The failure this prevents: disabling one source re-enabling six."""
+        client.put(
+            "/api/settings",
+            json={
+                "catalogue_sources": [
+                    {"source": source.value, "enabled": False}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            },
+            headers=admin["headers"],
+        )
+        client.put(
+            "/api/settings",
+            json={"catalogue_sources": [{"source": "dnb", "enabled": True}]},
+            headers=admin["headers"],
+        )
+        enabled = {
+            row["source"] for row in self._sources(client, admin) if row["enabled"]
+        }
+        assert enabled == {"dnb"}
+
+    def test_the_order_a_write_sends_is_the_order_that_comes_back(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={
+                "catalogue_sources": [
+                    {"source": "loc", "enabled": True},
+                    {"source": "bnf", "enabled": True},
+                ]
+            },
+            headers=admin["headers"],
+        )
+        listed = [row["source"] for row in self._sources(client, admin)]
+        assert listed[:2] == ["loc", "bnf"]
+
+    def test_a_source_this_build_does_not_know_is_dropped_not_refused(
+        self, client, admin
+    ):
+        """A client one release ahead is not a bad request."""
+        response = client.put(
+            "/api/settings",
+            json={"catalogue_sources": [{"source": "libris", "enabled": True}]},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 422
+
+    def test_a_list_longer_than_the_roster_is_refused(self, client, admin):
+        """A request body is bounded even where the result would not be."""
+        response = client.put(
+            "/api/settings",
+            json={
+                "catalogue_sources": [
+                    {"source": "dnb", "enabled": True}
+                    for _ in range(len(sources.DEFAULT_ORDER) + 1)
+                ]
+            },
+            headers=admin["headers"],
+        )
+        assert response.status_code == 422
+
+    def test_a_member_who_is_not_an_admin_cannot_read_the_list(self, client, member):
+        assert client.get("/api/settings", headers=member["headers"]).status_code == 403
+
+    def test_a_member_who_is_not_an_admin_cannot_change_it(self, client, member):
+        response = client.put(
+            "/api/settings",
+            json={"catalogue_sources": [{"source": "dnb", "enabled": False}]},
+            headers=member["headers"],
+        )
+        assert response.status_code == 403
+
+
+class TestASourceThatCannotAnswerSaysSo:
+    """Google Books has two switches, and the screen has to explain both."""
+
+    def _google(self, client, admin) -> dict:
+        rows = client.get("/api/settings", headers=admin["headers"]).json()
+        return next(
+            row for row in rows["catalogue_sources"] if row["source"] == "google_books"
+        )
+
+    def test_it_is_reported_as_not_ready_without_a_key(self, client, admin):
+        row = self._google(client, admin)
+        assert row["needs_a_key"] is True
+        assert row["ready"] is False
+
+    def test_it_is_ready_once_the_feature_is_on_and_a_key_is_stored(
+        self, client, admin
+    ):
+        client.put(
+            "/api/settings",
+            json={"google_books_enabled": True, "google_books_api_key": "a-real-key"},
+            headers=admin["headers"],
+        )
+        assert self._google(client, admin)["ready"] is True
+
+    def test_the_stored_switch_is_shown_even_when_it_cannot_answer(
+        self, client, admin
+    ):
+        """An admin must see what they set, or they turn it on and watch it
+        come back off. The pair is `get_raw` and `in_force`, one level up."""
+        assert self._google(client, admin)["enabled"] is True
+
+    def test_it_is_not_actually_asked_while_it_cannot_answer(self, client, db):
+        """The one place the two switches are reconciled.
+
+        Before this, `GOOGLE_BOOKS_ENABLED` was honoured at four of the six call
+        sites that reach outward and ignored at the two that matter most, so
+        scanning a barcode sent the ISBN to Google with the feature switched
+        off, and with no key stored it went anonymously rather than not at all.
+        """
+        from enums import CatalogueSource
+
+        assert (
+            CatalogueSource.GOOGLE_BOOKS
+            not in settings_store.catalogue_sources(db).asked
+        )
+
+    def test_it_is_still_in_the_stored_list_so_it_can_be_offered_back(self, db):
+        from enums import CatalogueSource
+
+        stored = settings_store.stored_catalogue_sources(db)
+        assert CatalogueSource.GOOGLE_BOOKS in {
+            entry.source for entry in stored.preferences
+        }
+
+
+class TestARouteRefusesRatherThanAnsweringNothing:
+    """Every catalogue off is answered with a 409, on every route that asks one.
+
+    **404 would be a claim about the book from an app that asked nobody**, and
+    an empty result page reads as "no such book" just as loudly. The refusal
+    names the screen that fixes it, because the library did this to itself.
+
+    Three routes rather than one, and that is the finding: the first version
+    taught `lookup` to say it and left the two search paths to raise
+    `ValueError` out of an empty `asyncio.wait`. One enrich request answered 409
+    for its ISBN half and then failed for its search half.
+    """
+
+    @pytest.fixture(autouse=True)
+    def nothing_switched_on(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={
+                "catalogue_sources": [
+                    {"source": source.value, "enabled": False}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            },
+            headers=admin["headers"],
+        )
+
+    def _book(self, client, admin) -> int:
+        created = client.post(
+            "/api/books",
+            json={"title": "A Book", "author": "Somebody"},
+            headers=admin["headers"],
+        )
+        assert created.status_code == 201, created.text
+        return int(created.json()["id"])
+
+    def test_an_isbn_lookup_is_refused(self, client, admin):
+        response = client.get(
+            "/api/books/lookup",
+            params={"isbn": "9780743273565"},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 409
+        assert "Catalogue sources" in response.json()["detail"]
+
+    def test_a_title_search_is_refused(self, client, admin):
+        response = client.get(
+            "/api/books/search", params={"q": "anything"}, headers=admin["headers"]
+        )
+        assert response.status_code == 409
+
+    def test_the_edition_candidates_are_refused(self, client, admin):
+        book_id = self._book(client, admin)
+        response = client.get(
+            f"/api/books/{book_id}/enrich/candidates", headers=admin["headers"]
+        )
+        assert response.status_code == 409
+
+    def test_enrichment_is_refused_once_rather_than_failing_halfway(
+        self, client, admin
+    ):
+        """Both halves are optional alone, so the refusal is up front."""
+        book_id = self._book(client, admin)
+        response = client.post(
+            f"/api/books/{book_id}/enrich", headers=admin["headers"]
+        )
+        assert response.status_code == 409
+
+    def test_the_refusal_names_the_setting_rather_than_the_book(self, client, admin):
+        response = client.get(
+            "/api/books/search", params={"q": "anything"}, headers=admin["headers"]
+        )
+        detail = response.json()["detail"]
+        assert "switched on" in detail
+        assert "not found" not in detail.lower()
+
+
+class TestTheLookupCacheIsDroppedByEveryWriteThatChangesWhatIsAsked:
+    """Three writes, not one.
+
+    `settings_store.ready_sources` reads the Google Books switch and the Google
+    Books key, so either can take a source out of the plan on its own. Clearing
+    only on the provider list left records from a source switched off through
+    its own card served for another day, which is the defect the clear exists to
+    prevent, one switch along.
+    """
+
+    @pytest.fixture
+    def cleared(self, monkeypatch):
+        seen: list[bool] = []
+        monkeypatch.setattr(metadata, "clear_cache", lambda: seen.append(True))
+        return seen
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("catalogue_sources", [{"source": "dnb", "enabled": False}]),
+            ("google_books_enabled", False),
+            ("google_books_api_key", "a-new-key"),
+        ],
+    )
+    def test_a_write_that_changes_what_is_asked_clears_it(
+        self, client, admin, cleared, field, value
+    ):
+        client.put("/api/settings", json={field: value}, headers=admin["headers"])
+        assert cleared == [True]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("mail_port", "2525"),
+            ("goodreads_lookup_enabled", False),
+            ("overdue_reminder_days", 14),
+        ],
+    )
+    def test_a_write_that_changes_nothing_about_asking_leaves_it_alone(
+        self, client, admin, cleared, field, value
+    ):
+        """Clearing on every save would throw away a day of lookups whenever
+        somebody changed the mail port."""
+        client.put("/api/settings", json={field: value}, headers=admin["headers"])
+        assert cleared == []

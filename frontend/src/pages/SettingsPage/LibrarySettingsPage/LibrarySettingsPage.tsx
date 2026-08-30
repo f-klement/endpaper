@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 
+import { useFeatureFlags } from "../../../app/hooks";
 import { useTranslation } from "../../../i18n";
 import { SettingsSection } from "../../components";
 import SettingsSubPage from "../components/SettingsSubPage";
@@ -7,7 +8,13 @@ import { useSettings } from "../hooks";
 import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
 import LibraryImport from "./components/LibraryImport";
-import { useCoverBackfill, useCustomFields, useLibraryImport } from "./hooks";
+import MarcImport from "./components/MarcImport";
+import {
+  useCoverBackfill,
+  useCustomFields,
+  useLibraryImport,
+  useMarcImport,
+} from "./hooks";
 
 /**
  * Bringing books in, and the shape this household gives them.
@@ -32,6 +39,12 @@ export default function LibrarySettingsPage() {
   const libraryImport = useLibraryImport();
   const coverBackfill = useCoverBackfill();
   const customFields = useCustomFields();
+  const marcImport = useMarcImport();
+  // **The card is drawn only in library mode, and the server refuses the route
+  // in any case.** Hiding a control is advice to one client; the 403 is the
+  // guarantee. What this decides is whether a household is shown an exchange
+  // format nobody in it can use.
+  const flags = useFeatureFlags();
   // `settings` answering at all is what says this account is an admin: the
   // endpoint is admin only and a 403 is reported as `isForbidden`. Nothing on
   // this page is refused to a member, so the record is read for that one fact
@@ -53,6 +66,22 @@ export default function LibrarySettingsPage() {
           onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
         />
       </SettingsSection>
+
+      {flags?.library_mode && (
+        <SettingsSection title={t("marc.title")} icon="book">
+          <MarcImport
+            isPreviewing={marcImport.isPreviewing}
+            isImporting={marcImport.isImporting}
+            preview={marcImport.preview}
+            result={marcImport.result}
+            error={marcImport.error}
+            onChoose={marcImport.choose}
+            onConfirm={marcImport.confirm}
+            onCancel={marcImport.reset}
+            onReviewUnconfirmed={() => navigate("/?ownership=unknown")}
+          />
+        </SettingsSection>
+      )}
 
       <CoversSection
         result={coverBackfill.result}

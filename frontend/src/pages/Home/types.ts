@@ -117,6 +117,7 @@ export const SORT_OPTIONS: { label: MessageKey; value: BookSort }[] = [
   { label: "sort.year_desc", value: BookSort.year_desc },
   { label: "sort.year_asc", value: BookSort.year_asc },
   { label: "sort.newest", value: BookSort.newest },
+  { label: "sort.ddc", value: BookSort.ddc },
   { label: "sort.series", value: BookSort.series },
 ];
 
@@ -133,6 +134,8 @@ export function hasActiveFilters(filters: BookFilters): boolean {
     filters.lending ||
     filters.collection !== null ||
     filters.discuss ||
-    filters.tagIds.length,
+    filters.tagIds.length ||
+    filters.headings.length ||
+    filters.ddcDivisions.length,
   );
 }

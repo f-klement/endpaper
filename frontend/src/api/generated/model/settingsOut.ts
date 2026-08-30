@@ -5,12 +5,14 @@
  * Catalogue, lend and track a collection of physical books, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { CatalogueSourceOut } from "./catalogueSourceOut.ts";
 import type { Locale } from "./locale.ts";
 
 /**
  * The admin view. The API key is masked, never returned in full.
  */
 export interface SettingsOut {
+  catalogue_sources?: CatalogueSourceOut[];
   default_locale: Locale;
   goodreads_lookup_enabled: boolean;
   google_books_api_key_from_env?: boolean;

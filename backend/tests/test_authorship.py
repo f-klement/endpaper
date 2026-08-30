@@ -451,7 +451,7 @@ class TestStoringWhatACatalogueAsserted:
         self, db, user
     ):
         """Nothing in a third party record is worth failing a member's refresh
-        for. The same call `routers/books._headings` makes for a heading."""
+        for. The same call `classifications.bounded_headings` makes for a heading."""
         long_one = AuthorityAssertion(
             "Long", AuthorityScheme.GND, "9" * (AUTHORITY_IDENTIFIER_MAX + 1)
         )

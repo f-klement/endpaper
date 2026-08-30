@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 /**
  * The one button.
@@ -30,6 +30,17 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
   fullWidth?: boolean;
   children?: ReactNode;
+  /**
+   * The underlying element, for the rare caller that has to move focus itself.
+   *
+   * A plain prop rather than `forwardRef`, which React 19 made unnecessary: it
+   * flows through the rest spread onto the `<button>` like any other attribute.
+   * The one caller today is the provider list's reorder buttons, which put
+   * focus on a row's other button when the one just pressed becomes disabled at
+   * an end, because a disabled element drops focus to the body and silently
+   * ends a run of presses.
+   */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 const BASE =

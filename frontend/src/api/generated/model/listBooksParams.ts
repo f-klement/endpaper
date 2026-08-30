@@ -43,6 +43,11 @@ export type ListBooksParams = {
    * Only books somebody has offered to talk about
    */
   discuss?: boolean;
+  /**
+   * Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed.
+   */
+  classification?: string[] | null;
+  ddc?: string | null;
   sort?: BookSort;
   /**
    * 1-based page number

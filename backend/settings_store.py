@@ -21,7 +21,8 @@ from typing import Any, Final
 from sqlalchemy.orm import Session
 
 import config
-from enums import Locale, SettingKey
+import sources
+from enums import CatalogueSource, Locale, SettingKey
 from models import Setting
 
 # Defaults for anything never written. Stored as the same strings the table
@@ -83,6 +84,10 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
+    # The provider list. An empty object rather than the seven entries spelled
+    # out, because `sources.parse` already answers "absent means the defaults"
+    # and writing them twice is two places for the default order to drift.
+    SettingKey.CATALOGUE_SOURCES: "{}",
 }
 
 # Settings whose value must never be sent back to a browser in full.
@@ -239,6 +244,76 @@ def is_from_env(key: SettingKey) -> bool:
 def google_books_api_key(db: Session) -> str:
     """The key actually in force. See `in_force`; this name has its own callers."""
     return in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+
+
+def source_credentials(db: Session) -> frozenset[CatalogueSource]:
+    """The sources a credential is actually in force for.
+
+    **A different question from `ready_sources`, and the difference is a real
+    screen.** A library that has a Google Books key but has switched the Google
+    Books card off has the credential and is not ready. Reporting only the
+    conjunction told it to add a key it already had, which is exactly the
+    sentence this feature exists to stop somebody hunting for.
+    """
+    held = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
+    if google_books_api_key(db):
+        held.add(CatalogueSource.GOOGLE_BOOKS)
+    return frozenset(held)
+
+
+def ready_sources(db: Session) -> frozenset[CatalogueSource]:
+    """The sources whose prerequisites this deployment actually meets.
+
+    Everything free and keyless is always ready. Google Books is ready only when
+    its own section is switched on **and** a key is in force, from the
+    environment or the table. Without both it cannot answer, and asking it
+    anyway is what sent an ISBN to a third party with the feature switched off.
+    """
+    ready = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
+    if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db):
+        ready.add(CatalogueSource.GOOGLE_BOOKS)
+    return frozenset(ready)
+
+
+def stored_catalogue_sources(db: Session) -> sources.Plan:
+    """The provider list **as stored**, which is what the settings screen shows.
+
+    The pair with `catalogue_sources` below is exactly `get_raw` and `in_force`,
+    and for the same reason: a screen that hid a source because no key is
+    configured would be a screen an admin cannot use, since they would switch it
+    on and watch it come back off.
+
+    Degrades rather than raising, like `get_int` and `get_locale`, and the reason
+    is sharper here. The caller is on the path that adds a book, so a row a
+    restore wrote would break scanning an ISBN rather than one screen.
+    `sources.parse` answers with a full roster whatever it is given.
+    """
+    return sources.parse(get_json(db, SettingKey.CATALOGUE_SOURCES))
+
+
+def catalogue_sources(db: Session) -> sources.Plan:
+    """Which catalogues this library **actually asks**, and in what order.
+
+    **Every caller that reaches outward goes through here rather than
+    `stored_catalogue_sources`**, which is the same rule `in_force` states for
+    the settable values: this answers "what will the next lookup ask", and the
+    other answers "what is in the table".
+
+    **Resolved here and passed down**, never read from inside `metadata.py`.
+    That module makes every outbound catalogue request and touches no database
+    at all, and the argument that keeps it that way is the one the Google Books
+    key already uses: the router resolves the setting and hands it over.
+
+    **One row read and one `json.loads` per request that reaches a catalogue**,
+    and that is accepted rather than cached. It is the same cost
+    `google_books_api_key` already pays beside it on the same call sites, the
+    row holds seven entries, and the alternative is a process local cache that
+    has to be invalidated on write: a second source of truth for a value whose
+    whole point is that turning a source off takes effect immediately. If this
+    ever shows up in a measurement, the honest fix is to resolve it once per
+    request rather than to remember it between them.
+    """
+    return sources.in_force(stored_catalogue_sources(db), ready_sources(db))
 
 
 def library_mode(db: Session) -> bool:

@@ -349,6 +349,103 @@ describe("a dark hover state is stated, never inherited", () => {
   });
 });
 
+/** A background painted with the light-only top surface, at any variant. */
+const LIGHT_FILL = /(?<![-\w])(?:[a-z-]+:)*bg-paper-0(?:\/\d+)?(?![-\w])/;
+const DARK_FILL = /(?<![-\w])dark:(?:[a-z-]+:)*bg-/;
+const DARK_INK = /(?<![-\w])dark:(?:[a-z-]+:)*text-/;
+
+/** The class strings in one module, with concatenation chains joined first. */
+function classStrings(source: string): string[] {
+  return [
+    ...source.replace(/["`]\s*\+\s*["`]/g, " ").matchAll(/["`]([^"`]*)["`]/g),
+  ].map((match) => match[1]!);
+}
+
+describe("a dark ink never lands on the light-only surface", () => {
+  it("appears nowhere in the source", () => {
+    // `paper-0` is the top surface, and it is the one paper token no palette
+    // and no mode redefines: `index.css` sets it once and `:root.dark` leaves
+    // it alone, which is why every dark call site in this tree spells
+    // `dark:bg-paper-900` rather than relying on the token to flip. So a
+    // literal that paints `bg-paper-0`, states a `dark:text-` and states no
+    // dark background has moved the ink into the dark ramp and left the pill
+    // in the light one.
+    //
+    // That is not a shade being slightly off. It is a light label on a white
+    // pill: the two on the book detail cover measured 1.26:1 for
+    // `text-paper-200` on `paper-0`, against the 4.5:1 WCAG 1.4.3 asks, and
+    // they had read that way since they were written because nothing looks
+    // wrong in the diff. Both now use the shared Button, whose `secondary`
+    // variant states the fill and the foreground together: 14.25:1 light and
+    // 15.79:1 dark.
+    //
+    // Both halves of the trigger matter. A literal with no `dark:text-` at all
+    // inherits its ink from a parent that has one, and 42 of the 44 literals
+    // painting this token do exactly that, correctly. The offence is stating
+    // one half of the pair and not the other, which is the same defect the
+    // dark hover rule above exists for, one property along.
+    //
+    // Variant prefixes are matched rather than assumed away: `PublicShell`'s
+    // skip link is `focus:bg-paper-0` with `dark:focus:bg-paper-900`, and a
+    // rule anchored on the bare spellings would report it.
+    //
+    // Concatenation chains are joined for the same reason the hover rule joins
+    // them: the light half and the dark half are routinely written in
+    // different segments across a line break.
+    const offenders = entries().flatMap(([path, source]) =>
+      classStrings(source)
+        .filter(
+          (classes) =>
+            LIGHT_FILL.test(classes) &&
+            DARK_INK.test(classes) &&
+            !DARK_FILL.test(classes),
+        )
+        .map((classes) => `${path}: ${classes}`),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("is watching something", () => {
+    // A rule whose subject was renamed passes by matching nothing. Counted
+    // 2026-08-29: 44 literals in the tree paint this token.
+    const painted = entries().flatMap(([, source]) =>
+      classStrings(source).filter((classes) => LIGHT_FILL.test(classes)),
+    );
+
+    expect(painted.length).toBeGreaterThan(30);
+  });
+
+  it("reports the shapes it exists for", () => {
+    const offends = (classes: string) =>
+      LIGHT_FILL.test(classes) &&
+      DARK_INK.test(classes) &&
+      !DARK_FILL.test(classes);
+
+    // The two it was written for, verbatim.
+    expect(
+      offends("bg-paper-0/90 shadow-sm text-paper-700 dark:text-paper-200"),
+    ).toBe(true);
+    expect(offends("bg-paper-0 text-paper-700 dark:text-paper-200")).toBe(true);
+    // Stating the pair is the fix, at any variant depth.
+    expect(
+      offends(
+        "bg-paper-0 dark:bg-paper-900 text-paper-800 dark:text-paper-100",
+      ),
+    ).toBe(false);
+    expect(
+      offends(
+        "focus:bg-paper-0 dark:focus:bg-paper-900 dark:focus:text-paper-100",
+      ),
+    ).toBe(false);
+    // Inheriting the ink is correct and is what most of the tree does.
+    expect(offends("bg-paper-0 border border-paper-200")).toBe(false);
+    // Neither a longer token nor a longer ramp step is this surface.
+    expect(offends("bg-paper-0-something dark:text-paper-200")).toBe(false);
+    expect(offends("bg-paper-900 dark:text-paper-200")).toBe(false);
+  });
+});
+
 describe("no dash is used as punctuation", () => {
   it("appears nowhere in the source", () => {
     // House style. The message catalogues have their own test; this covers

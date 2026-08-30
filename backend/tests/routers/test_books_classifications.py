@@ -16,6 +16,7 @@ from tests.helpers import (
     DNB,
     GOOGLE_BOOKS,
     K10PLUS,
+    enable_google_books,
     silence_catalogues,
     sru_response,
 )
@@ -275,7 +276,7 @@ class TestTheLookup:
         `_merge` puts the leading source's list first and extends it with each
         other source's, so a DNB record at the ceiling leaves nothing for
         K10plus's Dewey number or the Library of Congress's call number: they
-        are last in the list and `_headings` cuts the tail. Sorting by scheme
+        are last in the list and `classifications.bounded_headings` cuts the tail. Sorting by scheme
         before the slice is what makes "the Dewey number survives" true of a
         book rather than of a record.
 
@@ -591,7 +592,7 @@ class TestMerging:
         self, client, admin, db
     ):
         """Keeper first, then losers in id order: what survives is what was
-        already stored, the same tie-break `_write_classifications` uses. The
+        already stored, the same tie-break `classifications.add_headings` uses. The
         overflow is deleted, which is where it was going before this round
         anyway, since the cascade took every one of a loser's headings."""
         keeper = client.post(
@@ -841,9 +842,10 @@ class TestDeletion:
         assert headings(book["id"], db) == []
 
 
-def test_google_is_not_a_source_of_classifications(client, admin):
+def test_google_is_not_a_source_of_classifications(client, admin, db):
     """Google Books has no classification field, so a lookup that only Google
     answers carries none rather than an invented one."""
+    enable_google_books(db)
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith=GOOGLE_BOOKS).mock(
             return_value=httpx.Response(

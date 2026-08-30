@@ -349,7 +349,7 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     this docstring by
     `test_the_number_in_the_docstring_is_the_number_it_costs`, and the two 8s
     follow from it, since `TestCopyCount` and `TestCollectionName` each assert a
-    delta of exactly one against the same base. The 12 below and the per-author
+    delta of exactly one against the same base. The 11 below and the per-author
     table are measurements and nothing pins them, so treat them as true of the
     day they were taken.
 
@@ -362,11 +362,13 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     Every listing endpoint in `routers/books.py` passes
     `joinedload(Book.added_by)`, so none of them pays any of it: `GET
-    /api/books` measures a flat **12 SELECTs** end to end at 25 books, and
+    /api/books` measures a flat **11 SELECTs** end to end at 25 books, and
     `books_to_out` on rows fetched with the option is a flat 7 at 1, 5 and 25
     books. Both figures are for a page holding neither a copy nor a filed book,
     and the two conditional statements above are what a page holding either
-    costs on top. Both were one lower before the classification load.
+    costs on top. The 7 was one lower before the classification load, and the
+    11 was 12 until `Loading.SERIALISED` stopped loading tags this function
+    loads anyway (2026-08-30, measured at 5 and at 25 books).
 
     A new caller that fetches books without that option gets the per-author
     cost back. That is the trap this paragraph exists to name.
@@ -392,6 +394,11 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # SELECT for the whole page, not one per book: `selectinload` issues a
     # statement per relationship, so this option is why the count above is 7
     # and not 6.
+    #
+    # **`Loading.SERIALISED` depends on this line and deliberately loads no
+    # tags of its own**, so deleting it does not restore a shelf-side eager
+    # load: it reinstates the N+1 at every caller at once. `shelf.py`'s
+    # `Loading` docstring carries the measurement.
     rereading_filtered_rows(db, book_ids).options(
         selectinload(Book.tags), selectinload(Book.classifications)
     ).all()

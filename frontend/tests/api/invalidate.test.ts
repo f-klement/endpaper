@@ -61,6 +61,7 @@ const KEYS: Record<string, readonly unknown[]> = {
   listLocations: books.getListLocationsQueryKey(),
   listDuplicates: books.getListDuplicatesQueryKey(),
   listTags: books.getListTagsQueryKey(),
+  listClassifications: books.getListClassificationsQueryKey(),
   listTrash: books.getListTrashQueryKey(),
   listQuotes: books.getListQuotesQueryKey(),
   exportBooks: books.getExportBooksQueryKey(),
@@ -174,8 +175,14 @@ describe("the inventory is complete", () => {
     // getter beside the plain one: a config line meant to fix a paging bug
     // produced a sixth key nobody had counted. Derive this number from the
     // tree rather than from an expected delta.
+    //
+    // 47 on 2026-08-30, counted the way that sentence asks rather than as 46
+    // plus one: `grep -rhoE "export const get[A-Za-z]+QueryKey"
+    // src/api/generated/endpoints/ | sort -u | wc -l`. The classification facet
+    // list is the arrival, and it generated exactly one getter, which is the
+    // case the paragraph above warns is not guaranteed.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(46);
+    expect(Object.keys(KEYS).length).toBe(47);
   });
 });
 
@@ -190,6 +197,10 @@ describe("the catalogue is everything derived from the books table", () => {
       "listAuthors",
       "listBooks",
       "listBooksInfinite",
+      // Every facet carries a book_count, and enrichment can add a heading the
+      // library has never held, so a write moves this list the way it moves the
+      // tag list beside it.
+      "listClassifications",
       "listCollections",
       "listCopies",
       "listDuplicates",

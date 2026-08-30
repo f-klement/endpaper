@@ -2,8 +2,7 @@ import asyncio
 import csv
 import io
 import logging
-import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Final
@@ -18,8 +17,10 @@ import authority
 import catalogue
 import covers
 import custom_fields
+import ddc
 import google_books
 import isbn as isbn_utils
+import marc
 import metadata
 import settings_store
 from auth import require_admin
@@ -30,6 +31,7 @@ from authorship import (
     IdentifierConflict,
     RecordedAssertions,
 )
+from classifications import add_headings, bounded_headings, clipped
 from config import COVERS_DIR
 from dependencies import (
     BookForOwner,
@@ -38,11 +40,15 @@ from dependencies import (
     BookInTrash,
     CurrentUser,
     DbSession,
+    DivisionList,
+    HeadingList,
     Paging,
     RowId,
     TagIdList,
     row_ids,
 )
+from dependencies import divisions as parse_divisions
+from dependencies import headings as parse_headings
 from enums import (
     AuthorityScheme,
     BookFormat,
@@ -57,6 +63,7 @@ from enums import (
     SettingKey,
     TagCategory,
 )
+from importing import identity_key
 from models import (
     AUTHOR_KEY_MAX,
     AuthorIdentifier,
@@ -97,7 +104,7 @@ from schemas import (
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
-    ClassificationIn,
+    ClassificationFacets,
     CollectionAssign,
     ConfirmedIdentifierOut,
     CopyCreate,
@@ -107,7 +114,9 @@ from schemas import (
     CustomFieldRename,
     CustomFieldValueOut,
     CustomFieldValueUpdate,
+    DivisionFacetOut,
     DuplicateGroup,
+    HeadingFacetOut,
     LocationOut,
     MergeRequest,
     NoteCreate,
@@ -398,9 +407,16 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    # The key is passed even though Google is the last source tried, because
-    # the whole reason the fallback used to fail was a request that omitted it.
-    result = await metadata.lookup(canonical, settings_store.google_books_api_key(db))
+    # The key is passed whatever the library's provider list says, because the
+    # plan is what decides whether Google is asked at all: with its section
+    # switched off or no key in force, `settings_store.catalogue_sources` has
+    # already dropped it. Passing the key was once the whole fix for a fallback
+    # that failed by omitting it, and it stays for that reason.
+    result = await metadata.lookup(
+        canonical,
+        settings_store.google_books_api_key(db),
+        plan=settings_store.catalogue_sources(db),
+    )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
@@ -409,7 +425,7 @@ async def lookup_isbn(
     # Built here rather than left to the schema so the same objects feed the tag
     # suggestion and the response, and the two cannot disagree about what the
     # catalogues said.
-    classifications = _headings(record.headings)
+    classifications = bounded_headings(record.headings)
     all_tags = db.query(Tag).all()
     return BookLookup(
         **record.as_lookup(),
@@ -418,91 +434,6 @@ async def lookup_isbn(
             list(record.subjects), classifications, all_tags
         ),
     )
-
-
-#: How much of a rejected third party value reaches the log.
-#:
-#: A catalogue response has no size cap anywhere in `metadata.py`, so an
-#: untruncated `%r` of a record writes as many bytes to the log as the record
-#: holds. `backup.py` already solves the identical problem the same way with
-#: `cover[:120]` in its own "dropped rather than refused" line.
-_LOGGED_VALUE_MAX = 200
-
-
-def _clipped(value: object) -> str:
-    """A third party value, short enough to log. See `_LOGGED_VALUE_MAX`."""
-    text = repr(value)
-    return text if len(text) <= _LOGGED_VALUE_MAX else text[:_LOGGED_VALUE_MAX] + "..."
-
-
-#: Which heading survives a full book, most worth keeping first.
-#:
-#: DDC leads because it is the only scheme a tag suggestion is projected from,
-#: so losing it costs the member something visible. LCC next: a shelf
-#: classification is one assertion per catalogue and the thing a MARC export
-#: needs. The two subject vocabularies come after both, because a single record
-#: supplies several of each (GND 2.20 per record over 85 live DNB records, LCSH
-#: 2.03 per record that carries any over 900 live Library of Congress records,
-#: both measured 2026-08-24) and an eighth subject heading is worth less than
-#: another catalogue's Dewey number.
-#:
-#: **GND before LCSH, and the tie is broken on which `number` is stable.** They
-#: are the same kind of assertion at nearly the same rate, so the reason has to
-#: be the column: a GND row's number is an authority identifier that outlives
-#: its own caption, and an LCSH row's number is the heading string itself,
-#: which is precisely what moves when the Library of Congress revises a heading
-#: (`Afro-Americans` became `African Americans`). The store exists to hold the
-#: half that does not move, so the scheme that has one is kept first. Nothing
-#: renders a classification yet, so this is not a display preference: see §30i.
-#:
-#: A scheme missing from here sorts last rather than raising, so adding one to
-#: `ClassificationScheme` cannot break the ceiling by forgetting this.
-_SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
-    ClassificationScheme.DDC: 0,
-    ClassificationScheme.LCC: 1,
-    ClassificationScheme.GND: 2,
-    ClassificationScheme.LCSH: 3,
-}
-
-
-def _headings(entries: Iterable[catalogue.Heading]) -> list[ClassificationIn]:
-    """The classifications in a catalogue record, through the schema a client posts.
-
-    **An upstream catalogue is no more trusted than a browser.** The lookup
-    response is a draft the client posts straight back, so a caption longer than
-    the column or a number longer than `CLASSIFICATION_NUMBER_MAX` has to be
-    refused here rather than accepted into a payload that then 422s on the way
-    in. Nothing
-    in a record is worth failing the whole lookup for, so a bad entry is
-    dropped and logged and the rest of the record is answered.
-
-    **Validated first, then truncated.** Slicing the input to
-    `MAX_CLASSIFICATIONS_PER_BOOK` before the loop would let eight malformed
-    entries hide a ninth good one, which is the opposite of what dropping a bad
-    entry is for.
-
-    **Ordered by scheme before the slice, and this is the only place that can
-    be.** A parser can only order the record in front of it, and by the time a
-    list reaches here `_merge` has concatenated up to four catalogues: the
-    leading source's subject headings sit in front of the second catalogue's
-    Dewey number and the Library of Congress's call number, which are then the
-    first things dropped. Ordering here is what makes "the Dewey number
-    survives" true of a book rather than of a record.
-    """
-    headings: list[ClassificationIn] = []
-    for entry in entries:
-        try:
-            headings.append(
-                ClassificationIn(
-                    scheme=entry.scheme, number=entry.number, label=entry.label
-                )
-            )
-        except ValidationError:
-            logger.info("Discarded an unusable classification: %s", _clipped(entry))
-    # Stable, so within one scheme the catalogues keep the order they answered
-    # in and the leading source still wins.
-    headings.sort(key=lambda heading: _SCHEME_ORDER.get(heading.scheme, len(_SCHEME_ORDER)))
-    return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
 
 
 def _match_rows(
@@ -527,13 +458,13 @@ def _match_rows(
     `MAX_YEAR` 2200, and 9999 is MARC's own open ended date for a continuing
     resource.
 
-    **`_headings` is still called here although `Record.match_headings` bounds
+    **`bounded_headings` is still called here although `Record.match_headings` bounds
     the count**, and the two are not the same job. That bound stops a ninth
     heading; this drops an entry the column could not hold, so a 400 character
     caption costs its own heading rather than the row. What it no longer does
     on this path is the count: `match_headings` has already sliced, so on the
     search path the parser's own order decides what survives and not
-    `_SCHEME_ORDER`.
+    `classifications.SCHEME_ORDER`.
     Two parsers now have to keep that true, not one. `_dnb_record` emits its
     Dewey number ahead of its GND headings, and `_loc_record` emits its
     `<classification>` elements ahead of its LCSH ones, which is where the
@@ -553,13 +484,13 @@ def _match_rows(
         try:
             row = BookMatch(
                 **match.as_match(),
-                classifications=_headings(match.match_headings()),
+                classifications=bounded_headings(match.match_headings()),
             )
         except ValidationError:
             logger.info(
                 "Discarded an unusable search result from %r: %s",
                 match.source,
-                _clipped(match),
+                clipped(match),
             )
             continue
         # The record's own subjects rather than the joined string it puts on the
@@ -581,6 +512,11 @@ def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
     type a book in by hand when the honest answer is that a quota will reset in
     a few minutes. 503 rather than 404 for the two transient cases, so the
     client can offer "try again" instead of "add it manually".
+
+    The fourth is `NO_SOURCES`, where nothing was asked at all because the
+    library has switched off every catalogue that answers an ISBN. That is the
+    same mistake one step further on: a 404 there reports a fact about the book
+    from an app that asked nobody.
     """
     if result.outcome is metadata.Outcome.RATE_LIMITED:
         return {
@@ -598,9 +534,34 @@ def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
                 "the book by hand."
             ),
         }
+    if result.outcome is metadata.Outcome.NO_SOURCES:
+        return _no_sources()
     return {
         "status_code": status.HTTP_404_NOT_FOUND,
         "detail": "No catalogue has a record for this ISBN.",
+    }
+
+
+def _no_sources() -> dict[str, Any]:
+    """Nothing was asked, because nothing capable is switched on.
+
+    **409 rather than 404**, and it is the one refusal here that is about this
+    library rather than about the book: nothing is wrong with the ISBN or the
+    query, and a 404 would be the app reporting a fact it never checked. The
+    sentence names the screen that fixes it, because the library did this to
+    itself and can undo it in one click.
+
+    Shared by three routes rather than written three times. The lookup path
+    reaches it through `_lookup_failure`, which has a `Lookup` to read the
+    outcome off; the two search paths have no `Lookup` and decide on the plan
+    before they call out, so they call this directly.
+    """
+    return {
+        "status_code": status.HTTP_409_CONFLICT,
+        "detail": (
+            "No catalogue is switched on that can look up an ISBN. Turn one "
+            "back on under Settings, Catalogue sources."
+        ),
     }
 
 
@@ -644,7 +605,16 @@ async def search_books(
     # The reader's own language, so a German library searching a German
     # title gets the German printing first. It breaks ties only: an English
     # title still returns the English book.
-    matches = await metadata.search(q, api_key, limit=limit, prefer_language=lang)
+    plan = settings_store.catalogue_sources(db)
+    # A library that has switched every catalogue off is told so, rather than
+    # handed an empty result page that reads as "no such book". Same refusal a
+    # lookup gets, decided here because a search has no `Lookup` to carry it.
+    if not plan.searched:
+        raise HTTPException(**_no_sources())
+
+    matches = await metadata.search(
+        q, api_key, limit=limit, prefer_language=lang, plan=plan
+    )
 
     return _match_rows(matches, db.query(Tag).all())
 
@@ -655,20 +625,67 @@ async def search_books(
 # reverse order would make this a request for the book with id "export".
 
 
+#: The file extension each export format is saved under.
+#:
+#: `marcxml` is the value on the wire and `.xml` is what the file is called: a
+#: cataloguer's tools open `.xml`, and `.marcxml` is an extension nothing is
+#: registered for. Every other format is named after itself.
+_EXPORT_EXTENSIONS: Final[dict[ExportFormat, str]] = {ExportFormat.MARCXML: "xml"}
+
+
 @router.get("/export")
 def export_books(
     db: DbSession,
     current_user: CurrentUser,
     format: Annotated[ExportFormat, Query()] = ExportFormat.CSV,
 ) -> StreamingResponse:
+    """The shelf this member can see, as a file.
+
+    **MARCXML needs library mode and the other two do not.** A CSV export is a
+    household reading its own shelf in a spreadsheet. A MARC record is a
+    catalogue record handed to another institution, which is what library mode
+    is for, and offering it everywhere would put a format nobody in a household
+    can use in front of everybody. Enforced here rather than by hiding the menu
+    entry: disabling a control in the browser is advice to one client, which is
+    the sentence `routers/public.py` already states about the public catalogue.
+
+    **403, not 404.** The route exists and the member may call it; the format
+    is switched off. That is the same answer registration gives when it is
+    closed, and there is nothing to conceal: `GET /api/settings/features`
+    already tells any caller whether library mode is on.
+    """
+    extension = _EXPORT_EXTENSIONS.get(format, format.value)
+    filename = f"endpaper-export-{date.today().isoformat()}.{extension}"
+
+    if format is ExportFormat.MARCXML:
+        if not settings_store.library_mode(db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="MARC export is a library mode feature.",
+            )
+        # `Loading.PUBLISHED` rather than `EXPORTED`, and the name is about the
+        # payload rather than the audience: it is the one option that eagerly
+        # loads `classifications`, which is the half of a MARC record that
+        # makes it worth exchanging, and it omits `added_by` and `collection`,
+        # which are household facts a catalogue record does not carry. Reading
+        # them lazily instead would be one statement per book.
+        catalogued = Shelf.seen_by(db, current_user.id).all(
+            Book.title.asc(), load=Loading.PUBLISHED
+        )
+        return StreamingResponse(
+            iter([marc.write(catalogued)]),
+            # The registered media type for MARCXML, per the Library of
+            # Congress. A cataloguer's tools dispatch on it.
+            media_type="application/marcxml+xml; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     books = Shelf.seen_by(db, current_user.id).all(Book.title.asc(), load=Loading.EXPORTED)
 
     # Batched rather than queried per book, and empty costs no statement.
     # `status_of` is what applies "absence means unread", so the writer below
     # reads a value for every row rather than a default per cell.
     statuses = Reading.by(db, current_user.id).of([book.id for book in books])
-
-    filename = f"endpaper-export-{date.today().isoformat()}.{format.value}"
 
     if format is ExportFormat.CSV:
         output = io.StringIO()
@@ -820,6 +837,8 @@ def list_books(
     discuss: Annotated[
         bool, Query(description="Only books somebody has offered to talk about")
     ] = False,
+    classification: HeadingList = None,
+    ddc_division: Annotated[DivisionList, Query(alias="ddc")] = None,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
 ) -> Page[BookOut]:
     # Two parameters rather than a magic id for "none", and refused together
@@ -869,6 +888,8 @@ def list_books(
         unfiled=unfiled,
         unrated=unrated,
         discuss=discuss,
+        headings=parse_headings(classification),
+        ddc_divisions=parse_divisions(ddc_division),
     )
 
     books, total = (
@@ -1026,7 +1047,7 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # Before the commit, so a book and the headings it was added with land in
     # one transaction: a failure here must not leave a book claiming a
     # provenance no row records.
-    _write_classifications(book, payload.classifications, db)
+    add_headings(book, payload.classifications, db)
     db.commit()
     db.refresh(book)
 
@@ -1044,88 +1065,6 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
-
-
-def _write_classifications(
-    book: Book, headings: Sequence[ClassificationIn], db: Session
-) -> list[str]:
-    """Add or complete this book's headings. Returns the numbers it **changed**.
-
-    **Returning a filled in caption as a change is load bearing**, not
-    bookkeeping. `apply_enrichment` commits only `if updated:`, and `get_db`
-    closes the session in its `finally` without committing, so a call that
-    returned `[]` after setting `stored.label` would have the caption rolled
-    back and lost. That is reachable: the DNB answers
-    `650 $0 (DE-588)4026894-9 $a Informatik` where a stored row from an earlier
-    run carries the number and no caption, so a book already complete in every
-    column gains nothing but the caption.
-
-    The example used to be a Dewey one, and it stopped being possible on
-    2026-08-24: no source captions a Dewey number now that the DNB reads MARC
-    082, which carries the notation alone. GND is where a caption arrives.
-
-    **Additive, and never a replacement.** Selecting the same Catalogue record
-    may happen more than once. A writer that replaced the set would churn the
-    table on every selection, and one that appended blindly would deposit a
-    second copy of every heading.
-    `uq_classifications_book_scheme_number` refuses the second copy at the
-    database, and this refuses it before the flush, where there is still a
-    request to answer.
-
-    Deduplicated **within** the payload too. A client may post the same number
-    twice (two catalogues agreed), and two identical rows in one flush trip the
-    index rather than the check above.
-
-    A label is never overwritten: a heading already stored came from a
-    catalogue too, and the last writer is not the better one. Filling in a
-    missing one is the exception, because a caption where there was none is
-    strictly more than before.
-
-    **The ceiling is counted against the book, not against the payload.** Every
-    caller is bounded per request and this writer is additive across requests,
-    so without the count here the per book total is unbounded: `enrich/apply`
-    takes a client supplied `BookMatch`, makes no outbound call and therefore
-    carries no rate limiter, and eight rows per call times any number of calls
-    is a stored denial of service that every listing pays for, since
-    `books_to_out` selectin-loads this relationship onto every row of every
-    page.
-    """
-    # Keyed on the pair the unique index is on, with the scheme coerced through
-    # the enum on both sides. A stored row's `scheme` comes back from a plain
-    # VARCHAR as a `str` and the payload's is a `ClassificationScheme`, so
-    # comparing them raw works only for as long as that is a `StrEnum`;
-    # coercing removes the dependency instead of commenting on it.
-    existing = {
-        (ClassificationScheme(entry.scheme), entry.number): entry
-        for entry in book.classifications
-    }
-    changed: list[str] = []
-    for heading in headings:
-        key = (ClassificationScheme(heading.scheme), heading.number)
-        stored = existing.get(key)
-        if stored is not None:
-            if stored.label is None and heading.label is not None:
-                stored.label = heading.label
-                changed.append(heading.number)
-            continue
-        if len(existing) >= MAX_CLASSIFICATIONS_PER_BOOK:
-            logger.info(
-                "Book %s already carries %d classifications; dropping %r",
-                book.id,
-                len(existing),
-                heading.number,
-            )
-            continue
-        row = Classification(
-            book=book,
-            scheme=heading.scheme,
-            number=heading.number,
-            label=heading.label,
-        )
-        db.add(row)
-        existing[key] = row
-        changed.append(heading.number)
-    return changed
 
 
 def _conflict_detail(message: str, holder: Book, current_user: User) -> str | dict[str, object]:
@@ -2031,6 +1970,56 @@ def list_locations(db: DbSession, current_user: CurrentUser) -> list[LocationOut
     return [LocationOut(name=name, book_count=count) for name, count in rows]
 
 
+@router.get("/classifications", response_model=ClassificationFacets)
+def list_classifications(
+    db: DbSession, current_user: CurrentUser
+) -> ClassificationFacets:
+    """Every heading in the library and every Dewey division, each with a count.
+
+    The source for the classification filter panel, and the counterpart of
+    `/tags` and `/locations`. Ordered here so the response is deterministic:
+    headings by scheme then number, divisions by number, both ascending, which
+    for Dewey is shelf order and for a subject vocabulary is at least stable.
+    The order a reader sees is the client's, as it is for tags.
+
+    **The counting is the shelf's**, and this handler deliberately holds none of
+    it. A row in `classifications` carries no member, so nothing about it says
+    who may see it, and a facet list built here with a bare query would publish
+    the subject headings of other people's private reading without returning a
+    single Book. `Shelf.classification_facets` applies the viewer's predicate by
+    construction, and `tests/test_shelf.py` names this exact disclosure as the
+    reason its fourth pass exists.
+    """
+    headings, divisions = Shelf.seen_by(db, current_user.id).classification_facets()
+    return ClassificationFacets(
+        headings=sorted(
+            (
+                HeadingFacetOut(
+                    scheme=row.scheme,
+                    number=row.number,
+                    label=row.label,
+                    book_count=row.book_count,
+                )
+                for row in headings
+            ),
+            key=lambda facet: (facet.scheme, facet.number),
+        ),
+        divisions=sorted(
+            (
+                DivisionFacetOut(
+                    division=row.division,
+                    # This library's own word, not Dewey's caption. The schema
+                    # field says why at length.
+                    label=ddc.DIVISION_TAGS.get(row.division),
+                    book_count=row.book_count,
+                )
+                for row in divisions
+            ),
+            key=lambda facet: facet.division,
+        ),
+    )
+
+
 # ── Duplicates and merging ────────────────────────────────────────────────────
 #
 # "Is this the same **book**", which is a different question from "is this the
@@ -2108,34 +2097,15 @@ def _one_per_copy_group(books: list[Book]) -> list[Book]:
     return kept
 
 
-_ARTICLES = ("the ", "a ", "an ", "der ", "die ", "das ", "ein ", "eine ")
-
-
 def _duplicate_key(book: Book) -> str:
     """Normalise a book to something two editions of it will share.
 
-    Deliberately lossy. A key that is too tight finds nothing, and this is a
-    suggestion a person then confirms, not an automatic merge.
+    `importing.identity_key` is the implementation, and it is there rather than
+    here because the MARC importer matches on the same key: a title collision
+    costs a reading status on the wrong edition here and merges two different
+    books there, so one notion of "the same book" has to serve both.
     """
-
-    def normalise(value: str | None) -> str:
-        text = (value or "").casefold().strip()
-        text = re.sub(r"[^\w\s]", "", text)
-        text = re.sub(r"\s+", " ", text)
-        for article in _ARTICLES:
-            if text.startswith(article):
-                text = text[len(article) :]
-                break
-        return text
-
-    # Only the first author: "Terry Pratchett" and "Terry Pratchett, Neil
-    # Gaiman" are the same book credited differently on two editions.
-    #
-    # Split BEFORE normalising. `normalise` strips punctuation, comma included,
-    # so splitting afterwards finds nothing to split on and the whole credit
-    # list becomes the key.
-    first_author = (book.author or "").split(",")[0]
-    return f"{normalise(book.title)}|{normalise(first_author)}"
+    return identity_key(book.title, book.author)
 
 
 @router.post("/merge", response_model=BookOut)
@@ -2328,7 +2298,7 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     # `(ddc, 004, NULL)` from K10plus while the loser holds
     # `(ddc, 004, "Informatik")` from the DNB, and deleting that row without
     # taking its caption loses the caption for good: nothing re-enriches a
-    # survivor. Same rule as `_write_classifications`, a caption where there
+    # survivor. Same rule as `classifications.add_headings`, a caption where there
     # was none is strictly more than before.
     #
     # **`MAX_CLASSIFICATIONS_PER_BOOK` binds here too, and this is the only
@@ -2345,7 +2315,7 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
     # The overflow is **deleted**, which is exactly where it was going before
     # this round: the cascade on the loser's deletion took every one of its
     # headings. Keeper first and then losers in id order, so what survives is
-    # what was already stored, the same tie-break `_write_classifications` uses.
+    # what was already stored, the same tie-break `classifications.add_headings` uses.
     kept = {
         (ClassificationScheme(entry.scheme), entry.number): entry
         for entry in keeper.classifications
@@ -3291,7 +3261,11 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
 
     metadata_limiter.check(current_user.username)
     lookup_key = isbn_utils.parse(book.isbn) or book.isbn
-    result = await metadata.lookup(lookup_key, settings_store.google_books_api_key(db))
+    result = await metadata.lookup(
+        lookup_key,
+        settings_store.google_books_api_key(db),
+        plan=settings_store.catalogue_sources(db),
+    )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
 
@@ -3524,10 +3498,12 @@ async def enrich_book(
 ) -> BookEnrichmentOut:
     """Fill in the fields a book is missing, from every catalogue available.
 
-    Matched by ISBN when there is one, which runs the full merged chain (the
-    DNB and K10plus together, then the Austrian National Library, then Open
-    Library, then Google), and by title and author otherwise, which runs the
-    ranked search across all seven sources.
+    Matched by ISBN when there is one, which runs the full merged chain, and by
+    title and author otherwise, which runs the ranked search. **Which
+    catalogues either of those asks is the library's own provider list**, set
+    in Settings; a new install asks the DNB and K10plus together, then the
+    Austrian National Library, then Open Library, then Google, and searches all
+    seven. A source switched off is not asked on either path.
 
     **No API key is required.** This was Google-only and refused outright
     without a key, which made it useless for exactly the books the German and
@@ -3547,6 +3523,16 @@ async def enrich_book(
         if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED)
         else ""
     )
+    # Resolved once, because this handler reaches outward twice and the two
+    # halves must not be able to ask different sets of catalogues.
+    #
+    # **Refused up front rather than per half.** Both halves are optional on
+    # their own, so without this a library with nothing switched on got the
+    # lookup's 409 and then the search's failure from one request. Asking
+    # nothing is one answer, not two.
+    plan = settings_store.catalogue_sources(db)
+    if not plan.asked:
+        raise HTTPException(**_no_sources())
 
     # `as_match()` on both paths, and it carries no Classifications by
     # construction. That is ADR 0006 held by the type rather than by this
@@ -3555,7 +3541,7 @@ async def enrich_book(
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
-        result = await metadata.lookup(book.isbn, api_key)
+        result = await metadata.lookup(book.isbn, api_key, plan=plan)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
         # test for the record. This is the third consumer of a `Lookup` and the
         # only one that writes to a Book without telling the Member why nothing
@@ -3579,7 +3565,7 @@ async def enrich_book(
     if fields is None:
         # No ISBN, or no catalogue carries this edition under it.
         query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await metadata.search(query, api_key, limit=1)
+        matches = await metadata.search(query, api_key, limit=1, plan=plan)
         if matches:
             fields = matches[0].as_match()
 
@@ -3653,8 +3639,8 @@ def apply_enrichment(
         overwrite=overwrite,
     )
     # Already validated and already bounded by `BookMatch`, so the payload's
-    # own models go in rather than a second pass through `_headings`.
-    if _write_classifications(book, payload.classifications, db):
+    # own models go in rather than a second pass through `classifications.bounded_headings`.
+    if add_headings(book, payload.classifications, db):
         updated.append("classifications")
     if updated:
         _store_cover(book)
@@ -3691,12 +3677,17 @@ async def enrichment_candidates(
     )
     query = " ".join(part for part in (book.title, book.author) if part)
 
+    plan = settings_store.catalogue_sources(db)
+    if not plan.searched:
+        raise HTTPException(**_no_sources())
+
     matches = await metadata.candidates(
         query,
         api_key,
         isbn=book.isbn,
         limit=5,
         prefer_language=book.language,
+        plan=plan,
     )
     return _match_rows(matches, all_tags=None)
 

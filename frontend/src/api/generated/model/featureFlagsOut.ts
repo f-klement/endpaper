@@ -19,5 +19,6 @@ export interface FeatureFlagsOut {
   goodreads_lookup_enabled: boolean;
   google_books_enabled: boolean;
   google_books_ready?: boolean;
+  library_mode?: boolean;
   public_catalogue_published?: boolean;
 }

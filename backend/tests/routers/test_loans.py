@@ -5,32 +5,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from database import engine
 from models import Loan
 from tests.conftest import _make_account
-from tests.helpers import items
-
-
-def selects_for(client, headers: dict, url: str) -> tuple[int, int]:
-    """The SELECTs one request issues, and the `total` it answered with.
-
-    The total comes back with the count so a cost met by answering with
-    nothing cannot pass for a cheap page.
-    """
-    from sqlalchemy import event
-
-    statements: list[str] = []
-
-    def record(conn, cursor, statement, *rest):
-        statements.append(statement)
-
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        body = client.get(url, headers=headers).json()
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
-    selects = [row for row in statements if row.lstrip().upper().startswith("SELECT")]
-    return len(selects), body["total"]
+from tests.helpers import items, selects_for
 
 
 def lend_between_strangers(client, make_book, password_hash: str, index: int) -> dict:

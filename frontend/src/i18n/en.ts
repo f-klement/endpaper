@@ -114,6 +114,18 @@ export const en = {
   "sort.year_asc": "Year (oldest)",
   "sort.newest": "Recently added",
   "sort.series": "Series order",
+  "sort.ddc": "Dewey number",
+  "classification.section": "Classification",
+  "classification.filter": "Classification",
+  "classification.headings": "Subjects and numbers",
+  "classification.divisions": "Dewey shelf",
+  "classification.noneOnBook": "No classification yet.",
+  "classification.noneToFilter": "Nothing in the library carries one yet.",
+  "classification.filterBy": "Show only books carrying {heading}",
+  "classification.scheme.ddc": "Dewey",
+  "classification.scheme.lcc": "Library of Congress",
+  "classification.scheme.gnd": "GND",
+  "classification.scheme.lcsh": "Subject heading",
 
   // ── Book detail ─────────────────────────────────────────────────────────
   "book.uploadCover": "Upload Cover",
@@ -1008,6 +1020,29 @@ export const en = {
   "import.skipped": "{count} rows had no title and were skipped.",
   "import.unmatched": "Not found in the catalogue:",
 
+  // ── MARC (library mode) ─────────────────────────────────────────────────
+  "marc.title": "Take a catalogue across",
+  "marc.explain":
+    "A MARCXML file another library exported. Records are matched on ISBN, then on author and title together, so importing the same file twice does not double the catalogue.",
+  "marc.chooseFile": "Choose a MARC file",
+  "marc.reading": "Reading the file...",
+  "marc.importing": "Importing...",
+  "marc.previewTitle":
+    "{total} records in the file, {readable} this app can store.",
+  "marc.alreadyHeld":
+    "{count} are already on this shelf and will be filled in rather than added.",
+  "marc.blocked":
+    "{count} carry an ISBN that belongs to a book this account cannot see, and will be left alone.",
+  "marc.skipped": "{count} records have no title and will be left out.",
+  "marc.createMissing": "Add the {count} records this catalogue does not hold",
+  "marc.createMissingHint":
+    "They arrive marked as not confirmed: another library's record says that library holds the book, not this one.",
+  "marc.confirm": "Import {count} records",
+  "marc.confirmMatchedOnly": "Fill in {count} records already here",
+  "marc.result": "{rowsRead} records read, {matched} matched, {created} added.",
+  "marc.resultSkipped":
+    "{count} records were left out: no title, or an ISBN that belongs to a book this account cannot see.",
+
   // ── Backup ──────────────────────────────────────────────────────────────
   "backup.title": "Backup",
   "backup.explain":
@@ -1165,6 +1200,35 @@ export const en = {
   "public.fact.pages": "Pages",
   "public.fact.format": "Format",
   "public.fact.series": "Series",
+
+  // The provider list. Catalogue names are proper nouns and stay as they are in
+  // both catalogues; only the sentences around them are translated.
+  "providers.title": "Where book details come from",
+  "providers.hint":
+    "These are the catalogues this library asks about a book. Turn one off and it is not asked at all. The order is the order they are asked in, and it does not change which catalogue is believed when two disagree about the same field.",
+  "providers.costHint":
+    "Searching by title asks every catalogue that is on at the same time, so one more costs nothing unless it turns out to be the slowest. Scanning an ISBN asks the top two together and the rest one at a time, stopping at the first answer.",
+  "providers.moveUp": "Move {name} up",
+  "providers.moveDown": "Move {name} down",
+  "providers.moved": "{name} moved to position {position} of {total}.",
+  "providers.name.open_library": "Open Library",
+  "providers.name.google_books": "Google Books",
+  "providers.name.dnb": "German National Library",
+  "providers.name.k10plus": "K10plus",
+  "providers.name.oenb": "Austrian National Library",
+  "providers.name.bnf": "National Library of France",
+  "providers.name.loc": "Library of Congress",
+  "providers.status.needsKey":
+    "Needs an API key. Add one below, or it cannot answer.",
+  "providers.status.switchedOffBelow":
+    "A key is stored, but this catalogue is switched off in its own card below.",
+  "providers.status.searchOnly":
+    "Answers title searches only, so its position does not affect scanning.",
+  "providers.status.askedFirst":
+    "Asked on every scan, with the others at the top of this list.",
+  "providers.status.askedAfter":
+    "Asked only when the ones above it find nothing.",
+  "providers.status.off": "Off. This catalogue is never asked.",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

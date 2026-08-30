@@ -6621,3 +6621,1049 @@ repository's recorded failure mode (a smaller count is a weaker inequality) seen
 other side: not a bound that drifted, a bound that could not detect the improvement it was
 sitting on. Both loan cost tests now assert the count exactly, beside the two-length equality
 that catches the N+1. Moving the number stays allowed; it just has to be deliberate.
+
+### Headings are ANDed and Dewey divisions are ORed, in one filter
+
+Two facets over one table, and they take different operators. A heading behaves like a tag:
+selecting "Mental health" and "Stress management" means the books carrying both, which is
+what selecting two chips has meant in this app since the tag filter was written.
+
+A division does not, and the reason is what a division **is**. It is a shelf location, and a
+book has essentially one. ANDing two of them returns only the books carrying two Dewey
+numbers that fall in different divisions, so every multiple selection in a browse facet
+would return the empty set. A facet whose second click always empties the shelf is worse
+than one that disagrees with the filter beside it.
+
+Stated here because the inconsistency is the kind a later reader deletes for tidiness.
+
+### Only Dewey gets a sort, because only Dewey sorts
+
+`BookSort.DDC` orders on the DDC number as text, and there is deliberately no
+`sort=classification` covering the other three schemes.
+
+A Dewey notation always carries exactly three leading digits, so text order is numeric
+order: `004`, `155.9042`, `830`. A Library of Congress call number does not have that
+property. Its class letters are followed by a number that sorts numerically, so `BF75`
+precedes `BF575` on a real shelf and text order reverses them. Measured against the live row
+`BF575.S75 E64 2022` on 2026-08-29. Ordering on LCC would ship a sort that is wrong exactly
+where somebody would trust it, and doing it properly needs a call number parser nobody asked
+for. GND and LCSH are subject vocabularies and have no order at all.
+
+The enum member is therefore named for the scheme rather than for "classification": a reader
+who sees the general word will assume their LCC numbers are in it.
+
+### A projection that trusts a comment is a fail open filter
+
+`shelf._division_key` reads `classifications.number` as a Dewey notation and carried a
+comment saying every write path goes through `ddc.notation`. None did: `ddc.notation` was
+called from nowhere outside `ddc.py`, and `POST /api/books` with
+`{"scheme": "ddc", "number": "Hello world"}` answered 201 and stored it.
+
+The cost was not a stored oddity. The facet then published a division `He0`, and the chip
+linking to `?ddc=He0` hit the drop-rather-than-refuse rule for filter values, applied no
+clause at all, and returned **the whole library**. An app producing its own broken link,
+into a filter that fails open.
+
+Fixed at both ends, and both halves are load bearing. `ClassificationIn` now refuses a `ddc`
+number that is not a notation, which makes the invariant true going forward and is the real
+fix. `shelf._looks_like_a_notation` guards the two read paths, because a database written
+before that validator still holds whatever it was given and a facet is exactly where such a
+row surfaces.
+
+Both critic seats found this independently, which is the signal that process exists to
+produce. The general lesson is the one this file keeps relearning: **a comment asserting an
+invariant is not an invariant.** `tests/test_shelf.py::TestTheDivisionProjectionsAgree`
+compares the Python and SQL projections across all 1,000 three digit numbers, because they
+are two expressions of one rule and nothing else holds them together.
+
+### A bound stated in a docstring is not a bound
+
+`HeadingList` was written as `list[str] | None` with `Query(max_length=128)` and a docstring
+explaining that the bound was per value, so a scheme plus
+`CLASSIFICATION_NUMBER_MAX` fitted and nothing longer could match a row. On a list type
+Pydantic renders `max_length` as `maxItems`: it counts the values and says nothing about
+their length. The parameter had no length bound at all, and a single 20,000 character value
+answered 200.
+
+The `TagIdList` analogy is what misled it, and it is worth naming: that one is `str | None`,
+where the same keyword does bound the string. Same spelling, different subject.
+
+The per value bound now lives in `headings()`, which **drops** an over-long value rather than
+refusing it, because a value too long to match any row is not a heading and this module has
+always dropped those. Both critic seats found this independently too.
+
+### Settled by the owner, and not a seat's to reopen
+
+Stated first and plainly, because both cost a round trip and a later reader
+reopening either is the most expensive mistake available here.
+
+1. **An apk finding is acted on immediately, with no soak.** Disposition A of
+   three, owner 2026-08-27. Not B, keep refusing but record the true reason, and
+   not C, act only after an advisory has been seen on N consecutive nights. The
+   owner's own argument for C was withdrawn as thinner than presented: the three
+   day windows on PyPI and npm defend against "anyone can publish", and Alpine
+   packages are built by distro maintainers from aports and signed.
+2. **A rebuild release that did not clear its advisory retries the next night.**
+   Owner 2026-08-30, taken over naming the stuck state only and over failing the
+   nightly plan job. A rebuild finding is therefore never written to the ledger.
+   The accepted cost is up to one public tag per night while upstream has not
+   rebuilt; the nightly tags are the signal, chosen over a pager.
+
+
+Pipeline decisions do live here (kaniko at :5493, Renovate at :5567, the release
+image at :4409), so this one belongs. Suggested placement: beside the other
+release pipeline entries.
+
+### An apk finding is acted on, because the rebuild is the fix and a digest bump is not
+
+Autopatch's refusal for an OS package read *fixed by moving the base image
+digest, which is Renovate's job*, and the mechanism it named could not have
+worked. Measured 2026-08-27, when CVE-2026-14456 refused v0.10.0 at
+`verify:image`: `libcrypto3` and `libssl3` sat at `3.5.7-r0` with `3.5.8-r0`
+published and marked fixed, and the pinned digest was already the current
+`python:3.14.7-alpine`, byte for byte. There was no bump for Renovate to make.
+Upstream rebuilds on its own schedule and may take weeks. The fix was a rebuild,
+which the Dockerfile performs on every release build with `RUN apk upgrade
+--no-cache`, and that was itself broken at the time: kaniko had cached the
+upgrade layer for up to its two week default TTL, since fixed with
+`--cache-ttl=6h` on both build jobs. So the refusal named a mechanism that does
+not apply, and the mechanism that does was silently disabled. Nothing covered
+apk findings at all.
+
+A fixable HIGH or CRITICAL apk finding now cuts a patch release, which rebuilds.
+Owner's decision, 2026-08-27, disposition A of three, gated on the smoke test
+existing, which it does: `verify:smoke` and `build:smoke` run
+the image smoke test and gate `publish:dockerhub` and the cluster's
+digest announcement.
+
+**There is no soak on this path, deliberately.** `uv lock --exclude-newer` and
+bun's `--minimum-release-age` hold a language release for three days because
+anyone can publish to PyPI and npm. Alpine packages are built by distro
+maintainers from aports and signed, and `apk upgrade` moves the whole installed
+set rather than one named package, so a per finding delay would buy little and
+cost the window it exists to close. The alternative considered and refused was
+acting only after an advisory had been seen on N consecutive nights.
+
+**A rebuild finding is not judged by the post bump reports, and reading it out of
+them would be a release computed by absence.** No after report can see an apk
+package: bun and pip-audit read language manifests, and `ap-recheck` runs `trivy
+fs` over the exported source tree, which holds no apk database. So `finalise`
+partitions the actionable set: a bumpable finding must be absent from the after
+reports, a rebuildable one is released on the strength of what happens after the
+tag, `verify:image` scanning the rebuilt candidate with `--exit-code 1`
+and `verify:smoke` starting it and requiring `/api/healthz`, both of which gate
+`publish:dockerhub`.
+
+### One CVE against two ecosystems is two findings
+
+`_index` collapsed findings sharing any advisory id, and `Finding.merge` keeps
+the first ecosystem it saw. One CVE is routinely reported against both an OS
+package and the language package that bundles it, libwebp and pillow, libxml2
+and lxml, and one `trivy image` report carries the OS packages and the
+virtualenv together. So the two halves became one finding whose ecosystem was
+decided by Trivy's `Results` order, and the other half appeared in neither the
+actionable nor the reported list. Measured on one report holding both halves
+under CVE-2026-4863: os-pkgs first gave one apk finding and an empty
+`uv-packages.txt`, lang-pkgs first gave one pypi finding and no rebuild.
+
+This was invisible while apk was refused, because the merged finding was refused
+either way and reported nightly. **Acting on apk is what turned it fail open**,
+which is the general shape worth keeping: widening what a gate acts on can
+convert a harmless merge into a silent drop. Identity is now `(ecosystem, id)`.
+
+### The ledger reads one line, not the whole tag message
+
+`cmd_base` built the released-advisory ledger by grepping ids out of every tag's
+entire contents. The tag message interpolates a package name and two version
+strings straight out of a scanner report, so a `FixedVersion` reading
+`3.5.8-r0 CVE-2030-11111` filed an unrelated advisory permanently, and a ledger
+entry is what stops this pipeline ever acting on that id again. No newline
+needed: `grep -oE` matches anywhere on a line. It now reads only the
+`autopatch-advisories:` line this pipeline writes.
+
+The cost is deliberate: an id a person mentions in prose in their own tag
+message no longer counts as released. That is the better behaviour, because the
+documented way to accept an advisory is `.trivyignore`, which carries a reason
+and an expiry and is honoured for every scanner, and a sentence in a tag message
+carries neither.
+
+### A `$` anchored pattern is not a `fullmatch`
+
+`$` matches before a trailing newline, so `.match()` on the package-name
+patterns accepted one: measured, `libssl3\n` gives match=True, fullmatch=False
+on all three. The name reaches `tag-message.txt`, where a second line reading
+`autopatch-advisories: CVE-...` is the ledger. Anchoring reads as sufficient and
+is not.
+
+### A rebuild finding is not ledgered, so a failed rebuild is retried
+
+Owner's decision, 2026-08-30, taken over naming the stuck state only and over
+failing the nightly job. The ledger exists to stop a **bump** shipping the same
+advisory every night, because a bump that shipped cannot be improved by shipping
+it again. A rebuild is the opposite: it takes whatever the Alpine mirror holds at
+the moment it runs, so repeating it tomorrow is what fixes a mirror that was
+lagging, and the pipeline self-heals the day Alpine publishes.
+
+The retry is not blind. `release:build` pushes to the internal registry before
+`verify:image` scans it, so the image exists at the new tag even when the publish
+was refused, and `autopatch:audit:image` reads `:$AUTOPATCH_BASE_TAG`, which is
+now that image. The next night measures the rebuild that just happened.
+
+The accepted cost is one public tag per night, unbounded, while upstream has not
+rebuilt. The nightly tags are the signal, chosen over a pager.
+
+### The ledger key names the ecosystem
+
+Identity in `decide.py` is `(ecosystem, id)`, because one CVE is routinely
+reported against an OS package and against the language package bundling it. The
+ledger was bare ids, so releasing one half suppressed the other for ever though
+it was never released. An entry now reads `apk/CVE-2026-4863`; a bare id in an
+older tag still matches every ecosystem, which is the safe direction. Migration
+cost nothing: across every tag in this repository, no ledger entry exists in
+either format.
+
+The intermediate fix, holding a shared id back, is worth recording as refused: it
+un-suppressed the half that **was** released, so behaviour depended on whether
+some language package happened to share the CVE. Both critic seats reached the
+qualified key independently.
+
+### An advisory id is one whitespace free token
+
+The ledger line separates entries with a space, so an id carrying one is a second
+entry: measured end to end from a report whose `VulnerabilityID` read
+`CVE-2026-4 CVE-2030-9999`. Enforced in `Finding.__init__` rather than at the
+sink, because these ids also become `--ignore=<id>` arguments to `bun audit fix`,
+so a guard on the tag message would leave a command line unguarded. Nothing else
+inspects an id: both readers take the scanner's value verbatim.
+
+### A rebuild release builds with the kaniko cache off
+
+`build:` on main and `release:build` share a `--cache-repo` and a six hour TTL,
+and every layer before `RUN apk upgrade --no-cache` is identical between them, so
+a push to main in the six hours before the nightly run served the patch release
+the very layer it was cut to replace. Apk only: a lockfile bump changes a file in
+the build context and busts its own layer, while `apk upgrade` changes nothing
+kaniko hashes. Under retry nightly the cost is a wasted attempt and a public tag
+whose rebuild changed nothing, not a stuck pipeline.
+
+**The obvious fix does not work and the reason is worth keeping.** `ap-finalise`
+runs in the nightly pipeline and `release:build` in the pipeline the tag push
+creates, so a `reports: dotenv` cannot reach it. The tag annotation can, and this
+pipeline already treats tag messages as its record: `finalise` writes an
+`autopatch-rebuild:` line and `release:build` reads `CI_COMMIT_TAG_MESSAGE`. Two
+spellings of one literal is the drift that would rot, so a test imports the
+constant and asserts it appears in the job.
+
+### A finding with no advisory id is refused
+
+The other side of the one token rule, and it fails the same way: the ledger is
+ids, so a finding with none cannot be recorded as shipped and releases again
+every night. Measured from a bun advisory whose url carries no id: `ACT HIGH
+unknown npm/lodash`, a release, and an empty advisories line. `read_trivy`
+reaches the same state from a Vulnerability with no `VulnerabilityID`.
+
+### A guard proved on one validated field, then trusted for the fields beside it
+
+**The code was defensible every time and the stated reason was wrong every
+time.** That is what makes this worth a decision entry rather than a note: a
+reviewer reading the comment agrees with it, because the rule it names is real,
+and the guard covers fields that rule was never about.
+
+Four rounds of issue #88 hit it, each found by attacking rather than reading:
+
+| The rule, correctly stated | Where it was trusted and does not reach |
+|---|---|
+| package names are anchored, so a name cannot forge a line | `installed` and `fixed` are not validated at all |
+| the ledger reads one prefixed line, so a space separated payload fails | a newline in a value makes a real second line |
+| every value is collapsed to one line, so nothing can forge a line | an **id** carries the ledger's own separator, a space |
+| package names admit no colon, so nothing can spell the marker | `installed` and `fixed` are only whitespace collapsed |
+
+It is not an autopatch fact. The same evening, in the classification work, two
+critics independently found the shape in `HeadingList`'s stated bound and in
+`_division_key`'s stated invariant.
+
+**The tell** is a comment justifying a guard by naming **one** field's rule while
+the guard covers several. **The fix that held was structural every time**, never
+a further arm: validate at construction so the plan and its sinks agree, split on
+whitespace so the rule is that a value may not introduce a line rather than that
+`\n` is forbidden and `\r` allowed, anchor to a line rather than matching a
+substring.
+
+**And the instrument matters.** One evasion here was found by guessing a
+spelling, `NL=''`, and the one that would really have happened, `NL=$(printf
+'\n')`, was found only by executing the block. Four assertions on four fragments
+say nothing about whether the fragments compose: two rewrites left a mechanism
+wholly inert while passing every assertion written about it.
+
+## Open, and not resolved in this ticket
+
+Two gaps are recorded in the autopatch pipeline's own README rather than fixed, because
+both need a pipeline configuration edit that this trio's brief forbids:
+
+1. `autopatch:page:resolve` sends `completed` before `release:build` has run,
+   and the tag pipeline has no Telegram notifier. The summary now names how many
+   findings are waiting on that rebuild, which is a sentence rather than a page.
+2. Telegram cannot tell attempt 1 from attempt 40 under retry nightly, because
+   the summary is byte identical on every attempt. Not silence: the tag pipeline
+   fails each night and GitLab mails the schedule owner, and the owner chose the
+   nightly tags as the signal. Closing it properly needs a second marker line
+   read back into its own file, which needs a new artifact path in
+   the pipeline configuration.
+
+The question that was paged is answered: retry nightly, recorded above. The page
+was cleared.
+
+### The provider order is the order sources are asked, and nothing else
+
+Two things could be called a ranking of catalogue sources, and they are two
+rules: which sources are **asked**, and which is **believed** when two disagree
+about one field. The settings list is the first only, and the screen says so.
+
+**One list cannot honestly drive both.** The two orders disagree about Open
+Library in opposite directions: it is kept out of the pair asked on every lookup
+for being five times slower (1.64s against 0.36s and 0.11s), and put first for
+belief because its search index is edited towards how people write titles. The
+lookup path's belief rule is not a list at all, being computed per ISBN from a
+`9783` prefix. And the deciding one: `_SECONDARY_SOURCES` is exactly
+`_MATCH_PRECEDENCE[4:]`, so "believed last" is a contiguous tail **of that
+order**, while in the ask order those same three sit at positions 2, 5 and 6. No
+cut in the ask order expresses the regional set, and reseeding the ask order to
+make it contiguous changes the lookup chain instead. Either way something a
+household never touched moves, which the ticket forbids.
+
+A design seat proposed a stored cut position driving `_SECONDARY_SOURCES` and it
+was refused on that measurement. Recorded because it is the obvious next
+proposal and the reason it does not work is not obvious.
+
+### The tier a source is asked in is a position, not a property of the source
+
+An earlier draft made "asked on every lookup" a per source constant, reading
+`_FALLBACK_SOURCES` as a speed classification. **The Austrian National Library
+refutes that**: its measured mean is 0.240s, faster than K10plus's 0.36s, and it
+sits in the second tier for coverage (3 answers in 50) rather than for speed.
+Freezing that would freeze exactly the case the ticket was filed about, since an
+Austrian household wants it asked first and a German one does not. A position is
+the thing a household can move.
+
+**One property does stay a constant: metered.** A metered source is never in the
+tier asked on every lookup, whatever position it is given, because that tier is
+asked even for books another source answers, so Google Books at the top would be
+a charge per barcode scan. Moving it up still moves it earlier in the tier
+below. The refusal is structural rather than a warning on a screen, because the
+promise it protects is structural.
+
+### Google Books has two switches and they are conjoined in one place
+
+Its own section decides whether this library uses Google at all and holds the
+key; the provider list decides whether it is asked and where. Two rows for one
+source is a fact stored twice, and the answer is the shape
+`public_catalogue_is_published` already uses: conjoin them in one function every
+caller goes through. `settings_store.catalogue_sources` is that function, and
+`stored_catalogue_sources` beside it is what the screen shows, which is the same
+pair as `get_raw` and `in_force`.
+
+**Merging them into one row is the better end state and was not done here.** It
+needs a migration folding a stored `false` into a disabled entry, and it changes
+a field on the public feature flags model. Raised rather than half done.
+
+### The provider list does not reach the cover and authority hosts
+
+`covers.py` still asks Open Library and the DNB for a cover image, and
+`authority.py` still asks lobid, VIAF and Wikidata about an author. The boundary
+is defensible only because the motivating case is a commercial API and the one
+commercial source is Google Books, which the list does control completely. It is
+not a general "nothing is asked" claim and nothing in the tree makes one. The
+reasoning sits in `backend/sources.py` where a reader would look.
+
+### A source that cannot answer says which of two things is wrong
+
+Google Books can fail to answer for two reasons: no key, or its own card
+switched off. `CatalogueSourceOut` therefore carries `has_key` **beside**
+`ready` rather than only their conjunction. A screen reading `ready` alone told
+a library holding a perfectly good key to add a key, which is the exact symptom
+the provider list exists to remove, produced by the first fix for it.
+
+### An evasion attempt is bounded by the shapes its author imagines
+
+The guard that keeps a hard coded source order out of the tree was wrong on its
+first attempt three times, and **each attempt was attacked before it shipped**.
+Round one collected string literals only and I attacked it with six shapes, all
+of them strings, so six shapes tested one spelling. A critic then found that
+`(CatalogueSource.DNB, CatalogueSource.K10PLUS)` was invisible, which is the
+spelling the enum exists to promote and therefore the one the next mistake will
+use. Round two fixed the name and hard coded the **receiver** instead, so an
+aliased import and a dotted `enums.CatalogueSource.DNB` were invisible, which is
+the shape this repository has been caught by before.
+
+The general form is worth keeping: **testing a guard against shapes you thought
+of measures your imagination, not the guard.** What broke the loop each time was
+another seat writing fixtures from its own vantage. The rule now matches any
+attribute whose name is a member, which over-matches only if some unrelated class
+grows an upper case `DNB`, and a false positive fails loudly where a miss is
+silent.
+
+### A paragraph describing behaviour is not re-read when the behaviour changes
+
+**Three times in one ticket**, each caught by a seat rather than by the person
+who moved the behaviour, and each within the same round as the change:
+
+* `CatalogueSourceOut`'s class docstring enumerated its derived fields and was
+  stale on two of them six lines above the field that had just changed.
+* The same model's `enabled` comment claimed "off means not asked on every path"
+  while a paragraph written in the same round stated the opposite boundary.
+* The order guard's "what it cannot see" paragraph named `sorted(...)` as a
+  blind spot after a rewrite that made `sorted(("dnb", "loc"))` reported, which
+  understates a guard in the direction a reader can act on.
+
+The fix that generalises is not three corrections. **A summary that repeats what
+the lines below it already say is the thing that rots**, so the first was deleted
+rather than corrected, and the other two now state a measurement instead of a
+category. The standing rule this is a second instance of: a string describing
+behaviour must be re-read when that behaviour changes in the same round.
+
+## MARC21 import and export
+
+Twelve decisions from one ticket, and the count is worth the sentence: the
+feature is four hundred lines of parser and writer, and every one of these was
+either found by a critic seat attacking something or measured against a running
+system. None of them was reached by reading the code.
+
+### MARC is read through `metadata.py`'s parser, not a second one
+
+`backend/marc.py` composes `metadata.py`'s MARC primitives rather than restating
+them: the subfield reader, the non-sorting delimiters in both spellings, NFC
+normalisation, the repeated `082 $a`, the `020 $q` cross reference, the ISBD
+punctuation that introduces the next subfield, the extent parser and the
+language table. None of that is derivable from the specification and all of it
+was measured against live catalogues.
+
+`ddc.notation` records what the alternative costs: three parsers once had three
+notions of what a Dewey number is, and the column existed to hold one.
+
+**The consequence is a boundary this tree has nowhere else.** Those primitives
+are private to `metadata.py`, and no other production module here imports an
+underscore name from another. `marc.py` imports twenty. The alternative was to
+move the shared MARC block into `marc.py` and have `metadata.py` import it,
+which is the structurally right home and was not done in the wave that built
+this because `metadata.py` was another trio's file at the time. **Moving it is
+mechanical and should be done.**
+
+The round trip test is what holds the seam: `tests/test_marc.py` exports a Book
+and reads it back through the reader that parses live DNB and K10plus answers,
+so a record this app writes is proved to be one this app's catalogue parser
+accepts.
+
+### What `marc.py` refuses is deliberately narrower than what a lookup refuses
+
+A lookup refuses a title naming a volume slot and refuses a disc, because a
+catalogue's identifier index matches cross references and the wrong record
+poisons an entry. An upload is a cataloguer handing over their own file: `Bd. 3`
+may be exactly what they catalogued, and dropping rows they will never be told
+about is worse than importing a thin record they can see.
+
+The reader also does not read `100 $0`, though it is the same subfield the DNB
+is trusted for. `_k10plus_record` states the rule: a catalogue is not read for a
+person's identifier until somebody has compared it live, and nobody can compare
+an arbitrary upload.
+
+### An oversized MARC file is refused, where an oversized CSV is truncated
+
+`csv_import.MAX_ROWS` truncates at 20,000 with a log line. `marc.MAX_RECORDS`
+refuses. A truncated reading history is a partial reading history and the rows
+dropped are still that person's own. A truncated catalogue exchange is an
+institution being told its holdings transferred when 20,000 of them arrived and
+the rest did not, silently. The cataloguer can split the file; nobody can notice
+a silence.
+
+### Library mode is enforced on the server for MARC, at 403
+
+Both directions answer 403 with the mode off, on the rule `routers/public.py`
+already states: disabling a control in the browser is advice to one client. 403
+rather than the 404 the public catalogue gives, because the caller holds a
+session and `GET /api/settings/features` publishes `library_mode` to anybody, so
+a 403 conceals nothing. That is `routers/auth.py`'s answer for a closed feature.
+
+The gate is checked **before** the file is parsed, so a refused caller cannot
+spend the server's CPU on a 5 MB parse.
+
+### `classifications.py` exists because a ceiling with two implementations is not one
+
+`SCHEME_ORDER`, `bounded_headings` and `add_headings` were private to
+`routers/books.py`. `importing.py` now writes a Book's headings out of an
+uploaded record and has to obey the same ceiling, the same ordering and the same
+drop rule, and a router is the wrong place for a rule a domain module needs.
+
+### A stored `classifications.scheme` is a `str`, and comparing it with `is` fails silently
+
+`classifications.scheme` is a plain `String(20)` column, so a row loaded from the
+database hands back a `str` rather than a `ClassificationScheme`. `is` against
+the enum is then False for every row. The MARC export written that way answered
+200 and carried no call number at all, with nothing in the log.
+`classifications.add_headings` had already recorded the trap from the writing
+side; `marc.py` walked into it from the reading side within the hour. Caught by
+a router test against a real stored row: the unit tests drive the writer with a
+stand-in carrying real enum members and cannot see it.
+
+### No `008` in an exported record
+
+The fixed length data elements field encodes place of publication, illustration
+codes, literary form, intended audience and a government publication code, none
+of which this app holds. Coding forty positions with `|` is legal and says
+nothing; coding them with guesses writes assertions nobody here can support. The
+language goes in `041` and the date in `264`, which is where a reader looks. No
+`003` either: it names the organisation that assigned `001`, as a MARC
+Organization Code, and this deployment has none.
+
+---
+
+### The MARC importer applies the API's own bounds, read off the declarations
+
+`importing.within_bounds` holds an incoming record to what `POST /api/books`
+would accept, reading the `Ge`, `Le` and `MaxLen` off `BookCreate.model_fields`
+and the column widths off `Book.__table__` rather than retyping either. A list
+of arms would have been the enumerating shape this repository records as wrong
+on every first attempt, and a field added to the importer later inherits the
+bound without anybody remembering.
+
+It exists because the importer had no bound at all, and both the security seat
+and the implementer found that independently. Two measurements:
+
+* One 3.7 MB upload of a single record stored a 3,000,000 character title into a
+  `String(500)` column, and `GET /api/books` then answered 3.8 MB. SQLite does
+  not enforce a `VARCHAR` length, so nothing failed.
+* `series_index` is bounded `le=1000` on every API path. A ten character
+  `245 $n` stored `1e9`, and `routers/books.list_series` computes
+  `set(range(1, max(held) + 1))`, which at a measured **70.5 bytes and 0.624
+  seconds per million elements** is roughly **70 GB and ten minutes**: the
+  container is OOM killed, again on the next request, for every member.
+
+Strings truncate and numbers drop. Truncating a title keeps the record, which is
+what a batch wants; clamping a year of `9999`, MARC's own open ended date, to
+2200 would assert a date nobody supplied.
+
+### A guard's fixture has to reference the thing the guard stops
+
+`test_a_utf16_doctype_cannot_slip_past_the_byte_scan` was written twice. The
+first version used an empty `<collection/>` and a bare `pytest.raises`, so with
+the NUL check deleted the file parsed, found no record and raised "That file
+holds no MARC records": **green either way**, while `docs/security.md` cited it
+as the evidence. Both critic seats found it independently, which is the
+strongest signal this process produces.
+
+Two things fix it and neither is enough alone: the fixture references the entity
+from a real `245 $a`, so a parse that gets that far expands it, and `match=`
+names the refusal, so falling through to any other `MarcError` fails. Measured
+on a mutant with the guard removed: 898 bytes became a 1,000,000 character
+title.
+
+### The seam into `metadata.py` is pinned by a derived guard, and `mypy` is not in CI
+
+`marc.py` reads twenty private names on `metadata`, which no other module in
+this tree does. `tests/test_marc.py::TestTheSeamIntoMetadataIsPinned` derives
+that list with `ast` rather than writing it down, and asserts both that every
+name still exists and that `marc.py` is the only module doing it.
+
+It took three attempts and each failure was found by attacking it: the first
+matched a module basename against any local variable and reported `shelf.py`
+three times; the second was blind to `from metadata import _marc_fields`, the
+same import shape `tests/test_shelf.py` records its own first version sailing
+past; the third keyed on the local binding, so `import metadata as m` filed the
+read under `m` and the "is it one of ours" filter skipped it.
+
+**`mypy` reports all twenty statically and the pipeline does not run it.**
+The pipeline runs `ruff check`, the OpenAPI diff and `pytest`; its only
+mention of `mypy` is a comment. Adding `uv run mypy .` to the backend job would
+pin these and `_Subfields`, which is annotation only and which no runtime guard
+can reach. **Raised rather than done**, because a pipeline change affects every
+trio's push and is not one trio's to make.
+
+### `isbn` is never gap-filled onto a matched Book, and that is what stops a 500
+
+`importing._MARC_GAP_FIELDS` excludes it, and the exclusion was load bearing and
+unstated until the security seat's last round. A record whose ISBN belongs to a
+Book the member cannot see, but whose title and author match one they can, is
+**matched**: `MarcIndex.find` resolves it on the identity key and
+`isbn_is_taken` is never consulted. If the gap filler wrote `isbn`, it would put
+the invisible Book's ISBN onto the visible one and trip `books.isbn`'s unique
+index. That is the failure `_taken_isbns` exists to prevent, arriving by a door
+nothing guarded, and it is one transaction, so the transfer writes nothing and
+answers 500. The incoming ISBN is dropped instead, which is the cheaper loss,
+and `TestAMatchedBookNeverGainsAnIsbn` pins it.
+
+**Worth keeping for the method rather than the fact.** Four statements of the
+mechanism were made and all four were wrong, two of them mine. The last one
+proposed the autoflush behind `add_headings`'s lazy load, and that flush
+**cannot happen in this application**: `database.SessionLocal` is
+`sessionmaker(autoflush=False)`, so the SELECT is issued and the pending
+`UPDATE` rides past it, measured through the route.
+
+The mechanism is the next **explicit** flush, and it is a property of the file:
+the collider alone waits for the commit, and a collider followed by a record
+that has to be created surfaces at that record's `_create` flush
+(`_apply_one > _create > flush`, both records entered). Both arms measured
+through the route rather than through an in process session, which is what put
+the earlier answers apart: a session built by hand takes SQLAlchemy's default
+`autoflush=True` and is not the session this application ever runs.
+
+**The cleanest tell is the SELECT count, not the traceback.** Same record, same
+collision, one argument apart: `autoflush=False`, which is this app's, issues 1
+classifications SELECT and raises at the commit; `autoflush=True`, SQLAlchemy's
+default, issues 0 and raises inside `add_headings`, because the autoflush fires
+before the SELECT is reached. A probe reporting zero is measuring a session this
+application never constructs.
+
+The conclusion never depended on the moment, which is exactly why five wrong
+statements of it, across three seats, each survived a round. It was settled by
+one `grep` of the session factory rather than a sixth traceback: **a measurement
+is only evidence about the configuration it was taken under.**
+
+The same shape is why `blocked` under-counts, which narrows the oracle below
+rather than widening it: a hit there means the ISBN is held **and** nothing on
+this shelf matches the record.
+
+### The MARC preview publishes an ISBN existence oracle, and it is accepted
+
+`MarcPreviewOut.blocked` counts the records whose ISBN belongs to a book the
+caller cannot see. The **fact** is not new: it has been readable off
+`ImportResultOut.skipped` since the CSV importer, and `importing.py` argues why
+the alternative is worse, namely letting the insert reach the unique index,
+raise, and write nothing for the whole file with a 500. What is new is the
+**price**. The import pays for each probe by writing a Book for every ISBN that
+does not collide; a preview writes nothing.
+
+Measured by the security seat, 2026-08-30: a member account against another
+member's three private books, five records, `already_held: 0` and `blocked: 3`,
+exactly the three private ISBNs; 20,000 records, 3,860,064 bytes, answered 200
+in 1.08 seconds with zero books written. At three requests a minute that is
+60,000 ISBN existence probes a minute, non-destructive and invisible to the
+owner.
+
+**Kept, because no arithmetic hides it.** `readable`, `already_held` and
+`blocked` are the three numbers the screen exists for, and publishing any two
+publishes the third. Removing the field removes the answer to "will this double
+my catalogue", which is the accident the whole feature is shaped around, and
+puts back the overstatement that a preview promised records the import then
+refused.
+
+What it discloses is that **some** book in this house carries an ISBN. Never
+whose, never its title, never anything about the book, and never a 403 that
+would confirm an id. The seat that found it recommended keeping the field and
+recording the decision, which is what this is.
+
+---
+
+### The shelf loads what the row needs, not what the serialiser will load anyway
+
+`Loading.SERIALISED` carried `selectinload(Book.tags)` and
+`serialisation.books_to_out` re-reads the page with a `selectinload(Book.tags)`
+of its own, because `BookOut.model_validate` touches the collection. The same
+duplication in `routers/loans.py` was deleted on 2026-08-29; this is its twin,
+found by the same diagonal and fixed a day later.
+
+**The rule that decided the loans case decides this one, and it is worth
+restating because it is the general form**: a statement that can never do work
+is deleted, and one that does no work today is kept and documented. This one
+can never do work, and the reason is structural rather than incidental. Every
+Book fetched with `SERIALISED` is serialised by `books_to_out`, which is the
+only assembler `BookOut` has.
+
+**A total is the wrong instrument, and the first run of the diagonal proved
+it.** Counting SELECTs said `POST /api/books/{id}/copies` fell by one and
+`POST /api/books/{id}/restore` by two, and neither number said which load had
+gone. Counting only the statements that read `book_tags` said it exactly:
+`copies` goes 3 to 2 because it reads `book.tags` outside the serialiser and
+that read becomes lazy, `restore` goes 3 to 1 because two shelf reads happened
+in one request. **The sharper count is the one that tells a redundant eager
+load apart from an eager load replaced by a lazy one**, and only the first of
+those is free to delete.
+
+Measured 2026-08-30 inside the suite pod on builder, every measurement taken by
+a viewer who added none of the books, at two lengths each. Statements reading
+`book_tags`, before and after:
+
+| Call site | Route measured | Before | After |
+|---|---|---|---|
+| `routers/books.py` `list_books` | `GET /api/books` | 2 | 1 |
+| `routers/books.py` `list_trash` | `GET /api/books/trash` | 2 | 1 |
+| `routers/books.py` `list_duplicates` | `GET /api/books/duplicates` | 2 | 1 |
+| `routers/books.py` `list_copies` | `GET /api/books/{id}/copies` | 3 | 1 |
+| `dependencies.py` `book_for_read` | `GET /api/books/{id}` | 2 | 1 |
+| `dependencies.py` `book_for_read` | `GET /api/books/{id}/notes` | 1 | 0 |
+| `dependencies.py` `book_for_read` | `POST /api/books/{id}/copies` | 3 | 2 |
+| `dependencies.py` `book_in_trash` | `POST /api/books/{id}/restore` | 3 | 1 |
+| `dependencies.py` `book_in_trash` | `DELETE /api/books/{id}/permanent` | 1 | 1 |
+
+Every row measured at two lengths, and every row identical at both.
+
+Nothing rose anywhere, and the two rows that could have are the interesting
+ones. A **single** book can never gain an N+1 from this: an eager load of one
+row's collection and a lazy read of it are one statement each, so
+`POST /{id}/copies`, which reads `book.tags` itself, is the worst case and it
+still improves. And the purge is flat because the cascade loads the collection
+to delete the association rows whatever the option said.
+
+**`EXPORTED` keeps the option it drops here, and that asymmetry is the point
+rather than an oversight.** The CSV writer reads `book.tags` per row itself and
+has no second reader to lean on, so there the option is the only thing standing
+between it and an N+1.
+
+**Three of the four cost tests over these options passed with their own
+subject deleted, and a fourth was written in the same pass and passed the same
+way.** Found by both critics separately, and this is the part worth keeping,
+because every one of them was defensible on the page:
+
+| Test | Why it could not fail |
+|---|---|
+| `test_published_loading_costs_three_statements` (new, this ticket) | it read `books[0].tags`, so a dropped eager load was paid back as exactly one lazy load and the count was 3 either way |
+| `test_a_page_with_serialised_loading_costs_two_statements` | every fixture `User` is created in the test's own session, so `book.added_by` was answered from the identity map and the `joinedload` was unpinned |
+| `test_exported_loading_costs_two_statements` | the same hole, and it already carried `assert books[0].added_by is not None`, which is what made it look pinned |
+| a fourth test written in the same pass, measuring the shelf fetch and the serialisation in one window | its docstring claimed both suites stayed green without it. Two pre-existing tests fail on that mutation, and the diagonal caught nothing through it alone, so it was deleted rather than fixed |
+
+The fixes are a `db.expunge_all()` inside each counted window, and reading
+**every** book's collections rather than the first one's. Verified by a second
+diagonal, six mutations one option at a time, each now caught and each recorded
+with the name of the test that caught it.
+
+**The general form**: a cost test that reads one row's relationship inside its
+own counted window cannot measure an eager load, because the lazy load costs
+the same one statement. A cost test whose fixture built its rows in the session
+it measures cannot measure a many to one at all.
+
+---
+
+### Three national catalogues speak SRU over HTTP, so they need no Z39.50 client
+
+**Measured 2026-08-30 for #91.** The internal target survey classified Italy, Greece,
+Czechia, Spain, Portugal, Argentina and Uruguay as Z39.50 targets, on the strength of an
+unauthenticated `initResponse` and a banner. **Three of them answer `operation=explain`
+and `operation=searchRetrieve` over plain HTTP on the same port**, and one of those is the
+sharpest case in the ticket.
+
+| Target | HTTP SRU | Query language | Records |
+|---|---|---|---|
+| `catalogue.nlg.gr:210/biblios` (Greece, Koha) | yes | CQL `bath.isbn`, and PQF via `x-pquery` | **MARC21** as MARCXML |
+| `aleph.nkp.cz:9991/NKC` (Czechia) | yes | PQF via `x-pquery`; CQL refused | Dublin Core only |
+| `catalogos.cultura.gob.es:220` and `:212` (Spain, two ministry catalogues) | yes | PQF via `x-pquery` | ISO 2709, not UTF-8 |
+| `opac.sbn.it:2100` (Italy), `z3950.nlg.gr:210` | no, Metaproxy answers its own HTML 400 | | |
+| `z3950.porbase.bnportugal.gov.pt:210` (Portugal) | no, nothing listens for HTTP | | |
+| Argentina, Uruguay | HTTP answers and refuses with `Authentication error`, as Z39.50 does | | |
+
+**Latency over that HTTP route, n=7 each, one host, min / median / max**, with the two
+SRU sources already in the chain asked the same two ways in the same run from the same
+host, which is what makes the candidate figures mean anything:
+
+| Target | ISBN lookup, `maximumRecords=5` | title search, `maximumRecords=10` |
+|---|---|---|
+| Czechia | 0.057 / 0.072 / 0.109s | 0.187 / 0.190 / 0.245s |
+| Greece | 0.201 / 0.203 / 0.235s | 0.254 / 0.256 / 0.262s |
+| control, Library of Congress | 0.208 / 0.212 / 0.346s | 0.311 / 0.327 / 0.751s |
+| control, DNB | 0.222 / 0.240 / 0.292s | 0.278 / 0.309 / 0.507s |
+
+Both candidates are at or under both controls on both paths, so neither has a latency
+argument against it. **These are not comparable with the Z39.50 figures the survey
+carries for the same countries**, which were taken on different hardware; a duration
+measured on one machine says nothing about another.
+
+**The reason is structural and is why this generalises**: YAZ's Generic Frontend Server
+speaks HTTP and Z39.50 on one socket, and answers SRU on it wherever the operator has
+configured a database. `metadata._LOC_URL` is already this fact, `http://lx2.loc.gov:210/lcdb`
+answering `text/xml`, and it was read as a property of the Library of Congress rather
+than of YAZ. **The survey read six YAZ banners and never sent an HTTP request to any of
+those sockets.**
+
+What binds: **check for SRU on the Z39.50 port before sizing a target as a client
+problem.** One `curl` per target, and it decided three of eight countries here.
+
+### Greece serves MARC21, not UNIMARC, and it is a different host
+
+The target survey records Greece as `UNIMARC ONLY: usmarc and marc21 both return
+[239] Record syntax not supported`. That is true of `z3950.nlg.gr`, which is a
+Metaproxy. **The National Library of Greece's own Koha is `catalogue.nlg.gr`, a different
+address**, and it serves MARC21: leader `04637cam a2200577 a 4500`, `020`, `245`, `260`,
+and a `100$0` carrying `urn:nbn:gr:nlg:01-A112061`.
+
+So Greece needs neither a Z39.50 client nor a UNIMARC mapping, which were the two things
+that made the session plan call it a mapping ticket rather than a config line.
+
+**It is still not a config line, for a different reason.** `metadata._marc_claims_isbn`
+refuses any `020` carrying a `$q` qualifier, because a qualified entry is a cross
+reference to a different edition and taking one as identity once returned a Ukrainian
+translation of Dune for the American ISBN. **The National Library of Greece uses `$q` for
+the binding**, `χαρτόδετο` for paperback and `σκληρόδετο` for hardback. Measured over 50
+ISBNs drawn from that library's own catalogue: 50 returned a record, 43 passed the guard,
+**7 were rejected and every one was a correct match**. It fails as `NOT_FOUND`, which is
+indistinguishable from a catalogue that does not hold the book, and the function is a hard
+filter for K10plus and the OENB as well. So the rule is right, its stated reason names one
+country's convention, and it covers every country: the recurring shape this register
+already has an entry for.
+
+### A miss rate is not a gain: the candidate has to hold the book too
+
+| | keyless misses, of 50 | the candidate holds | realisable gain | 95% Wilson |
+|---|---|---|---|---|
+| Czechia | 40 | 39 | **78.0%** | 64.8 to 87.2 |
+| Greece | 43 | 31 | **62.0%** | 48.2 to 74.1 |
+
+**The discount is real and differs sharply**: Greece's 86.0% gap becomes a 62.0% gain
+and Czechia's 80.0% becomes 78.0%. **Which of the two ends up larger is not established**:
+the difference is +16.0 points, 95% Newcombe -2.0 to +32.7, which includes zero, and the
+Wilson intervals overlap across 64.8 to 74.1. The rows above are ordered arbitrarily. That
+the discount matters is the finding; the ranking is not one, and an earlier draft of this
+entry made it anyway, at the same n the entry beside it refuses to rank on.
+
+**And a diagnostic beside a hit count is not a failure to answer.** Greece returns the
+true `numberOfRecords` **and** `Unknown schema for retrieval` when no `recordSchema` is
+named. A probe treating any diagnostic as unreadable reported "Greece: realisable gain
+0.0%, 37 unreadable", a confident zero produced entirely by the measuring filter, on the
+country the report recommends. Every previous instance of this in the programme has the
+same shape and a different filter: a hit count read off an empty SRU envelope, a quota
+refusal read as zero, and a transient 503 read as a miss. **The count is deliberately not
+stated here**, because a number in prose does not recount itself and this register has an
+entry about exactly that.
+
+### The DNB and the OENB answer almost nothing outside German publishing, and both are in the default first tier
+
+**Measured 2026-08-30 for #91, n=50 domestic ISBNs per country, one host, asked through
+`metadata._SOURCES` itself so that "answered" means what the application means.** A
+source that answered `rate_limited` or `unavailable` after five retries is excluded from
+its own denominator rather than counted as a miss, **which is the mistake the entry above
+records this programme making again while measuring this**: a refusal scored as a miss, or
+a diagnostic scored as an absence, is a number that describes the measuring filter rather
+than the catalogue. The sample is drawn from Wikidata, which is in
+neither chain, by ISBN registration group, and it is biased towards notable editions:
+Open Library and Google Books hold those best, so these figures **understate** the miss
+rate rather than inflating it.
+
+| | Italy | Czechia | Greece | Spain | Portugal | Brazil | Argentina | Uruguay |
+|---|---|---|---|---|---|---|---|---|
+| DNB | 5 | 2 | **0** | 1 | **0** | **0** | **0** | **0** |
+| K10plus | 12 | 7 | 3 | 5 | 17 | 23 | 15 | 28 |
+| OENB | 4 | 1 | **0** | **0** | **0** | **0** | **0** | **0** |
+| Open Library | 30 | 5 | 7 | 30 | 23 | 34 | 14 | 25 |
+| Google Books | 47/47 | 42/49 | 22/50 | 48/49 | 34/50 | 35/50 | 24/50 | 41/50 |
+
+`sources.DEFAULT_ORDER` leads with the DNB and `ALWAYS_ASKED` is 2, so **a new install
+anywhere in this table spends both of its concurrent lookup slots on sources that answer
+0 to 5 of 50.** That is #94's argument with a number against it, and it is actionable
+with no new provider: it is a default ordering question.
+
+### Most of the coverage the tree credits to the chain is Google Books, and most installations have no key
+
+| Country | keyless chain misses | with a Google key |
+|---|---|---|
+| Greece | **86.0%** (73.8 to 93.0) | 54.0% |
+| Czechia | 80.0% (67.0 to 88.8) | 14.3% |
+| Argentina | 56.0% (42.3 to 68.8) | 42.0% |
+| Portugal | 44.0% (31.2 to 57.7) | 24.0% |
+| Italy | 36.0% (24.1 to 49.9) | **0.0%** |
+| Spain | 36.0% (24.1 to 49.9) | 2.0% |
+| Uruguay | 34.0% (22.4 to 47.8) | 16.0% |
+| Brazil | 20.0% (11.2 to 33.0) | 16.0% |
+
+95% Wilson, n=50. **The intervals overlap between neighbours, so this does not rank
+countries**; it separates the top from the bottom, Greece's floor of 73.8% being above
+Brazil's ceiling of 33.0%.
+
+The session plan already records this correction for Brazil ("5 of 5 from Google Books is true
+only of a deployment that brought its own key"). It reproduces across eight countries.
+
+### A national library does not hold every ISBN in its own registration group
+
+Of 50 Greek-prefix ISBNs drawn from Wikidata, the National Library of Greece holds
+**37**, 95% Wilson 60.4 to 84.1.
+So "legal deposit means the domestic edition is there" is 74% true here, and a coverage
+argument built on 100% overstates the gain by a quarter. Measured through the library's
+own ISBN index, which was verified to discriminate before it was used for anything: an
+ISBN out of its own record returns 1, a foreign ISBN returns 0.
+
+### The Library of Congress is credited with the wrong countries
+
+`metadata.search`'s docstring lists the Library of Congress in the free regional tier "for
+Spanish, Portuguese and Latin American printings". **Nothing had measured that**, and it
+is a published docstring rather than a comment.
+
+Asked by `bath.isbn` over its own SRU, 50 domestic ISBNs per country attempted, 2 or 3
+per country unreadable so the denominators vary:
+
+| | Spain | Portugal | Brazil | Argentina | **Uruguay** | Italy | Czechia | Greece |
+|---|---|---|---|---|---|---|---|---|
+| holds | 12 of 48 | 9 of 48 | 9 of 47 | 8 of 48 | **26 of 47** | 12 of 48 | 3 of 48 | 2 of 47 |
+| | 25.0% | 18.8% | 19.1% | 16.7% | **55.3%** | 25.0% | 6.2% | 4.3% |
+
+**The sentence names the wrong countries.** Uruguay is much its strongest and is not
+named: 55.3% against Spain's and Italy's 25.0% is +28.0 points, 95% Newcombe +9.0 to
++44.4, which excludes zero, so it is one of the few orderings in this work that is
+actually separated. Spain, which the sentence does name, is exactly Italy's, which the
+sentence excludes.
+
+**It is a title search source**, so holding the edition is necessary and not sufficient:
+the figure says the record exists to be found, not that a title query finds it.
+
+**The docstring was corrected in the same wave** and now reads "the Library of Congress
+for Latin American printings", with the table and this reasoning beside it. Nothing below
+Uruguay is separated at this sample size, so the six are not ranked. **There is
+deliberately no test pinning the numbers**, because pinning them means asking a national
+library from the suite, which is a test that fails when that library is down.
+
+### Endpaper ships no catalogue credential, and two countries are closed by that
+
+**Owner, 2026-08-30.** The national libraries of Argentina and Uruguay publish Z39.50
+usernames and passwords on their own public pages, with contact details and no stated
+restriction. Both refuse unauthenticated and answer with them. Both also answer **SRU over
+plain HTTP** and refuse there with the identical `Authentication error`, so a credential
+would need no Z39.50 client at all.
+
+**The answer is no, for both.** The reasoning is a terms of use judgement rather than a
+measurement: a credential published for human librarians is not obviously published for a
+self hosted application to embed and redistribute, and a household would be using
+somebody else's credential rather than its own, which is a different relationship with the
+issuing library than every other source in the chain has.
+
+**What that costs, measured, so the decision is not re-taken as a cheaper one than it
+was.** Argentina is the **second largest** measured coverage gap of the eight countries
+surveyed: 56.0% of a domestic ISBN sample unresolvable without a Google Books key, 95%
+Wilson 42.3 to 68.8, and 42.0% with one. Uruguay is 34.0% and 16.0%. Neither has any other
+route: no open interface, and no HTTP catalogue that answers.
+
+### A number, once written down, stops being re-derived and starts being copied
+
+**By the person who corrected it.** This is the clearest instance this project has
+produced of why a figure in prose needs a test, and it rules out the comfortable
+explanations.
+
+A review seat computed a comparison as `26/50` against `12/50` and reported it: +28.0
+points, 95% Newcombe +9.0 to +44.4. **The same seat then established, in writing, that
+those denominators were wrong**: two or three lookups per country had gone unanswered, so
+the real fractions were `26/47` and `12/48`. It corrected the table accordingly. And then
+it went on quoting +28.0 as sound through three further rounds, **in the same documents in
+which it was insisting on the corrected denominators**. A second seat caught it by
+implementing the method independently, validating it against the neighbouring sentence,
+and only then searching the denominator space for the pair that produces the stated
+triple. The correct figures are +30.3, +10.6 to +47.0, and the conclusion does not move.
+
+**Not inattention, not unfamiliarity, and not a missing measurement.** The right value was
+established by the same person, in writing, and the stale one was repeated beside it. A
+number that has been written down reads as settled, and nobody recomputes what looks
+settled, including its author.
+
+**So the rule is mechanical rather than a matter of care.** Every figure a docstring
+derives from another figure in the same docstring gets a test that recomputes it. Where
+that check is impossible or disproportionate, the docstring names which figures are
+covered and which are not, as `TestTheShelfIsTheOnlyWayIn` does with its blind spots.
+**A limit that could be closed by one call to a helper already in the file is not a limit,
+it is a gap with a sentence in front of it**, and the next reader cannot tell those apart.
+
+The worked example is `metadata.search`'s Library of Congress table: ten derived figures,
+six percentages and four aggregates, all recomputed from the two rows the guard already
+parses. Twenty mutations, twenty caught. Six of them survived the first version of that
+guard, which pinned three of the ten and left the other seven, **which is the defect its
+own docstring diagnoses, recurring inside the fix for it**.
+
+### A finding that rests on a mechanism should say what guards that mechanism
+
+**The search fan-out's deadline is what would cancel a slow national catalogue**, and the
+whole argument for adding one over a slow transport rests on it. Exactly one test
+exercises it, and until 2026-08-30 that test could barely fail.
+
+It slept 5 seconds behind one source against a 4.0 second deadline and asserted the search
+took under 5. A **working** deadline returns at about 4.0, so there was a second of
+headroom and no false failure to worry about. The defect was the other way: a **completely
+broken** deadline returns at about 5.0, against a bound of 5, so the test failed only by
+however much `asyncio.sleep(5)` overshoots 5.000. Its entire ability to detect its own
+regression rested on scheduler noise being positive.
+
+**So a bound that several other conclusions leaned on was, in effect, unguarded**, and
+none of those conclusions said so. That does not weaken them: the mechanism was correct
+throughout and only its test was weak. It changes what a finding has to state. **Name what
+guards the mechanism you are relying on, and check that the guard can fail.**
+
+It is now bounded against the deadline rather than against the sleep, with both figures
+scaled down so the suite gets four seconds back, and **proved to discriminate** by
+removing the timeout in memory: unmutated passes, mutated fails by about a second with a
+message quoting the deadline, the sleep and the elapsed time.
+
+**One thing checked rather than assumed, because it would have made the whole test
+inert.** The deadline constant is read at call time as a bare module global and is bound
+as no default argument anywhere, so patching it in a test actually takes. There is already
+a test elsewhere in this tree for exactly that failure, a constant resolved at import
+rather than at call time, which is why it was worth a minute rather than a shrug.
+
+### An SRU source built on PQF may not build its own query string
+
+**Found by the security seat on 2026-08-30, and it is the recurring shape this register
+already has an entry for: a guard proved on one field, trusted for the field beside it.**
+No count is given here on purpose, because the count is kept elsewhere and a second copy
+of it in a published file is a number that will not recount itself. Two of the three SRU capable targets accept **only** PQF, as the
+`x-pquery` parameter; CQL is refused. So an adapter for them puts a PQF string into an
+HTTP query parameter, on the `fetch.py` side of the tree, where the only PQF escaper
+lives behind a seam it would not go through.
+
+`metadata._CQL_UNSAFE` does **not** cover it. It is `[=<>"()/\\]+`, and `@` is not in
+it. Executed against `_search_terms`, a title term of `@1=1016 harry` becomes
+`@attr 1=4 @1 @attr 1=4 1016 @attr 1=4 harry`, which is exactly the injection the Z39.50
+seam's own escaper was written against: an `@` followed by a digit at the head of a term
+replaces the pinned use attribute, so the query stops being an author or title search and
+becomes something else entirely, with no error anywhere.
+
+**The reason a reviewer signs this off is the finding.** `_CQL_UNSAFE` deletes `"` and
+`\`, two of the three characters the PQF escaper escapes, so the value looks sanitised;
+and the constant's comment names CQL's metacharacters while the string is about to be
+parsed as PQF. That is the tell already recorded here: a guard justified by naming one
+context's rule while it covers another.
+
+**The fix is structural rather than a further arm on the character class**, which is what
+held every previous time: one function produces every PQF string, it is the only way to
+produce one, and a house rule test asserts that nothing outside that module formats a
+string containing `@attr`. Two riders, both measured: the CQL sanitiser must **not** run
+first, because chaining a sanitiser for one grammar into another is the same defect one
+level up; and the refusal of control and surrogate characters is still required but its
+reason changes, since a NUL survives as `%00` and truncates the C string in the
+**server's** parser instead of ours, which is invisible from this side.
+
+**Greece's ISBN lookup is safe by construction and does not need this.** `bath.isbn` is
+built from a validated 13 digit ISBN, the same construction as the three live SRU sources
+already in the chain.
+
+### A source that is not UTF-8 corrupts a shelf rather than failing a search
+
+The Spanish ministry catalogues answer over SRU with ISO 2709 inside the SRU envelope and
+are **not UTF-8**. Three things hold, all measured on this tree's Python 3.14, and the
+first draft of this entry got the mechanism wrong in a way worth recording.
+
+**Nothing raises.** `metadata._parsed` hands a `str` to `ElementTree.fromstring`, and a
+declaration of `ISO-8859-1` or `windows-1252` parses without complaint. And the decode
+that happens first substitutes rather than failing: a response's `.text` decodes with
+`errors="replace"`, so a body whose bytes are not UTF-8 arrives as **mojibake**, with
+every accented character replaced by U+FFFD. Measured: an author of `Solé` arrives as
+`Sol�`.
+
+**So the failure is a corrupted record written to a member's shelf, silently, under a 200
+with no log line.** That is worse than a crash, not better, and it is the thing an adapter
+for those two catalogues has to be written against.
+
+**The remedy is the one the MARCXML reader already uses, and it brings its own hazard
+with it**: read the envelope from the response's bytes rather than its decoded text, and
+catch `ValueError` beside `ParseError`. Those two halves are one change, because the
+`ValueError` exists **only** on the bytes path. Measured, `str` against `bytes`, same
+document:
+
+| declaration | as `str` | as `bytes` |
+|---|---|---|
+| `ISO-8859-1`, `windows-1252` | parses | parses |
+| `EUC-JP`, `Shift_JIS`, `UTF-7` | **parses** | `ValueError: multi-byte encodings are not supported` |
+
+So the text path cannot raise that error and cannot be fixed by catching it, and moving to
+bytes is what makes catching it necessary. **Every parse site in `metadata.py` catches
+`ParseError` and not `ValueError`**: 8 of 8, uniform, which makes it a structural property
+rather than a count that can drift. The MARCXML reader already parses from bytes for this
+reason and grew its `ValueError` arm after a 92 byte body produced a 500.
+
+**What the first draft of this entry said, and why it was wrong**, because the correction
+is the more useful half. It claimed `fromstring` "raises `ValueError` on a body carrying
+its own encoding declaration", and that the hazard was 8 of 13 `try` blocks. Neither
+survives: the declaration Spain actually sends parses fine, the module has 16 `try`
+statements rather than 13, and the 8 is the numerator of a different and stronger fraction
+than the one it was attached to. **A mechanism inherited from a review and not re-derived
+is a claim**, and this one was two review rounds from being written into a published file.
+
+---

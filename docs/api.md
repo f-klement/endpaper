@@ -89,7 +89,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
-| GET | `/api/books/export?format=csv\|txt` | user | File download, not paginated |
+| GET | `/api/books/export?format=csv\|txt\|marcxml` | user | File download, not paginated. `marcxml` needs library mode, **403** without |
 | GET | `/api/books/search?q=` | user | Free-text search for the add flow. Needs no API key |
 | GET | `/api/books/series` | user | Every series, with the gaps in it |
 | GET | `/api/books/authors` | user | Everybody credited on the shelf, with counts, spellings and merges |
@@ -466,9 +466,13 @@ and a catalogue will happily return the other one.
 Library merges printings under a *work*, and `GET /{id}/enrich/candidates` asks that
 cluster with the book's own ISBN: every row in it is a printing of the same book by Open
 Library's own merge rather than by a title match. Underneath it sits the free text search
-across all seven catalogues, which is the only answer for a book with no ISBN, for a work
-Open Library has not merged, and for a good deal of German publishing, where Open Library
-returns 404.
+across every catalogue the library has switched on, which is the only answer for a book
+with no ISBN, for a work Open Library has not merged, and for a good deal of German
+publishing, where Open Library returns 404. A new install has all seven on; see the
+provider list below.
+
+**Open Library switched off answers no cluster at all**, because nothing else here holds
+one. The search half still answers, so the endpoint degrades rather than failing.
 
 Three rules hold that together:
 
@@ -793,6 +797,8 @@ tags: a page of 25 book cards has nowhere to render them, and `books_to_out` is 
 |---|---|---|---|
 | POST | `/api/imports/preview` | user | Reads the file and reports what it is. Writes nothing |
 | POST | `/api/imports/csv` | user | Applies it. `create_missing`, `apply_tags`, `overrides` |
+| POST | `/api/imports/marc/preview` | user | Reads a MARCXML file and reports what it holds. Writes nothing. **403** without library mode |
+| POST | `/api/imports/marc` | user | Applies it. `create_missing`, default **true**. **403** without library mode |
 
 Goodreads, LibraryThing, StoryGraph, Libib, Openreads, or anything else with a
 title column. The approach is taken from **BookWyrm's** `bookwyrm/importers/`,
@@ -831,6 +837,95 @@ another app.
 Statuses are personal, so an import only ever writes the importing member's own
 `user_books` rows. Created books arrive `ownership=unknown`: an export says what
 somebody read, which is silent on whether a copy was ever in the house.
+
+### MARC21, in and out
+
+The exchange format every other library system speaks, and a **library mode**
+feature at both ends: `POST /api/imports/marc` and
+`GET /api/books/export?format=marcxml` both answer **403** with the mode off.
+Enforced on the server rather than by hiding the controls, for the reason
+`routers/public.py` states about the public catalogue: disabling a button in a
+browser is advice to one client. 403 rather than the 404 the public catalogue
+gives, because the caller here holds a session and
+`GET /api/settings/features` already publishes `library_mode` to anybody.
+
+**MARCXML only, never ISO 2709.** The binary serialisation carries a directory
+of byte offsets that has to agree with the field data after every change, and
+every consumer that reads it reads MARCXML too.
+
+**The reader is the one that parses live catalogue answers.** `backend/marc.py`
+composes `metadata.py`'s MARC primitives rather than restating them, so an
+uploaded record is read exactly as a DNB or K10plus answer is: the non-sorting
+delimiters in both spellings, NFC normalisation, the repeated `082 $a`, the
+`020 $q` that marks a cross reference to another edition, the ISBD punctuation
+that introduces the next subfield. What `marc.py` adds is policy, and it differs
+in three places from a lookup's:
+
+* **A record with no title is the only refusal.** A lookup also refuses a title
+  naming a volume slot and refuses a disc, because a catalogue's identifier
+  index matches cross references and the wrong record poisons an entry. An
+  upload is a cataloguer handing over their own file.
+* **Author identifiers are not read**, though `100 $0` is the same subfield the
+  DNB is trusted for. A catalogue is not read for a person's identifier until
+  somebody has compared it live, and nobody can compare an arbitrary upload.
+* **`050` and `650 $2 lcsh` are read**, which no catalogue this app queries
+  sends: they are the Library of Congress call number and subject heading, and
+  both have columns here.
+
+**Matching is ISBN, then author and title together, never title alone.** The CSV
+importer matches on title alone, which is right for a reading history: the worst
+case is a status on the wrong edition of a book somebody read. The worst case
+for a catalogue is two different books folded into one record, and every library
+holds more than one *Selected poems*. Both use `importing.identity_key`, which
+is also what the duplicate finder computes.
+
+**One unreadable record costs one record.** A catalogue export is the product of
+years and is not uniformly clean, so a record with no `245 $a` is counted in
+`skipped` and the rest of the batch completes. The **file** being the wrong
+thing is a 400: not XML, a doctype, an encoding this reader refuses (which
+includes a declared multi-byte one such as `EUC-JP`), no `<record>` element, or
+more than 20,000 records. A body declaring more than the upload cap is a 413
+from the body size middleware, before a byte is spooled.
+
+**A record's values are held to the bounds `POST /api/books` applies.** Strings
+are cut to the column, and a number outside the schema's range is stored as
+absent rather than clamped: `264 $c` of `9999`, MARC's own open ended date, is
+no year at all, and a `245 $n` past the series ceiling is no volume number. See
+[security.md](security.md#the-two-catalogue-uploads-which-are-not-images) for
+what that cost before it existed.
+
+**The preview models both of the import's refusals.** `already_held` counts what
+will be matched and filled in; `blocked` counts what will be refused because its
+ISBN belongs to a book the caller cannot see. Without the second,
+`readable - already_held` overstated what an import would add by exactly the
+number another member holds privately. `blocked` is a count and never a title,
+for the reason the 404-not-403 rule exists.
+
+**More than 20,000 records aborts rather than truncating**, which is the
+opposite of the CSV reader and deliberate. A truncated reading history is a
+partial reading history. A truncated catalogue transfer is an institution being
+told its holdings moved when most of them did not, silently.
+
+**A doctype is refused, and a UTF-16 file with it.** `xml.etree` expands
+internal entities, so a 5 MB upload carrying one can define an entity worth a
+thousand times its own bytes and the upload cap stops bounding the work. The
+doctype check is a byte scan, exact for the ASCII compatible encodings and blind
+to the others, so the encodings it cannot see are refused first: that is what
+makes the scan a guarantee rather than a guess.
+
+**A MARC import writes nothing personal.** A catalogue record carries no reading
+status, no rating and no review, so no `user_books` row is touched and
+`statuses_updated` comes back zero. `create_missing` defaults to **true** here
+and to false on the CSV path: a reading history is mostly books the household
+does not own, and a catalogue transfer that adds no records has transferred
+nothing.
+
+**The export carries the classifications**, which is the half another
+institution shelves by: `082` for Dewey, `050` for Library of Congress, `650`
+with `$0` and `$2` for a GND or LCSH heading. It carries no `008`, because that
+field encodes place of publication, illustration codes, literary form and
+intended audience, none of which this app holds, and filling forty positions
+with guesses writes assertions nobody here can support.
 
 ### Backup and restore
 
@@ -1106,6 +1201,45 @@ is a catalogue to offer. It is the **server's conjunction** of library mode and 
 switch, never either row, so a client cannot get the nesting rule wrong. `library_mode` is
 deliberately **not** on this model: the cataloguer column set it changes is a later ticket,
 so it would be an unread field on the one endpoint a stranger can call.
+
+#### The provider list
+
+`GET /api/settings` carries `catalogue_sources`: the **whole** roster, in the order this
+library asks it, one entry per catalogue. A switched off source is still listed, because
+the screen has to be able to offer it back; leaving it out would make "off" and "not in
+this build" the same thing on screen.
+
+Only `source` and `enabled` are the library's to set. The rest are computed on the server
+so a browser cannot get the rule wrong: `answers_lookup` and `answers_search` say which
+questions this catalogue can answer at all (the BnF and the Library of Congress answer
+title search only), `asked_first` says whether it is in the leading pair asked together on
+every ISBN lookup, and `needs_a_key` with `ready` say whether it can answer at all in this
+deployment.
+
+**What the order decides, and what it does not.** It is the order sources are **asked**.
+It is not the order they are **believed** when two disagree about one field, which stays
+in the backend: no single order reproduces both of today's behaviours, so one list driving
+both would silently move something nobody touched. `backend/sources.py` carries the
+argument in full.
+
+**Off means not asked**, on every path in the catalogue chain that reaches a source for a
+record. It is not a claim about every request the application makes: the cover store still
+asks Open Library and the DNB for an image, and the author authority still asks three more
+hosts. `backend/sources.py` states that boundary.
+
+With every capable source switched off, **all four routes that reach a catalogue answer
+409** naming the setting rather than 404 or an empty page: `GET /api/books/lookup`,
+`GET /api/books/search`, `GET /api/books/{id}/enrich/candidates` and
+`POST /api/books/{id}/enrich`. A 404 there would be a claim about the book made by an app
+that asked nobody, and an empty result page reads the same way. Enrichment refuses up
+front rather than per half, so one request cannot answer 409 for its ISBN half and fail
+for its search half.
+
+`PUT /api/settings` takes `catalogue_sources` as a list of `{source, enabled}`. It is
+**merged against what is stored, not taken whole**: a payload naming one source says
+nothing about the others, and completing it from the defaults would read a request to
+disable one catalogue as an instruction to switch six on. A name this build does not know
+is refused with 422, and the list is bounded at the size of the roster.
 
 `PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled` and
 `public_catalogue_indexing_enabled`, and **refuses no combination of them**: an admin may

@@ -39,8 +39,16 @@ so it is a proposal you confirm rather than a tag applied behind you.
 Four schemes are stored: Dewey and Library of Congress shelf numbers, the
 subject headings the German National Library assigns, each with the identifier
 that names it in the national authority file, and Library of Congress Subject
-Headings, which the record supplies as a phrase rather than a number. Nothing
-displays them yet.
+Headings, which the record supplies as a phrase rather than a number. A book shows
+the headings it carries, any of them can be filtered on, and a shelf can be ordered
+by its Dewey numbers.
+
+**A provider list.** Every catalogue this build can ask is listed in Settings, with a
+switch and a position. Off means not asked, not deprioritised. The order is the order they
+are asked in; which source is believed when two disagree is a separate rule that is
+deliberately not exposed.
+
+---
 
 **Covers are stored here**, not hotlinked. Every candidate image is fetched and
 checked before it is offered, so a broken link never becomes a book's cover, and
@@ -179,6 +187,17 @@ setting can be linked to rather than described as "third card down".
 once, in one sentence, whether you want to buy the author a coffee. Nothing else
 in the app asks at all.
 
+**MARC21 import and export** (library mode). Read a MARCXML file another
+library exported; write the whole shelf back out as MARCXML. Matched on ISBN,
+then author and title together. Carries the classifications, which is what a
+receiving library shelves by.
+
+**ISO 2709 is deliberately not read or written**, the binary MARC serialisation. It carries a
+directory of byte offsets that has to agree with the field data after every
+change, and every consumer that reads it reads MARCXML too. Authority record
+import is also out: this app stores an author identifier, not an authority
+record.
+
 **A public catalogue, off by default and behind two switches.** Library mode
 changes what a cataloguer sees: call number, Classification and record status in,
 ownership and reading status out. It publishes nothing. The publish switch is a
@@ -200,6 +219,13 @@ are different decisions.
 
 **No offline mode.** Everything on every screen comes from the API, so an
 offline shell could only lie.
+
+**No Apple build, and none planned.** No iOS app, no iPad app, no macOS
+desktop client. The reason is hardware rather than product: building for an
+Apple platform requires Apple hardware to build on. On those platforms the
+progressive web app is the whole offering, and it is a real one, with its own
+icon and its own window. It needs the instance reachable, like every other
+screen here.
 
 **No social features**, no federation, no recommendations, no reading goals.
 

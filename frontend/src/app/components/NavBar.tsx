@@ -9,7 +9,7 @@ import {
 import { Icon } from "../../components";
 import type { IconName } from "../../components";
 import { useTranslation, type MessageKey } from "../../i18n";
-import { useExportLibrary } from "../hooks";
+import { useExportLibrary, useFeatureFlags } from "../hooks";
 
 /**
  * The three destinations that stay on the bar as icons.
@@ -89,6 +89,19 @@ const ITEM_CLASS =
   "hover:bg-paper-100 transition-colors dark:text-paper-200 dark:hover:bg-paper-800";
 
 /**
+ * Which export formats to offer.
+ *
+ * MARCXML only in library mode. It is an exchange format for handing a
+ * catalogue to another institution, and a household has nothing to do with it;
+ * the server refuses the format outright without the mode, so this is about
+ * clutter rather than about access.
+ */
+function exportFormats(libraryMode: boolean): ExportFormat[] {
+  const formats: ExportFormat[] = [ExportFormat.csv, ExportFormat.txt];
+  return libraryMode ? [...formats, ExportFormat.marcxml] : formats;
+}
+
+/**
  * The application bar.
  *
  * Fixed to the top rather than a left rail. The rail cost 56px of a phone's
@@ -108,6 +121,10 @@ export default function NavBar({
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { exportLibrary } = useExportLibrary();
+  // MARCXML is offered only in library mode. The server refuses the format
+  // without it, so this decides what a household is shown rather than what it
+  // may do.
+  const flags = useFeatureFlags();
   const { t } = useTranslation();
 
   // Under proxy auth both of these are inert: the upstream owns the session,
@@ -258,7 +275,7 @@ export default function NavBar({
 
             {exportOpen && (
               <div className="border-t border-paper-200 bg-paper-100 flex gap-2 px-4 py-2.5 dark:border-paper-800 dark:bg-paper-950/60">
-                {[ExportFormat.csv, ExportFormat.txt].map((format) => (
+                {exportFormats(flags?.library_mode ?? false).map((format) => (
                   <button
                     key={format}
                     onClick={() => {

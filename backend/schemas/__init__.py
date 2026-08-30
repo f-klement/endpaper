@@ -49,8 +49,11 @@ from schemas.book import (
 )
 from schemas.classification import (
     MAX_CLASSIFICATIONS_PER_BOOK,
+    ClassificationFacets,
     ClassificationIn,
     ClassificationOut,
+    DivisionFacetOut,
+    HeadingFacetOut,
 )
 from schemas.collection import (
     CollectionAssign,
@@ -66,7 +69,13 @@ from schemas.custom_field import (
     CustomFieldValueOut,
     CustomFieldValueUpdate,
 )
-from schemas.imports import ImportPreviewOut, ImportPreviewRow, ImportResultOut
+from schemas.imports import (
+    ImportPreviewOut,
+    ImportPreviewRow,
+    ImportResultOut,
+    MarcPreviewOut,
+    MarcPreviewRow,
+)
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
 from schemas.note import NoteCreate, NoteOut
 from schemas.progress import ProgressCreate, ProgressOut
@@ -78,6 +87,8 @@ from schemas.public import (
 )
 from schemas.quote import QuoteCreate, QuoteOut, QuoteWithBookOut
 from schemas.settings import (
+    CatalogueSourceOut,
+    CatalogueSourcePreference,
     FeatureFlagsOut,
     LoginImageOut,
     OverdueNotifyResult,
@@ -139,8 +150,11 @@ __all__ = [
     "CollectionOut",
     "CollectionStat",
     "CollectionUpdate",
+    "ClassificationFacets",
     "ClassificationIn",
     "ClassificationOut",
+    "DivisionFacetOut",
+    "HeadingFacetOut",
     "CopyCreate",
     "CoverBackfillOut",
     "CustomFieldCreate",
@@ -156,12 +170,16 @@ __all__ = [
     "BookMatch",
     "LoanCreate",
     "LocationOut",
+    "MarcPreviewOut",
+    "MarcPreviewRow",
     "MemberEmailOut",
     "MergeRequest",
     "SeriesOut",
     "LoginRequest",
     "LoanOut",
     "MyOverdueOut",
+    "CatalogueSourceOut",
+    "CatalogueSourcePreference",
     "FeatureFlagsOut",
     "LoginImageOut",
     "RestoreResult",

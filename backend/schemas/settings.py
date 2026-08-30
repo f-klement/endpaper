@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
-from enums import Locale, OverdueNotifyReason, OverdueSender
+from enums import CatalogueSource, Locale, OverdueNotifyReason, OverdueSender
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
 #: 1 rather than 0: a zero would mean "resend on every tick", which is an hourly
@@ -36,6 +36,80 @@ MAX_TELEGRAM_TOKEN = 300
 MAX_TELEGRAM_CHAT = 64
 
 
+#: The provider list can never be longer than the roster, because every entry
+#: names one member of a closed enum. Stated as a bound on the request body all
+#: the same: without it a payload repeating one source a million times is a
+#: million objects validated before `sources.parse` gets to drop all but one.
+MAX_CATALOGUE_SOURCES = len(CatalogueSource)
+
+
+class CatalogueSourcePreference(BaseModel):
+    """One row of the provider list, as a client sends it back.
+
+    **Two fields, because they are the only two a household sets.** Everything
+    else on `CatalogueSourceOut` is derived, and accepting a derived field back
+    would be accepting a client's opinion about a rule the server owns.
+    """
+
+    source: CatalogueSource
+    enabled: bool
+
+
+class CatalogueSourceOut(BaseModel):
+    """One catalogue, as the settings screen needs to draw it.
+
+    **Only `source` and `enabled` are stored; every other field is derived**,
+    and they are served rather than recomputed in the browser for the reason
+    `public_catalogue_published` is: two places deciding one rule is how a
+    screen comes to promise something the server does not do.
+
+    `sources.describe` is the one place that decides them, and each field below
+    says what it means rather than being enumerated here. This paragraph used to
+    list them and was stale on two within a round, which is what a summary of
+    five fields six lines above the five fields is for.
+    """
+
+    source: CatalogueSource
+    #: Off means **not asked**, on every path in `metadata.py` that reaches this
+    #: catalogue for a record. It is not a claim about every request the
+    #: application makes: `covers.py` still asks Open Library and the DNB for a
+    #: cover image, and `authority.py` asks three more hosts about an author.
+    #: `backend/sources.py` states that boundary in full, and this sentence used
+    #: to contradict it.
+    enabled: bool
+    #: Whether this source can answer an ISBN at all. False for the BnF and the
+    #: Library of Congress, which answer title search only, so the screen can
+    #: say that reordering them changes nothing about scanning a barcode.
+    answers_lookup: bool
+    answers_search: bool
+    #: Whether it is one of the leading enabled sources asked together on every
+    #: lookup. This is what "what does enabling cost" resolves to on the ISBN
+    #: path: everything below the leading run is asked only after a miss.
+    asked_first: bool
+    #: Whether it needs a credential the household supplies. Google Books alone
+    #: today.
+    needs_a_key: bool
+    #: Whether that credential is in force, from the environment or the table.
+    #:
+    #: **Sent beside `ready` rather than folded into it**, because they are two
+    #: causes and a screen showing only the conjunction cannot tell them apart.
+    #: A library with a key whose Google Books card is switched off was told to
+    #: add a key it already had, which is the exact symptom this feature exists
+    #: to stop somebody hunting for.
+    has_key: bool
+    #: Whether it **could** answer if asked, which is false only for a source
+    #: needing a key that this deployment has not got: Google Books with none
+    #: stored and none in the environment. **The most likely single cause of
+    #: "why is this not working"**, so it is a field rather than something a
+    #: reader is left to infer from two other screens.
+    #:
+    #: Deliberately independent of `enabled`. A household switching Google Books
+    #: on wants to be told there is no key at the moment it switches it on, and
+    #: a field that went false only once the source was already enabled could
+    #: not say so first. See `sources.describe`.
+    ready: bool
+
+
 class LoginImageOut(BaseModel):
     """Where the login background lives, as a path under the /covers mount."""
 
@@ -60,12 +134,34 @@ class FeatureFlagsOut(BaseModel):
     goodreads_lookup_enabled: bool
     default_locale: Locale
 
+    # ── Library mode ─────────────────────────────────────────────────────
+    #: Whether this Library is running as a small archive rather than a
+    #: household.
+    #:
+    #: **It was deliberately absent for a round**, because it had no reader, and
+    #: an unread field on the one endpoint a stranger can call is disclosure
+    #: with nothing on the other end of it. The note left here said it cost one
+    #: line to add back beside its first consumer. MARC import and export is
+    #: that consumer: the export menu offers MARCXML only in library mode, and
+    #: the MARC import section appears only there, so a client with no session
+    #: to read `GET /api/settings` from still has to be told.
+    #:
+    #: **The raw switch, not a conjunction**, unlike the field below it. There
+    #: is nothing to conjoin: the server gates both MARC routes on this row
+    #: alone, so a client reading it gets exactly the answer the routes give.
+    #:
+    #: What it discloses to a caller with no token is one boolean of deployment
+    #: posture: this instance is run as a library. It says nothing about the
+    #: catalogue, and **it is not the same disclosure as the field below it**,
+    #: which was the first justification written here and is measurably wrong:
+    #: with library mode on and nothing published the response reads
+    #: `library_mode: true, public_catalogue_published: false`, so this is
+    #: strictly the wider of the two in that state. It is published because a
+    #: client with no admin session cannot otherwise tell whether to offer a
+    #: MARC control the server will answer 403 to.
+    library_mode: bool = False
+
     # ── The public catalogue ─────────────────────────────────────────────
-    #: **`library_mode` is deliberately not here**, and was for a round. It had
-    #: no reader: the cataloguer column set it changes is a later ticket, and an
-    #: unread field on the one endpoint a stranger can call is disclosure with
-    #: nothing on the other end of it. It costs one line to add back beside its
-    #: first consumer.
     #:
     #: Whether a reader with no account may search and read item records.
     #:
@@ -98,6 +194,17 @@ class SettingsOut(BaseModel):
     google_books_api_key_from_env: bool = False
     goodreads_lookup_enabled: bool
     default_locale: Locale
+
+    # ── Catalogue sources ────────────────────────────────────
+    #: The whole roster, always, in the order this library asks them, whether or
+    #: not each is on. **Never only the enabled ones**: the screen has to draw a
+    #: switched off source in order to offer switching it back on, and a list
+    #: that omitted them would make "off" and "not in this build" the same
+    #: thing on screen.
+    #:
+    #: Empty only if `sources.DEFAULT_ORDER` is, which it is not. It is a list
+    #: rather than a map because the order is the point.
+    catalogue_sources: list[CatalogueSourceOut] = Field(default_factory=list)
 
     # ── Overdue reminders ────────────────────────────────────────────────
     overdue_webhook_enabled: bool = False
@@ -187,6 +294,22 @@ class SettingsUpdate(BaseModel):
     google_books_api_key: str | None = Field(default=None, max_length=200)
     goodreads_lookup_enabled: bool | None = None
     default_locale: Locale | None = None
+
+    #: The provider list, sent whole rather than patched.
+    #:
+    #: **A partial list is accepted and completed rather than refused**, by the
+    #: same `sources.parse` a stored row goes through: anything it does not name
+    #: is appended in the default order and enabled. One door for both, so a
+    #: payload and a restore cannot disagree about what an unmentioned source
+    #: means. A repeat is dropped, and a name this build does not know is
+    #: dropped rather than 422ing, because a client one release ahead is not a
+    #: bad request.
+    #:
+    #: Bounded because a request body is bounded, not because the roster is:
+    #: see `MAX_CATALOGUE_SOURCES`.
+    catalogue_sources: list[CatalogueSourcePreference] | None = Field(
+        default=None, max_length=MAX_CATALOGUE_SOURCES
+    )
 
     overdue_webhook_enabled: bool | None = None
     #: An empty string clears the destination. `None` leaves it untouched.

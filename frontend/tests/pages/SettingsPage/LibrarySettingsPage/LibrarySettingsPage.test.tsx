@@ -47,6 +47,50 @@ beforeEach(() => {
 });
 
 describe("LibrarySettingsPage", () => {
+  /** The feature flags, with library mode where a test wants it. */
+  function stubLibraryMode(on: boolean) {
+    api.on("/api/settings/features", {
+      body: {
+        google_books_enabled: false,
+        goodreads_lookup_enabled: false,
+        default_locale: "en",
+        library_mode: on,
+      },
+    });
+  }
+
+  it("does not offer the MARC card to a household", async () => {
+    // The server refuses both MARC routes without library mode, so this is
+    // about not showing a household an exchange format nobody in it can use.
+    stubLibraryMode(false);
+    render();
+
+    await screen.findByRole("heading", { name: "Bring a library across" });
+    expect(
+      screen.queryByRole("heading", { name: "Take a catalogue across" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the MARC card in library mode", async () => {
+    stubLibraryMode(true);
+    render();
+
+    expect(
+      await screen.findByRole("heading", { name: "Take a catalogue across" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the CSV import in library mode too", async () => {
+    // An archive still has people who arrive from Goodreads. The MARC card is
+    // an addition rather than a replacement.
+    stubLibraryMode(true);
+    render();
+
+    expect(
+      await screen.findByRole("heading", { name: "Bring a library across" }),
+    ).toBeInTheDocument();
+  });
+
   it("draws all three cards", async () => {
     render();
 

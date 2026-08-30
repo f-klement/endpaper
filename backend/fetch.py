@@ -75,6 +75,15 @@ MAX_REDIRECTS: Final = 2
 #: where a 1.8 GB peak has already caused an OOMKill once. `metadata.search`
 #: asks seven sources at once and parsing retains a measured 15.28x the wire
 #: bytes, so the worst case this admits is 7 x 2 MiB x 15.28, about 224 MB.
+#:
+#: **Which makes the ceiling sixteen concurrent sources, and it is worth having
+#: written down before somebody proposes the seventeenth.** 536,870,912 divided
+#: by (2,097,152 x 15.28) is 16.75, so seven spends 41.8% of the pod and the
+#: seventeenth source exceeds it outright. The provider list (`sources.py`) lets
+#: a library switch sources **off**, never on beyond the roster, so nothing a
+#: household does moves this: the bound is the roster's size, which is why
+#: `tests/test_fetch.py::_concurrent_search_sources` counts
+#: `sources.SEARCH_SOURCES` rather than whatever is enabled.
 #: Seven *honest* worst cases is about 4.49 MiB on the wire and about 72 MB
 #: parsed. The seventh is the ÖNB, and the figure is its **largest** measured
 #: page, 516,771 bytes (`alma.publisher=Zsolnay`, 50 records, 2026-08-27), not

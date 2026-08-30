@@ -6,7 +6,7 @@ import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { searchUrl } from "../../../lib/goodreads";
 import { CoverImage } from "../../components";
-import { Icon } from "../../../components";
+import { Button, Icon } from "../../../components";
 
 interface BookHeaderProps {
   book: BookOut;
@@ -62,19 +62,42 @@ export default function BookHeader({
           className="w-full h-56 object-cover object-top bg-gradient-to-br from-accent-100 to-accent-200"
         />
 
-        <button
-          onClick={onBack}
-          className="absolute top-4 left-4 bg-paper-0/90 backdrop-blur-sm rounded-full p-2 shadow-sm text-paper-700 dark:text-paper-200"
-        >
-          ← {t("common.back")}
-        </button>
+        {/* Both of these are the shared Button rather than their own classes,
+            and the reason is not tidiness. They used to say `bg-paper-0/90`
+            with `dark:text-paper-200`, and `paper-0` is the top surface in
+            every palette in **both** modes: it is the one paper token that is
+            never redefined under `.dark`, which is why every dark call site in
+            this app spells `dark:bg-paper-900` instead. So the dark variant
+            moved the ink and left the pill white, and the label measured
+            1.26:1 against the 4.5:1 WCAG 1.4.3 asks. `secondary` carries the
+            matching pair (14.25:1 light, 15.79:1 dark) because the fill and
+            the foreground are stated together, which is the same rule the
+            accent fill tokens exist for.
 
-        <button
+            Only position is passed through `className`. Anything that
+            re-spells a utility the variant already sets (the radius, the
+            shadow, the height) would be two classes for one property, and
+            which of them wins is decided by Tailwind's output order rather
+            than by the order they are written in here. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onBack}
+          icon={<Icon name="chevron" className="h-3.5 w-3.5 rotate-180" />}
+          className="absolute top-3 left-3"
+        >
+          {t("common.back")}
+        </Button>
+
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => coverInput.current?.click()}
-          className="absolute bottom-3 right-3 bg-paper-0/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-xs font-medium text-paper-700 hover:bg-paper-0 transition-colors dark:text-paper-200"
+          icon={<Icon name="camera" className="h-3.5 w-3.5" />}
+          className="absolute bottom-3 right-3"
         >
           {t("book.uploadCover")}
-        </button>
+        </Button>
         <input
           ref={coverInput}
           type="file"

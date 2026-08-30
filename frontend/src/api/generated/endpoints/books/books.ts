@@ -48,6 +48,7 @@ import type {
   BookStatusUpdate,
   BulkRequest,
   BulkResult,
+  ClassificationFacets,
   CollectionAssign,
   ConfirmedIdentifierOut,
   CopyCreate,
@@ -110,6 +111,15 @@ export const getListBooksUrl = (params?: ListBooksParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ["classification"];
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? "null" : String(v));
+      });
+      return;
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : String(value));
     }
@@ -1819,6 +1829,176 @@ export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
 > => {
   return useMutation(getBulkActionMutationOptions(options), queryClient);
 };
+export const getListClassificationsUrl = () => {
+  return `/api/books/classifications`;
+};
+
+/**
+ * Every heading in the library and every Dewey division, each with a count.
+ *
+ * The source for the classification filter panel, and the counterpart of
+ * `/tags` and `/locations`. Ordered here so the response is deterministic:
+ * headings by scheme then number, divisions by number, both ascending, which
+ * for Dewey is shelf order and for a subject vocabulary is at least stable.
+ * The order a reader sees is the client's, as it is for tags.
+ *
+ * **The counting is the shelf's**, and this handler deliberately holds none of
+ * it. A row in `classifications` carries no member, so nothing about it says
+ * who may see it, and a facet list built here with a bare query would publish
+ * the subject headings of other people's private reading without returning a
+ * single Book. `Shelf.classification_facets` applies the viewer's predicate by
+ * construction, and `tests/test_shelf.py` names this exact disclosure as the
+ * reason its fourth pass exists.
+ * @summary List Classifications
+ */
+export const listClassifications = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationFacets> => {
+  return customFetch<ClassificationFacets>(getListClassificationsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListClassificationsQueryKey = () => {
+  return [`/api/books/classifications`] as const;
+};
+
+export const getListClassificationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listClassifications>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listClassifications>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListClassificationsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listClassifications>>
+  > = ({ signal }) => listClassifications({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listClassifications>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListClassificationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listClassifications>>
+>;
+export type ListClassificationsQueryError = unknown;
+
+export function useListClassifications<
+  TData = Awaited<ReturnType<typeof listClassifications>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassifications>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listClassifications>>,
+          TError,
+          Awaited<ReturnType<typeof listClassifications>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListClassifications<
+  TData = Awaited<ReturnType<typeof listClassifications>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassifications>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listClassifications>>,
+          TError,
+          Awaited<ReturnType<typeof listClassifications>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useListClassifications<
+  TData = Awaited<ReturnType<typeof listClassifications>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassifications>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary List Classifications
+ */
+
+export function useListClassifications<
+  TData = Awaited<ReturnType<typeof listClassifications>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassifications>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListClassificationsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getBackfillCoversUrl = (params?: BackfillCoversParams) => {
   const normalizedParams = new URLSearchParams();
 
@@ -2573,6 +2753,20 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
 };
 
 /**
+ * The shelf this member can see, as a file.
+ *
+ * **MARCXML needs library mode and the other two do not.** A CSV export is a
+ * household reading its own shelf in a spreadsheet. A MARC record is a
+ * catalogue record handed to another institution, which is what library mode
+ * is for, and offering it everywhere would put a format nobody in a household
+ * can use in front of everybody. Enforced here rather than by hiding the menu
+ * entry: disabling a control in the browser is advice to one client, which is
+ * the sentence `routers/public.py` already states about the public catalogue.
+ *
+ * **403, not 404.** The route exists and the member may call it; the format
+ * is switched off. That is the same answer registration gives when it is
+ * closed, and there is nothing to conceal: `GET /api/settings/features`
+ * already tells any caller whether library mode is on.
  * @summary Export Books
  */
 export const exportBooks = async (
@@ -5447,10 +5641,12 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
 /**
  * Fill in the fields a book is missing, from every catalogue available.
  *
- * Matched by ISBN when there is one, which runs the full merged chain (the
- * DNB and K10plus together, then the Austrian National Library, then Open
- * Library, then Google), and by title and author otherwise, which runs the
- * ranked search across all seven sources.
+ * Matched by ISBN when there is one, which runs the full merged chain, and by
+ * title and author otherwise, which runs the ranked search. **Which
+ * catalogues either of those asks is the library's own provider list**, set
+ * in Settings; a new install asks the DNB and K10plus together, then the
+ * Austrian National Library, then Open Library, then Google, and searches all
+ * seven. A source switched off is not asked on either path.
  *
  * **No API key is required.** This was Google-only and refused outright
  * without a key, which made it useless for exactly the books the German and

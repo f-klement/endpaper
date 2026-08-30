@@ -646,10 +646,10 @@ class TestOneBadRecordCostsOneResult:
     there is no `ValidationError` handler in the app. Before this guard a single
     record tripping any bound answered 500 and lost every other row on the page.
 
-    The lookup path answers the same problem the same way, in `_headings`.
+    The lookup path answers the same problem the same way, in `classifications.bounded_headings`.
 
     **The classifications no longer reach that guard at all.** They go through
-    `_headings` first, like the lookup path, so an unusable heading costs its
+    `classifications.bounded_headings` first, like the lookup path, so an unusable heading costs its
     own row and a ninth heading costs the ninth heading. Everything else in the
     record still costs the whole result, `year` being the reachable one: MARC
     writes 9999 for a continuing resource and `MAX_YEAR` is 2200.
@@ -706,7 +706,7 @@ class TestOneBadRecordCostsOneResult:
         """400 characters against a 200 character column.
 
         It used to drop the whole result, because the headings went straight
-        into `BookMatch`. They go through `_headings` now, which is what the
+        into `BookMatch`. They go through `classifications.bounded_headings` now, which is what the
         lookup path always did with the same record.
         """
         res = self._search(
@@ -744,7 +744,7 @@ class TestOneBadRecordCostsOneResult:
         though the record writes its subject headings first.
 
         This pins the parser's own ordering end to end and **not** the sort in
-        `_headings`, which cannot show here: a search result comes from one
+        `classifications.bounded_headings`, which cannot show here: a search result comes from one
         record, so the Dewey number is already at index 0 by the time it
         arrives. The sort is what makes this true of a merged book, and
         `tests/routers/test_books_classifications.py::TestTheLookup::
@@ -894,10 +894,10 @@ class TestSubjectHeadingsOnASearchRow:
         """A record carrying more subject headings than the whole book budget.
 
         Measured live: one record carries 14 against at most two
-        classifications. `Record.match_headings` slices before `_SCHEME_ORDER`
+        classifications. `Record.match_headings` slices before `classifications.SCHEME_ORDER`
         is applied, so the parser emitting the `<classification>` elements first
         is what keeps the Dewey number and the call number on the row, and
-        `_headings` then puts the Dewey number in front.
+        `classifications.bounded_headings` then puts the Dewey number in front.
         """
         match = self._search(
             client,

@@ -29,7 +29,10 @@
  * rather than something this app will see, the DNB being its only supplier
  * here and German its only caption: `4203576-4` names one heading whatever a
  * record calls it. What differs is that a Dewey number also sorts, and a GND
- * number does not, which costs nothing because nothing here sorts on it.
+ * number does not. That is now a visible difference rather than a latent one:
+ * `BookSort.DDC` orders a shelf by Dewey and there is deliberately no
+ * counterpart for the other three, because two of them have no order and the
+ * third does not sort as text.
  *
  * **LCSH is the one member with no identifier at all, and that is measured
  * rather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a
@@ -40,7 +43,7 @@
  * honest and worth knowing: a heading the Library of Congress later revises
  * (`Afro-Americans` became `African Americans`) changes this scheme's
  * identifier, where a GND number or a Dewey notation survives its own
- * recaptioning. That is why LCSH sorts last in `_SCHEME_ORDER`.
+ * recaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.
  *
  * **A person's identifier is not one of these**, though the DNB writes it in
  * the same `$0`: `100 $0` says who wrote the book, and every scheme here says
@@ -48,9 +51,10 @@
  * `author_identifiers` table, which is a different store keyed on a name
  * rather than on a book.
  *
- * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. The other three
- * are stored because a catalogue heading is worth keeping whole, not because
- * anything reads them yet.
+ * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
+ * now: a book shows the headings it carries, and any of them can be filtered
+ * on. What DDC has that the others do not is a second reading, the division,
+ * which is what makes it browsable and sortable as well as filterable.
  */
 export type ClassificationScheme =
   (typeof ClassificationScheme)[keyof typeof ClassificationScheme];

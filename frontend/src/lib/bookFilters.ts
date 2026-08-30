@@ -70,6 +70,21 @@ export interface BookFilters {
   discuss: boolean;
   sort: BookSort;
   tagIds: number[];
+  /**
+   * Exact headings, each `scheme:number`, ANDed like tags.
+   *
+   * Strings rather than ids, and that is the data rather than a shortcut: a
+   * classification row belongs to one book, so two books sharing a heading
+   * share no row and there is no id to name. The pair is the identity.
+   */
+  headings: string[];
+  /**
+   * Dewey divisions, three digits ending in zero, ORed.
+   *
+   * ORed where `headings` is ANDed, because a division is a shelf location and
+   * a book has essentially one: see `docs/decisions.md`.
+   */
+  ddcDivisions: string[];
 }
 
 export const DEFAULT_FILTERS: BookFilters = {
@@ -85,6 +100,8 @@ export const DEFAULT_FILTERS: BookFilters = {
   discuss: false,
   sort: BookSort.title_asc,
   tagIds: [],
+  headings: [],
+  ddcDivisions: [],
 };
 
 function isStatus(value: string | null): value is ReadStatus {
@@ -162,6 +179,12 @@ export function readFilters(params: URLSearchParams): BookFilters {
     // `?collection=4` is the link the collections page offers, and
     // `?collection=unfiled` the one the picker's empty option offers.
     collection: readCollection(params.get("collection")),
+    // Repeated, not comma separated, because an LCSH heading is a phrase and
+    // phrases carry commas. `getAll` is what makes that work, and it is why
+    // this one field cannot follow `tags`.
+    headings: params.getAll("classification").filter(Boolean),
+    // Comma separated is safe here: a division is three digits.
+    ddcDivisions: (params.get("ddc") ?? "").split(",").filter(Boolean),
   };
 }
 
@@ -191,6 +214,10 @@ export function toParams(filters: BookFilters): ListBooksParams {
     ...(filters.collection === "unfiled" ? { unfiled: true } : {}),
     ...(filters.discuss ? { discuss: true } : {}),
     ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
+    ...(filters.headings.length ? { classification: filters.headings } : {}),
+    ...(filters.ddcDivisions.length
+      ? { ddc: filters.ddcDivisions.join(",") }
+      : {}),
     sort: filters.sort,
   };
 }

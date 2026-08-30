@@ -1,4 +1,5 @@
 import type {
+  ClassificationFacets,
   CollectionOut,
   LocationOut,
   TagOut,
@@ -6,6 +7,7 @@ import type {
 import { useTranslation } from "../../../i18n";
 import type { LibraryView } from "../../../lib/libraryView";
 import { TagPicker } from "../../components";
+import ClassificationPicker from "./ClassificationPicker";
 import type { BookFilters as Filters } from "../types";
 import {
   FORMAT_FILTERS,
@@ -36,11 +38,20 @@ interface BookFiltersProps {
   collections: CollectionOut[];
   onToggleTag: (tagId: number) => void;
   onClearTags: () => void;
+  classifications: ClassificationFacets | undefined;
+  showClassificationPanel: boolean;
+  onToggleClassificationPanel: () => void;
+  onToggleHeading: (heading: string) => void;
+  onToggleDivision: (division: string) => void;
+  onClearClassifications: () => void;
   view: LibraryView;
   onViewChange: (view: LibraryView) => void;
 }
 
-/** The status pills, sort select and collapsible tag panel. Presentational. */
+/**
+ * The status pills, the sort select, and the two collapsible panels.
+ * Presentational.
+ */
 export default function BookFilters({
   filters,
   tags,
@@ -51,11 +62,21 @@ export default function BookFilters({
   collections,
   onToggleTag,
   onClearTags,
+  classifications,
+  showClassificationPanel,
+  onToggleClassificationPanel,
+  onToggleHeading,
+  onToggleDivision,
+  onClearClassifications,
   view,
   onViewChange,
 }: BookFiltersProps) {
   const { t } = useTranslation();
   const activeTagCount = filters.tagIds.length;
+  // Both groups count towards one badge, because the pill is one control and
+  // "3" beside it should mean three things are narrowing the shelf.
+  const activeClassificationCount =
+    filters.headings.length + filters.ddcDivisions.length;
 
   return (
     <>
@@ -344,6 +365,52 @@ export default function BookFilters({
             tags={tags}
             selectedIds={filters.tagIds}
             onToggle={onToggleTag}
+          />
+        </div>
+      )}
+
+      {/* Beside the tag pill and never inside it. The two filter the same
+          shelf and mean different things: a tag is this library's word, a
+          heading is a published scheme's. Folding them into one control would
+          be the flattening the whole store exists to avoid. */}
+      <div className="mt-2">
+        <button
+          onClick={onToggleClassificationPanel}
+          className={`text-sm px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+            activeClassificationCount > 0
+              ? "bg-accent-fill border-accent-fill text-on-accent"
+              : "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
+                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300"
+          }`}
+        >
+          <Icon name="library" className="w-3.5 h-3.5" />{" "}
+          {t("classification.filter")}{" "}
+          {activeClassificationCount > 0 && `(${activeClassificationCount})`}
+          <Icon
+            name="chevron"
+            className={`w-3 h-3 opacity-70 transition-transform duration-150 ${
+              showClassificationPanel ? "-rotate-90" : "rotate-90"
+            }`}
+          />
+        </button>
+        {activeClassificationCount > 0 && (
+          <button
+            onClick={onClearClassifications}
+            className="ml-2 text-xs text-paper-600 hover:text-paper-800 underline dark:text-paper-400 dark:hover:text-paper-300"
+          >
+            {t("library.clear")}
+          </button>
+        )}
+      </div>
+
+      {showClassificationPanel && (
+        <div className="mt-2 p-3 bg-paper-50 rounded-xl border border-paper-100 dark:bg-paper-900 dark:border-paper-800">
+          <ClassificationPicker
+            facets={classifications}
+            selectedHeadings={filters.headings}
+            selectedDivisions={filters.ddcDivisions}
+            onToggleHeading={onToggleHeading}
+            onToggleDivision={onToggleDivision}
           />
         </div>
       )}

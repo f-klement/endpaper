@@ -7,6 +7,7 @@ again".
 """
 
 import ast
+import inspect
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -15,6 +16,10 @@ from typing import get_args
 import pytest
 from pydantic import BaseModel
 from sqlalchemy import CheckConstraint
+
+import metadata
+import sources
+from enums import CatalogueSource
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -551,7 +556,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **83** models under `schemas/`, **30** of
+    Measured on the tree as it stands: **90** models under `schemas/`, **31** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -580,14 +585,34 @@ class TestEveryRequestBodyRowIdIsBounded:
     other seats landed a model each: to 82, then to **83**. **Three trios in
     one wave is the condition this paragraph cannot survive on its own**, so
     the last word before a commit belongs to the command below rather than to
-    this history. **The second number has now
-    stood still through five of those seven**, because every model that
+    this history. It drifted an eighth time on 2026-08-30, to **86**, when the
+    classification facets added `HeadingFacetOut`, `DivisionFacetOut` and
+    `ClassificationFacets`. **The second number has now
+    stood still through six of those eight**, because every model that
     did not move it is served on a response and accepted by no handler, which
     is exactly the distinction the two counts exist to keep visible. Every drift
     was caught by this test rather than by a reader, and a history that stops one
     drift short is the defect this paragraph exists to prevent. A number in prose that
     nothing checks is a number that is eventually wrong, and this file exists
     precisely to stop a defect being found a third time by a person.
+
+    It drifted a ninth time on 2026-08-30, to **90**, when MARC import added
+    `MarcPreviewOut` and `MarcPreviewRow`. **The second number stood still for
+    the seventh of the nine**: both are served on the preview response and no
+    handler accepts either as a body, so neither can carry a row id in from
+    outside. That is the distinction the two counts exist to keep visible, said
+    once more because it is the reason a drift in the first number is not
+    automatically a hole in the rule.
+
+    **And the history stopped one drift short anyway, which is the thing it
+    warns about happening to itself.** The eighth entry above ends at 86 with
+    the three classification facet models; the tree measured **88** at
+    `2c00658`, before this trio wrote a line. Two models landed without an
+    entry. That is not reconstructed here, because guessing which ones would put
+    a made up fact in a paragraph whose whole purpose is that its facts are
+    recomputed: what the entry above should have said is whatever the command
+    below reported at the time. **The last word before a commit belongs to that
+    command**, and this is the second wave in which the prose lost to it.
     """
 
     def _model_bases(self, node: ast.ClassDef) -> set[str]:
@@ -2259,3 +2284,448 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
             f"exempted {sorted(self.ADDRESS_READERS)}"
         )
 
+
+
+class TestTheProviderRosterIsOneList:
+    """One roster, and every table that dispatches on a source agrees with it.
+
+    **The rule the provider list rests on.** `sources.parse` guarantees a plan
+    holds only members of `CatalogueSource`, and `metadata` then subscripts two
+    tables with those members. If either table and the roster drift apart the
+    failure is a `KeyError` on the path that adds a book, which is the worst
+    place in this application to discover a typo.
+
+    Compared at **runtime** rather than by reading the source with `ast`, and
+    that is the lesson rather than a preference: the guard in `test_fetch.py`
+    that counted the search fan out read a list literal out of `metadata.search`
+    and stopped being able to when the fan out became a comprehension over the
+    library's own list. A dictionary a test can import cannot go stale that way.
+    """
+
+    def test_every_source_that_answers_an_isbn_has_a_lookup_adapter(self):
+        assert set(metadata._SOURCES) == sources.LOOKUP_SOURCES
+
+    def test_every_source_that_answers_a_title_has_a_search_adapter(self):
+        """The two dispatch tables together are the whole search roster.
+
+        **Against the tables, not against `sources.METERED`**, and that was a
+        correction. Comparing `set(_FREE_SEARCHES) | METERED` was satisfied by a
+        metered source with **no adapter anywhere**, which the dispatch would
+        then have sent to the free table and raised a `KeyError` on.
+        """
+        assert set(metadata._FREE_SEARCHES) | set(
+            metadata._METERED_SEARCHES
+        ) == sources.SEARCH_SOURCES
+
+    def test_the_metered_table_holds_exactly_the_metered_sources(self):
+        assert set(metadata._METERED_SEARCHES) == sources.METERED
+
+    def test_no_source_is_in_both_search_tables(self):
+        """Or a key-needing source would be asked through the keyless path."""
+        assert not set(metadata._FREE_SEARCHES) & set(metadata._METERED_SEARCHES)
+
+    def test_every_source_in_the_roster_can_answer_something(self):
+        """A member of the enum nothing can ask is a row the screen cannot explain."""
+        assert set(sources.DEFAULT_ORDER) == (
+            sources.LOOKUP_SOURCES | sources.SEARCH_SOURCES
+        )
+
+    def test_the_default_order_names_the_whole_roster_exactly_once(self):
+        assert sorted(sources.DEFAULT_ORDER) == sorted(CatalogueSource)
+
+    def test_a_source_needing_a_key_is_one_that_costs_money(self):
+        """The two properties are separate and today they name one source.
+
+        Kept as an assertion rather than one constant, because they are
+        genuinely different questions: a free source could need registration,
+        and a metered one could be billed without a key. If they ever diverge
+        this fails and both `Plan.lookup_together` and `describe` need re-reading.
+        """
+        assert sources.NEEDS_A_KEY == sources.METERED
+
+
+class TestBeliefIsStatedOnceRatherThanTwice:
+    """`_SECONDARY_SOURCES` and the tail of `_MATCH_PRECEDENCE` are one fact.
+
+    **Found by a critic, and it predates the provider list.** The sources ranked
+    last for belief and the sources docked a point for relevance are the same
+    three, written out separately in two constants twelve lines apart. Nothing
+    made them agree, and the provider list makes it matter more: they are the
+    two rules a household's order deliberately does **not** reach, so a reader
+    working out why promoting a source changed nothing has to read both and
+    trust that they say the same thing.
+
+    Pinned rather than merged. Deriving one from the other would hide that they
+    are two decisions that happen to coincide, and the day a regional catalogue
+    is believed late without being docked, this fails and says so.
+    """
+
+    def test_the_sources_believed_last_are_the_ones_docked_a_point(self):
+        cut = len(metadata._MATCH_PRECEDENCE) - len(metadata._SECONDARY_SOURCES)
+        assert frozenset(metadata._MATCH_PRECEDENCE[cut:]) == metadata._SECONDARY_SOURCES
+
+    def test_precedence_names_every_source_and_nothing_else(self):
+        """A source missing here sorts last by default, silently."""
+        assert sorted(metadata._MATCH_PRECEDENCE) == sorted(
+            source.value for source in CatalogueSource
+        )
+
+
+class TestNoModuleHardCodesASourceOrder:
+    """The ranking is data now, and the guard is that nobody kept a copy.
+
+    The ticket that made it data names this rule: "a settings backed order with
+    a constant still consulted somewhere is the failure mode". So the shape
+    looked for is any **ordered** literal of two or more catalogue sources.
+
+    **Both spellings, and the second is the one that matters.** The first
+    version collected `ast.Constant` strings only, which caught `("dnb",
+    "k10plus")` and was blind to `(CatalogueSource.DNB, CatalogueSource.K10PLUS)`.
+    That is backwards: `CatalogueSource` exists so new code stops writing the
+    strings, `sources.py` already writes every roster as members, and the next
+    hard coded order will therefore be in the spelling the guard could not see.
+    Measured by a critic against eight real orders of real sources: it reported
+    one.
+
+    **Ordered, so `ast.Tuple`, `ast.List` and a dict's keys.** A set has no
+    order and cannot be one, which is why `_SECONDARY_SOURCES` needs no
+    exemption: it is a `frozenset` and says which sources are docked a point,
+    not in what order.
+
+    Four exemptions, each a deliberate, named table that something else pins:
+
+    * `sources.DEFAULT_ORDER`, the seeded order itself.
+    * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
+      field. Deliberately not reachable from the settings list.
+    * `metadata._SOURCES` and `metadata._FREE_SEARCHES`, the dispatch tables.
+      They are mappings rather than orders, and `TestTheProviderRosterIsOneList`
+      is what keeps them equal to the roster.
+
+    **`_METERED_SEARCHES` is deliberately not exempted**, and it was for a round.
+    It holds one entry, so it is never two or more sources and is never reported;
+    an exemption for it guards nothing, which
+    `test_dropping_an_exemption_surfaces_only_its_own_literal` said in as many
+    words the moment it was added. The day a second metered source arrives it
+    starts being reported and somebody has to decide, which is the right moment
+    to be asked rather than a rule that quietly already forgave it.
+
+    **What it still cannot see, said rather than left to be found.** An order
+    built by a call rather than written as a literal: `sorted(...)`,
+    `"dnb,k10plus".split(",")`, a comprehension over something else. Those are
+    reachable only by following values, which is the machinery the shelf guard
+    was rewritten to get rid of. The literal forms are what a person writes when
+    they mean to fix an order, and that is what this catches.
+    """
+
+    #: Where an ordered literal of sources is still allowed, by module and name.
+    ALLOWED = {
+        "sources.py": {"DEFAULT_ORDER"},
+        "metadata.py": {"_MATCH_PRECEDENCE", "_SOURCES", "_FREE_SEARCHES"},
+    }
+
+    def _offenders(self, paths: list[Path] | None = None) -> dict[str, set[str]]:
+        """Every ordered literal of source names, wherever it sits.
+
+        **Every literal in the module, not only the ones on the right of an
+        assignment.** Scoping this to `ast.Assign` was the first version and it
+        is the "enumerates something open" trap: an order handed straight to a
+        call, used as a default argument, or held in a class body would have
+        gone unseen, and each is ordinary Python rather than an evasion somebody
+        had to think of.
+
+        `paths` exists so the mutation test can run **this** function over a
+        fixture rather than re-implementing it. Its first version walked a
+        synthetic tree inline and asserted on its own copy, so it would have
+        passed with this function returning `{}`: the tell was a `tmp_path`
+        argument it never used.
+        """
+        names = {source.value for source in CatalogueSource}
+        members = {source.name for source in CatalogueSource}
+        found: dict[str, set[str]] = {}
+        for path in paths if paths is not None else _python_sources():
+            module = path.name if paths is not None else str(path.relative_to(BACKEND))
+            allowed = self.ALLOWED.get(module, set())
+            tree = ast.parse(path.read_text())
+
+            # The literals belonging to an exempt constant, by identity, so the
+            # exemption covers exactly that constant's value and nothing that
+            # happens to sit near it.
+            exempt: set[int] = set()
+            for node in ast.walk(tree):
+                # **The target is read structurally, not by statement kind.**
+                # Listing `ast.Assign` alone exempted neither constant, because
+                # both are `_NAME: Final = ...`, an `AnnAssign` with a single
+                # `target` rather than a list of `targets`. The guard then
+                # reported the literals it exists to permit, which is how this
+                # was found.
+                bound = getattr(node, "targets", None) or getattr(node, "target", None)
+                value = getattr(node, "value", None)
+                if bound is None or not isinstance(value, ast.AST):
+                    continue
+                written = bound if isinstance(bound, list) else [bound]
+                if allowed & {
+                    target.id for target in written if isinstance(target, ast.Name)
+                }:
+                    exempt.update(id(inner) for inner in ast.walk(value))
+
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Tuple, ast.List)):
+                    candidates: list[list[ast.expr]] = [list(node.elts)]
+                elif isinstance(node, ast.Dict):
+                    # **Keys and values both.** `{source: index}` is how
+                    # `_merge_matches` spells an order and `{index: source}` is
+                    # the more natural way to write "position 0 is the DNB";
+                    # reading only one side would catch one of the two.
+                    candidates = [
+                        [key for key in node.keys if key is not None],
+                        list(node.values),
+                    ]
+                else:
+                    continue
+                if id(node) in exempt:
+                    continue
+                for elements in candidates:
+                    spelled = [
+                        named
+                        for element in elements
+                        if (named := _source_named(element, names, members)) is not None
+                    ]
+                    if len(spelled) >= 2 and len(spelled) == len(elements):
+                        found.setdefault(module, set()).add(", ".join(sorted(spelled)))
+                        break
+        return found
+
+    def test_no_module_keeps_its_own_list_of_source_names(self):
+        assert self._offenders() == {}, (
+            "a hard coded source order is back: "
+            f"{ {name: sorted(where) for name, where in self._offenders().items()} }"
+        )
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("strings", '_ORDER = ("dnb", "k10plus")'),
+            ("enum members", "_ORDER = (CatalogueSource.DNB, CatalogueSource.K10PLUS)"),
+            ("a list", '_ORDER = ["dnb", "loc"]'),
+            ("the value attribute", "_ORDER = (CatalogueSource.BNF.value, CatalogueSource.LOC.value)"),
+            ("a call argument", 'def f():\n    return g(["dnb", "loc"])'),
+            ("a default argument", 'def f(order=("bnf", "oenb")):\n    return order'),
+            ("a class body", 'class C:\n    ORDER = ["loc", "bnf"]'),
+            ("a dict keyed on sources", "_M = {CatalogueSource.DNB: 0, CatalogueSource.OENB: 1}"),
+            ("nested in a dict value", '_M = {"a": ("dnb", "oenb")}'),
+            ("a dict keyed on position", '_M = {0: "dnb", 1: "loc"}'),
+            (
+                "an aliased import",
+                "from enums import CatalogueSource as CS\n_O = (CS.DNB, CS.K10PLUS)",
+            ),
+            (
+                "a dotted receiver",
+                "import enums\n_O = (enums.CatalogueSource.DNB, enums.CatalogueSource.LOC)",
+            ),
+            ("the subscript spelling", '_O = (CatalogueSource["DNB"], CatalogueSource["LOC"])'),
+            ("an order carrying a weight", '_O = (("dnb", 1.0), ("k10plus", 0.9))'),
+            ("a mixed spelling", '_O = ("dnb", CatalogueSource.LOC)'),
+        ],
+    )
+    def test_the_guard_reports_every_shape_an_order_is_written_in(
+        self, tmp_path: Path, shape: str, source: str
+    ) -> None:
+        """A mutation per shape, run through `_offenders` itself.
+
+        **Real sources, never invented names**, or the fixture would pass
+        whatever the rule did. One shape per case rather than one case listing
+        them, so a shape that stops being reported names itself.
+        """
+        fixture = tmp_path / "offender.py"
+        fixture.write_text(source + "\n")
+        assert self._offenders([fixture]) != {}, f"{shape} is invisible to the guard"
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("a single source", '_ONE = ("dnb",)'),
+            ("strings that are not sources", '_X = ("alpha", "beta")'),
+            ("a set, which has no order", "_S = {CatalogueSource.BNF, CatalogueSource.LOC}"),
+            ("a mixed tuple", '_X = ("dnb", "not a source")'),
+        ],
+    )
+    def test_the_guard_leaves_alone_what_is_not_an_order(
+        self, tmp_path: Path, shape: str, source: str
+    ) -> None:
+        """The other half of the diagonal: it must not report everything."""
+        fixture = tmp_path / "innocent.py"
+        fixture.write_text(source + "\n")
+        assert self._offenders([fixture]) == {}, f"{shape} is reported and should not be"
+
+    def test_every_exemption_still_exists_to_be_exempted(self):
+        """An allowlist entry for a deleted constant guards nothing."""
+        owners = {"sources.py": sources, "metadata.py": metadata}
+        for module, allowed in self.ALLOWED.items():
+            for name in allowed:
+                assert hasattr(owners[module], name), (
+                    f"{module}:{name} is gone, so its exemption has no subject"
+                )
+
+    def test_dropping_an_exemption_surfaces_only_its_own_literal(self):
+        """Each exemption is pinned by something, and only by itself.
+
+        One mutation dropping two names at once cannot show that either was
+        pinning anything, so this drops them one at a time.
+
+        **It compares which literal came back, not merely that one did.** The
+        first version asserted `module in offenders`, so the name promised more
+        than it checked: four exemptions could all have surfaced the same
+        literal and it would have passed. Now each drop must produce exactly one
+        literal for its module, and the four must be distinct, which is what
+        "only its own" says.
+        """
+        surfaced: dict[str, frozenset[str]] = {}
+        for module, allowed in self.ALLOWED.items():
+            for name in sorted(allowed):
+                guard = TestNoModuleHardCodesASourceOrder()
+                guard.ALLOWED = {
+                    where: (names - {name} if where == module else names)
+                    for where, names in self.ALLOWED.items()
+                }
+                reported = guard._offenders().get(module, set())
+                assert len(reported) == 1, (
+                    f"{module}:{name} surfaced {sorted(reported)}; dropping one "
+                    "exemption should surface exactly that constant's literal"
+                )
+                surfaced[f"{module}:{name}"] = frozenset(reported)
+
+        assert len(set(surfaced.values())) == len(surfaced), (
+            "two exemptions surface the same literal, so neither is pinned by "
+            f"itself: {surfaced}"
+        )
+
+
+def _source_named(
+    element: ast.expr, names: set[str], members: set[str]
+) -> str | None:
+    """The source this element names, in any spelling, or None.
+
+    **The receiver is deliberately not checked.** Requiring
+    `Name(id="CatalogueSource")` hard coded one spelling of the *receiver* in
+    place of one spelling of the *name*, which is the same mistake one level
+    along: `from enums import CatalogueSource as CS` and
+    `import enums` then `enums.CatalogueSource.DNB` are both plain literals and
+    both were invisible. The first is the aliased-import shape this repository
+    has already been caught by once.
+
+    **The cost is a false positive and it is stated rather than glossed.** Any
+    attribute whose name is a member counts, so an unrelated enum with a
+    colliding member is reported: `(Region.LOC, Region.BNF)` is reported today,
+    measured. `LOC`, `DNB` and `BNF` are short enough to collide with a
+    location, a line count or a bank. No enum in `enums.py` collides now, so it
+    is latent. It is still the right trade, because the alternative is resolving
+    aliases by following imports, and because a false positive fails loudly and
+    is cleared in a minute where a miss is silent and permanent.
+
+    **It recurses one level into a tuple or list**, because an order carrying a
+    weight per source, `(("dnb", 1.0), ("k10plus", 0.9))`, is exactly how a
+    reintroduced ranking gets written and is an ordered literal of two sources
+    by any reading.
+
+    **What it still does not read: an order built from a name or a
+    comprehension**, never merely one wrapped in a call. Every literal in the
+    module is walked wherever it sits, so `sorted(("dnb", "loc"))` and
+    `tuple(["dnb", "loc"])` **are** reported, both measured. What survives is
+    `"dnb,loc".split(",")`, `sorted(KNOWN, key=rank)` and
+    `[s for s in KNOWN if s in ENABLED]`, where the order comes from something
+    that is not a literal. Following values is the machinery the shelf guard was
+    rewritten to be rid of.
+
+    This paragraph said "a call" for a round, which understated the guard in the
+    direction a reader could act on: somebody could have concluded that wrapping
+    a literal in `sorted` evades it, and written exactly that.
+    """
+    if isinstance(element, ast.Constant) and element.value in names:
+        return str(element.value)
+    # `CatalogueSource["DNB"]`, the subscript spelling of a member.
+    if (
+        isinstance(element, ast.Subscript)
+        and isinstance(element.slice, ast.Constant)
+        and element.slice.value in members
+    ):
+        return str(element.slice.value)
+    if isinstance(element, ast.Attribute):
+        # `CatalogueSource.DNB.value`: unwrap one attribute and try again.
+        if element.attr == "value":
+            return _source_named(element.value, names, members)
+        if element.attr in members:
+            return element.attr
+    # A pair or a row: the source it is about, whatever else it carries.
+    if isinstance(element, (ast.Tuple, ast.List)):
+        for inner in element.elts:
+            found = _source_named(inner, names, members)
+            if found is not None:
+                return found
+    return None
+
+
+class TestEveryOutboundEntryPointTakesTheProviderList:
+    """"Off means not asked" holds by signature, not by discipline.
+
+    **A required parameter rather than a rule somebody remembers.** Every public
+    coroutine in `metadata.py` reaches a catalogue, and each takes `plan`
+    keyword only with no default, so mypy refuses a call site that forgets to
+    apply the library's provider list. A default would have made forgetting
+    silent, and the thing it would silently do is ask a source the library
+    switched off.
+
+    This is the second leg. The first is that the plan is honoured *inside*
+    those functions, which `tests/test_sources.py` owns. What this catches is a
+    new door: a public entry point added later that reaches outward with no plan
+    at all, which no type checker can notice because there is nothing to check
+    it against.
+
+    **Public, deliberately.** The private helpers each source is fetched with
+    (`_dnb_search`, `_open_library`) take no plan and must not: they are called
+    only from the two functions that have already filtered, and requiring one of
+    them too would put the same decision in two places.
+    """
+
+    #: The entry points as they stand. Named so that a **removed** door fails
+    #: this too: a rule that only checks what it finds passes happily on a file
+    #: whose subject has been deleted, which has happened twice in this suite.
+    DOORS = {"lookup", "search", "editions", "candidates"}
+
+    def _public_coroutines(self) -> dict[str, set[str]]:
+        tree = ast.parse((BACKEND / "metadata.py").read_text())
+        return {
+            node.name: {
+                argument.arg
+                for argument in [*node.args.args, *node.args.kwonlyargs]
+            }
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and not node.name.startswith("_")
+        }
+
+    def test_every_public_entry_point_takes_a_plan(self):
+        missing = {
+            name
+            for name, arguments in self._public_coroutines().items()
+            if "plan" not in arguments
+        }
+        assert missing == set(), (
+            f"these reach a catalogue with no provider list: {sorted(missing)}"
+        )
+
+    def test_the_doors_are_the_ones_this_rule_was_written_against(self):
+        """A door removed or renamed is a finding, not a quieter pass."""
+        assert set(self._public_coroutines()) == self.DOORS
+
+    def test_the_plan_cannot_be_defaulted_away(self):
+        """Keyword only with no default, or forgetting it stops being an error.
+
+        Checked on the signature rather than trusted to review: a default is one
+        character of diff and turns a compile error into a source being asked
+        that somebody switched off.
+        """
+        for name in self.DOORS:
+            signature = inspect.signature(getattr(metadata, name))
+            parameter = signature.parameters["plan"]
+            assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
+            assert parameter.default is inspect.Parameter.empty, name

@@ -47,6 +47,8 @@ describe("hasActiveFilters", () => {
     // Both spellings of the field narrow the view, so both count.
     ["the unfiled books", { collection: "unfiled" as const }],
     ["an author", { author: "ursula k le guin" }],
+    ["a heading", { headings: ["lcsh:Mental health"] }],
+    ["a Dewey division", { ddcDivisions: ["150"] }],
   ])("is true with %s", (_label, overrides) => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, ...overrides })).toBe(true);
   });
@@ -57,6 +59,26 @@ describe("hasActiveFilters", () => {
     expect(
       hasActiveFilters({ ...DEFAULT_FILTERS, sort: BookSort.newest }),
     ).toBe(false);
+  });
+});
+
+describe("the sort options", () => {
+  it("offers Dewey, and offers it as its own value rather than a general one", () => {
+    // Named for the scheme because only Dewey sorts: a Library of Congress
+    // call number does not sort as text. `docs/decisions.md` carries the
+    // measurement.
+    const values = SORT_OPTIONS.map((option) => option.value);
+
+    expect(values).toContain(BookSort.ddc);
+  });
+
+  it("offers every sort the API accepts", () => {
+    // The other direction, and the one that goes stale on its own: a sort
+    // added to the enum is a sort the grid cannot reach until somebody adds it
+    // here, with nothing failing.
+    const values = SORT_OPTIONS.map((option) => option.value);
+
+    expect([...values].sort()).toEqual(Object.values(BookSort).sort());
   });
 });
 

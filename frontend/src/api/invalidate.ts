@@ -46,6 +46,7 @@ import {
   getListLocationsQueryKey,
   getListQuotesQueryKey,
   getListSeriesQueryKey,
+  getListClassificationsQueryKey,
   getListTagsQueryKey,
   getListTrashQueryKey,
 } from "./generated/endpoints/books/books";
@@ -99,6 +100,13 @@ const LIBRARY_WIDE: ReadonlySet<unknown> = new Set([
   getListLocationsQueryKey()[0],
   getListDuplicatesQueryKey()[0],
   getListTagsQueryKey()[0],
+  // The classification facets, for the same reason the tag list is here: every
+  // entry carries a `book_count`, so adding, trashing or enriching a book moves
+  // it. Enrichment is the case that matters, because it is the one that creates
+  // headings rather than counting them: applying a catalogue record can add a
+  // Dewey number the library has never held, and without this the filter panel
+  // would not offer it until the cache aged out.
+  getListClassificationsQueryKey()[0],
   getListTrashQueryKey()[0],
   getListQuotesQueryKey()[0],
   getListCollectionsQueryKey()[0],

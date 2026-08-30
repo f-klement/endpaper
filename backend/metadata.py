@@ -20,7 +20,15 @@ measured against the live deployment rather than guessed at.
    throttling us, or the network was down. Those need different actions from
    the reader, so they are now different answers.
 
-The sources are ordered per ISBN rather than fixed: see `_sources_for`.
+**Which sources are asked, and in what order, is the library's own setting**
+and arrives as a `sources.Plan`: see `sources.py` for what the order does and
+what it deliberately does not. Two rules stay here because they are not
+preferences: `_preferred_source`, which believes the German legal deposit
+library about a `9783` ISBN and K10plus about anything else, and
+`_MATCH_PRECEDENCE`, which decides whose version of a shared field wins.
+
+This sentence used to read "the sources are ordered per ISBN rather than fixed:
+see `_sources_for`", naming a function that has never existed in this file.
 """
 
 import asyncio
@@ -29,7 +37,7 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any, Final
@@ -42,8 +50,9 @@ import covers
 import ddc
 import fetch
 import google_books
+import sources
 from catalogue import AuthorityAssertion, Heading, Record
-from enums import AuthorityScheme, ClassificationScheme
+from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
 from isbn import parse as parse_isbn
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
@@ -64,6 +73,16 @@ class Outcome(StrEnum):
     NOT_FOUND = auto()
     RATE_LIMITED = auto()
     UNAVAILABLE = auto()
+    #: Nothing was asked, because this library has no catalogue switched on that
+    #: can answer an ISBN.
+    #:
+    #: **Distinct from `NOT_FOUND` for the reason the two above it are**, and it
+    #: is the sharper case of the same mistake: "no catalogue has this book"
+    #: sends a reader to type it in by hand over a setting they could change in
+    #: one click, and it is a claim about the world made by an app that asked
+    #: nobody. A provider that cannot answer has to say so rather than fail
+    #: quietly.
+    NO_SOURCES = auto()
 
 
 @dataclass(frozen=True)
@@ -1193,8 +1212,8 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
 #
 # Measured over ten ISBNs spanning five languages: 6 hits, 3.5 of 5 fields per
 # hit, 0.36s average. Open Library was broader (9 hits) but thinner (2.7) and
-# five times slower (1.64s, one case over 3s). See `_FAST_SOURCES` for what
-# that ranking bought.
+# five times slower (1.64s, one case over 3s). See `sources.DEFAULT_ORDER`
+# for what that ranking bought.
 #
 # Free, no key, no registration. MARCXML rather than Dublin Core because the
 # subfield structure is what makes the ISBN check below possible at all.
@@ -1865,37 +1884,22 @@ async def _oenb_search(query: str, limit: int) -> list[Record]:
 # is worse than no row. Its own measurement is 50 Austrian imprint ISBNs on
 # 2026-08-27, where it answered 50 of 50 against the DNB's 47 and K10plus's 39,
 # and held 3 that the German pair both missed. Mean latency 0.240s. Where it
-# sits and why: `_FALLBACK_SOURCES`.
+# sits and why: `sources.DEFAULT_ORDER`, which carries the measurement.
 
-_SOURCES: Final = {
-    "open_library": _open_library,
-    "google_books": _google_books,
-    "dnb": _dnb,
-    "k10plus": _k10plus,
-    "oenb": _oenb,
+#: Every source that can answer an **ISBN**, by name. BNF and LOC are absent
+#: because neither was worth an ISBN request; they answer title search only.
+#:
+#: **Keyed on the enum, and `sources.LOOKUP_SOURCES` must name exactly these
+#: five.** `TestTheProviderRosterIsOneList` asserts it rather than a comment
+#: claiming it, because a source added to one and not the other is a `KeyError`
+#: on the path that adds a book.
+_SOURCES: Final[dict[CatalogueSource, Callable[[str, str], Awaitable[Lookup]]]] = {
+    CatalogueSource.OPEN_LIBRARY: _open_library,
+    CatalogueSource.GOOGLE_BOOKS: _google_books,
+    CatalogueSource.DNB: _dnb,
+    CatalogueSource.K10PLUS: _k10plus,
+    CatalogueSource.OENB: _oenb,
 }
-
-#: Asked together, on every lookup. Free, unmetered, and fast enough that the
-#: cost of asking both is the slower of the two rather than the sum.
-_FAST_SOURCES: Final = ("dnb", "k10plus")
-
-#: Asked in turn, only if the fast pair found nothing. Open Library is broad and
-#: slow; Google is the only source with a key, a quota and a bill attached.
-#:
-#: **ÖNB is first of the three, and the order is measured rather than
-#: alphabetical.** It is the only source here that answers for an Austrian
-#: imprint the German pair both missed: 3 of 50, measured 2026-08-27.
-#:
-#: It is also much the fastest of the three, and **the two figures come from
-#: different samples and are not one measurement**: the ÖNB's mean of 0.240s is
-#: over the 50 live lookups of that same 2026-08-27 Austrian sample, while Open
-#: Library's 1.64s is off the ten ISBN comparison in the chain comment above,
-#: taken on another date against another set of books. They are the right order
-#: of magnitude apart rather than precisely comparable, which is all this
-#: ordering needs: asking the fast Austrian source before the slow broad one
-#: costs a fraction of a second on the lookups that reach this list at all, and
-#: nothing on the ones the fast pair already answered.
-_FALLBACK_SOURCES: Final = ("oenb", "open_library", "google_books")
 
 #: Bookland registration group for German-language publishing.
 _GERMAN_PREFIX: Final = "9783"
@@ -2198,15 +2202,28 @@ async def _dnb_search(query: str, limit: int) -> list[Record]:
 #
 #   bnf   Bibliothèque nationale de France. French legal deposit. Free, no key.
 #   loc   Library of Congress. Poor for ISBN lookup (two hits in ten, both
-#         covered elsewhere) and worth having for search, where it holds
-#         Spanish, Portuguese and Latin American printings the German and
-#         French catalogues do not: "cien anos de soledad" returns 73 records,
-#         "ensaio sobre a cegueira" six.
+#         covered elsewhere) and worth having for search, where a Spanish or
+#         Portuguese title the German and French catalogues do not hold still
+#         surfaces: "cien anos de soledad" returns 73 records, "ensaio sobre a
+#         cegueira" six. Those two counts are the evidence that belongs here,
+#         because they measure the path this source is actually on.
 #
-# Spain and Portugal have no usable free interface of their own. The Biblioteca
-# Nacional de España redirects its SRU endpoint and refuses its SPARQL one; the
-# Portuguese PORBASE endpoint is gone. The Library of Congress is the honest
-# substitute rather than a first choice.
+# **What this comment used to claim, and why it no longer does.** It said the LoC
+# "holds Spanish, Portuguese and Latin American printings", which is the sentence
+# `search`'s docstring retracts with a measurement: by ISBN it holds 25.0% of a
+# Spanish sample and 55.3% of a Uruguayan one, and Uruguay is the only country
+# that separates from any other. Read the two together: the table there says which
+# countries it **holds**, the two counts above say the search **surfaces** them,
+# and those are different questions.
+#
+# It also said Spain and Portugal "have no usable free interface of their own",
+# and both halves are now measured false. **Spain has three reachable
+# catalogues** (the CSIC library network, and the ministry's CCPB and REBECA),
+# two of which answer SRU over plain HTTP; it is the Biblioteca Nacional
+# specifically that authenticates. **PORBASE is not gone**: its hostname was
+# retired and the national library publishes two live ones on another domain.
+# Neither is in the chain, so the Library of Congress is still the substitute
+# here, but it is a substitute for something that exists rather than for nothing.
 
 _BNF_URL: Final = "https://catalogue.bnf.fr/api/SRU"
 _LOC_URL: Final = "http://lx2.loc.gov:210/lcdb"
@@ -2818,8 +2835,15 @@ async def search(
     api_key: str = "",
     limit: int = 10,
     prefer_language: str | None = None,
+    *,
+    plan: sources.Plan,
 ) -> list[Record]:
-    """Find a book by title and author, across every catalogue available.
+    """Find a book by title and author, across every catalogue this library asks.
+
+    **Which catalogues those are is `plan`**, and it is the household's, not
+    this module's. A source switched off is never constructed and never
+    awaited. What follows describes the seven a new install asks, which is the
+    seeded default and the shape every measurement below was taken at.
 
     Three tiers, and the tiering is what keeps this both broad and quick.
 
@@ -2827,16 +2851,63 @@ async def search(
     for German and European publishing, the DNB for German legal deposit.
 
     **Tier two, free, regional:** the BnF for French, the Library of Congress
-    for Spanish, Portuguese and Latin American printings, the ÖNB for Austrian
-    imprints. All three are ranked a point below the primaries: they are here
-    for the books nobody else holds, not to reorder the ones everybody does.
+    for Uruguayan printings and for anything printed before ISBNs existed, the
+    ÖNB for Austrian imprints. All three are ranked a point below the primaries:
+    they are here for the books nobody else holds, not to reorder the ones
+    everybody does.
+
+    **That line has now named the wrong countries twice, and the second time was
+    the correction.** It said "Spanish, Portuguese and Latin American printings",
+    which nothing had measured. Measured 2026-08-30, asking `lx2.loc.gov` by
+    `bath.isbn` for 50 domestic ISBNs per country, denominators varying because
+    two or three per country went unanswered:
+
+    | | Uruguay | Spain | Italy | Brazil | Portugal | Argentina |
+    |---|---|---|---|---|---|---|
+    | held | 26/47 | 12/48 | 12/48 | 9/47 | 9/48 | 8/48 |
+    | | **55.3%** | 25.0% | 25.0% | 19.1% | 18.8% | 16.7% |
+
+    So the first correction read "Latin American printings", **and that was the
+    same mistake one category up**: the label is carried entirely by Uruguay,
+    while Brazil at 19.1% and Argentina at 16.7% are **below** the Spain and
+    Italy figures the correction had just dropped for being unsupported.
+    Aggregated, Latin America is 43/142 against Spain and Italy's 24/96, +5.3
+    points, 95% Newcombe -6.5 to +16.3, which includes zero; without Uruguay it
+    is 17/95, or 17.9%.
+
+    **Uruguay is the only result here that separates from anything**: +30.3
+    points over Spain, 95% Newcombe +10.6 to +47.0, excluding zero. Nothing
+    separates the five below it, so the line names Uruguay and stops.
+
+    Those three figures said +28.0, +9.0 and +44.4 for one round, which is what
+    26/50 against 12/50 gives. **They were the numbers from before the table
+    above was corrected to its real denominators**, so this paragraph was the
+    claim written in two places and fixed in one, committed in the paragraph
+    that names that mistake. `TestTheLibraryOfCongressTableAgreesWithItself`
+    now recomputes all three from the table's own fractions, because the six
+    percentages were pinned and these three were pinned by nothing, which is
+    how they survived.
+
+    **Holding the edition is necessary and not sufficient**, because this is a
+    title search source: the table says the record exists to be found, not that
+    a title query finds it. `_loc_search` below carries the title side, and the
+    durable half of this source's justification is not in the table at all: it
+    is the best free source for a book printed before ISBNs existed, which no
+    ISBN measurement can touch.
+
+    The method behind the table, and the two title search counts that measure the
+    other half of this source, are in `docs/decisions.md` and in the regional
+    catalogues comment below.
 
     **Tier three, only with a key:** Google Books, for the blurb and the
     categories the others do not carry.
 
-    Every source in every tier is asked **concurrently**, so the wall clock is
-    the slowest of seven rather than the sum, measured at 1.2s to 1.8s before
-    the seventh joined.
+    Every enabled source is asked **concurrently**, so the wall clock is the
+    slowest of them rather than the sum, measured at 1.2s to 1.8s across seven
+    before the seventh joined. **Enabling one costs a slot of the deadline and
+    nothing of the wall clock; disabling one buys back neither**, since the
+    budget is spent waiting on the slowest survivor. What it does buy is the
+    request never being made, which is the point of the switch.
 
     **The seventh moved that, and the honest figure is a range rather than a
     number.** Across 24 live ÖNB title searches on 2026-08-27, at the shape this
@@ -2867,32 +2938,28 @@ async def search(
     title still gets the English book.
 
     A source that fails is skipped rather than failing the search. Losing one
-    of four is not worth refusing to answer.
+    of four is not worth refusing to answer, and a library that has switched
+    every source off gets an empty list rather than an error.
     """
     trimmed = query.strip()
     terms = _search_terms(trimmed)
     if not terms:
         return []
 
-    async def _google() -> list[Record]:
-        if not api_key:
-            return []
-        try:
-            found = await google_books.search(trimmed, api_key, limit=limit)
-        except (google_books.GoogleBooksError, httpx.HTTPError, ValueError):
-            logger.info("Google Books search unavailable for %r", trimmed, exc_info=True)
-            return []
-        return [_google_record(item) for item in found]
-
+    # **Only the enabled sources are constructed**, so a source this library
+    # turned off is never built and never awaited. Building all seven and
+    # dropping some would leave un-awaited coroutines behind, which is a warning
+    # per search and a request nobody asked for if one ever ran.
+    #
+    # `plan.searched` holds only names in `sources.SEARCH_SOURCES`, and
+    # `TestTheProviderRosterIsOneList` pins that set equal to `_FREE_SEARCHES`
+    # plus the metered one, so there is no `KeyError` to reach here.
     tiers = await _within_deadline(
         [
-            _open_library_search(trimmed, limit),
-            _k10plus_search(trimmed, limit),
-            _dnb_search(trimmed, limit),
-            _bnf_search(trimmed, limit),
-            _loc_search(trimmed, limit),
-            _oenb_search(trimmed, limit),
-            _google(),
+            _METERED_SEARCHES[name](trimmed, limit, api_key)
+            if name in _METERED_SEARCHES
+            else _FREE_SEARCHES[name](trimmed, limit)
+            for name in plan.searched
         ]
     )
 
@@ -2902,6 +2969,69 @@ async def search(
         merged, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
     )
     return ranked[:limit]
+
+
+#: The title search adapter for every source that needs no credential.
+#:
+#: **Module level and introspectable on purpose.** The guard that keeps this
+#: table and the roster in step used to read the fan out with `ast`, as a list
+#: literal handed to `_within_deadline`, and it broke the moment the fan out
+#: stopped being a literal. A dictionary a test can compare with
+#: `sources.SEARCH_SOURCES` at runtime cannot go stale the same way.
+#:
+#: Google Books is the one absent, because it is the one that needs an API key
+#: and so cannot share this signature. `_METERED_SEARCHES` below holds it, and
+#: `TestTheProviderRosterIsOneList` asserts the two tables together are the
+#: whole roster: a source added to the roster and to neither table fails rather
+#: than going quietly unasked.
+_FREE_SEARCHES: Final[
+    dict[CatalogueSource, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
+] = {
+    CatalogueSource.OPEN_LIBRARY: _open_library_search,
+    CatalogueSource.K10PLUS: _k10plus_search,
+    CatalogueSource.DNB: _dnb_search,
+    CatalogueSource.BNF: _bnf_search,
+    CatalogueSource.LOC: _loc_search,
+    CatalogueSource.OENB: _oenb_search,
+}
+
+
+async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
+    """Google Books, which needs a key and so takes one more argument.
+
+    A module level adapter rather than a closure inside `search`, so the table
+    below can be compared with the roster at runtime. It was a closure and the
+    dispatch tested `name is CatalogueSource.GOOGLE_BOOKS`, which is a second
+    metered source away from a `KeyError`: the roster guard would have been
+    satisfied by `set(_FREE_SEARCHES) | METERED` while the dispatch sent it to
+    the free table.
+
+    An absent key answers nothing rather than requesting anonymously.
+    `settings_store.ready_sources` already keeps a keyless Google out of the
+    plan, so this is the second of two checks, kept because a caller passing a
+    plan by hand is not a caller that consulted the settings table.
+    """
+    if not api_key:
+        return []
+    try:
+        found = await google_books.search(query, api_key, limit=limit)
+    except (google_books.GoogleBooksError, httpx.HTTPError, ValueError):
+        logger.info("Google Books search unavailable for %r", query, exc_info=True)
+        return []
+    return [_google_record(item) for item in found]
+
+
+#: The title search adapter for every source that needs a credential.
+#:
+#: Separate from `_FREE_SEARCHES` because the signature differs, and a table
+#: rather than a branch on one name because a branch is only correct while there
+#: is exactly one of them. `TestTheProviderRosterIsOneList` pins these keys equal
+#: to `sources.METERED`.
+_METERED_SEARCHES: Final[
+    dict[CatalogueSource, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
+] = {
+    CatalogueSource.GOOGLE_BOOKS: _google_search,
+}
 
 
 #: How long a search may take, whatever the catalogues do.
@@ -2919,7 +3049,16 @@ SEARCH_DEADLINE_SECONDS: Final = 4.0
 async def _within_deadline(
     searches: list[Coroutine[Any, Any, list[Record]]],
 ) -> list[list[Record]]:
-    """Run every search, keep what answers in time, drop the rest."""
+    """Run every search, keep what answers in time, drop the rest.
+
+    **Empty is a real case and is answered here rather than raised.**
+    `asyncio.wait` refuses an empty set with `ValueError`, so a library that has
+    switched off every catalogue turned a title search into a 500. It arrived
+    with the fix for the sibling case: `lookup` learned to say "nothing was
+    asked" and this path was left to find out the hard way.
+    """
+    if not searches:
+        return []
     tasks = [asyncio.ensure_future(search) for search in searches]
     done, pending = await asyncio.wait(tasks, timeout=SEARCH_DEADLINE_SECONDS)
 
@@ -3158,7 +3297,11 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
 
 
 async def editions(
-    isbn: str, limit: int, prefer_language: str | None = None
+    isbn: str,
+    limit: int,
+    prefer_language: str | None = None,
+    *,
+    plan: sources.Plan,
 ) -> list[Record]:
     """Every other printing of this work Open Library has merged.
 
@@ -3215,7 +3358,15 @@ async def editions(
 
     Empty rather than raising on every failure path, including an ISBN that is
     not one: this is an enrichment, and losing it costs a picker some rows.
+
+    **Open Library off means this answers nothing**, because there is no second
+    source for it: the cluster is Open Library's own merge and nothing else here
+    holds one. "Off means not asked" has to be true on every path that reaches
+    outward, not only the two the settings screen names, and this is the path
+    that would otherwise keep asking a source a household switched off.
     """
+    if CatalogueSource.OPEN_LIBRARY not in plan.asked:
+        return []
     canonical = parse_isbn(isbn)
     if canonical is None or limit <= 0:
         return []
@@ -3272,6 +3423,8 @@ async def candidates(
     isbn: str | None = None,
     limit: int = 10,
     prefer_language: str | None = None,
+    *,
+    plan: sources.Plan,
 ) -> list[Record]:
     """Editions to choose between for a book that already exists, cluster first.
 
@@ -3292,8 +3445,8 @@ async def candidates(
     deadline, so a slow Open Library costs its rows rather than the response.
     """
     cluster, searched = await asyncio.gather(
-        _work_cluster(isbn, max(limit - 1, 0), prefer_language),
-        search(query, api_key, limit=limit, prefer_language=prefer_language),
+        _work_cluster(isbn, max(limit - 1, 0), prefer_language, plan),
+        search(query, api_key, limit=limit, prefer_language=prefer_language, plan=plan),
     )
     rows = list(cluster)
     # **Deduplicated on the ISBN and on nothing else**, which is the one thing
@@ -3314,7 +3467,7 @@ async def candidates(
 
 
 async def _work_cluster(
-    isbn: str | None, limit: int, prefer_language: str | None
+    isbn: str | None, limit: int, prefer_language: str | None, plan: sources.Plan
 ) -> list[Record]:
     """`editions`, bounded by the search deadline and never fatal.
 
@@ -3328,7 +3481,7 @@ async def _work_cluster(
         return []
     try:
         return await asyncio.wait_for(
-            editions(isbn, limit, prefer_language), SEARCH_DEADLINE_SECONDS
+            editions(isbn, limit, prefer_language, plan=plan), SEARCH_DEADLINE_SECONDS
         )
     except TimeoutError:
         logger.info("Open Library's edition cluster missed the deadline for %s", isbn)
@@ -3385,7 +3538,22 @@ def _remember(isbn: str, result: Lookup) -> None:
 
 
 def clear_cache() -> None:
-    """Drop every entry. For tests, and for an admin who has just set a key."""
+    """Drop every entry.
+
+    **Called whenever a setting changes which catalogues are asked**, because
+    this cache is keyed on the ISBN alone: a record a source supplied before it
+    was switched off would otherwise keep being served for the rest of its 24
+    hours, and "off means not asked" would be true on the wire and false on the
+    screen.
+
+    That is three writes, not one, and the docstring used to name the wrong one:
+    it said "for an admin who has just set a key", which was inverted by the
+    time the provider list arrived. The three are the provider list itself, the
+    Google Books switch and the Google Books key, since
+    `settings_store.ready_sources` reads the last two and either can take a
+    source out of the plan on its own. `routers/settings.update_settings` is
+    where they are wired.
+    """
     _cache.clear()
 
 
@@ -3403,13 +3571,23 @@ def _worst(attempts: list[tuple[str, Outcome]]) -> Outcome:
     return Outcome.NOT_FOUND
 
 
-async def lookup(raw_isbn: str, api_key: str = "") -> Lookup:
+async def lookup(
+    raw_isbn: str, api_key: str = "", *, plan: sources.Plan
+) -> Lookup:
     """Resolve an ISBN to the best record the free catalogues can produce.
 
-    Two phases. The fast pair is asked **together** and their answers merged,
-    which is where the record quality comes from. Only if neither knows the
-    book do the broad-but-slow and the metered sources get a turn, one at a
-    time, so an ordinary lookup never spends Google quota at all.
+    Two phases. The leading `sources.ALWAYS_ASKED` enabled sources are asked
+    **together** and their answers merged, which is where the record quality
+    comes from. Only if none of them knows the book do the rest get a turn, one
+    at a time, stopping at the first hit.
+
+    **The household decides which sources those are, and the count is a
+    constant.** An ordinary lookup makes `sources.ALWAYS_ASKED` outbound
+    requests whatever the list says, so reordering can never turn every lookup
+    into a full fan out. What it changes is which pair leads, which is what
+    makes this useful to a shelf that is not German. A household that leaves
+    Google Books below the leading pair still never spends quota on an ordinary
+    lookup; one that promotes it has chosen to, and the settings screen says so.
 
     The ISBN is canonicalised first, so a lookup costs nothing for input that
     could not be a book, and the cache is keyed on one spelling.
@@ -3429,12 +3607,10 @@ async def lookup(raw_isbn: str, api_key: str = "") -> Lookup:
     # `return_exceptions` is not set: every source already turns its own
     # failures into an UNAVAILABLE outcome, so an exception escaping one of
     # them is a bug worth seeing rather than a network condition to absorb.
-    fast = await asyncio.gather(
-        *(_SOURCES[name](isbn, api_key) for name in _FAST_SOURCES)
-    )
+    together = plan.lookup_together
+    fast = await asyncio.gather(*(_SOURCES[name](isbn, api_key) for name in together))
     attempts.extend(
-        (name, result.outcome)
-        for name, result in zip(_FAST_SOURCES, fast, strict=True)
+        (name, result.outcome) for name, result in zip(together, fast, strict=True)
     )
 
     hits = [result.record for result in fast if result.found and result.record]
@@ -3457,7 +3633,7 @@ async def lookup(raw_isbn: str, api_key: str = "") -> Lookup:
         logger.info("Resolved %s from %s", isbn, merged.source)
         return found
 
-    for name in _FALLBACK_SOURCES:
+    for name in plan.lookup_in_turn:
         result = await _SOURCES[name](isbn, api_key)
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
@@ -3476,7 +3652,11 @@ async def lookup(raw_isbn: str, api_key: str = "") -> Lookup:
             logger.info("Resolved %s from %s", isbn, name)
             return found
 
-    missed = Lookup(_worst(attempts), source="", attempts=attempts)
+    # Asked nothing, so `_worst` has nothing to weigh: an empty `attempts` would
+    # answer NOT_FOUND, which is a statement about the book rather than about
+    # this library's settings.
+    outcome = Outcome.NO_SOURCES if not attempts else _worst(attempts)
+    missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
         _remember(isbn, missed)
     logger.info(

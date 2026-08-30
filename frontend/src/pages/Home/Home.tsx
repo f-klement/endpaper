@@ -38,6 +38,10 @@ export default function Home() {
   const overdue = useMyOverdue();
   const brokenSenders = useBrokenSenders();
   const [showTagPanel, setShowTagPanel] = useState(false);
+  // Its own flag rather than one "which panel is open" value, so opening the
+  // classification panel does not close the tag panel: the two narrow the same
+  // shelf and are routinely used together.
+  const [showClassificationPanel, setShowClassificationPanel] = useState(false);
 
   const filtered = hasActiveFilters(library.filters);
   const wishlist = isWishlist(library.filters);
@@ -98,6 +102,14 @@ export default function Home() {
         tags={library.tags}
         showTagPanel={showTagPanel}
         onToggleTagPanel={() => setShowTagPanel((open) => !open)}
+        classifications={library.classifications}
+        showClassificationPanel={showClassificationPanel}
+        onToggleClassificationPanel={() =>
+          setShowClassificationPanel((open) => !open)
+        }
+        onToggleHeading={library.toggleHeading}
+        onToggleDivision={library.toggleDivision}
+        onClearClassifications={library.clearClassifications}
         onFilterChange={library.update}
         locations={library.locations}
         collections={library.collections}

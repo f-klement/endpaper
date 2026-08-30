@@ -22,6 +22,7 @@ import QuoteList from "./components/QuoteList";
 import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
+import ClassificationPanel from "./components/ClassificationPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
 import EnrichPicker from "./components/EnrichPicker";
 import ShelfPanel from "./components/ShelfPanel";
@@ -229,6 +230,14 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               isSaving={actions.isSavingDetails}
               onSave={actions.updateDetails}
             />
+
+            {/* Between the tags and the shelf, because it answers the same
+                question they do and answers it with somebody else's authority.
+                Its own heading rather than more chips in the tag row: a
+                published scheme and a household word are different kinds of
+                claim, and the whole reason this is stored as a scheme, a number
+                and a caption is that flattening them loses which is which. */}
+            <ClassificationPanel classifications={book.classifications ?? []} />
 
             {/* Under the shelf, because both answer "where does this one
                 live": one physically, one in this library's own filing. */}

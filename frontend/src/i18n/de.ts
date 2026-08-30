@@ -128,6 +128,18 @@ export const de: Messages = {
   "sort.year_asc": "Jahr (älteste)",
   "sort.newest": "Zuletzt hinzugefügt",
   "sort.series": "Reihenfolge der Reihe",
+  "sort.ddc": "DDC-Notation",
+  "classification.section": "Klassifikation",
+  "classification.filter": "Klassifikation",
+  "classification.headings": "Schlagworte und Notationen",
+  "classification.divisions": "DDC-Sachgruppe",
+  "classification.noneOnBook": "Noch keine Klassifikation.",
+  "classification.noneToFilter": "Noch kein Buch im Bestand tr\u00e4gt eine.",
+  "classification.filterBy": "Nur B\u00fccher mit {heading} zeigen",
+  "classification.scheme.ddc": "DDC",
+  "classification.scheme.lcc": "Library of Congress",
+  "classification.scheme.gnd": "GND",
+  "classification.scheme.lcsh": "Schlagwort",
 
   // ── Buchdetails ─────────────────────────────────────────────────────────
   "book.uploadCover": "Cover hochladen",
@@ -964,6 +976,32 @@ export const de: Messages = {
     "{count} Zeilen hatten keinen Titel und wurden übersprungen.",
   "import.unmatched": "Nicht im Katalog gefunden:",
 
+  // ── MARC (Bibliotheksmodus) ─────────────────────────────────────────────
+  "marc.title": "Einen Katalog übernehmen",
+  "marc.explain":
+    "Eine MARCXML-Datei, die eine andere Bibliothek exportiert hat. Datensätze werden über die ISBN zugeordnet, sonst über Verfasser und Titel zusammen, damit ein zweiter Import derselben Datei den Katalog nicht verdoppelt.",
+  "marc.chooseFile": "MARC-Datei auswählen",
+  "marc.reading": "Datei wird gelesen...",
+  "marc.importing": "Wird importiert...",
+  "marc.previewTitle":
+    "{total} Datensätze in der Datei, {readable} davon kann diese App speichern.",
+  "marc.alreadyHeld":
+    "{count} davon stehen bereits in diesem Regal und werden ergänzt statt neu angelegt.",
+  "marc.blocked":
+    "{count} tragen eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört, und bleiben unangetastet.",
+  "marc.skipped":
+    "{count} Datensätze haben keinen Titel und bleiben unberücksichtigt.",
+  "marc.createMissing":
+    "Die {count} Datensätze anlegen, die dieser Katalog nicht hat",
+  "marc.createMissingHint":
+    "Sie werden als nicht bestätigt angelegt: der Datensatz einer anderen Bibliothek sagt, dass jene Bibliothek das Buch besitzt, nicht diese.",
+  "marc.confirm": "{count} Datensätze importieren",
+  "marc.confirmMatchedOnly": "{count} bereits vorhandene Datensätze ergänzen",
+  "marc.result":
+    "{rowsRead} Datensätze gelesen, {matched} zugeordnet, {created} angelegt.",
+  "marc.resultSkipped":
+    "{count} Datensätze blieben unberücksichtigt: kein Titel, oder eine ISBN, die zu einem für dieses Konto nicht sichtbaren Buch gehört.",
+
   // ── Sicherung ───────────────────────────────────────────────────────────
   "backup.title": "Sicherung",
   "backup.explain":
@@ -1119,4 +1157,32 @@ export const de: Messages = {
   "public.fact.pages": "Seiten",
   "public.fact.format": "Ausgabeform",
   "public.fact.series": "Reihe",
+
+  // Die Anbieterliste. Katalognamen sind Eigennamen und bleiben unübersetzt.
+  "providers.title": "Woher die Buchdaten kommen",
+  "providers.hint":
+    "Diese Kataloge fragt diese Bibliothek zu einem Buch. Wer ausgeschaltet ist, wird gar nicht gefragt. Die Reihenfolge ist die Reihenfolge der Anfragen; sie entscheidet nicht, welchem Katalog geglaubt wird, wenn zwei sich beim selben Feld widersprechen.",
+  "providers.costHint":
+    "Die Titelsuche fragt alle eingeschalteten Kataloge gleichzeitig, ein weiterer kostet also nichts, außer er ist der langsamste. Beim Scannen einer ISBN werden die oberen beiden zusammen gefragt und der Rest einzeln, bis einer antwortet.",
+  "providers.moveUp": "{name} nach oben schieben",
+  "providers.moveDown": "{name} nach unten schieben",
+  "providers.moved": "{name} steht jetzt an Position {position} von {total}.",
+  "providers.name.open_library": "Open Library",
+  "providers.name.google_books": "Google Books",
+  "providers.name.dnb": "Deutsche Nationalbibliothek",
+  "providers.name.k10plus": "K10plus",
+  "providers.name.oenb": "Österreichische Nationalbibliothek",
+  "providers.name.bnf": "Französische Nationalbibliothek",
+  "providers.name.loc": "Library of Congress",
+  "providers.status.needsKey":
+    "Braucht einen API-Schlüssel. Unten einen hinterlegen, sonst kann dieser Katalog nichts beantworten.",
+  "providers.status.switchedOffBelow":
+    "Ein Schlüssel ist hinterlegt, dieser Katalog ist aber in seiner eigenen Karte weiter unten ausgeschaltet.",
+  "providers.status.searchOnly":
+    "Beantwortet nur Titelsuchen, die Position wirkt sich also nicht auf das Scannen aus.",
+  "providers.status.askedFirst":
+    "Wird bei jedem Scan gefragt, zusammen mit den anderen oben in dieser Liste.",
+  "providers.status.askedAfter":
+    "Wird nur gefragt, wenn die darüber nichts finden.",
+  "providers.status.off": "Aus. Dieser Katalog wird nie gefragt.",
 };

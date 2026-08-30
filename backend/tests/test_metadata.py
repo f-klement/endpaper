@@ -27,6 +27,8 @@ catalogue.
 """
 
 import asyncio
+import math
+import re
 from typing import Any
 from xml.etree import ElementTree
 
@@ -36,6 +38,7 @@ import respx
 
 import fetch
 import metadata
+import sources
 from catalogue import AuthorityAssertion, Heading, Record
 from enums import AuthorityScheme, ClassificationScheme
 from metadata import (
@@ -49,11 +52,43 @@ from metadata import (
     _marc_fields,
     _pages_from_extent,
     _parsed,
-    lookup,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.helpers import silence_covers, silence_oenb
+
+#: Every catalogue enabled, in the order a new install asks them.
+#:
+#: **These four wrappers exist so that `plan` can stay a required argument.**
+#: `metadata.lookup` and its three siblings take it keyword only with no
+#: default, so mypy refuses any production call site that forgets to apply the
+#: library's provider list. That is the property worth having and it is worth
+#: more than the convenience of a default, so the convenience lives here
+#: instead, in the one file that does not care which sources are on.
+#:
+#: What this file tests is what the catalogues answer and how their records are
+#: parsed and merged. What the plan itself does belongs to `test_sources.py`,
+#: and which module may hold a source order belongs to `test_house_rules.py`.
+#: A test here that wanted a narrower plan passes `plan=` and this gets out of
+#: the way.
+ALL_SOURCES = sources.DEFAULT_PLAN
+
+
+async def lookup(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
+    return await metadata.lookup(*args, plan=plan, **kwargs)
+
+
+async def search(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
+    return await metadata.search(*args, plan=plan, **kwargs)
+
+
+async def editions(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
+    return await metadata.editions(*args, plan=plan, **kwargs)
+
+
+async def candidates(*args: Any, plan: sources.Plan = ALL_SOURCES, **kwargs: Any):
+    return await metadata.candidates(*args, plan=plan, **kwargs)
+
 
 OPEN_LIBRARY = "https://openlibrary.org/"
 GOOGLE_BOOKS = "https://www.googleapis.com/books/v1/volumes"
@@ -1337,7 +1372,7 @@ class TestTheResponseSizeCap:
             mock.get(url__startswith=OPEN_LIBRARY).mock(
                 return_value=httpx.Response(200, json={"docs": []})
             )
-            rows = await metadata.search("clean code")
+            rows = await search("clean code")
 
         assert rows == []
 
@@ -2295,7 +2330,7 @@ class TestAHostileSourceCostsItsOwnRows:
             oenb = mock.get(url__startswith=OENB).mock(
                 return_value=_xml(self._poisoned_marc())
             )
-            rows = await metadata.search("poisoned")
+            rows = await search("poisoned")
 
         assert oenb.called
         # **The row survives, and that is the right answer rather than a
@@ -2384,7 +2419,7 @@ class TestAHostileSourceCostsItsOwnRows:
                     302, headers={"location": "http://xn--a.gov/x"}
                 )
             )
-            rows = await metadata.search("anything at all")
+            rows = await search("anything at all")
 
         assert loc.called
         assert rows == []
@@ -3114,7 +3149,7 @@ class TestTheEditionCluster:
     async def test_the_cluster_answers_with_the_other_printings(self):
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert [row.isbn for row in rows] == [
             "9780262270830",
@@ -3129,7 +3164,7 @@ class TestTheEditionCluster:
         one somebody can recognise their copy from."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert rows[0].page_count == 1320
         assert rows[-1].publisher is None
@@ -3140,7 +3175,7 @@ class TestTheEditionCluster:
         the same work and cannot fill in that copy's publisher or page count."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
+            rows = await editions(ENGLISH_ISBN, 5, prefer_language="de")
 
         assert [row.isbn for row in rows] == ["9783486590029", None]
 
@@ -3175,7 +3210,7 @@ class TestTheEditionCluster:
         }
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock, listing)
-            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="de")
+            rows = await editions(ENGLISH_ISBN, 5, prefer_language="de")
 
         assert [row.title for row in rows] == ["Es", "Es, Turkish printing"]
 
@@ -3185,7 +3220,7 @@ class TestTheEditionCluster:
         the Der Zinker cluster are among the 19 that do not."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.editions(ENGLISH_ISBN, 5, prefer_language="fr")
+            rows = await editions(ENGLISH_ISBN, 5, prefer_language="fr")
 
         assert [row.title for row in rows] == ["Introduction to Algorithms"]
         assert rows[0].language is None
@@ -3199,7 +3234,7 @@ class TestTheEditionCluster:
             author = mock.get(url__startswith=OL_AUTHORS).mock(
                 return_value=httpx.Response(200, json=OL_AUTHOR)
             )
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert author.call_count == 1
         assert rows[0].author == "Thomas H. Cormen"
@@ -3210,7 +3245,7 @@ class TestTheEditionCluster:
         applied to the book by `POST /{id}/enrich/apply`."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert rows[0].headings == (
             Heading(ClassificationScheme.DDC, "005.1"),
@@ -3222,7 +3257,7 @@ class TestTheEditionCluster:
             edition = mock.get(url__startswith=OL_ISBN).mock(
                 return_value=httpx.Response(200, json=_ol_edition())
             )
-            rows = await metadata.editions("not-an-isbn", 5)
+            rows = await editions("not-an-isbn", 5)
 
         assert rows == []
         assert not edition.called
@@ -3234,7 +3269,7 @@ class TestTheEditionCluster:
         answers 500 for the whole page rather than losing the cluster."""
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock, ["not", "a", "listing"])
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert rows == []
 
@@ -3245,7 +3280,7 @@ class TestTheEditionCluster:
             mock.get(url__startswith=OL_ISBN).mock(
                 return_value=httpx.Response(200, json="just a string")
             )
-            rows = await metadata.editions(ENGLISH_ISBN, 5)
+            rows = await editions(ENGLISH_ISBN, 5)
 
         assert rows == []
 
@@ -3255,7 +3290,7 @@ class TestTheEditionCluster:
         including round 2's own reference record."""
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=OL_ISBN).mock(return_value=httpx.Response(404))
-            rows = await metadata.editions(GERMAN_ISBN, 5)
+            rows = await editions(GERMAN_ISBN, 5)
 
         assert rows == []
 
@@ -3283,7 +3318,7 @@ class TestTheCandidates:
     async def test_the_cluster_leads(self):
         with respx.mock(assert_all_called=False) as mock:
             self._routes(mock)
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
@@ -3305,7 +3340,7 @@ class TestTheCandidates:
             mock.get(
                 url__regex=r"https://openlibrary\.org/works/[^/]+/editions\.json.*"
             ).mock(return_value=httpx.Response(200, json=crowded))
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
@@ -3333,7 +3368,7 @@ class TestTheCandidates:
                     },
                 )
             )
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
@@ -3358,7 +3393,7 @@ class TestTheCandidates:
                     },
                 )
             )
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
@@ -3378,7 +3413,7 @@ class TestTheCandidates:
                     },
                 )
             )
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=None, limit=5
             )
 
@@ -3404,14 +3439,18 @@ class TestTheCandidates:
             )
 
             async def _forever(
-                isbn: str, limit: int, prefer_language: str | None = None
+                isbn: str,
+                limit: int,
+                prefer_language: str | None = None,
+                *,
+                plan: sources.Plan,
             ) -> list[dict[str, object]]:
                 await asyncio.sleep(30)
                 return []
 
             monkeypatch.setattr(metadata, "editions", _forever)
             monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", 0.05)
-            rows = await metadata.candidates(
+            rows = await candidates(
                 "Introduction to Algorithms", isbn=ENGLISH_ISBN, limit=5
             )
 
@@ -3726,7 +3765,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
-            rows = await metadata.search("angehaltene leben")
+            rows = await search("angehaltene leben")
 
         assert [row.title for row in rows] == ["Das angehaltene Leben"]
 
@@ -3741,7 +3780,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
-            rows = await metadata.search("angehaltene leben")
+            rows = await search("angehaltene leben")
 
         assert rows[0].title == "Das angehaltene Leben"
         assert "<<" not in rows[0].title
@@ -3759,7 +3798,7 @@ class TestTheAustrianNationalLibrarySearch:
             route = mock.get(url__startswith=OENB).mock(
                 return_value=_xml(OENB_EMPTY)
             )
-            await metadata.search("angehaltene leben")
+            await search("angehaltene leben")
 
         query = route.calls.last.request.url.params["query"]
         assert query == "alma.title=angehaltene and alma.title=leben"
@@ -3779,7 +3818,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
-            rows = await metadata.search("angehaltene leben")
+            rows = await search("angehaltene leben")
 
         assert rows[0].sources == {"oenb"}
 
@@ -3797,7 +3836,7 @@ class TestTheAustrianNationalLibrarySearch:
             mock.get(url__startswith=OENB).mock(
                 return_value=_xml(OENB_SEARCH_WITH_ONLINE)
             )
-            rows = await metadata.search("nur online")
+            rows = await search("nur online")
 
         assert [row.title for row in rows] == ["Das angehaltene Leben"]
 
@@ -3818,7 +3857,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             self._quiet(mock)
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_SEARCH))
-            rows = await metadata.search("angehaltene leben")
+            rows = await search("angehaltene leben")
 
         assert rows[0].author_identifiers == ()
 
@@ -3841,16 +3880,59 @@ class TestTheAustrianNationalLibrarySearch:
             mock.get(url__startswith="http://lx2.loc.gov").mock(
                 return_value=httpx.Response(500)
             )
-            rows = await metadata.search("great gatsby")
+            rows = await search("great gatsby")
 
         assert [row.title for row in rows] == ["The Great Gatsby"]
 
+    #: The deadline this test patches in, and the sleep it puts behind one source.
+    #:
+    #: **Both are scaled down from 4.0 and 5, and the ratio is what matters rather than
+    #: the values.** The sleep must outlast the deadline by enough that a broken deadline
+    #: misses the bound by a wide margin, and the deadline must be long enough that the
+    #: five other mocked sources finish inside it.
+    #:
+    #: **The old numbers made this test nearly unable to fail.** It slept 5 against the
+    #: real 4.0 deadline and asserted `elapsed < 5`. A working deadline returns at about
+    #: 4.0, so there was a second of headroom and no false failure to worry about; the
+    #: defect was the other way round. **A completely broken deadline returns at about
+    #: 5.0, against a bound of 5**, so the test failed only by however much
+    #: `asyncio.sleep(5)` overshoots 5.000, which is scheduler noise. Its whole ability
+    #: to detect the regression it was written for rested on that overshoot being
+    #: positive. That is the recorded shape of a bound that stops guarding without ever
+    #: failing, met from the other side.
+    #:
+    #: It also spent four seconds of real wall clock on every suite run.
+    _DEADLINE = 0.5
+    _SLOWER_THAN_THE_DEADLINE = 2.0
+
+    #: What the five mocked sources, the merge and the ranking are allowed on top of the
+    #: deadline.
+    #:
+    #: **Chosen so the two failure directions have the same slack**, which is what the old
+    #: bound did not have. A working deadline returns at about `_DEADLINE` and has this
+    #: much room before the bound; a broken one returns at about
+    #: `_SLOWER_THAN_THE_DEADLINE` and misses the bound by 1.05s, measured. Every source
+    #: here is a mock that answers instantly, so this is slack against a loaded worker
+    #: rather than against any real work.
+    _MARGIN = 0.5
+
     @pytest.mark.asyncio
-    async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self):
-        """User story 5. The deadline degrades the results, never the latency."""
+    async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
+        """User story 5. The deadline degrades the results, never the latency.
+
+        **Bounded against the deadline, not against the sleep.** A broken deadline now
+        misses by 1.05s rather than by microseconds, and the number in the assertion says
+        what is being tested. `_MARGIN` is the slack for five mocked sources and the
+        merge, and it is far below the 1.5s a regression would cost.
+
+        **Proved to discriminate rather than asserted to**: with the deadline raised
+        above the sleep, this test is the one that fails, and it fails on the elapsed
+        bound rather than on the row assertion.
+        """
+        monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", self._DEADLINE)
 
         async def _crawl(request):
-            await asyncio.sleep(5)
+            await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
             return _xml(OENB_SEARCH)
 
         with respx.mock(assert_all_called=False) as mock:
@@ -3870,10 +3952,13 @@ class TestTheAustrianNationalLibrarySearch:
                 return_value=httpx.Response(500)
             )
             started = asyncio.get_running_loop().time()
-            rows = await metadata.search("great gatsby")
+            rows = await search("great gatsby")
             elapsed = asyncio.get_running_loop().time() - started
 
-        assert elapsed < 5
+        assert elapsed < self._DEADLINE + self._MARGIN, (
+            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s; "
+            f"a source sleeping {self._SLOWER_THAN_THE_DEADLINE}s was waited for"
+        )
         assert [row.title for row in rows] == ["The Great Gatsby"]
 
 
@@ -4060,3 +4145,275 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 
         assert result.record is not None
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
+
+
+class TestALibraryThatAsksNothing:
+    """Every catalogue switched off is a real state, and it must not raise.
+
+    **`asyncio.wait` refuses an empty set with `ValueError`**, so the fan out
+    turned a title search into a 500 for exactly the library that had just used
+    the new setting. It arrived with the fix for the sibling case: `lookup`
+    learned to say "nothing was asked" and this path was left to find out.
+
+    The routes refuse before they get here, with a 409 naming the setting. This
+    is the layer under that, and it is tested separately because a caller
+    passing a plan by hand is not a caller that consulted the settings table.
+    """
+
+    @staticmethod
+    def _nothing_on() -> sources.Plan:
+        return sources.parse(
+            {
+                "sources": [
+                    {"source": source.value, "enabled": False}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_title_search_answers_nothing_rather_than_raising(self):
+        assert await metadata.search("anything", plan=self._nothing_on()) == []
+
+    @pytest.mark.asyncio
+    async def test_the_edition_candidates_answer_nothing_rather_than_raising(self):
+        rows = await metadata.candidates(
+            "anything", isbn=ENGLISH_ISBN, plan=self._nothing_on()
+        )
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_an_isbn_lookup_says_nothing_was_asked(self):
+        """Distinct from "no catalogue has this book", which is a claim."""
+        metadata.clear_cache()
+        result = await metadata.lookup(ENGLISH_ISBN, plan=self._nothing_on())
+        assert result.outcome is metadata.Outcome.NO_SOURCES
+        assert result.attempts == []
+
+    @pytest.mark.asyncio
+    async def test_the_edition_cluster_is_not_asked_with_open_library_off(self):
+        """Open Library is the only source of a cluster, so off means empty."""
+        without = sources.parse(
+            {"sources": [{"source": "open_library", "enabled": False}]}
+        )
+        assert await metadata.editions(ENGLISH_ISBN, 5, plan=without) == []
+
+
+def _newcombe(
+    first_hits: int, first_n: int, second_hits: int, second_n: int
+) -> tuple[float, float, float]:
+    """The difference between two proportions and its 95% interval, as percentages.
+
+    Newcombe's method 10, which builds the difference interval out of the two Wilson
+    intervals rather than assuming normality, and is what every interval quoted in this
+    docstring was computed with.
+    """
+    z = 1.959964
+
+    def wilson(hits: int, total: int) -> tuple[float, float]:
+        share = hits / total
+        spread = 1 + z * z / total
+        centre = (share + z * z / (2 * total)) / spread
+        half = (
+            z
+            * math.sqrt(
+                share * (1 - share) / total + z * z / (4 * total * total)
+            )
+            / spread
+        )
+        return max(0.0, centre - half), min(1.0, centre + half)
+
+    first, second = first_hits / first_n, second_hits / second_n
+    first_low, first_high = wilson(first_hits, first_n)
+    second_low, second_high = wilson(second_hits, second_n)
+    low = (first - second) - math.sqrt(
+        (first - first_low) ** 2 + (second_high - second) ** 2
+    )
+    high = (first - second) + math.sqrt(
+        (first_high - first) ** 2 + (second - second_low) ** 2
+    )
+    return 100 * (first - second), 100 * low, 100 * high
+
+
+class TestTheLibraryOfCongressTableAgreesWithItself:
+    """`metadata.search`'s docstring states six percentages and the fractions they came from.
+
+    **The measurement cannot be pinned and the arithmetic can.** Re-taking the numbers
+    means asking a national library from the suite, which is a test that fails when that
+    library is down. Recomputing a stated percentage from the stated fraction beside it
+    needs no network at all, and it is the habit `test_serialisation`'s
+    "the number in the docstring is the number it costs" already establishes here.
+
+    **What this catches is the edit that changes one row and not the other**, which is the
+    shape that made the sentence above the table wrong twice: a claim written in two places
+    and corrected in one.
+
+    **It is written to fail if its own subject is deleted**, because a docstring guard that
+    goes vacuous is the recurring defect this repository has recorded twenty times. The
+    table's shape is asserted before its contents are: two rows, six columns each, and the
+    countries named in the order the prose then reasons about them.
+    """
+
+    #: The country columns, in the docstring's own left to right order, which the prose
+    #: below the table depends on: it calls the first the only separated result and
+    #: compares the fourth and sixth against the second and third.
+    COUNTRIES = ("Uruguay", "Spain", "Italy", "Brazil", "Portugal", "Argentina")
+
+    @staticmethod
+    def _rows() -> tuple[list[str], list[str], list[str]]:
+        """The table's three rows as cell lists: headings, fractions, percentages."""
+        doc = metadata.search.__doc__ or ""
+        lines = [
+            [cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in doc.splitlines()
+            if line.strip().startswith("|")
+        ]
+        assert len(lines) == 4, f"expected a four line table, found {len(lines)}"
+        return lines[0][1:], lines[2][1:], lines[3][1:]
+
+    def test_the_table_is_still_there_and_still_the_shape_the_prose_reads(self):
+        headings, fractions, percentages = self._rows()
+        assert tuple(headings) == self.COUNTRIES
+        assert len(fractions) == len(percentages) == len(self.COUNTRIES)
+
+    def test_every_percentage_is_the_fraction_beside_it(self):
+        _, fractions, percentages = self._rows()
+        for country, fraction, stated in zip(
+            self.COUNTRIES, fractions, percentages, strict=True
+        ):
+            held, _, asked = fraction.partition("/")
+            shown = float(stated.strip("*").rstrip("%"))
+            assert round(100 * int(held) / int(asked), 1) == shown, (
+                f"{country}: the docstring says {stated} and {fraction} is "
+                f"{100 * int(held) / int(asked):.1f}%"
+            )
+
+    def test_uruguay_leads_the_table_it_is_named_for(self):
+        """The prose calls it the only separated result, so it had better be the largest."""
+        _, fractions, _ = self._rows()
+        shares = [int(f.split("/")[0]) / int(f.split("/")[1]) for f in fractions]
+        assert shares[0] == max(shares)
+
+    def test_the_tier_line_is_word_for_word_what_was_measured(self):
+        """The clause is pinned exactly, because it has been wrong twice and neither
+        spelling names a country.
+
+        **Matching country nouns does not see the mistake this guards against.** The
+        first version of this test looked for `Spain` and `Portugal` in the line. Both
+        times the line was wrong it was wrong **adjectivally**, "Spanish, Portuguese and
+        Latin American printings", and `Spain` is not a substring of `Spanish`. Two
+        mutations written by a second seat, adding "and Spanish printings" and "and
+        Portuguese printings", walked straight past it.
+
+        **The fix is not a longer word list**, which would leave Brazilian, Argentine,
+        Argentinian, Italian, Iberian and Latin American behind it: that is the
+        enumerating-guard shape this repository has paid for repeatedly. It is to pin the
+        clause, so that **any** edit to it fails and whoever makes it re-derives the
+        claim, which is what `test_fetch.py` does for the source count. An edit backed by
+        a measurement updates one string here; an edit backed by nothing cannot.
+        """
+        doc = metadata.search.__doc__ or ""
+        start = doc.index("**Tier two")
+        clause = doc[start : doc.index(".", doc.index("ÖNB", start))]
+        assert clause == (
+            "**Tier two, free, regional:** the BnF for French, the Library of Congress\n"
+            "for Uruguayan printings and for anything printed before ISBNs existed, the\n"
+            "ÖNB for Austrian imprints"
+        ), f"the tier two clause changed and nothing re-derived it:\n{clause!r}"
+
+    #: Which columns each aggregate in the prose sums, by position in `COUNTRIES`.
+    #:
+    #: Named here rather than spelled inside a test, because the prose reasons about two
+    #: groups and a subtraction and all three have to agree with the same table.
+    _LATIN_AMERICA = (0, 3, 5)   # Uruguay, Brazil, Argentina
+    _THE_TWO_DROPPED = (1, 2)    # Spain, Italy
+    _LATIN_AMERICA_WITHOUT_URUGUAY = (3, 5)
+
+    @staticmethod
+    def _prose() -> str:
+        """The docstring with every run of whitespace collapsed to one space.
+
+        **Matched against this rather than the raw text, because a regex that knows
+        where a sentence wraps breaks on any rewording that moves the wrap.** The
+        aggregate sentence currently breaks between `+5.3` and `points`, and the first
+        version of the test below encoded that position and failed on the unmutated
+        docstring.
+        """
+        return " ".join((metadata.search.__doc__ or "").split())
+
+    def _sum(self, fractions: list[str], columns: tuple[int, ...]) -> tuple[int, int]:
+        pairs = [
+            (int(fractions[i].split("/")[0]), int(fractions[i].split("/")[1]))
+            for i in columns
+        ]
+        return sum(p[0] for p in pairs), sum(p[1] for p in pairs)
+
+    def test_the_aggregate_figures_recompute_from_the_table_too(self):
+        """The sibling test pinned three derived figures and left seven, which is the
+        defect it exists to describe, one subset across.
+
+        **Measured by a second seat**, seven mutations against the previous version:
+        changing `43/142`, `24/96`, `17/95`, `17.9%`, the aggregate `+5.3` and its `-6.5`
+        bound all survived, and only the control was caught. Six of seven, every one
+        recomputable from the two rows the test already parses.
+
+        **So there is no unguarded figure left in this docstring.** Sixteen in total:
+        six table percentages, and **ten derived from them**, being the Uruguay triple, the
+        aggregate triple, the two aggregate fractions and the without-Uruguay pair. That is
+        the claim, and it is what makes this test worth the ten lines rather than a note
+        saying which figures are covered.
+
+        That sentence said "ten in total" over a list summing to sixteen, folding the six
+        percentages into a total that excluded them. Ten is the count of the **derived**
+        figures alone, which is the number the finding above uses. **A note about a
+        miscounted enumeration, miscounting its own.**
+        """
+        _, fractions, _ = self._rows()
+        prose = self._prose()
+
+        region = self._sum(fractions, self._LATIN_AMERICA)
+        europe = self._sum(fractions, self._THE_TWO_DROPPED)
+        difference, low, high = _newcombe(*region, *europe)
+        stated = re.search(
+            r"Latin America is (\d+)/(\d+) against Spain and Italy's (\d+)/(\d+), "
+            r"\+(\d+\.\d) points, 95% Newcombe (-\d+\.\d) to \+(\d+\.\d)",
+            prose,
+        )
+        assert stated is not None, "the docstring no longer states the aggregate sentence"
+        assert (int(stated.group(1)), int(stated.group(2))) == region
+        assert (int(stated.group(3)), int(stated.group(4))) == europe
+        assert [round(v, 1) for v in (difference, low, high)] == [
+            float(g) for g in stated.group(5, 6, 7)
+        ]
+
+        rest = self._sum(fractions, self._LATIN_AMERICA_WITHOUT_URUGUAY)
+        without = re.search(r"without Uruguay it is (\d+)/(\d+), or (\d+\.\d)%", prose)
+        assert without is not None, "the docstring no longer states the without-Uruguay figure"
+        assert (int(without.group(1)), int(without.group(2))) == rest
+        assert round(100 * rest[0] / rest[1], 1) == float(without.group(3))
+
+    def test_the_three_derived_figures_recompute_from_the_table(self):
+        """The percentages were pinned and the numbers drawn from them were not.
+
+        **That is exactly how they went wrong.** The prose stated +28.0 points and a
+        Newcombe interval of +9.0 to +44.4, which is `26/50` against `12/50`: the flat
+        sample size, from before the table was corrected to the denominators that actually
+        answered. The six table percentages were guarded and these three were not, so the
+        guard's own coverage had picked the case that was already right.
+        """
+        _, fractions, _ = self._rows()
+        uruguay, spain = (
+            (int(f.split("/")[0]), int(f.split("/")[1])) for f in fractions[:2]
+        )
+        difference, low, high = _newcombe(*uruguay, *spain)
+        stated = re.search(
+            r"\+(\d+\.\d) points over Spain, 95% Newcombe \+(\d+\.\d) to \+(\d+\.\d)",
+            self._prose(),
+        )
+        assert stated is not None, "the docstring no longer states the three figures"
+        assert [round(v, 1) for v in (difference, low, high)] == [
+            float(g) for g in stated.groups()
+        ], (
+            f"the docstring says {stated.groups()} and the table gives "
+            f"{difference:.1f}, {low:.1f}, {high:.1f}"
+        )
