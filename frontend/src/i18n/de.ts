@@ -179,6 +179,17 @@ export const de: Messages = {
   "field.ownership": "Besitz",
   "field.addedBy": "Hinzugefügt von",
   "field.addedAt": "Hinzugefügt am",
+  // "Signatur" ist der bibliothekarische Begriff für die Notation, unter der
+  // ein Buch im Regal steht. Bewusst nicht "Regal": das ist `location.label`,
+  // die freie Beschreibung, wo ein Buch in diesem Haushalt tatsächlich steht.
+  "field.callNumber": "Signatur",
+  "field.classification": "Schlagwörter",
+
+  // ── Spalten der Tabelle wählen ──────────────────────────────────────────
+  "columns.label": "Spalten",
+  "columns.summary": "{shown} von {total}",
+  "columns.reset": "Zurück zu den üblichen Spalten",
+  "columns.alwaysShown": "Der Titel wird immer angezeigt.",
 
   // ── Ausklappbereich der Karte ───────────────────────────────────────────
   "card.details": "Details",
@@ -417,7 +428,7 @@ export const de: Messages = {
   "settings.public.modeTitle": "Bibliotheksmodus",
   "settings.public.modeLabel": "Diese Bibliothek als Bibliothek katalogisieren",
   "settings.public.modeHint":
-    "Zeigt Signatur, Klassifikation und Erfassungsstand und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
+    "Zeigt Signatur und Schlagwörter und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
   "settings.public.modeRepublishes":
     "Das Veröffentlichen ist bereits eingeschaltet. Wenn Sie dies wieder einschalten, ist der Katalog sofort erneut öffentlich.",
   "settings.public.publishTitle": "Veröffentlichen",

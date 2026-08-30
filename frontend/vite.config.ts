@@ -185,6 +185,21 @@ export default defineConfig({
     // uses. The eleven DOM-free files opt out entirely with a
     // `@vitest-environment node` docblock and are unaffected either way.
     //
+    // **Recount that eleven with the docblock ANCHORED, or it comes out one too
+    // high**:
+    // `grep -rlE '^\s*\*\s*@vitest-environment node' tests | wc -l`.
+    // The obvious `grep -rl '@vitest-environment node' tests` answers twelve,
+    // because `tests/setup.ts` *mentions* the docblock in a comment explaining
+    // that setup also runs for the files carrying it. `setup.ts` is not one of
+    // them and does not opt out of anything. Counting the string rather than
+    // the docblock turned this number from correct to wrong twice in one
+    // ticket, in both directions, which is why the command is written down
+    // rather than left to whoever edits next.
+    //
+    // Eleven describes the tree from 2026-08-30 onward. A checkout from earlier
+    // that day counts twelve and is not stale: `tests/lib/recordStatus.test.ts`
+    // existed for one round and was deleted with the rule it guarded.
+    //
     // The risk is real and is why this is worth a note rather than a swap:
     // happy-dom is not jsdom, and a test relying on a corner jsdom implements
     // and it does not will fail on the DOM rather than on the assertion. The

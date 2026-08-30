@@ -4,11 +4,11 @@ import { Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
 import type { MessageKey } from "../../../i18n/en";
 import {
-  ClassificationScheme,
   type ClassificationFacets,
   type DivisionFacetOut,
   type HeadingFacetOut,
 } from "../../../api/generated/model";
+import { SCHEME_LABEL } from "../../../lib/classificationLabels";
 
 interface ClassificationPickerProps {
   facets: ClassificationFacets | undefined;
@@ -30,13 +30,6 @@ interface ClassificationPickerProps {
  * detail: `004` is computing in Dewey and is not a Library of Congress call
  * number at all, so a number with no scheme cannot be read.
  */
-
-const SCHEME_LABEL: Record<ClassificationScheme, MessageKey> = {
-  [ClassificationScheme.ddc]: "classification.scheme.ddc",
-  [ClassificationScheme.lcc]: "classification.scheme.lcc",
-  [ClassificationScheme.gnd]: "classification.scheme.gnd",
-  [ClassificationScheme.lcsh]: "classification.scheme.lcsh",
-};
 
 /** The wire spelling of one heading, and the only place it is assembled. */
 export function headingKey(facet: HeadingFacetOut): string {

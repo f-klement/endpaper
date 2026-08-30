@@ -20,6 +20,7 @@ import {
   useLibrary,
   useUnconfirmedCount,
 } from "../../../src/pages/Home/hooks";
+import { DEFAULT_COLUMNS } from "../../../src/lib/libraryColumns";
 import {
   makeBook,
   makeBookPage,
@@ -412,6 +413,101 @@ describe("useLibrary lending and discussion filters", () => {
       await waitFor(() => expect(result.current.books).toHaveLength(1));
       expect(result.current.filters.discuss).toBe(false);
     });
+  });
+});
+
+/**
+ * The column set, per mode.
+ *
+ * The mode comes from `library_mode` on the feature flags, which is fetched,
+ * so every assertion here waits for it rather than reading the first render.
+ */
+describe("useLibrary, the column set", () => {
+  function inLibraryMode(on: boolean) {
+    api.on("/api/settings/features", {
+      body: {
+        google_books_enabled: false,
+        google_books_ready: false,
+        goodreads_lookup_enabled: false,
+        default_locale: "en",
+        library_mode: on,
+      },
+    });
+  }
+
+  it("gives a household its own table and none of the cataloguer's columns", async () => {
+    inLibraryMode(false);
+    const { result } = renderLibrary();
+
+    await waitFor(() => expect(result.current.mode).toBe("household"));
+    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.household]);
+    expect(result.current.availableColumns).not.toContain("callNumber");
+  });
+
+  it("offers the cataloguer's set in library mode", async () => {
+    inLibraryMode(true);
+    const { result } = renderLibrary();
+
+    await waitFor(() => expect(result.current.mode).toBe("cataloguer"));
+    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.cataloguer]);
+    for (const key of ["callNumber", "classification"]) {
+      expect(result.current.availableColumns).toContain(key);
+    }
+  });
+
+  it("falls back to the household set when the flags never answer", async () => {
+    // `useFeatureFlags` is `retry: false` and the shell renders regardless, so
+    // a failure here has to mean the table every existing library already has.
+    api.on("/api/settings/features", { status: 500, body: {} });
+    const { result } = renderLibrary();
+
+    await waitFor(() => expect(result.current.books).toHaveLength(1));
+    expect(result.current.mode).toBe("household");
+  });
+
+  it("keeps a household's choice through a mode switch in both directions", async () => {
+    // The ticket's third testing decision. Two storage keys, so neither mode's
+    // choice is ever a merge of the other's.
+    inLibraryMode(false);
+    const household = renderLibrary();
+    await waitFor(() =>
+      expect(household.result.current.mode).toBe("household"),
+    );
+
+    act(() => household.result.current.toggleColumn("price"));
+    const chosen = [...household.result.current.columns];
+    expect(chosen).not.toContain("price");
+    household.unmount();
+
+    inLibraryMode(true);
+    const cataloguer = renderLibrary();
+    await waitFor(() =>
+      expect(cataloguer.result.current.mode).toBe("cataloguer"),
+    );
+    expect(cataloguer.result.current.columns).toEqual([
+      ...DEFAULT_COLUMNS.cataloguer,
+    ]);
+    act(() => cataloguer.result.current.toggleColumn("classification"));
+    cataloguer.unmount();
+
+    inLibraryMode(false);
+    const back = renderLibrary();
+    await waitFor(() => expect(back.result.current.mode).toBe("household"));
+    expect(back.result.current.columns).toEqual(chosen);
+  });
+
+  it("hands the choice back and takes it away again", async () => {
+    inLibraryMode(false);
+    const { result } = renderLibrary();
+    await waitFor(() => expect(result.current.mode).toBe("household"));
+
+    expect(result.current.canResetColumns).toBe(false);
+    act(() => result.current.toggleColumn("price"));
+    expect(result.current.canResetColumns).toBe(true);
+
+    act(() => result.current.resetColumns());
+    expect(result.current.columns).toEqual([...DEFAULT_COLUMNS.household]);
+    expect(result.current.canResetColumns).toBe(false);
   });
 });
 

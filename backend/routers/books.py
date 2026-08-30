@@ -2066,8 +2066,19 @@ def list_duplicates(db: DbSession, current_user: CurrentUser) -> list[DuplicateG
         return []
 
     # One serialisation pass for every duplicate, then partitioned back into
-    # groups. `books_to_out` costs a constant three statements whatever it is
-    # given, so calling it per group is what made it linear in groups.
+    # groups. For a page fetched with `Loading.SERIALISED`, `books_to_out`
+    # costs a constant number of statements whatever the size of the page, so
+    # calling it per group is what made this linear in groups.
+    #
+    # **The qualification is load bearing rather than pedantry.** Without the
+    # option `books_to_out` pays one more statement per distinct author, so the
+    # cost would grow with the shelf and not with the groups; the fetch above
+    # is what supplies it.
+    #
+    # The number itself is deliberately not repeated here. It is stated once,
+    # in `books_to_out`, where a test reads it back out of the docstring and
+    # measures against it. This line used to carry its own copy of the figure,
+    # and it went stale with nothing failing anywhere.
     flat = [book for members in duplicated.values() for book in members]
     serialised = {out.id: out for out in books_to_out(flat, current_user, db)}
 
@@ -3161,9 +3172,11 @@ def remove_book_tag(
 # Served here rather than on `BookOut`, like notes and quotes and unlike tags.
 # Two reasons and the second is the load bearing one. A page of 25 book cards
 # has no room to render them, so putting them on every listing payload would buy
-# nothing; and `books_to_out` is a **7 statement** budget that a test reads out
+# nothing; and `books_to_out` is a fixed statement budget that a test reads out
 # of its own docstring, so a field nobody displays would cost every listing in
-# the app one more query.
+# the app one more query. The figure is deliberately not repeated here: it lived
+# in this comment while a third copy elsewhere in this file disagreed with it,
+# and nothing recounts a number in a comment.
 
 
 def _custom_fields_out(book: Book, db: Session) -> list[CustomFieldValueOut]:

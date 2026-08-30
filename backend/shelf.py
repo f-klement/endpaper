@@ -167,25 +167,87 @@ class Loading(Enum):
 
     **`SERIALISED` deliberately does not load `tags`, and `EXPORTED` does.**
     That asymmetry is the whole of it, and what decides it is whether a second
-    reader exists. Everything fetched with `SERIALISED` is serialised by
-    `serialisation.books_to_out`, which re-reads the page with a
+    reader exists. No caller fetching with `SERIALISED` reads a **page** of
+    tags outside `serialisation.books_to_out`, which re-reads the page with a
     `selectinload(Book.tags)` of its own, so an option here loads a collection
     that is loaded again a moment later and can never do work. The CSV export
     has no such second reader: it reads `book.tags` per row itself, so there
     the option is the only thing standing between it and an N+1.
 
-    Measured 2026-08-30 by dropping the option and counting the statements
-    that read `book_tags`, at all six call sites, at two lengths each, and by
-    a viewer who added none of the books, with the owner's view taken beside it
-    on four of the routes as a control (identical, because a collection load is
-    never answered from the identity map): 2 to 1 on `GET /api/books`,
+    **The stronger sentence is false, and it was the one written here until
+    2026-08-30.** "Everything fetched with `SERIALISED` is serialised by
+    `books_to_out`" is falsified by **17 of the 33 routes** that reach
+    `book_for_read` or `book_in_trash`, all of them in `routers/books.py` and
+    nowhere else: **11** serialise a sub-resource and never the book (the
+    reads and writes under notes, quotes, progress and custom fields, plus
+    `GET /{id}/enrich/candidates`), **5** answer 204 and serialise nothing at
+    all (`DELETE /{id}`, `DELETE /{id}/permanent`, and the note, quote and
+    progress deletes), and `add_copy` serialises the **copy** rather than the
+    book it read. `list_duplicates` falsifies it a second way, fetching the
+    whole shelf and serialising only the rows that fell into a group.
+
+    **Those numbers are recomputed from the routers by
+    `tests/test_shelf.py::TestTheRoutesThisDocstringCounts`, and the reason is
+    that two breakdowns were written before this one and both were wrong.**
+    First `19` with a split of `16/2`, because the enrichment **family** has
+    three routes and only `GET /{id}/enrich/candidates` fails to serialise its
+    book, so counting families rather than routes gave 19 where the answer is
+    17. Then `17` with a split of `14/2`, filing the note, quote and progress
+    deletes as sub-resource routes. The rule that settles it is one sentence
+    neither had: **a route that answers 204 serialises nothing, whether it
+    hangs off a book or off a note.**
+
+    Two critics reviewing independently agreed on the total and produced two
+    different splits of it, which is why each bucket is asserted apart rather
+    than summed.
+
+    The conclusion survives all of them, and the reason is the word **page**.
+    Every one of those 17 routes holds a single Book, where an eager load of one
+    row's collection and a lazy read of it cost one statement each. That is why
+    the measurement below shows `POST /{id}/copies` going 3 to 2 rather than
+    3 to 1: the option's statement was not saved there, it was replaced. Only a
+    caller that serialises a **page** by some route other than `books_to_out`
+    would turn this deletion into an N+1, and there is none.
+
+    Measured 2026-08-30 by counting the statements that read `book_tags`, at
+    all six call sites, at two lengths each, by a viewer who added none of the
+    books, with the owner's view taken beside it on three of the routes as a
+    control (identical, because a collection load is never answered from the
+    identity map). Option present to option absent: 2 to 1 on `GET /api/books`,
     `/api/books/trash`, `/api/books/duplicates` and `/api/books/{id}`; 3 to 1
     on `/api/books/{id}/copies` and `POST /api/books/{id}/restore`, which read
     the shelf twice in one request; 1 to 0 on `/api/books/{id}/notes`, which
-    serialises nothing; 3 to 2 on `POST /api/books/{id}/copies`, the one route
-    that reads `book.tags` outside the serialiser; and unchanged at 1 on
+    serialises nothing; 3 to 2 on `POST /api/books/{id}/copies` and on the
+    working arm of each `/api/books/{id}/tags/{tag_id}` route, which are the
+    three that read `book.tags` outside the serialiser and so replace the
+    statement rather than saving it; and unchanged at 1 on
     `DELETE /api/books/{id}/permanent`, whose cascade loads the collection
-    either way. Nothing rose anywhere.
+    either way.
+
+    **One arm of one route is dearer without the option, at both library sizes,
+    and nothing else in thirty scenarios is.**
+    `POST /api/books/{id}/tags/{tag_id}` where
+    the tag is already on the book: **11 statements with the option and 12
+    without**, at a library of 5 and of 25 alike. Neither of the two is a tag
+    load, and that is what identifies it. The handler calls
+    `db.get(Tag, tag_id)` before it reads `book.tags`, and the eager load had
+    already put that Tag in the identity map, so the `get` was answered without
+    a statement. The same route's working arm falls 15 to 14, and `DELETE` of
+    a tag that is present is flat at 14, trading the tag load for that same
+    `get`.
+
+    So the trade is one statement on one arm of one write, against one on every
+    listing the app serves. It is recorded rather than rounded away because
+    "nothing rose anywhere" is what this paragraph said until a second seat
+    measured the arms separately, and an absolute is the shape of claim this
+    repository keeps getting wrong.
+
+    Measured twice, in both directions, by two seats. The first run dropped the
+    option; the second added it back, which is the only direction still
+    available once it is gone, and reproduced every row. Neither direction is
+    sufficient alone: dropping it tells a redundant eager load apart from one
+    replaced by a lazy load, and adding it back proves no call site was left
+    paying for a load it needed.
 
     A caller that serialises a page of Books by any route other than
     `books_to_out` has to load the collection itself, or it pays one statement

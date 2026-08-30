@@ -22,6 +22,17 @@ import { useListCollections } from "../../api/generated/endpoints/collections/co
 import { useMyOverdue as useMyOverdueQuery } from "../../api/generated/endpoints/loans/loans";
 import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
 import {
+  AVAILABLE_COLUMNS,
+  catalogueMode,
+  clearColumns,
+  isDefaultColumns,
+  readColumns,
+  toggledColumns,
+  writeColumns,
+  type CatalogueMode,
+  type ColumnKey,
+} from "../../lib/libraryColumns";
+import {
   readLibraryView,
   writeLibraryView,
   type LibraryView,
@@ -46,6 +57,7 @@ import {
   saveSearch,
   type SavedSearch,
 } from "../../lib/savedSearches";
+import { useFeatureFlags } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { useSortedByName, useTranslation } from "../../i18n";
 import type { BookFilters } from "./types";
@@ -91,6 +103,17 @@ export interface UseLibraryResult {
   view: LibraryView;
   setView: (view: LibraryView) => void;
 
+  /** Whether this library is being catalogued or kept. See `libraryColumns`. */
+  mode: CatalogueMode;
+  /** Every column this mode offers, whether drawn or not. */
+  availableColumns: readonly ColumnKey[];
+  /** The columns the table draws. Remembered per mode, in this browser. */
+  columns: readonly ColumnKey[];
+  toggleColumn: (key: ColumnKey) => void;
+  resetColumns: () => void;
+  /** False while `columns` already is this mode's default set. */
+  canResetColumns: boolean;
+
   books: BookOut[];
   total: number;
   tags: TagOut[];
@@ -130,6 +153,24 @@ export function useLibrary(): UseLibraryResult {
   // Same reasoning, and the same failure posture: storage that refuses to
   // answer gives the grid rather than an error.
   const [view, setViewState] = useState<LibraryView>(() => readLibraryView());
+
+  // **The column set is derived from the mode, not held as state seeded from
+  // it.** The flags are fetched, so `library_mode` is undefined for the first
+  // render or two; a `useState` initialiser would capture the household set
+  // and a cataloguer would keep it for the rest of the session. Re-reading
+  // storage when the mode changes is one `getItem`, and it is what makes the
+  // two modes' choices independent rather than merely separately stored.
+  //
+  // `edits` is bumped by a write so the next render re-reads what was just
+  // stored. Storage is the single copy: keeping a second one in state is how
+  // the two come to disagree.
+  const mode = catalogueMode(useFeatureFlags()?.library_mode);
+  const [edits, setEdits] = useState(0);
+  const columns = useMemo(
+    () => readColumns(mode),
+    // `edits` is the whole point of the dependency, not an accident.
+    [mode, edits],
+  );
 
   const params = { ...toParams(filters), page_size: PAGE_SIZE };
 
@@ -223,6 +264,24 @@ export function useLibrary(): UseLibraryResult {
       setViewState(next);
       writeLibraryView(next);
     },
+
+    mode,
+    availableColumns: AVAILABLE_COLUMNS[mode],
+    columns,
+    // Written under this mode's own key, so a household's choice is untouched
+    // by anything a cataloguer does and the other way round. A toggle that
+    // lands back on the default clears the key instead of storing a copy of
+    // it, which `writeColumns` does rather than this call site: turning one
+    // column off and straight back on is the ordinary way to get there.
+    toggleColumn: (key) => {
+      writeColumns(mode, toggledColumns(mode, columns, key));
+      setEdits((count) => count + 1);
+    },
+    resetColumns: () => {
+      clearColumns(mode);
+      setEdits((count) => count + 1);
+    },
+    canResetColumns: !isDefaultColumns(mode, columns),
 
     books: flatBooks,
     total,

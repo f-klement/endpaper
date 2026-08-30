@@ -44,7 +44,7 @@ interface BookListProps {
  * The library as dense rows: a tiny cover, and what identifies a book at a glance.
  *
  * **What the row holds is the design, and the answer is not everything the
- * table has.** A dense row repeating twenty one columns is a worse table. What
+ * table has.** A dense row repeating twenty three columns is a worse table. What
  * is here is what a **grid card's face** carries, minus the two badges that are
  * about a card rather than a book (the copies count and the discussion offer),
  * plus the two facts the card hides in its fold out that somebody scanning a

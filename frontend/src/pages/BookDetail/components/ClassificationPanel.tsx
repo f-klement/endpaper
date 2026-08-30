@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom";
 
 import type { ClassificationOut } from "../../../api/generated/model";
-import { ClassificationScheme } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
-import type { MessageKey } from "../../../i18n/en";
+import { SCHEME_LABEL } from "../../../lib/classificationLabels";
 
 interface ClassificationPanelProps {
   classifications: ClassificationOut[];
@@ -23,14 +22,6 @@ interface ClassificationPanelProps {
  * computing in Dewey and is not a Library of Congress call number at all, so a
  * number shown without its scheme cannot be read.
  */
-
-/** The message key naming one scheme, so a typo is a compile error. */
-const SCHEME_LABEL: Record<ClassificationScheme, MessageKey> = {
-  [ClassificationScheme.ddc]: "classification.scheme.ddc",
-  [ClassificationScheme.lcc]: "classification.scheme.lcc",
-  [ClassificationScheme.gnd]: "classification.scheme.gnd",
-  [ClassificationScheme.lcsh]: "classification.scheme.lcsh",
-};
 
 /**
  * The filter link one heading leads to.

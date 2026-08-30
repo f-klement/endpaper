@@ -789,7 +789,7 @@ with nothing saying why, is worse than an error. See [security.md](security.md).
 
 These are served here rather than on `BookOut`, like notes and quotes and unlike
 tags: a page of 25 book cards has nowhere to render them, and `books_to_out` is a
-7 statement budget that a test reads out of its own docstring.
+fixed statement budget that a test reads out of its own docstring.
 
 ### Importing a library
 

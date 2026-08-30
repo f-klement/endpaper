@@ -10,6 +10,7 @@ import BookGrid from "./components/BookGrid";
 import BookList from "./components/BookList";
 import BookTable from "./components/BookTable";
 import ChannelAlertBanner from "./components/ChannelAlertBanner";
+import ColumnPicker from "./components/ColumnPicker";
 import OverdueBanner from "./components/OverdueBanner";
 import SavedSearches from "./components/SavedSearches";
 import SelectionBar from "./components/SelectionBar";
@@ -160,7 +161,7 @@ export default function Home() {
             aria-busy={library.isStale}
           >
             {/* Selecting forces the grid: the checkbox lives on a card, and
-                neither a table of twenty one columns nor a dense list is where
+                neither a table of twenty three columns nor a dense list is where
                 somebody ticks twenty books off. Starting a selection therefore
                 shows the covers again, rather than offering a selection that
                 does nothing.
@@ -180,15 +181,29 @@ export default function Home() {
                 onToggleSelect={selection.toggle}
               />
             ) : library.view === "table" ? (
-              <BookTable
-                books={library.books}
-                sort={library.filters.sort}
-                onSortChange={(sort) => library.update({ sort })}
-                isLoading={library.isLoading}
-                hasMore={library.hasMore}
-                isLoadingMore={library.isLoadingMore}
-                onLoadMore={library.loadMore}
-              />
+              <>
+                {/* Above the table rather than inside it. The table scrolls
+                    sideways on a narrow screen, and a control that scrolls
+                    away from the thing it configures is one the reader has to
+                    go and find. */}
+                <ColumnPicker
+                  available={library.availableColumns}
+                  visible={library.columns}
+                  onToggle={library.toggleColumn}
+                  onReset={library.resetColumns}
+                  canReset={library.canResetColumns}
+                />
+                <BookTable
+                  books={library.books}
+                  columns={library.columns}
+                  sort={library.filters.sort}
+                  onSortChange={(sort) => library.update({ sort })}
+                  isLoading={library.isLoading}
+                  hasMore={library.hasMore}
+                  isLoadingMore={library.isLoadingMore}
+                  onLoadMore={library.loadMore}
+                />
+              </>
             ) : (
               <BookList
                 books={library.books}

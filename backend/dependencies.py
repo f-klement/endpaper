@@ -293,9 +293,13 @@ def book_for_read(
     """The book at `book_id`, if the caller is allowed to see it.
 
     Eager-loads `added_by`, so resolving the book does not cost a query for the
-    member who added it. The collections are not loaded here: `books_to_out`
-    re-reads the page and loads them itself, and `shelf.Loading` carries the
-    measurement.
+    member who added it. The collections are not loaded here, and what happens
+    to them next depends on the route rather than on this dependency: **15 of
+    the 31** routes fed from here serialise no Book at all, just under half,
+    and those that do get their tags from `books_to_out`, which re-reads and
+    loads them itself.
+    `shelf.Loading` carries the measurement, including the one arm of one route
+    that pays a statement for the absence.
     """
     book = (
         Shelf.seen_by(db, current_user.id)

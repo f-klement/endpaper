@@ -66,8 +66,9 @@ be saved as a view.
 **Card, list or table.** The list is one dense row per book: a tiny cover, the
 title, and the author, series, year and reading status beside it, plus a marker
 where the book is out on loan or nobody has confirmed the library holds it. The
-table carries twenty one columns and sorts on what the server can genuinely
-order by. The choice is remembered in the browser.
+table carries twenty three columns, sorts on what the server can genuinely
+order by, and draws whichever of them you pick. Both the view and the columns
+are remembered in the browser, and the columns are remembered per mode.
 
 **Series** and **author** pages group the shelf by what it already knows, and a
 series page works out which volumes are missing rather than making you notice.
@@ -199,8 +200,13 @@ import is also out: this app stores an author identifier, not an authority
 record.
 
 **A public catalogue, off by default and behind two switches.** Library mode
-changes what a cataloguer sees: call number, Classification and record status in,
-ownership and reading status out. It publishes nothing. The publish switch is a
+changes what a cataloguer sees: call number and Classification in, ownership,
+lending willingness and reading status out. Which columns the table draws is
+chosen from that set and remembered separately for each mode, so turning the
+mode on and off does not rearrange a household's catalogue. The call number is
+Dewey and Library of Congress, the two schemes that place a book on a shelf, and
+it sorts by the Dewey number rather than by the text in the cell. It publishes
+nothing. The publish switch is a
 second, separate decision, and a library running library mode internally without
 publishing is the common case rather than an edge one. Publishing is refused by
 the server whenever library mode is off, so turning library mode back off cannot

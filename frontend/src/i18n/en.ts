@@ -181,6 +181,20 @@ export const en = {
   "field.ownership": "Ownership",
   "field.addedBy": "Added by",
   "field.addedAt": "Date added",
+  // The cataloguer's two, offered in library mode only.
+  //
+  // "Call number" rather than "Shelf mark", because it is what the notation is
+  // called in Dewey and in Library of Congress alike, and because "shelf" is
+  // already taken here: `location.label` is the prose about where a book
+  // actually stands in this house.
+  "field.callNumber": "Call number",
+  "field.classification": "Subjects",
+
+  // ── Choosing the table's columns ────────────────────────────────────────
+  "columns.label": "Columns",
+  "columns.summary": "{shown} of {total}",
+  "columns.reset": "Back to the usual columns",
+  "columns.alwaysShown": "The title is always shown.",
 
   // ── The card's fold out ─────────────────────────────────────────────────
   "card.details": "Details",
@@ -436,7 +450,7 @@ export const en = {
   "settings.public.modeTitle": "Library mode",
   "settings.public.modeLabel": "Catalogue this library as a library",
   "settings.public.modeHint":
-    "Shows the call number, the classification and the record status, and puts ownership and reading status away. It publishes nothing.",
+    "Shows the call number and the subject headings, and puts ownership and reading status away. It publishes nothing.",
   "settings.public.modeRepublishes":
     "Publishing is already switched on, so turning this back on republishes the catalogue immediately.",
   "settings.public.publishTitle": "Publishing",

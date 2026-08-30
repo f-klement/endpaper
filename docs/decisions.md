@@ -4887,6 +4887,95 @@ constraint costs here.
 
 ## Product
 
+### A count in a docstring is pinned by a test or it is not stated
+
+`Loading`'s docstring justifies what `SERIALISED` carries by counting routes: 17 of the
+33 reaching `book_for_read` or `book_in_trash` do not serialise the Book they read.
+**That count was written wrongly five times in one day, by three parties working
+independently**, and the total was never the hard part. Two review seats agreed on 17
+and produced two different breakdowns of it, 14/2 and 11/5.
+
+The rule that settles it is one sentence neither draft had: **a route that answers 204
+serialises nothing, whether it hangs off a book or off a note.** The three sub-resource
+deletes belong with the two book deletes, and the enrichment family has three routes of
+which only `GET /{id}/enrich/candidates` fails to serialise its book. Counting families
+rather than routes is what produced the 19.
+
+So the numbers are recomputed by
+`tests/test_shelf.py::TestTheRoutesThisDocstringCounts` rather than restated, in the
+shape `test_the_number_in_the_docstring_is_the_number_it_costs` already uses for the
+statement counts. **Each bucket is asserted separately**, because a guard on the total
+alone passes when one bucket moves and another moves back, which is precisely the
+difference between the two seats' splits. The first draft of the class asserted only
+the sum and passed the wrong split; that is recorded here because it was written by the
+seat that had just been shown the defect.
+
+Five mutations, all caught, each recorded by the name of the test that failed
+rather than by a count. One earlier mutation retyped a 204 route's return
+annotation and reported **INVALID, no summary line**, because FastAPI refuses the module
+at import: not caught and not survived, and worth knowing because an INVALID that is
+read as SURVIVED sends the next round chasing a hole that is not there.
+
+### A guard that enumerates its own universe goes quiet without failing
+
+`TestTheRoutesThisDocstringCounts` was added to stop a count in a docstring going stale.
+It then went stale three times itself, in one helper, and **every one was found by an
+evasion attempt and none by reading**:
+
+| What was enumerated | Measured as |
+|---|---|
+| the **dependency** universe, a hard-coded map of four alias names | a 34th route on a fifth alias: pristine 33, mutated 33 |
+| the **route** universe, the router variable name `router.` | `routers/public.py` declares a second router, `catalogue`; 107 routes, 105 seen, and a SERIALISED route added there survived at 7 passed |
+| the route's own **spelling**, matched against those alias names | a route writing `book: Annotated[Book, Depends(book_for_read)]` in place resolves to the identical fetch and survived at 9 passed |
+
+The third is the one to remember, because by then the universe **was** derived and the
+guard looked structural. What was still enumerated was *how a route may write the
+dependency*, and an inline `Depends` is ordinary FastAPI.
+
+**The failure mode is silence, not a red test.** In each case every number in both
+docstrings could go stale with the whole class green, so the guard reported success
+about a tree it could no longer see. Nothing in a reading pass distinguishes that from
+a guard that is working: two seats read the first version and approved it.
+
+Three rules follow, and the third is the one that generalises past this file.
+
+1. **The structural fix, never a further arm.** Each was replaced by deriving the thing
+   that actually matters: an HTTP verb decorator rather than a router's name, and
+   `load=Loading.SERIALISED` followed through `Depends` rather than a list of aliases.
+   `book_for_cover` is now excluded **by construction**, because it fetches with no
+   `load=`, rather than by being left off a list.
+2. **A mutation set drawn from inside the universe cannot find this.** All five original
+   mutations moved a number or a classification the guard already saw, and all five
+   passed while three holes were open. The four evasions are now kept as mutations M6 to
+   M9 precisely because they come from outside it.
+3. **State the universe in the docstring, and say which blind spots are real.** The
+   class now names what it does not see, and names one a reader would expect that
+   **cannot occur**: a dependency fetching SERIALISED without spelling `load=` as a
+   keyword is impossible, because `Shelf.all`, `first` and `page` all put `load` after a
+   `*`. Listing a blind spot that cannot happen is safe and misleading.
+
+**And a scripted edit can gut a file while everything stays green.** Lifting two helpers
+out of that class inserted them at column zero **inside the class body**, which
+terminated the class: the classmethod and all nine tests became unreachable code after a
+`return`. **The file parsed. ruff passed. mypy would have passed.** The only signal was
+`pytest -k` collecting nothing and exiting **5**; running the whole file instead would
+have shown a green suite with the nine tests simply absent.
+
+This is the recorded "a green suite is not evidence of an intact file" defect arrived at
+by the opposite door: not a duplicated block but a **swallowed** one. The check is the
+file's shape, and the strongest form came from the review seats rather than from the
+implementer: assert the tests are **methods of the class in the parse tree**, so they
+cannot be dead code after a return, and assert there is no module level `def` after the
+last class, since a terminated class leaves its remaining methods sitting there. An AST
+diff against `git show HEAD` then confirms nothing was lost: 13 classes and 82 tests
+before, 14 and 91 after, no duplicates.
+
+**A hash nobody else can recompute is not evidence.** Two seats spent a round unable to
+check each other because one quoted a whole tree digest from its own pipeline. Quote
+`git hash-object` per file and name the command beside the value. It paid for itself
+immediately: three of the four files were byte identical across a round, which turned a
+four file re-review into a one file one.
+
 ### Small libraries and archives are a direction, not a second audience
 
 Decided by the owner on 2026-08-26. The question had been open in two roadmap files at once,
@@ -5045,6 +5134,34 @@ converts a permanent review cost into a one time one, which is the house pattern
 
 **Blocked on library mode existing**, because there is no mode to follow until then. English is
 unaffected: it has no equivalent distinction.
+
+### No bookshop or retailer is a catalogue source
+
+Settled by the owner on 2026-08-28, while the breadth programme was choosing which
+sources to probe. **Amazon, Bertrand, BOL.com, LastDodo, StripInfo, databazeknih.cz,
+Biblionet.gr and Douban are excluded**, and so is anything else of that shape.
+
+**Three independent reasons, which is the point of writing them down: losing one does not
+reopen the question.**
+
+1. **A retailer describes what it can sell**, not what was published. It is silent on
+   anything out of print, which is a large part of a household shelf and most of an
+   archive's.
+2. **Its terms usually forbid automated access.** A household running this application
+   would inherit that, without having agreed to it or being told.
+3. **It has a website rather than a protocol.** A source built on one is a scraper, and it
+   breaks on a layout change rather than on a version change.
+
+**The consequence, so nobody reads a competitor's coverage as available ground.**
+NeverTooManyBooks reaches Portugal through Bertrand, a bookshop. That is why its Portugal
+coverage does not transfer here: Portugal still needs a real library, and the one this
+project found, `z3950.porbase.org`, resolves and then times out on the TCP connect to port
+210. So Portugal is a known hostname with a shut port rather than an unknown address, and
+that is a row no transport work fixes.
+
+A source that fails only the third test, a real catalogue reachable only by scraping, is
+still refused, and it is refused by the same reasoning rather than by this list. The list
+is examples.
 
 ## Multi workstation is joined terminals, and the container stays the documented alternative
 
@@ -7295,8 +7412,8 @@ a viewer who added none of the books, at two lengths each. Statements reading
 
 Every row measured at two lengths, and every row identical at both.
 
-Nothing rose anywhere, and the two rows that could have are the interesting
-ones. A **single** book can never gain an N+1 from this: an eager load of one
+Nothing rose anywhere in that table, and the two rows that could have are the
+interesting ones. A **single** book can never gain an N+1 from this: an eager load of one
 row's collection and a lazy read of it are one statement each, so
 `POST /{id}/copies`, which reads `book.tags` itself, is the worst case and it
 still improves. And the purge is flat because the cascade loads the collection
@@ -7306,6 +7423,35 @@ to delete the association rows whatever the option said.
 rather than an oversight.** The CSV writer reads `book.tags` per row itself and
 has no second reader to lean on, so there the option is the only thing standing
 between it and an N+1.
+
+**"Nothing rose anywhere" was an absolute and it is false: the exception is one
+arm of one route.** `POST /api/books/{id}/tags/{tag_id}`, where the tag is
+**already** on the book, costs 12 statements without the option and 11 with it,
+at a library of 5 and of 25 alike. Neither of the two is a tag load, which is
+what identifies the cause: the handler calls `db.get(Tag, tag_id)` before it
+reads `book.tags`, and the eager load had already put that Tag in the identity
+map, so the `get` was answered without a statement. The same route's working arm
+falls 15 to 14, and `DELETE` of a tag that is present is flat at 14, trading the
+tag load for that same `get`.
+
+**The decision stands and the absolute does not.** One statement on one arm of
+one write, against one on every listing the app serves, is a trade worth making.
+It is recorded because the original claim was an absolute over 20 scenarios that
+had not measured the arm where it fails, and because a route whose two arms cost
+different things is exactly the clause this repository keeps getting wrong: the
+generalisation was right and the sentence explaining it was not.
+
+**Re-measured by a second seat, in the opposite direction.** The original harness
+drops the option and cannot be re-run against the fixed tree: its anchor is the
+two option line, and a missing anchor is a silent pre-flight exit rather than a
+failure. The inverse adds the option back, and a third run covers what neither
+had measured, the two tag routes at four arms and `book_in_trash` at a second
+library size. **Thirty distinct scenarios across the runs.** Every row above
+reproduces, restoring the option is caught by exactly the two tests that pin the
+contract, and the only scenario where the shipped tree is dearer is the one
+above. Neither direction is sufficient alone: dropping the option tells a
+redundant eager load apart from one replaced by a lazy load, and adding it back
+proves no call site was left paying for a load it needed.
 
 **Three of the four cost tests over these options passed with their own
 subject deleted, and a fourth was written in the same pass and passed the same
@@ -7686,5 +7832,183 @@ survives: the declaration Spain actually sends parses fine, the module has 16 `t
 statements rather than 13, and the 8 is the numerator of a different and stronger fraction
 than the one it was attached to. **A mechanism inherited from a review and not re-derived
 is a claim**, and this one was two review rounds from being written into a published file.
+
+## The cataloguer's column set
+
+Nine decisions from #30. The ticket sized itself S because the data mostly
+existed, and what it actually cost was settling what one of its three columns
+meant: the answer was that it never meant anything, and it is gone.
+
+### The call number is Dewey and Library of Congress, the subjects are GND and LCSH
+
+Two columns rather than one, and the line between them is not a preference.
+`ClassificationScheme`'s own docstring draws it: "GND is an authority file
+rather than a shelf order", an LCC notation is a call number
+(`BF575.S75 E64 2022`), and DDC is the one of the four that also sorts. So the
+call number column holds notations and the subjects column holds headings.
+
+The consequence is the rendering rule, which differs between the two on
+purpose. **A notation names its scheme** (`Dewey 155.9042`), for the reason
+`ClassificationPanel` already gives: `004` is computing in Dewey and is not a
+Library of Congress call number at all. **A heading does not**, because it is
+words and reads without one. GND decides which way the fallback goes: its
+`number` is an opaque identifier (`4203576-4`) and its `label` is the heading,
+while LCSH carries the heading in `number` and has no label at all, so the cell
+renders `label ?? number`.
+
+**`location` is neither**, and that was the named mistake to avoid. It is prose
+about where a book stands in this house. It sorts against nothing and means
+nothing outside the house, and it keeps its own column in both modes.
+
+### Sorting the call number sorts the classification, never the cell
+
+The call number header asks the API for `BookSort.ddc`, which is
+`min(classifications.number) where scheme = ddc` with nulls last, evaluated in
+SQL over the whole table (`backend/shelf.py`, `_DDC_ORDER`). It is deliberately
+**not** the string the cell draws: that string carries a scheme name in the
+reader's language and may hold a second notation from a different shelf order
+after it, so ordering by it would order the library by the word "Dewey" in
+English and by "Library of Congress" in German. The table sorts nothing itself,
+which is the rule it already had: a browser sort would sort only the page that
+has been loaded, silently.
+
+### There is no record status column, and the promise of one is withdrawn
+
+**"Record status" never had a definition.** It appears in the archived plan
+exactly once, in a parenthetical list of what matters to a cataloguer, and was
+carried verbatim into three files: `settings_store.library_mode`'s docstring,
+the `settings.public.modeHint` string on screen, and `docs/featurelist.md`. All
+three promised a column that nothing stored and nobody had specified.
+
+Two derivations were built during this ticket and both were refused.
+
+* **From privacy**, restricted when the Book is private. Refused because
+  `visible_to()` is
+  `or_(Book.is_private.is_(False), Book.added_by_user_id == user_id)`, so a
+  listing carries everybody's public Books beside the reader's **own private
+  ones**: the column would read true on exactly the rows that must not leave
+  the house, in a mode one switch away from a public catalogue, and 30c prints
+  the same table onto a spine label.
+* **From completeness**, established when the Book carried the descriptive
+  minimum the MARC leader's own comment names plus a Classification. Better
+  founded, and still refused: **a column invented so that a promise in prose
+  comes true is worse than no column, because it looks like data.**
+
+**What a cataloguer actually wants there is the record's source**, which
+library it came from or that it was a manual entry. That is provenance, MARC
+`040`, not status. It needs a real column and a migration: nothing stores it,
+`backend/marc.py` writes no `040` at all, and the datum exists at write time and
+is discarded, because the lookup knows which source answered and an import knows
+it was an import. It has its own ticket.
+
+So the three prose sites now describe what ships, and none promises the
+provenance column before it exists.
+
+### One spec table per column, not a label map beside two lists of keys
+
+`COLUMN_SPECS` holds a label, an `offeredTo` and a `defaultIn` for each column,
+and both `AVAILABLE_COLUMNS` and `DEFAULT_COLUMNS` are derived from it.
+
+**The first draft was an exclusion literal and a critic broke it in one move.**
+Adding a key to `COLUMN_KEYS` was a compile error in the label map and in
+`BookTable`'s definitions, and no error at all in the household's list, which
+was spelled as "every key except these". So a third cataloguer column would
+have reached every household silently, and the test covering it enumerated the
+same literals, making it a second copy rather than a check. The fix is
+structural rather than a further arm: a new entry cannot compile without saying
+which modes it belongs to.
+
+**One constraint the types still cannot express**, so it is a test:
+`ALWAYS_SHOWN` must be offered to every mode. `normalise` filters over
+`AVAILABLE_COLUMNS[mode]`, so its forced-title arm cannot fire for a key that
+mode does not offer, and `title: { offeredTo: HOUSEHOLD }` compiles and hands a
+cataloguer a table with no link to any book.
+
+The label lives in the same row for a second reason. Two things name a column,
+the table's own header and the picker that turns it on and off, and a picker
+offering "Where it is" against a header reading "Location" is one column
+presented as two.
+
+### The column set is per mode, in two localStorage keys
+
+The same argument `libraryView.ts` makes, and it holds unchanged: this is a
+habit rather than library data, so it needs no endpoint, no schema and no
+migration. It is also the only shape available, because `GET /api/settings` is
+admin only and a column choice is one person's rather than the library's.
+
+**Two keys rather than one record holding both**, because the requirement is
+that a household's choice survives a switch into library mode and back. Two keys
+make that structural: writing one cannot touch the other, so there is no merge
+to get wrong and no ordering between the two writes to reason about.
+
+**The set is derived from the mode rather than held as state seeded from it.**
+`library_mode` arrives from a fetch, so it is undefined for the first render or
+two; a `useState` initialiser would capture the household set and a cataloguer
+would keep it for the rest of the session. Reading storage when the mode changes
+costs one `getItem`.
+
+**Storage never holds a copy of the default, and `writeColumns` enforces it on
+a normalised set.** A stored copy stops following the default the moment a later
+version changes it, which is the one thing "back to the usual columns" must not
+do. Two shapes reach that state and only the first is obvious: reset, and
+turning one column off and straight back on, which also hides the reset control
+because there is then nothing to reset *from* while the key still holds a copy.
+The guard compares joined strings, so it normalises its input first: without
+that it holds only for a canonical caller, and the docstring claiming the
+invariant needs nobody to remember it would have been true only because the one
+call site remembered.
+
+**`readColumns` decides on the stored tokens, never on its own result.** The
+result always carries the forced title, so a length test on it cannot tell a
+reader who turned every other column off from a value naming nothing this
+version knows, and a title-only table silently reverted on reload. The docstring
+claimed the forced title was what stopped those two being confused, and the code
+confused exactly them.
+
+One consequence, stated rather than fixed: the stored value is an unversioned
+comma list, so a deliberate title-only choice and the survivor of a mass column
+rename are the same string. Not worth versioning.
+
+### One table of scheme labels, because there were about to be three
+
+`ClassificationPanel` and `ClassificationPicker` each carried their own
+`Record<ClassificationScheme, MessageKey>`, and the table view would have been
+the third. The type made a *missing* scheme a compile error in each copy, so the
+keys could not drift; the values could, and three places naming one scheme three
+ways is drift nobody notices. Now `frontend/src/lib/classificationLabels.ts`.
+
+### A count is not a fact about a file until it says which tree it describes
+
+Two seats measured `vite.config.ts`'s tally of DOM-free test files during this
+ticket and got twelve and eleven. **Neither was wrong.** Twelve was correct for
+the tree carrying `tests/lib/recordStatus.test.ts`; eleven is correct for the
+tree that ships, because that file existed for one round and was deleted with
+the rule it guarded. The comment now dates its number rather than merely
+stating it, so a reader who counts twelve on an older checkout reads a different
+tree instead of a stale number.
+
+That is the general answer to a disagreement this repository keeps having, and
+it is cheaper than the alternative: a number stated without its tree has to be
+re-derived by everyone who doubts it, and the doubt is never resolved because
+both parties are right.
+
+### A refusal belongs where somebody would go to propose it again
+
+`settings_store.library_mode`'s docstring records that there is no record status
+column, that "record status" never had a definition, and that **both** attempted
+derivations were refused and why. That is the file a person opens when they want
+to know what library mode does, so it is where a proposal to add such a column
+would start. A refusal recorded only in a changelog or a merge request is a
+refusal the next person re-litigates from scratch.
+
+### Check the shape of a scripted edit's result, not its exit code
+
+Two instruments lied at exit code 0 during this ticket: a regex meant to parse
+`COLUMN_SPECS` matched 5 of its 23 entries because it assumed one-line bodies,
+and a splice of a notes file resolved its end anchor before its start anchor and
+duplicated ninety lines. Both were caught by looking at the result's shape, a
+count of entries and a list of headings, which is the check this repository
+already prescribes after any scripted edit and which nothing else would have
+caught.
 
 ---

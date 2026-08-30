@@ -319,11 +319,29 @@ def catalogue_sources(db: Session) -> sources.Plan:
 def library_mode(db: Session) -> bool:
     """Whether the catalogue is presented to a **cataloguer** rather than a household.
 
-    Call number, Classification and record status in; ownership, lending
-    willingness and reading status out. It publishes nothing, which is why it
-    is a separate switch from the one below: an institution wanting the
-    cataloguer's columns should not have to put its catalogue on the internet
-    to get them.
+    Call number and Classification in; ownership, lending willingness and
+    reading status out. It publishes nothing, which is why it is a separate
+    switch from the one below: an institution wanting the cataloguer's columns
+    should not have to put its catalogue on the internet to get them.
+
+    Which columns the table draws is a browser-local choice, remembered
+    separately for each mode, so turning this on and off does not rearrange a
+    household's catalogue. The sets and the reasoning are
+    `frontend/src/lib/libraryColumns.ts`.
+
+    **This docstring used to promise a third column, "record status", and there
+    was never a definition of one anywhere.** The phrase reached three files
+    verbatim from a single parenthetical in the archived plan. Two derivations
+    were built and both were refused: completeness, because a column invented so
+    that a promise in prose comes true looks like data; and anything reading
+    `is_private`, because `visible_to` keeps the reader's **own** private Books
+    in the listing, so such a column would read true on exactly the rows that
+    must not leave the house, in a mode one switch away from a public catalogue.
+    What a cataloguer actually wants there is the record's **source**, which is
+    MARC `040` and is provenance rather than status. Nothing stores it, `marc.py`
+    writes no `040`, and the lookup discards which source answered. That is a
+    column with a migration behind it and it has its own ticket. Do not
+    reintroduce a derived stand-in for it here.
     """
     return get_bool(db, SettingKey.LIBRARY_MODE)
 

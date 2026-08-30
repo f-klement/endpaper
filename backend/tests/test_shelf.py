@@ -3476,3 +3476,373 @@ class TestTheDivisionProjectionsAgree:
     def test_refuses_the_row_that_produced_a_fabricated_division(self, db):
         """`He0` was a real facet entry. Pinned so it cannot come back."""
         assert self._sql(db, _looks_like_a_notation(literal("Hello world"))) is False
+
+
+#: A route is a function carrying an HTTP verb decorator, whatever the router
+#: object is called. Matching `router.` instead missed 2 of 107 routes, because
+#: `routers/public.py` declares a second router named `catalogue`, and a
+#: `SERIALISED` call site added through that door moved no number and failed no
+#: test.
+_HTTP_VERBS = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options"}
+)
+
+
+def _book_dependency(annotation) -> str | None:
+    """The function inside `Annotated[Book, Depends(f)]`, or None.
+
+    Shared by the alias derivation and the chain walk in
+    `TestTheRoutesThisDocstringCounts`, which need the same question answered
+    about a module level assignment and about a parameter annotation. It tests
+    for `Book` specifically, so `Annotated[Session, Depends(get_db)]` beside it
+    in the same signature is not mistaken for a link in the chain.
+    """
+    import ast
+
+    if annotation is None:
+        return None
+    if not isinstance(annotation, ast.Subscript):
+        return None
+    if ast.unparse(annotation.value) != "Annotated":
+        return None
+    parts = (
+        annotation.slice.elts
+        if isinstance(annotation.slice, ast.Tuple)
+        else [annotation.slice]
+    )
+    if not parts or ast.unparse(parts[0]) != "Book":
+        return None
+    for part in parts[1:]:
+        if (
+            isinstance(part, ast.Call)
+            and ast.unparse(part.func) == "Depends"
+            and part.args
+        ):
+            return ast.unparse(part.args[0])
+    return None
+
+
+def _fetch_chain(tree) -> tuple[dict[str, bool], dict[str, str | None]]:
+    """Per dependency function: does it fetch SERIALISED, and what it depends on.
+
+    The two maps `_root_that_fetches` walks. Split out of the alias derivation
+    so the route scan can use the identical rule on a parameter written in
+    place, which was the third enumeration this class had to lose.
+    """
+    import ast
+
+    fetches: dict[str, bool] = {}
+    parents: dict[str, str | None] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        fetches[node.name] = any(
+            any(
+                kw.arg == "load" and ast.unparse(kw.value) == "Loading.SERIALISED"
+                for kw in call.keywords
+            )
+            for call in ast.walk(node)
+            if isinstance(call, ast.Call)
+        )
+        parents[node.name] = None
+        for arg in node.args.args + node.args.kwonlyargs:
+            depended = _book_dependency(arg.annotation)
+            if depended is not None:
+                parents[node.name] = depended
+    return fetches, parents
+
+
+def _root_that_fetches(
+    function: str | None,
+    fetches: dict[str, bool],
+    parents: dict[str, str | None],
+) -> str | None:
+    """Walk `Depends` to whichever link carries `load=Loading.SERIALISED`.
+
+    Shared by the alias derivation and by the route scan, which is the point:
+    an alias and a route spelling the dependency **inline** resolve to the same
+    fetch, and counting only the first is an enumeration wearing a derivation's
+    clothes. A chain with no fetch returns None, which is how `book_for_cover`
+    is excluded by construction rather than by omission.
+    """
+    seen: set[str] = set()
+    while function is not None and function not in seen:
+        if fetches.get(function):
+            return function
+        seen.add(function)
+        function = parents.get(function)
+    return None
+
+
+class TestTheRoutesThisDocstringCounts:
+    """`Loading`'s docstring counts routes, and a count in prose goes stale.
+
+    It states that 17 of the 33 routes reaching `book_for_read` or
+    `book_in_trash` do not serialise the Book they read, split 11 that
+    serialise a sub-resource, 5 that answer 204 and serialise nothing, and
+    `add_copy`, which serialises the copy. Those numbers are the evidence for
+    the sentence a reader uses to judge a new `Loading.SERIALISED` call site.
+
+    **Two breakdowns were written before this one and both were wrong**, by
+    two parties deriving them separately: `19` with a split of `16/2`, then
+    `17` with a split of `14/2`, against the tree's `17` and `11/5`. The first
+    counted the enrichment family as three routes when only
+    `enrich/candidates` qualifies; the second filed the note, quote and
+    progress deletes as sub-resource routes when they answer 204 and serialise
+    nothing, exactly like the two book deletes beside them.
+
+    **Each bucket is asserted separately and that is the point.** A guard on
+    the total alone passes when one bucket moves and another moves back, which
+    is what 14/2 and 11/5 are: same total, same everything else, and only the
+    three deletes moved. The first draft of this class made exactly that
+    mistake.
+
+    **The universe this counts over is derived twice, and both derivations
+    replaced an enumeration that a review seat evaded.** They are stated here
+    rather than left to be discovered:
+
+    * a **route** is any function carrying an HTTP verb decorator, whatever the
+      router object is called. The first draft matched `router.` and so missed
+      2 of 107, because `routers/public.py` declares a second router named
+      `catalogue`; a `SERIALISED` call site added there moved no number and
+      failed no test.
+    * a **dependency** is resolved by following `Depends` through each
+      dependency's own signature to whichever link carries
+      `load=Loading.SERIALISED`. The first draft held a list of four alias
+      names, and a 34th route on a fifth alias measured 33 against 33.
+
+    Both holes were found by attacking rather than by reading, by two seats
+    independently, and neither could be caught by any mutation that moves a
+    number inside a universe the guard already sees. Both evasions are kept as
+    mutations, which is why this class is worth more than the count it asserts.
+
+    What it still does not see, named rather than left to be found: a route
+    reached through `include_router` on a prefix this repository does not use.
+
+    The other blind spot a reader would reasonably expect, a dependency that
+    fetches SERIALISED without spelling `load=` as a keyword, **cannot occur**:
+    `Shelf.all`, `Shelf.first` and `Shelf.page` all put `load` after a `*`, so
+    it is keyword only and the signature closes it. Naming a blind spot that
+    cannot happen would be safe but misleading, which is why this says which
+    one it is.
+    """
+
+    @staticmethod
+    def _dependency_aliases(source: str | None = None) -> dict[str, str]:
+        """Every `Annotated[Book, Depends(...)]` alias that fetches SERIALISED.
+
+        **Derived from `dependencies.py`, never listed here**, and that is the
+        whole point of the method. The first version of this class carried a
+        hard-coded map of four alias names, so it could only count routes
+        spelled with a name somebody had already thought of: a fifth alias, or
+        a rename, left every number in both docstrings stale with all seven
+        tests green. None of the five mutations could find it either, because
+        each of them moved something inside the universe the map already saw.
+
+        So the discriminator is the thing that actually matters, `load=`
+        carrying `Loading.SERIALISED`, followed through the chain: an alias
+        points at a dependency, that dependency may take another Book
+        dependency as a parameter, and the fetch lives at the end of it.
+        `BookForCover` is excluded by construction rather than by omission,
+        because `book_for_cover` fetches with no `load=` at all.
+
+        Returns alias name to the name of the function that carries the fetch,
+        not the immediate dependency, so `BookForWrite` resolves to
+        `book_for_read` and `book_for_read`'s own count stays derivable.
+        """
+        import ast
+        import pathlib
+
+        if source is None:
+            source = (
+                pathlib.Path(__file__).resolve().parent.parent / "dependencies.py"
+            ).read_text()
+        tree = ast.parse(source)
+
+        fetches, parents = _fetch_chain(tree)
+
+        aliases: dict[str, str] = {}
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            function = _book_dependency(node.value)
+            root = _root_that_fetches(function, fetches, parents)
+            if root is not None:
+                aliases[target.id] = root
+        return aliases
+
+    @classmethod
+    def _routes(cls):
+        """Every routed function taking one of those, classified.
+
+        Yields `(name, dependency, bucket)` where bucket is one of `own`,
+        `copy`, `nothing` or `sub_resource`. `own` and `copy` are separated
+        because `add_copy` calls the serialiser on the **copy**, so a guard
+        asking only "does this call `book_to_out`" files it on the wrong side
+        and 17 comes out as 16.
+        """
+        import ast
+        import pathlib
+
+        aliases = cls._dependency_aliases()
+        # The same two maps the alias derivation walks, so a route spelling the
+        # dependency inline resolves by the identical rule rather than by being
+        # absent from a list of alias names.
+        backend = pathlib.Path(__file__).resolve().parent.parent
+        fetches, parents = _fetch_chain(ast.parse((backend / "dependencies.py").read_text()))
+        out = []
+        routers = backend / "routers"
+        for path in sorted(routers.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                if not any(
+                    isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and decorator.func.attr in _HTTP_VERBS
+                    for decorator in node.decorator_list
+                ):
+                    continue
+                dependency = argument = None
+                for arg in node.args.args + node.args.kwonlyargs:
+                    annotation = ast.unparse(arg.annotation) if arg.annotation else ""
+                    resolved = aliases.get(annotation) or _root_that_fetches(
+                        _book_dependency(arg.annotation), fetches, parents
+                    )
+                    if resolved is not None:
+                        dependency = resolved
+                        argument = arg.arg
+                if dependency is None:
+                    continue
+                own = other = False
+                for call in ast.walk(node):
+                    if not isinstance(call, ast.Call):
+                        continue
+                    if not isinstance(call.func, ast.Name):
+                        continue
+                    if call.func.id not in ("book_to_out", "books_to_out"):
+                        continue
+                    first = ast.unparse(call.args[0]) if call.args else ""
+                    if first in (argument, f"[{argument}]"):
+                        own = True
+                    else:
+                        other = True
+                returns = ast.unparse(node.returns) if node.returns else "None"
+                if own:
+                    bucket = "own"
+                elif other:
+                    bucket = "copy"
+                elif returns == "None":
+                    bucket = "nothing"
+                else:
+                    bucket = "sub_resource"
+                out.append((node.name, dependency, bucket))
+        return out
+
+    @staticmethod
+    def _stated(pattern: str) -> int:
+        """A number read out of the `Loading` docstring, so prose is the subject."""
+        import re
+
+        match = re.search(pattern, Loading.__doc__ or "")
+        assert match is not None, f"the docstring no longer states {pattern!r}"
+        return int(match.group(1))
+
+    def _bucket(self, name: str) -> list[str]:
+        return sorted(r[0] for r in self._routes() if r[2] == name)
+
+    def test_the_number_of_routes_on_those_dependencies_is_the_stated_one(self):
+        assert len(self._routes()) == self._stated(r"of the (\d+) routes\*\*")
+
+    def test_the_number_that_do_not_serialise_their_own_book_is_the_stated_one(self):
+        falsifying = [r for r in self._routes() if r[2] != "own"]
+        assert len(falsifying) == self._stated(r"\*\*(\d+) of the \d+ routes\*\*")
+
+    def test_the_sub_resource_count_is_the_stated_one(self):
+        assert len(self._bucket("sub_resource")) == self._stated(
+            r"\*\*(\d+)\*\* serialise a sub-resource"
+        )
+
+    def test_the_count_that_serialises_nothing_is_the_stated_one(self):
+        """Asserted apart from the sub-resource count, not summed with it."""
+        assert len(self._bucket("nothing")) == self._stated(
+            r"\*\*(\d+)\*\* answer 204 and serialise nothing"
+        )
+
+    def test_the_three_sub_resource_deletes_are_counted_as_serialising_nothing(self):
+        """The three routes the two review seats put in different buckets.
+
+        Named rather than counted, because the disagreement was about these
+        three specifically and a count would go quiet if one were renamed.
+        """
+        nothing = self._bucket("nothing")
+        assert {"delete_note", "delete_quote", "delete_progress"} <= set(nothing)
+        assert {"delete_book", "purge_book"} <= set(nothing)
+
+    def test_exactly_one_route_serialises_a_book_other_than_the_one_it_read(self):
+        assert self._bucket("copy") == ["add_copy"]
+
+    def test_the_aliases_are_derived_from_the_fetch_not_from_a_list(self):
+        """The four aliases, and that `BookForCover` is excluded for a reason.
+
+        `book_for_cover` reads the same book by the same rule and fetches with
+        no `load=`, so it is the discriminator this derivation turns on. If it
+        ever appears here, the walk has stopped asking about the fetch and
+        started matching names again, which is the defect the derivation
+        replaced.
+        """
+        aliases = self._dependency_aliases()
+
+        assert aliases == {
+            "BookForRead": "book_for_read",
+            "BookInTrash": "book_in_trash",
+            "BookForWrite": "book_for_read",
+            "BookForOwner": "book_for_read",
+        }
+
+    def test_a_new_alias_would_be_counted_without_editing_this_file(self):
+        """The evasion the hard-coded map could not see, run against itself.
+
+        A fifth alias pointing at a dependency that fetches SERIALISED is
+        resolved by the same walk, so the counts move and the tests above fail
+        rather than going quietly stale. Asserted by deriving from a copy of
+        `dependencies.py` with one alias appended, because the real file has
+        four and a guard proved only on those four is the thing being fixed.
+        """
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parent.parent / "dependencies.py"
+        ).read_text()
+        mutated = (
+            source
+            + "\n\nBookForSomethingNew = Annotated[Book, Depends(book_for_write)]\n"
+        )
+
+        aliases = self._dependency_aliases(mutated)
+
+        # Resolved through `book_for_write` to the link that carries the fetch,
+        # which is the whole walk: the alias scan, the chain, and the root.
+        assert aliases["BookForSomethingNew"] == "book_for_read"
+        # And the discriminator still bites on the same text, so this cannot
+        # pass by the walk having been replaced with a list of every alias.
+        assert "BookForCover" not in aliases
+
+    def test_the_dependency_docstring_counts_are_the_stated_ones(self):
+        """`dependencies.book_for_read` states its own pair, and the
+        denominator is different: it excludes the two trash routes."""
+        import re
+
+        from dependencies import book_for_read
+
+        stated = re.search(
+            r"\*\*(\d+) of\s+the (\d+)\*\* routes fed from here serialise no Book",
+            " ".join((book_for_read.__doc__ or "").split()),
+        )
+        assert stated is not None, "book_for_read no longer states its counts"
+        mine = [r for r in self._routes() if r[1] == "book_for_read"]
+        silent = [r for r in mine if r[2] in ("nothing", "sub_resource")]
+        assert (len(silent), len(mine)) == (int(stated.group(1)), int(stated.group(2)))

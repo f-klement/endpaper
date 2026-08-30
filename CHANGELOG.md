@@ -16,6 +16,13 @@
   number, `650` with `$0` and `$2` for a GND or LCSH heading.
 - `GET /api/settings/features` now reports `library_mode`, so a client with no
   admin session can tell whether to offer any of this.
+- **The cataloguer's column set.** In library mode the table view offers two
+  columns a household has no use for: a call number, and the published subject
+  headings. The household's columns about the object and the reader are turned
+  off by default and can be turned back on. Which columns are drawn is now
+  chosen from a picker above the table and remembered separately for each mode,
+  so switching library mode on and off does not rearrange anybody's catalogue.
+  The call number sorts by the Dewey number rather than by the text in the cell.
 - A bound on `description`, `models.DESCRIPTION_MAX`. It had none anywhere:
   `POST /api/books` accepted a 200,000 character description with a 201, and
   `description` is on the listing payload, so one oversized value was paid for
