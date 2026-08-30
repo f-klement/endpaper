@@ -7505,7 +7505,11 @@ Uruguay is separated at this sample size, so the six are not ranked. **There is
 deliberately no test pinning the numbers**, because pinning them means asking a national
 library from the suite, which is a test that fails when that library is down.
 
-### Endpaper ships no catalogue credential, and two countries are closed by that
+### Argentina and Uruguay will be covered, using the credentials their libraries publish
+
+**A decision, not a shipped state. Nothing is built for either country and no
+`CatalogueSource` exists for them.** This entry records what was decided and why, so the
+work can be sized; the code is its own tickets.
 
 **Owner, 2026-08-30.** The national libraries of Argentina and Uruguay publish Z39.50
 usernames and passwords on their own public pages, with contact details and no stated
@@ -7513,17 +7517,34 @@ restriction. Both refuse unauthenticated and answer with them. Both also answer 
 plain HTTP** and refuse there with the identical `Authentication error`, so a credential
 would need no Z39.50 client at all.
 
-**The answer is no, for both.** The reasoning is a terms of use judgement rather than a
-measurement: a credential published for human librarians is not obviously published for a
-self hosted application to embed and redistribute, and a household would be using
-somebody else's credential rather than its own, which is a different relationship with the
-issuing library than every other source in the chain has.
+**The answer is yes, for both, taken 2026-08-30 and reversing a no taken the same day.**
+The reversal is recorded rather than tidied away, because the first answer was given on a
+question that had been put wrongly. The owner was asked whether to *approach* two foreign
+national libraries for credentials, and answered no. That was never the question: the
+parameters are already published, on the libraries' own pages, with contact details and
+**no stated restriction on use**. What was actually being decided was whether using a
+published front door is within its terms, not whether to go and ask for one.
 
-**What that costs, measured, so the decision is not re-taken as a cheaper one than it
-was.** Argentina is the **second largest** measured coverage gap of the eight countries
+**On the terms of use question itself**, which is the real one: these are published by the
+issuing library, on its own site, beside a contact address, with no restriction stated.
+That is a documented front door rather than a guessed credential or a worked around
+authentication wall, and it is the same relationship a library intends when it publishes an
+SRU endpoint. The entry above, on provenance, is what this rests on, and it is load bearing:
+the defence is only as good as the reading of the page, and that reading has already been
+wrong once in this file.
+
+**What it buys, measured.** Argentina is the **second largest** measured coverage gap of the eight countries
 surveyed: 56.0% of a domestic ISBN sample unresolvable without a Google Books key, 95%
 Wilson 42.3 to 68.8, and 42.0% with one. Uruguay is 34.0% and 16.0%. Neither has any other
-route: no open interface, and no HTTP catalogue that answers.
+route: no open interface, and no HTTP catalogue that answers, so without the published
+credential both are closed entirely.
+
+**Shipping a credential is new for this codebase and is the work rather than a detail.**
+Every other source in the chain is either open or takes the household's own key
+(`google_books_api_key`). A credential belonging to a third party, carried in the image and
+redistributed, is a different thing from both, and how it is stored, whether an install can
+replace it, and what happens when the issuing library rotates it are all open. That is
+sized in the tickets rather than assumed here.
 
 ### A number, once written down, stops being re-derived and starts being copied
 
