@@ -30,6 +30,11 @@
 
 ### Changed
 
+- The default catalogue order asks Open Library before the Austrian National
+  Library. The fallback list is asked one source at a time and stops at the
+  first hit, so it is now ordered by how often a source answers a book the
+  leading pair missed: of 297 such ISBNs in 500, Open Library answered 96 and
+  the ÖNB answered 2. Nothing changes for a library that has set its own order.
 - The duplicate finder and the importers now compute one identity key
   (`importing.identity_key`) rather than two. The CSV importer's title only
   fallback is unchanged; MARC never matches on a title alone.

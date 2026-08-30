@@ -1645,13 +1645,31 @@ def _k10plus_record(
 # from ten Austrian imprints, taken off live ÖNB records printed after 2005 and
 # put to all three catalogues on 2026-08-27: ÖNB held 50, the DNB 47, K10plus
 # 39, and **3 of the 50 were held by ÖNB and by neither of the German pair**.
-# 6% is worth a request that costs nothing when the fast pair answers, and it
-# is not worth widening the pair everybody pays for. The sample is a floor
-# rather than an estimate: every ISBN came off an ÖNB record that carried one,
-# from ten well known presses, so it is biased towards the books the German
-# catalogues are most likely to hold too.
+# 6% is worth a request that costs nothing when the fast pair answers.
+#
+# **The second half of that argument is superseded too, and separately.** It also
+# said 3 of 50 was not worth widening the pair everybody pays for, which is the
+# `ALWAYS_ASKED` question, and that is now settled on a wider measurement: a
+# third concurrent slot answers 2 more books of 500 and costs half again as many
+# outbound requests. See `sources.ALWAYS_ASKED` and `sources.TIER_UNION`. This
+# block supersedes cleanly in two directions and it is worth saying which,
+# because the order it justified and the tier size it justified were replaced by
+# different evidence.
+#
+# **Read that sample for how it was drawn, because the drawing decides which of
+# its two numbers means anything.** Every ISBN came off a live ÖNB record, so
+# the 50 of 50 is true by construction and is not evidence about what the ÖNB
+# holds. The 3 of 50 is evidence, and it is a floor: ten well known presses lean
+# towards the books the German catalogues are most likely to hold too.
+#
+# **The order it was used to justify is superseded.** This sample also put the
+# ÖNB ahead of Open Library in the fallback tier, and #115 reversed that on a
+# wider one. The measurement, the frames and the reason are in the chain comment
+# below and in `sources.DEFAULT_ORDER`, and are not repeated here.
 #
 # Mean lookup latency over that sample: DNB 0.210s, ÖNB 0.240s, K10plus 0.390s.
+# Superseded as a ranking by `sources.MEASURED`, which times all four free
+# sources on one 500 ISBN sample rather than three of them on this one.
 
 _OENB_URL: Final = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
 
@@ -1881,10 +1899,32 @@ async def _oenb_search(query: str, limit: int) -> list[Record]:
 #
 # **ÖNB is not in that table and deliberately not added to it**, because it was
 # measured on a different sample and a row carrying a figure from somewhere else
-# is worse than no row. Its own measurement is 50 Austrian imprint ISBNs on
-# 2026-08-27, where it answered 50 of 50 against the DNB's 47 and K10plus's 39,
-# and held 3 that the German pair both missed. Mean latency 0.240s. Where it
-# sits and why: `sources.DEFAULT_ORDER`, which carries the measurement.
+# is worse than no row. Where it sits and why is `sources.DEFAULT_ORDER`, which
+# carries the measurement.
+#
+# **Its old figures measured a different population, and the ÖNB block above
+# records which.** They were 50 Austrian imprint ISBNs on 2026-08-27: the ÖNB
+# answered 50 of 50 against the DNB's 47 and K10plus's 39, and held 3 the German
+# pair both missed. **Every one of those ISBNs was taken off a live ÖNB
+# record**, so the 50 of 50 is true by construction. #115 drew a fresh Austrian
+# sample on 2026-08-30, 50 ISBNs from Wikidata by publisher country, and got 22,
+# 39 and 25, with the ÖNB holding **1** of the 7 the German pair missed and
+# Open Library holding **2**. The two do not disagree: one is drawn from books
+# the ÖNB holds and the other from books Austrian publishers published, and
+# only the second can answer how often the ÖNB answers where the German pair
+# did not, which is the question the fallback order turns on.
+#
+# **What this chain covers without a Google Books key, which is what a default
+# install runs.** Google Books needs one (`sources.NEEDS_A_KEY`) and most
+# installations have none, so the chain most deployments actually run is the
+# four free sources. Measured 2026-08-30 over 500 domestic ISBNs across ten
+# frames: the free four answer 300 and miss 200, and outside German language
+# publishing they miss 196 of 400. So a sentence anywhere in this module saying
+# the chain covers a country is a statement about a **keyed** install. #91
+# measured the size of that on the same books, Italy 36% missed keyless against
+# 0% with a key and Greece 86% against 54%; **that keyed half is #91's
+# measurement and is not re-derived here**, because the seat that wrote this had
+# no key. The per source figures and the frames: `sources.MEASURED`.
 
 #: Every source that can answer an **ISBN**, by name. BNF and LOC are absent
 #: because neither was worth an ISBN request; they answer title search only.

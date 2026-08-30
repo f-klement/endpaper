@@ -154,6 +154,38 @@ def silence_oenb(mock: Any) -> Any:
     return mock
 
 
+def silence_open_library(mock: Any) -> Any:
+    """Answer the whole Open Library host with "nothing found".
+
+    A helper of its own for `silence_oenb`'s reason, one reorder later. #115 put
+    Open Library ahead of the OENB in `sources.DEFAULT_ORDER`, so every test that
+    watches the OENB answer an **ISBN lookup** now passes through Open Library
+    first, and seven of them failed on an unmocked request rather than on
+    anything about the OENB.
+
+    **It answers for the whole host, search included, and not only the record
+    endpoint.** The pattern is `openlibrary.org/` and anything after it, so it
+    covers `/isbn/*.json` and `/search.json` alike. Every caller today is an ISBN
+    lookup test, and a test that wants Open Library's **search** to answer must
+    register its own route **before** calling this: respx resolves in
+    registration order and the first match wins, so a search route added
+    afterwards is unreachable and the test silently passes on a 404.
+
+    **Not the cover host**, which `silence_covers` owns. `covers.openlibrary.org`
+    does not start with `openlibrary.org`, so those two patterns are disjoint and
+    neither shadows the other whichever is registered first. That is a narrower
+    claim than it looks and it is the only one made here.
+
+    **Not autouse**, for `silence_oenb`'s reason: a fixture registering this for
+    every test would also register it for the tests that exist to watch Open
+    Library answer, and respx resolves in registration order.
+    """
+    mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(
+        return_value=httpx.Response(404)
+    )
+    return mock
+
+
 def silence_catalogues(mock: Any) -> Any:
     """Register a "nothing found" answer for every metadata source.
 

@@ -27,6 +27,7 @@ catalogue.
 """
 
 import asyncio
+import itertools
 import math
 import re
 from typing import Any
@@ -36,11 +37,12 @@ import httpx
 import pytest
 import respx
 
+import covers
 import fetch
 import metadata
 import sources
 from catalogue import AuthorityAssertion, Heading, Record
-from enums import AuthorityScheme, ClassificationScheme
+from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
 from metadata import (
     Outcome,
     _dc_title_statement,
@@ -55,7 +57,7 @@ from metadata import (
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
-from tests.helpers import silence_covers, silence_oenb
+from tests.helpers import silence_covers, silence_oenb, silence_open_library
 
 #: Every catalogue enabled, in the order a new install asks them.
 #:
@@ -3497,6 +3499,7 @@ class TestTheAustrianNationalLibrary:
         """The 3 of 50 the whole item turns on, as a test rather than a claim."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3512,27 +3515,38 @@ class TestTheAustrianNationalLibrary:
         assert result.record.year == 2007
 
     @pytest.mark.asyncio
-    async def test_the_oenb_is_asked_before_open_library(self):
-        """Order inside the fallback list, which is measured rather than a taste.
+    async def test_open_library_is_asked_before_the_oenb(self):
+        """Order inside the fallback list, and #115 reversed it on a measurement.
 
-        Mean lookup latency 2026-08-27: ÖNB 0.240s, Open Library 1.64s. Asking
-        the slow broad source first would cost every Austrian lookup a second
-        and a half for a record ÖNB already had.
+        **It used to be the other way and the reason was latency**, which was
+        the wrong question: the tail is asked one at a time and stops at the
+        first hit, so what it costs is a round trip to whoever does not answer,
+        and what orders it is how often each one does. Of the 297 ISBNs in 500
+        that the leading pair missed, Open Library answered 96 and the OENB
+        answered 2, measured 2026-08-30. The frames are named in
+        `sources.MEASURED` and the rule is asserted in
+        `tests/test_sources.py::TestTheOrderFollowsTheMeasurement`.
+
+        The old reason is not wrong about the seconds, and the seconds are not
+        what is being bought: the OENB is faster, and asking it first buys a
+        fast answer twice in 297 and a wasted round trip 295 times.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            mock.get(url__startswith=OENB).mock(
+            oenb = mock.get(url__startswith=OENB).mock(
                 return_value=_xml(OENB_AUSTRIAN_ONLY)
             )
-            open_library = mock.get(url__startswith=OPEN_LIBRARY).mock(
-                return_value=httpx.Response(404)
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(200, json=OPEN_LIBRARY_RECORD)
             )
             result = await lookup("9783700316206")
 
-        assert result.source == "oenb"
-        assert not open_library.called
+        # Both halves are needed: the source alone would pass on a chain that
+        # asked the OENB first and preferred Open Library's answer anyway.
+        assert result.source == "open_library"
+        assert not oenb.called
 
     @pytest.mark.asyncio
     async def test_a_record_for_a_different_book_is_refused(self):
@@ -3565,6 +3579,7 @@ class TestTheAustrianNationalLibrary:
         """User story 3: confirming an ÖNB record enriches a Book like a DNB one."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3590,6 +3605,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3615,6 +3631,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3628,6 +3645,7 @@ class TestTheAustrianNationalLibrary:
         """`700 $4 trl`. The live record is a novel translated from Italian."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3650,6 +3668,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_open_library(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             route = mock.get(url__startswith=OENB).mock(
@@ -4145,6 +4164,109 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 
         assert result.record is not None
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
+
+
+class TestNoOrderOfTheRosterFindsMoreBooks:
+    """The chain asks every enabled source until one answers, so order is a schedule.
+
+    **`sources.DEFAULT_ORDER`'s docstring rests on this and #115 measured it**, so
+    it is pinned here rather than left as a sentence: over 500 domestic ISBNs,
+    five candidate orders resolved the same 300. A test is the better half of
+    that claim, because the survey measured the orders that were considered and
+    this measures **every permutation of the roster**.
+
+    What it protects is a refusal. The cheap answer to "the chain misses books in
+    Greece" is to reorder the list, and reordering cannot help: the only thing a
+    reorder buys is latency and which records `_merge` folds. A future change
+    that makes a hit depend on position, an early exit or a per tier deadline
+    say, breaks this rather than quietly narrowing what the chain finds.
+    """
+
+    ISBN = "9780306406157"
+
+    def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
+        return sources.parse(
+            {"sources": [{"source": name.value, "enabled": True} for name in order]}
+        )
+
+    @staticmethod
+    def _only(holder: CatalogueSource):
+        """A `_SOURCES` table where exactly one catalogue holds the book."""
+
+        def make(name: CatalogueSource):
+            async def answer(isbn: str, api_key: str) -> metadata.Lookup:
+                if name is not holder:
+                    return metadata.Lookup(metadata.Outcome.NOT_FOUND)
+                return metadata.Lookup(
+                    metadata.Outcome.FOUND,
+                    record=Record(source=name.value, isbn=isbn, title="Held here"),
+                    source=name.value,
+                )
+
+            return answer
+
+        return {name: make(name) for name in metadata._SOURCES}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("holder", sorted(sources.LOOKUP_SOURCES))
+    async def test_every_permutation_finds_a_book_any_one_source_holds(
+        self, holder: CatalogueSource, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Parametrised on the holder, because a table where nothing answers
+        would pass this with the chain deleted."""
+        monkeypatch.setattr(metadata, "_SOURCES", self._only(holder))
+
+        # The signature is mirrored rather than swallowed with **kwargs, for
+        # conftest's reason: a stub that accepts anything keeps passing after
+        # the real one changes shape.
+        async def no_cover(
+            raw_isbn: str, supplied: str | None = None, deadline: float | None = None
+        ) -> str | None:
+            return None
+
+        monkeypatch.setattr(covers, "resolve", no_cover)
+        first_asked = set()
+        for order in itertools.permutations(sources.DEFAULT_ORDER):
+            metadata.clear_cache()
+            result = await metadata.lookup(
+                self.ISBN, "a-key", plan=self._plan(order)
+            )
+            assert result.outcome is metadata.Outcome.FOUND, order
+            # **`record.sources`, not `in result.source`.** That was a substring
+            # match on a joined string, and `"dnb" in "oenb"` is True, so it
+            # could not tell a DNB hit from an OENB one. Nothing was masked
+            # because `_only` lets exactly one source answer, which is the kind
+            # of accident that stops being one after an edit.
+            assert result.record is not None
+            assert holder.value in result.record.sources, order
+            first_asked.add(result.attempts[0][0])
+        # **Anti vacuity, and it is the assertion that makes the loop mean
+        # something.** Everything above passes on an implementation that ignores
+        # the plan and asks all five, and passes on a `parse` that returns
+        # `DEFAULT_PLAN` for every input. This says the permutations really did
+        # reach `lookup` as different plans.
+        assert len(first_asked) > 1
+
+    @pytest.mark.asyncio
+    async def test_a_source_no_permutation_reaches_would_fail_this(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The evasion, run rather than argued.
+
+        A holder that is dropped from the plan is unreachable under **every**
+        order, which is what the test above would look like if `parse` were
+        losing a source. It has to fail, or the parametrised test is measuring
+        that the chain answers rather than that the order does not matter.
+        """
+        monkeypatch.setattr(
+            metadata, "_SOURCES", self._only(CatalogueSource.OPEN_LIBRARY)
+        )
+        metadata.clear_cache()
+        without = sources.parse(
+            {"sources": [{"source": "open_library", "enabled": False}]}
+        )
+        result = await metadata.lookup(self.ISBN, "a-key", plan=without)
+        assert result.outcome is not metadata.Outcome.FOUND
 
 
 class TestALibraryThatAsksNothing:

@@ -600,18 +600,32 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 `GET /api/books/lookup` asks five catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
-union catalogue of the German library networks. Both are free, need no key, and answered
-in 0.1s and 0.4s against a ten-ISBN sample. Their records are merged field by field,
+union catalogue of the German library networks. Both are free, need no key, and are the
+two fastest sources here: 0.25s and 0.45s at the ninetieth percentile over the 500 ISBN
+sample below. They are asked together, so the pair costs the slower of the two rather than
+the sum. Their records are merged field by field,
 nothing overwritten, so a page count from one and a subject heading from the other land on
 the same book.
 
-**Phase two, asked in turn, only if neither knew the book:** the **Austrian National
-Library**, then **Open Library**, then **Google Books**. The ÖNB is first because it is
-both fast and narrow: over 50 ISBNs from ten Austrian presses it held all 50 where the DNB
-held 47 and K10plus 39, and 3 of the 50 were held by it and by neither of them. Open
-Library is the broadest source, and at 1.6s the slowest by five
-times; Google is the only one with a key, a quota and a bill attached. An ordinary lookup
-therefore spends no quota at all.
+**Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
+**Austrian National Library**, then **Google Books**. Phase two stops at the first hit, so
+it is ordered by how often a source answers a book phase one missed: of 297 such ISBNs in
+500, Open Library answered 96 and the ÖNB 2. Open Library is the broadest source and much
+the slowest, which is why it is here rather than in phase one; Google is the only one with
+a key, a quota and a bill attached, and an ordinary lookup therefore spends no quota at
+all.
+
+**No order of these five finds more books than another.** Every enabled source is asked
+until one answers, so the order decides latency and which records are merged, never
+coverage. Reordering is not the fix for a book the chain misses.
+
+**What the chain covers without a Google Books key, which is what a stock install runs.**
+Four of the five are free; Google Books needs a key you supply. Measured over 500 domestic
+ISBNs across ten countries on 2026-08-30, the four free sources answer **300 and miss
+200**, and outside German language publishing they miss **196 of 400**. So a statement
+that this chain covers a given country is a statement about a keyed install: an earlier
+survey put Italy at 36% missed keyless against 0% with a key, and Greece at 86% against
+54%. The per source figures are in `backend/sources.py`, `MEASURED`.
 
 Open Library is read as three records rather than one: the **edition** for the printing,
 the **work** behind it for the subjects and the author the edition mostly omits, and one

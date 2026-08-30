@@ -8011,4 +8011,250 @@ count of entries and a list of headings, which is the check this repository
 already prescribes after any scripted edit and which nothing else would have
 caught.
 
+## The default source order, and what an order can and cannot buy
+
+Twelve entries from #115. The ticket asked for a tuple to be reordered; what it
+cost was establishing that the tuple had never had a stated rule, and three of
+the four claims in its own description did not survive re-derivation.
+
+### The first tier is a latency budget, and no order of the roster covers more
+
+**#115.** `sources.DEFAULT_ORDER` had no stated rule, so the question "should the
+DNB lead" had no answer to check against. It has one now, in the constant's own
+docstring, and the rule is that the first tier holds the sources most likely to
+answer **within a latency budget**, deliberately not the most authoritative.
+
+Two facts settle that, and both are in the tree rather than here. Authority is
+already owned elsewhere and per ISBN: `metadata._merge` sorts by
+`_preferred_source(isbn)` regardless of tier position, so promoting a source
+changes whether it is asked and never whether it is believed. And **coverage is
+order invariant**: `metadata.lookup` asks every enabled source until one answers,
+so no permutation of the roster finds more books. Modelled over five candidate
+orders on one 500 ISBN outcome set, all five resolved the same 300, and
+`tests/test_metadata.py::TestNoOrderOfTheRosterFindsMoreBooks` now asserts it
+over **every** permutation rather than the five that were considered.
+
+What follows is a refusal worth recording: reordering is never the fix for a
+country the chain misses. It buys latency, and which records `_merge` folds.
+
+### The ticket's own premise did not survive re-derivation, and three of its four claims were wrong
+
+**#115, filed off #91's survey.** Recorded because the correction is the finding,
+and because `docs/decisions.md` already carries the claim in the form that is
+wrong.
+
+The existing entry, *"The DNB and the ÖNB answer almost nothing outside German
+publishing, and both are in the default first tier"*, says a new install
+*"spends both of its concurrent lookup slots on sources that answer 0 to 5 of
+50"*. Measured again on the same 400 ISBNs, cell for cell identical to #91's
+table:
+
+* **The ÖNB is not in the first tier.** `ALWAYS_ASKED` is 2 and the ÖNB was
+  third, so it was first in the **sequential** tail. The tier was the DNB and
+  K10plus.
+* **K10plus does not answer 0 to 5 of 50.** It answers 12, 7, 3, 5, 17, 23, 15
+  and 28, which is 110 of 400 and the best free source after Open Library.
+* **The DNB's slot costs no wall clock.** The tier is gathered, so it costs its
+  slowest member: `dnb + k10plus` is a mean of 0.342s and **K10plus alone is a
+  mean of 0.342s**, p90 0.447s against 0.446s. What the slot spends is one HTTP
+  request and a millisecond.
+
+What survived is the tail order, which was wrong, and the reason given for it,
+which does not reproduce. That is what #115 changed.
+
+### The ÖNB's justifying measurement measured a different population
+
+**#115.** `sources.DEFAULT_ORDER` put the ÖNB ahead of Open Library as "the only
+source that answers for an Austrian imprint the German pair both missed: 3 of
+50", and `metadata.py` recorded 50 of 50 against the DNB's 47 and K10plus's 39,
+measured 2026-08-27. A fresh Austrian sample drawn from Wikidata by publisher
+country, 50 ISBNs on 2026-08-30, gives 22, 39 and 25, with the ÖNB holding **1**
+of the 7 the German pair missed and Open Library holding **2**.
+
+**The two do not disagree, and the tree says why.** `metadata.py`'s ÖNB comment
+records that every ISBN in the 2026-08-27 sample was taken off a live ÖNB
+record, so its 50 of 50 is true by construction and is not evidence about what
+the ÖNB holds. Its 3 of 50 is evidence and is a floor. The new sample is drawn
+from books Austrian publishers published, and only that frame can answer how
+often the ÖNB answers where the German pair did not, which is the question the
+fallback order turns on. Both are now stated where they matter, with their
+frames, and the superseded conclusion is marked in place rather than left to be
+found twice.
+
+**The correction is worth more than the finding, and it is mine.** The first
+version of this entry, and of the two comments it describes, said that how the
+earlier sample was drawn "is not recorded anywhere in this tree" and offered the
+by construction explanation as a guess. It is recorded, twenty lines into the
+block being corrected, and a critic found it in one grep. So this is another
+instance of the class this file already names twice over: **the code defensible,
+the stated reason wrong**, and the reason wrong in the specific way of asserting
+that something is absent without looking. A claim that a record does not exist
+is a claim to be checked exactly like a claim that it does.
+
+### Three slots asked together was measured and refused, on 0.061s
+
+**#115.** The ÖNB is the only candidate for a third concurrent slot: Open Library
+is outside `FIRST_TIER_BUDGET_SECONDS` and Google Books is metered and barred. It
+is nearly free in wall clock, p90 0.447s to 0.507s, and models **0.061s** faster
+per lookup, 1.344s to 1.283s over 500 ISBNs, by taking a round trip off the miss
+path. It buys **2 more books of 500**, and costs half again as many outbound
+requests on every lookup of every install, against other people's free
+catalogues. Refused on that, with the numbers in `sources.ALWAYS_ASKED` so it can
+be reversed against them, and the size now pinned by `sources.TIER_UNION` rather
+than by a guard that sliced with the constant it was checking.
+
+**Recorded because both numbers were wrong first**, and both errors are general.
+The model must cost a gathered tier as **that ISBN's own maximum**, never as the
+maximum of four per source means, which overstated the absolute by 11% and the
+gain by half. And the baseline must be **the order that ships**: against the
+order before the tail was reordered it reads 0.108s, which credits the third slot
+with the tail reorder's saving.
+
+### Most of the chain's coverage is Google Books, and most installs have no key
+
+**#115, measuring the keyless half of #91's finding.** Over 500 domestic ISBNs
+across ten frames the four free sources answer 300 and miss 200; outside German
+language publishing they miss 196 of 400. #91's keyed contrast on the same books
+was Italy 36% missed against 0%, Greece 86% against 54%. **The keyed half was not
+re-derived**: this seat had no key, and a figure that cannot be recomputed is
+attributed rather than repeated as its own. Stated in `sources.NEEDS_A_KEY`,
+`sources.MEASURED`, `metadata.py`'s chain comment, `README.md`, **`docs/api.md`
+and `docs/README.md`**, because a docstring saying the chain covers a country is
+a claim about a keyed install. The last two were missed on the first pass and are
+the ones that mattered: `docs/api.md` is the tree's most explicit description of
+the chain's coverage, and it still carried the old order and the refuted ÖNB
+reason in full.
+
+**Superseded figures in this file, for whoever edits it next.** The 50 of 50 and
+the 0.240s table at 3020-3030, and "its measured mean is 0.240s, faster than
+K10plus's 0.36s" at 6924 and 6941-6942. The entries above append rather than
+rewrite, so those lines still read as current until somebody marks them.
+
+### The evidence behind a stated bound has to live where the bound does
+
+**#115.** `sources.MEASURED` and `sources.TIER_UNION` are measured constants, and
+the probes that produced them ran in a session directory that is deleted when the
+work ships. Three integers presented as measured, whose evidence is gone three
+days later, is the failure this repository already records as **a bound that
+stops guarding without ever failing**: nothing that could contradict it still
+exists. So the sample is committed, at
+`backend/tests/fixtures/catalogue_survey_2026_08_30.json`, 500 rows of an ISBN,
+what each free source answered and how long it took, and
+`TestTheConstantsAreRederivableFromTheCommittedSample` recomputes every constant
+from it. 109KB, ISBNs and verdicts only, and it is published like the rest of the
+test tree.
+
+**It is evidence about that run and not about a re-run**, which both the module
+and the test class say in as many words. These are live third party catalogues on
+a dated day; re-deriving them against the world means re-running the probe.
+
+**And the answer arrived one `git add` short of working.** The fixture was
+untracked and not gitignored, and the publish script exports from
+`git archive HEAD`, so the mirror, the image and the pipeline would all have
+shipped a test class reading a file that was not there while the local gate
+stayed green. **Both critic seats found it independently**, which is the
+strongest signal this process produces and means it was not a near miss. A new
+file that a test depends on is not added by any gate that runs before the commit.
+
+### A guard proved on one property, then trusted for the property beside it, for the third time in one file
+
+**#115.** The class is already named twice in `CLAUDE.md`, and this wave produced
+three more instances in one review cycle, so the tell is worth stating on its own:
+**a comment justifying a guard by naming one rule while the guard covers several.**
+It reads correctly, a reviewer agrees with it, and the hole survives.
+
+* `test_a_metered_source_never_joins_the_pair_asked_on_every_lookup` keeps a
+  metered source out of the tier. A docstring said it held Google Books' position
+  in the **tail**. It does not: Google Books at position 1 of `DEFAULT_ORDER`
+  passed all 52 assertions in the file, leaving the tier untouched and making the
+  metered source the first thing asked on every miss, 200 of 500 sampled lookups
+  against 297. Fixed by `test_a_metered_source_is_asked_last_by_default`.
+* `test_the_slot_threshold_is_not_fitted_to_this_roster` asserted two inequalities
+  the tests above it already made. `SLOT_MUST_EARN = 3` and `= 35`, both edges of
+  its own stated interval, survived. The budget beside it had been given the
+  proportion of interval treatment and this constant had not, which is the
+  "generalisation right, the clause explaining the exception unmeasured" shape.
+* `Measured`'s docstring asserted that nothing checked the table against the
+  world three lines from a list saying the sample was committed and every figure
+  recomputed. The fix falsified a neighbouring sentence and the sentence stayed.
+
+### A fix a critic hands you is itself a first draft
+
+**#115**, and an instance of a rule `CLAUDE.md` already states. The design seat's
+fix for the latency model quoted the third slot's gain as 0.11s. That is
+three wide measured against the order **before** this change. The refusal is
+taken from the order that **ships**, so the figure is **0.061s**; 0.108s credits
+the third slot with the tail reorder's saving. The seat confirmed it on
+re-reading. The implementer that applies a finding without re-deriving it writes
+the next round's error, and this one was in the finding rather than in the code.
+
+### A docstring in a published test may not cite a session path
+
+**#115, and the third instance in one wave.** `backend/tests/` is published while
+the internal seat notes directory is stripped, so the publish script's last guard
+rejects a published file that names a path inside it, and the build fails
+after the push rather than before it. This entry cannot spell that directory
+either, which is the rule demonstrating itself: the guard matches a stripped
+directory name followed by a slash, wherever it appears. It happened in `backend/tests/test_house_rules.py` here, in
+`backend/tests/test_shelf.py` on `main` from another trio, and once already in a
+`docs/decisions.md` entry drafted from that same trio's notes.
+
+**The reason it keeps happening is worth more than the rule.** The seat writing
+the sentence is looking at the file, so the pointer is true when written and dies
+twice: once when the mirror strips it, and again when the wave ships and the
+directory is deleted. **Stand the sentence on what the harness proved, not on
+where the harness lives.** "Checked by planting one and watching this test fail"
+survives both deaths; a path does not.
+
+It is also a class the local gate cannot catch before a commit, because the
+script reads `git archive HEAD`. The only cheap check is grepping the changed
+published files with the script's own patterns, which is what found this one.
+
+### The source order guard's dict arm: a structural rewrite, tried and reverted
+
+**#115.** Recorded because two seats independently judged it the better shape and
+it is not in the tree, so without this the next person to hit that arm starts
+from scratch.
+
+`TestNoModuleHardCodesASourceOrder` reads a dict's keys as an ordered literal of
+source names. Every mapping keyed on `CatalogueSource` therefore trips it, which
+is why `metadata._SOURCES` and `metadata._FREE_SEARCHES` were already exempted
+and why `sources.MEASURED` needed a third exemption the day it was written.
+
+**The rewrite** read a mapping's keys as an order only when its **values are the
+positions**, so `{DNB: 0, K10PLUS: 1}` stayed an offender and `{DNB: _dnb}` and
+`{DNB: Measured(...)}` stopped being ones. It removed three exemptions rather
+than adding one, and it **reported** an order nested inside a mapping's values,
+which the exemption route exempts.
+
+**Why it was reverted anyway**, and this is the part that inverts the usual
+advice. The exemption is one named constant in one named module; the rewrite made
+a whole shape invisible **tree-wide**, so a future module relying on a source
+keyed dict's iteration order would never be asked the question. And the
+alternative the guard appears to invite, restructuring `MEASURED` into a tuple of
+`Measured` records, is worse than either: `_source_named` returns `None` for a
+`Call`, so a tuple of records is invisible to the guard entirely. Measured
+through the guard's own `paths` hook against an isolated fixture. **So the
+structural move is right when the structure is what the guard misreads, and here
+restructuring the data would have removed the guard's grip rather than satisfying
+it.** That is the sentence to keep.
+
+**A known gap, and it predates this ticket**: an order nested inside an exempt
+constant's value is exempt, because the exemption walks the whole value subtree.
+That is true of `DEFAULT_ORDER` today and is not introduced here.
+
+### Two seats made the same mistake in opposite directions
+
+**#115.** The implementer wrote that a fact was "not recorded anywhere in this
+tree" without looking, and it was recorded twenty lines into the block being
+corrected. The design seat then reported that a sentence was still present in
+`sources.py` after it had been removed, having re-taken the measurement its
+finding turned on but not the quotation the finding rested on.
+
+**One asserted an absence without checking, the other asserted a presence without
+rechecking.** Both are the same rule as every stale number in `CLAUDE.md`, one
+level up from arithmetic: **a claim about what the tree contains is a claim, and
+it goes stale exactly like a figure does.** The seat found its own; the other was
+found by being contradicted and withdrew it with the mechanism named.
+
 ---

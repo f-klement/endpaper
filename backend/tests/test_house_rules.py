@@ -2400,6 +2400,28 @@ class TestNoModuleHardCodesASourceOrder:
     * `metadata._SOURCES` and `metadata._FREE_SEARCHES`, the dispatch tables.
       They are mappings rather than orders, and `TestTheProviderRosterIsOneList`
       is what keeps them equal to the roster.
+    * `sources.MEASURED`, what each free lookup source was measured to do.
+      **Justified by what is checkable rather than by what is obvious.** Nothing
+      outside `backend/tests/` reads it, `TIER_UNION` or `SLOT_MUST_EARN` at all,
+      every reference to them under `backend/` being a comment, so none can be
+      the "constant still consulted somewhere" this guard exists to catch. Its
+      completeness is pinned by `TestTheOrderFollowsTheMeasurement` and its
+      values by `TestTheConstantsAreRederivableFromTheCommittedSample`. The
+      exemption is by identity of that constant's own value, so a plain tuple of
+      sources added to `sources.py` tomorrow is still reported. That was checked
+      by planting one and watching this test fail, rather than reasoned about.
+
+    **A sequence of objects each carrying a source is invisible here**, and it is
+    newly reachable rather than theoretical: `sources.Measured` did not exist
+    before the round that added this exemption, and a tuple of records is the
+    obvious way to restructure a table out of the dict arm below.
+    `_source_named` returns `None` for a `Call`, so a tuple of
+    `Measured(source=CatalogueSource.DNB, ...)` is not reported, measured through
+    this guard's own `paths` hook against a fixture holding nothing else. **That
+    is the argument against restructuring `MEASURED` to satisfy this guard
+    rather than exempting it**: the restructure would not satisfy the guard, it
+    would blind it, and the exemption keeps more checked than the tidier looking
+    alternative.
 
     **`_METERED_SEARCHES` is deliberately not exempted**, and it was for a round.
     It holds one entry, so it is never two or more sources and is never reported;
@@ -2419,7 +2441,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
-        "sources.py": {"DEFAULT_ORDER"},
+        "sources.py": {"DEFAULT_ORDER", "MEASURED"},
         "metadata.py": {"_MATCH_PRECEDENCE", "_SOURCES", "_FREE_SEARCHES"},
     }
 
@@ -2512,6 +2534,11 @@ class TestNoModuleHardCodesASourceOrder:
             ("a default argument", 'def f(order=("bnf", "oenb")):\n    return order'),
             ("a class body", 'class C:\n    ORDER = ["loc", "bnf"]'),
             ("a dict keyed on sources", "_M = {CatalogueSource.DNB: 0, CatalogueSource.OENB: 1}"),
+            ("a rank written as a float", "_M = {CatalogueSource.DNB: 0.9, CatalogueSource.OENB: 0.8}"),
+            (
+                "an order nested inside a table keyed on a source",
+                "_M = {CatalogueSource.DNB: (CatalogueSource.LOC, CatalogueSource.BNF)}",
+            ),
             ("nested in a dict value", '_M = {"a": ("dnb", "oenb")}'),
             ("a dict keyed on position", '_M = {0: "dnb", 1: "loc"}'),
             (
