@@ -21,7 +21,7 @@ export interface UseLoginFormResult {
   /** True when a directory authenticates, so the form is not our own. */
   isDirectoryLogin: boolean;
 
-  submit: (username: string, password: string) => void;
+  submit: (username: string, password: string, email: string) => void;
   isSubmitting: boolean;
   error: unknown;
   clearError: () => void;
@@ -63,9 +63,24 @@ export function useLoginForm(
     registrationEnabled,
     isDirectoryLogin,
 
-    submit: (username, password) => {
+    // **The address goes only to registration.** `LoginRequest` has no such
+    // field, and sending one would be a payload the sign in route never asked
+    // for. An empty string is sent as nothing at all: `UserCreate` reads "" as
+    // no address, and this keeps the two ends agreeing rather than relying on
+    // it.
+    //
+    // The branch is `active`, the one derived above, rather than a second read
+    // of `mode`: two derivations of one fact a line apart is how they come to
+    // disagree.
+    submit: (username, password, email) => {
       setDismissed(false);
-      active.mutate({ data: { username, password } });
+      if (active === register) {
+        register.mutate({
+          data: { username, password, ...(email ? { email } : {}) },
+        });
+        return;
+      }
+      login.mutate({ data: { username, password } });
     },
     isSubmitting: active.isPending,
     error: dismissed ? null : active.error,

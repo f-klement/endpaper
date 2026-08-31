@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field
 
 import mailer
 from enums import AuthMode, ThemeMode
@@ -13,11 +14,63 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_BYTES = 72
 
 
+def _an_address_or_nothing(value: str | None) -> str | None:
+    """One address, or nothing, whichever route is asking.
+
+    Checked with `mailer.looks_like_address`, the rule the household address
+    already passes, so this app has one answer to "is that an address" rather
+    than two that drift. It is also the header injection control: it refuses
+    whitespace anywhere, **a trailing newline included**, every control and non
+    printing character, and the comma and semicolon that turn one `To` header
+    into two.
+
+    The trailing newline is named because it is the one spelling this rule used
+    to accept: `looks_like_address` was anchored with `$` under `match`, which
+    matches before a final newline. The `.strip()` below happened to hide it and
+    is not what stops it. See `mailer.looks_like_address`.
+
+    An empty or blank string is nothing rather than a refusal. A member clearing
+    the field types nothing into it, and a 422 for "" would make "remove my
+    address" the one edit the form could not express. At registration the same
+    spelling is the ordinary case: a browser sends "" for a field nobody filled
+    in.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if not mailer.looks_like_address(stripped):
+        raise ValueError("That is not an address.")
+    return stripped
+
+
+#: An address as every route that takes one accepts it.
+#:
+#: **One alias rather than the same field written out twice**, because the two
+#: routes that take an address are the same question asked at two moments:
+#: `PUT /users/me/email` edits one and `POST /auth/register` sets it while the
+#: account is being made. `MAX_ADDRESS` and the column's `String(320)` agree,
+#: and the bound is enforced here because SQLite would not enforce it.
+AddressField = Annotated[
+    str | None,
+    Field(max_length=mailer.MAX_ADDRESS),
+    AfterValidator(_an_address_or_nothing),
+]
+
+
 class UserCreate(BaseModel):
-    """Registration. The length floor is a policy for *new* passwords only."""
+    """Registration. The length floor is a policy for *new* passwords only.
+
+    **The address is optional and stays optional**, which is the whole of the
+    compatibility story: an account with none must keep working, because that is
+    every account that existed before the column did. A client that sends no
+    `email` creates exactly the account it created before.
+    """
 
     username: str = Field(min_length=1, max_length=50, pattern=r"^\S.*$")
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_BYTES)
+    email: AddressField = None
 
 
 class LoginRequest(BaseModel):
@@ -68,50 +121,55 @@ class MemberEmailOut(BaseModel):
 
     `editable` is per row, not per deployment: `auth_backends.directory_owns_email`
     reads that member's own `auth_source`, so a local test account stays
-    editable in a library running LDAP. The client draws a read only field with
-    "from your directory" when it is false; the server refuses the write
-    regardless, because a client is not a control.
+    editable in a library running LDAP. The client draws a read only field
+    saying the address comes from the directory when it is false; the server
+    refuses the write regardless, because a client is not a control.
+
+    **`from_directory` is not the negation of `editable`, and that is the whole
+    reason it exists.** Three cases, and the two flags separate them where one
+    could not:
+
+    | account | `from_directory` | `editable` |
+    |---|---|---|
+    | local | false | true |
+    | directory, no address attribute configured | **true** | **true** |
+    | directory, an address attribute configured | true | false |
+    | `auth_source` spelled as nothing this build knows | false | true |
+
+    **The fourth row is why this is computed from the named directories rather
+    than from "not local".** `users.auth_source` carries no `CheckConstraint`,
+    which `auth_backends.directory_owns_email` states and depends on, so a
+    restored or hand edited row can hold anything. Under `!= LOCAL` such a row
+    read as a directory account and its owner was told a directory they do not
+    have supplies no address.
+
+    The middle row is #103's open question and the one nobody could be told
+    about: the account appeared at a first sign in with nobody filling in a
+    form, and the directory carries no address, so it has none and its owner is
+    the only person who can give it one. `editable` alone says "you may type
+    here" and cannot say why the box is empty. This is what lets the screen say
+    the directory did not supply one rather than leaving a member to infer it.
+
+    It discloses no address and widens nothing: this model is already restricted
+    to the four routes in `routers/users.py`, and the caller is the member
+    themselves or an admin.
     """
 
     id: int
     username: str
     email: str | None = None
     editable: bool
+    #: Required, not defaulted, so the pair is published with one strength.
+    #: `_member_email` is the only constructor and always sets it, and a default
+    #: would make the generated client read `from_directory?: boolean` beside
+    #: `editable: boolean` for two halves of one deliberately paired fact.
+    from_directory: bool
 
 
 class EmailUpdate(BaseModel):
-    """An address, or null to clear it.
+    """An address, or null to clear it. The rule is `AddressField`."""
 
-    Checked with `mailer.looks_like_address`, the rule the household address
-    already passes, so this app has one answer to "is that an address" rather
-    than two that drift. It is also the header injection control: it refuses
-    whitespace anywhere, **a trailing newline included**, every control and non
-    printing character, and the comma and semicolon that turn one `To` header
-    into two.
-
-    The trailing newline is named because it is the one spelling this rule used
-    to accept: `looks_like_address` was anchored with `$` under `match`, which
-    matches before a final newline. The `.strip()` below happened to hide it and
-    is not what stops it. See `mailer.looks_like_address`.
-
-    An empty or blank string is stored as null rather than refused. A member
-    clearing the field types nothing into it, and a 422 for "" would make
-    "remove my address" the one edit the form could not express.
-    """
-
-    email: str | None = Field(default=None, max_length=mailer.MAX_ADDRESS)
-
-    @field_validator("email")
-    @classmethod
-    def _an_address_or_nothing(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        stripped = value.strip()
-        if not stripped:
-            return None
-        if not mailer.looks_like_address(stripped):
-            raise ValueError("That is not an address.")
-        return stripped
+    email: AddressField = None
 
 
 #: What a palette or wallpaper id may look like.

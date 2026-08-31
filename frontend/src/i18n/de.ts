@@ -392,6 +392,11 @@ export const de: Messages = {
   "login.password": "Passwort",
   "login.usernamePlaceholder": "Benutzername eingeben",
   "login.passwordPlaceholder": "Passwort eingeben",
+  "login.email": "E-Mail-Adresse",
+  "login.emailOptional": "optional",
+  "login.emailHint":
+    "Hierhin ginge eine Erinnerung, die an dich gerichtet ist. Verschickt wird noch nichts, und du kannst die Adresse auch später eintragen.",
+  "login.emailPlaceholder": "du@example.org",
   "login.pleaseWait": "Bitte warten...",
   "login.browseCatalogue": "Den öffentlichen Katalog durchsuchen",
   "login.firstAccountAdmin":
@@ -470,8 +475,10 @@ export const de: Messages = {
   "account.email.yours": "Deine Adresse",
   "account.email.placeholder": "du@example.org",
   "account.email.none": "Nicht hinterlegt.",
+  "account.email.noneFromDirectory":
+    "Nicht hinterlegt. Das Verzeichnis liefert keine Adresse, sie kann hier eingetragen werden.",
   "account.email.fromDirectory":
-    "Diese Adresse stammt aus deinem Verzeichnis. Ändere sie dort.",
+    "Diese Adresse stammt aus dem Verzeichnis. Sie wird dort geändert.",
   "account.email.directoryRefused":
     "Diese Adresse gehört dem Verzeichnis und wurde hier nicht geändert.",
   "account.email.couldNotSave": "Die Adresse konnte nicht gespeichert werden.",
@@ -550,6 +557,10 @@ export const de: Messages = {
   "settings.testAccountsCreateFailed":
     "Das Konto konnte nicht angelegt werden.",
   "settings.testAccountsPasswordPlaceholder": "Passwort, mindestens 8 Zeichen",
+  "settings.testAccountsAddress": "E-Mail-Adresse für dieses Konto, optional",
+  "settings.testAccountsAddressPlaceholder": "E-Mail-Adresse (optional)",
+  "settings.testAccountsAddressHint":
+    "Verschickt wird noch nichts. Erinnerungen an überfällige Bücher gehen an das Postfach des Haushalts.",
   "settings.testAccountsSwitch": "Wechseln",
   "settings.testAccountsSwitchTo": "Zu {name} wechseln",
   "settings.testAccountsSwitchFailed":
@@ -1183,6 +1194,7 @@ export const de: Messages = {
   "providers.name.dnb": "Deutsche Nationalbibliothek",
   "providers.name.k10plus": "K10plus",
   "providers.name.oenb": "Österreichische Nationalbibliothek",
+  "providers.name.nlg": "Griechische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

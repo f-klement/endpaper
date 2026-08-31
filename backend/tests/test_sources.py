@@ -21,10 +21,10 @@ from enums import CatalogueSource
 #: lived in a working directory that is deleted when the work ships, which is the
 #: shape this repository has already recorded as a bound that stops guarding
 #: without ever failing: nothing that could contradict it still exists.
-SAMPLE = Path(__file__).parent / "fixtures" / "catalogue_survey_2026_08_30.json"
+SAMPLE = Path(__file__).parent / "fixtures" / "catalogue_survey_2026_08_31.json"
 
 #: The sources the sample covers, which is `LOOKUP_SOURCES` minus the metered one.
-SAMPLED = ("dnb", "k10plus", "oenb", "open_library")
+SAMPLED = ("dnb", "k10plus", "oenb", "open_library", "nlg")
 
 
 def _sample() -> list[dict]:
@@ -53,7 +53,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
     the constants describe **this recorded run**. It cannot prove the run was
     honest, because somebody editing the constants and the sample together defeats
     it, and it cannot prove a re-run would agree: these are live third party
-    catalogues and the figures are dated 2026-08-30. Re-deriving them against the
+    catalogues and the figures are dated 2026-08-31. Re-deriving them against the
     world means re-running the probe, not running this suite.
     """
 
@@ -101,6 +101,30 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             measured = _p90([entry[f"seconds_{source.value}"] for entry in rows])
             assert row.p90_seconds == round(measured, 3), source
 
+    def test_each_frame_count_matches_the_table(self):
+        """`frames_answered` is what keeps a national catalogue out of the tier,
+        so it is recomputed rather than asserted like everything else here."""
+        rows = _sample()
+        frames = {row["frame"] for row in rows}
+        for source, row in sources.MEASURED.items():
+            answered_in = {
+                entry["frame"] for entry in rows if entry[source.value] == "found"
+            }
+            assert answered_in <= frames
+            assert row.frames_answered == len(answered_in), source
+
+    def test_the_marginal_table_matches_the_sample(self):
+        """`TAIL_MARGINAL` counts books the leading tier missed, which is the
+        one figure the tail's order rests on and no per source count holds."""
+        rows = _sample()
+        tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
+        missed = [
+            entry for entry in rows if not any(entry[name] == "found" for name in tier)
+        ]
+        for source, stated in sources.TAIL_MARGINAL.items():
+            answered = sum(1 for entry in missed if entry[source.value] == "found")
+            assert stated == answered, source
+
     def test_the_union_table_matches_the_sample(self):
         """Recomputed the way it was produced: the best tier of each size that
         the budget allows, by how many of the 500 it answers between them."""
@@ -110,6 +134,10 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             for name in SAMPLED
             if _p90([entry[f"seconds_{name}"] for entry in rows])
             <= sources.FIRST_TIER_BUDGET_SECONDS
+            # The frame rule, applied here as well, or this table would price a
+            # tier `_tier_for` cannot build. See `TIER_FRAMES_MINIMUM`.
+            and len({entry["frame"] for entry in rows if entry[name] == "found"})
+            >= sources.TIER_FRAMES_MINIMUM
         ]
         for size in range(1, len(within) + 1):
             best = max(
@@ -124,16 +152,22 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`DEFAULT_ORDER` orders the tail on 96 against 2, which is the one
-        number in that docstring no per source table can hold."""
+        """`DEFAULT_ORDER` orders the tail on 83, 34 and 1, which is the one
+        figure in that docstring no per source table can hold.
+
+        **The pooled counts say the opposite about two of the three**, which is
+        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 37 and
+        55 would put the OeNB ahead of the NLG.
+        """
         rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
         missed = [
             entry for entry in rows if not any(entry[name] == "found" for name in tier)
         ]
-        assert len(missed) == 297
-        assert sum(1 for entry in missed if entry["open_library"] == "found") == 96
-        assert sum(1 for entry in missed if entry["oenb"] == "found") == 2
+        assert len(missed) == 279
+        assert sum(1 for entry in missed if entry["open_library"] == "found") == 83
+        assert sum(1 for entry in missed if entry["nlg"] == "found") == 34
+        assert sum(1 for entry in missed if entry["oenb"] == "found") == 1
 
 
 class TestTheOrderFollowsTheMeasurement:
@@ -162,14 +196,18 @@ class TestTheOrderFollowsTheMeasurement:
     * **The tier rule ranks sources individually**, while what a gathered tier
       is worth is the best **union**. `MEASURED` cannot express a union, so
       `TIER_UNION` carries the joint measurement and only the sizes, not the
-      membership. The two agree on this roster: `dnb + k10plus` answers 203 of
-      500 against 185 for `k10plus + oenb` and 95 for `dnb + oenb`.
-    * **The tail rule is marginal and the guard is unconditional.** The constant
-      orders the tail by how often a source answers *a book the tier missed*, 96
-      against 2; `test_the_tail_is_ordered_by_how_often_a_source_answers`
-      compares `answered / of`, which counts books the tier already had. They
-      agree here (237 > 44 and 96 > 2) and come apart on a roster where a broad
-      source only holds what the tier holds.
+      membership. The two agree on the sources a tier may hold: `dnb + k10plus`
+      answers 221 of 500 against 215 for `k10plus + oenb` and 95 for
+      `dnb + oenb`. **They stopped agreeing over the whole roster**, which is
+      what `TIER_FRAMES_MINIMUM` is for: `k10plus + nlg` answers 242, and all 34
+      of that difference is one frame of the ten.
+    * **The tail rule is marginal, and the guard now measures the same thing.**
+      It used to compare `answered / of`, which counts books the tier already
+      had, and the disclosure here said the two "come apart on a roster where a
+      broad source only holds what the tier holds". The NLG is that roster:
+      pooled it answers 37 against the OeNB's 55, and of the books the tier
+      missed it answers 34 against 1. So the guard reads `TAIL_MARGINAL`, and
+      the pooled rate now orders nothing.
     * **The tail guard sees only sources in `MEASURED`**, so it says nothing
       about where Google Books sits. Measured: moving Google Books above the
       OENB leaves that test green. Its position is a metering rule rather than a
@@ -216,21 +254,33 @@ class TestTheOrderFollowsTheMeasurement:
 
     @classmethod
     def _within(cls) -> list[CatalogueSource]:
-        """The free lookup sources fast enough to be asked on every lookup."""
+        """The free lookup sources a tier may hold.
+
+        Two conditions, not one: fast enough to be asked on every lookup, and
+        general enough to be worth asking on every lookup. See
+        `sources.TIER_FRAMES_MINIMUM` for the second, which the NLG is the first
+        source to fail.
+        """
         return [
             source
             for source in cls._free_lookup()
             if sources.MEASURED[source].p90_seconds
             <= sources.FIRST_TIER_BUDGET_SECONDS
+            and sources.MEASURED[source].frames_answered
+            >= sources.TIER_FRAMES_MINIMUM
         ]
 
     @classmethod
-    def _tier_for(cls, budget: float) -> set[CatalogueSource]:
-        """The tier the stated rule produces for a given budget."""
+    def _tier_for(
+        cls, budget: float, frames: int | None = None
+    ) -> set[CatalogueSource]:
+        """The tier the stated rule produces for a given budget and frame floor."""
+        floor = sources.TIER_FRAMES_MINIMUM if frames is None else frames
         within = [
             source
             for source in cls._free_lookup()
             if sources.MEASURED[source].p90_seconds <= budget
+            and sources.MEASURED[source].frames_answered >= floor
         ]
         within.sort(key=lambda source: (-cls._rate(source), source.value))
         return set(within[: sources.ALWAYS_ASKED])
@@ -244,6 +294,10 @@ class TestTheOrderFollowsTheMeasurement:
         for source, row in sources.MEASURED.items():
             assert 0 < row.answered <= row.of, source
             assert row.p90_seconds > 0, source
+            # A source answering in no frame answered nothing, which `answered`
+            # already refuses; a source answering in more frames than it has
+            # answers is a transcription error.
+            assert 0 < row.frames_answered <= row.answered, source
 
     def test_the_tier_holds_the_sources_that_answer_most_inside_the_budget(self):
         assert set(sources.DEFAULT_PLAN.lookup_together) == self._tier_for(
@@ -289,6 +343,62 @@ class TestTheOrderFollowsTheMeasurement:
             "which is near enough an edge to be a fit"
         )
 
+    @staticmethod
+    def _best_union(pool: list[str], size: int) -> int:
+        """What the best tier of that size answers, of the committed sample."""
+        rows = _sample()
+        return max(
+            sum(1 for row in rows if any(row[name] == "found" for name in names))
+            for names in itertools.combinations(pool, size)
+        )
+
+    def _within_names(self, *, frame_rule: bool) -> list[str]:
+        """The sources a tier may hold, with the frame rule on or off."""
+        rows = _sample()
+        return [
+            name
+            for name in SAMPLED
+            if _p90([row[f"seconds_{name}"] for row in rows])
+            <= sources.FIRST_TIER_BUDGET_SECONDS
+            and (
+                not frame_rule
+                or len({row["frame"] for row in rows if row[name] == "found"})
+                >= sources.TIER_FRAMES_MINIMUM
+            )
+        ]
+
+    def test_the_frame_rule_is_what_holds_the_tier_at_two(self):
+        """The decision `TIER_FRAMES_MINIMUM` actually makes, pinned.
+
+        **Not the tier's membership**, which the rate rule decides on its own: a
+        critic executed `_tier_for` for every floor from 0 to 5 and got
+        `{dnb, k10plus}` each time, so a guard asserting the NLG is out of the
+        tier passes with the frame rule deleted and says nothing.
+
+        The size is the decision. `TIER_UNION` unions rather than ranks, so
+        without the frame rule the third slot earns 13 against `SLOT_MUST_EARN`
+        of 10 and `test_the_next_slot_would_not_have_earned_its_place` fails,
+        which is a measurement telling every install to make a third concurrent
+        request on every lookup. With the rule the third slot earns 1.
+
+        Both arms are computed from the committed sample rather than from
+        `TIER_UNION`, so neither can agree with the constant by construction.
+        """
+        for frame_rule, expected in ((True, False), (False, True)):
+            pool = self._within_names(frame_rule=frame_rule)
+            assert len(pool) >= 3, (frame_rule, pool)
+            earned = self._best_union(pool, 3) - self._best_union(pool, 2)
+            assert (earned >= sources.SLOT_MUST_EARN) is expected, (
+                f"with the frame rule {'on' if frame_rule else 'off'} the third "
+                f"slot earns {earned} against a bar of {sources.SLOT_MUST_EARN}"
+            )
+
+    def test_the_frame_rule_changes_which_sources_a_tier_may_hold(self):
+        """Or the two arms above are the same arm twice."""
+        assert self._within_names(frame_rule=True) != self._within_names(
+            frame_rule=False
+        )
+
     def test_the_union_table_agrees_with_the_per_source_one_where_they_touch(self):
         """The one point at which the two tables can check each other.
 
@@ -315,8 +425,12 @@ class TestTheOrderFollowsTheMeasurement:
 
         This is the one a critic got past. Deriving the tier from `MEASURED`
         slices with `ALWAYS_ASKED`, so `ALWAYS_ASKED = 3` with the OENB moved to
-        position three produced a tier the derivation agreed with. Here the
-        third slot has to answer something, and it answers 2.
+        position three produced a tier the derivation agreed with. Here every
+        slot the tier holds has to answer something: they answer 208 and 13.
+
+        **This loop stops at `ALWAYS_ASKED`, so it never weighs a third slot.**
+        `test_the_next_slot_would_not_have_earned_its_place` is the one that
+        does, and it reads 1. Saying otherwise here was a second seat's finding.
         """
         for size in range(1, sources.ALWAYS_ASKED + 1):
             gain = sources.TIER_UNION[size] - sources.TIER_UNION.get(size - 1, 0)
@@ -345,10 +459,12 @@ class TestTheOrderFollowsTheMeasurement:
         `max(dropped) < SLOT_MUST_EARN`, which are the two tests above it
         restated, plus a third that named `SLOT_MUST_EARN` nowhere. A critic
         measured what that let through: **3 survived and 35 survived**, both
-        edges of the constant's own stated interval, and only 36 failed. So the
+        edges of the interval the roster had **then**, and only 36 failed. So the
         constant was fitted to the roster and this was the test claiming it was
-        not. The budget beside it had already been given the proportion of
-        interval treatment; this one had not, which is the whole defect.
+        not. The interval is [2, 13] now, so those two figures are a record of a
+        superseded roster rather than a bound anybody can check today. The budget
+        beside it had already been given the proportion of interval treatment;
+        this one had not, which is the whole defect.
         """
         earned = [
             sources.TIER_UNION[size] - sources.TIER_UNION.get(size - 1, 0)
@@ -374,11 +490,12 @@ class TestTheOrderFollowsTheMeasurement:
         metered source out of the pair asked together and says nothing about the
         order of the tail. With Google Books at position 1 of `DEFAULT_ORDER` the
         tier is untouched, because `lookup_together` filters `METERED` before it
-        slices, and `lookup_in_turn` becomes `(google_books, open_library, oenb)`,
-        so the metered source is asked on every miss: 200 of the 500 sampled
-        lookups today against 297, half again as many, against this module's own
-        "Google Books is last of the five that answer an ISBN" and `docs/api.md`'s
-        "an ordinary lookup therefore spends no quota at all".
+        slices, and `lookup_in_turn` becomes
+        `(google_books, open_library, nlg, oenb)`, so the metered source is asked
+        on every miss: 164 of the 500 sampled lookups today against 279, against
+        this module's own "Google Books is last of the six that answer an ISBN"
+        and `docs/api.md`'s "an ordinary lookup therefore spends no quota at
+        all".
 
         A **household** may promote it, and
         `test_a_metered_source_promoted_is_still_asked_earlier_in_the_tier_below`
@@ -392,18 +509,35 @@ class TestTheOrderFollowsTheMeasurement:
         assert free, "no free source in the default tail"
         assert min(metered) > max(free)
 
-    def test_the_tail_is_ordered_by_how_often_a_source_answers(self):
+    def test_the_tail_is_ordered_by_how_often_it_answers_what_the_tier_missed(self):
         """It stops at the first hit, so a source ahead of the answerer costs a
-        round trip and nothing else."""
+        round trip and nothing else, and what it saves is a book the tier missed.
+
+        **Against `TAIL_MARGINAL`, not against `answered / of`, and that was the
+        correction.** The pooled rate counts books the tier already had. The two
+        agreed while the tail was Open Library and the OeNB, and the NLG is the
+        roster this class disclosed as the one where they come apart: pooled it
+        answers 37 against the OeNB's 55, marginally it answers 34 against 1.
+        """
         measured = [
             source
             for source in sources.DEFAULT_PLAN.lookup_in_turn
-            if source in sources.MEASURED
+            if source in sources.TAIL_MARGINAL
         ]
         # Or the ordering assertion below is a statement about one element.
         assert len(measured) >= 2
-        rates = [self._rate(source) for source in measured]
-        assert rates == sorted(rates, reverse=True)
+        marginals = [sources.TAIL_MARGINAL[source] for source in measured]
+        assert marginals == sorted(marginals, reverse=True)
+
+    def test_the_marginal_table_covers_the_whole_measured_tail(self):
+        """A source in the tail and not in that table is one the ordering rule
+        above cannot see, and it would sort wherever it was put."""
+        tail = {
+            source
+            for source in sources.DEFAULT_PLAN.lookup_in_turn
+            if source in sources.MEASURED
+        }
+        assert tail == set(sources.TAIL_MARGINAL)
 
     def test_every_source_is_searched_by_default(self):
         assert set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES

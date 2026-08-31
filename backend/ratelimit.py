@@ -50,7 +50,7 @@ REGISTER_LIMIT = RateLimit(max_attempts=5, window_seconds=3600)
 # wedge the database for everyone else.
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
-# Every metadata call fans out to as many as seven public catalogues, none of
+# Every metadata call fans out to as many as eight public catalogues, none of
 # which the library runs or pays for. One member holding the scan page open
 # with a script behind it would spend somebody else's quota and put this
 # deployment's address in front of their rate limiter, which is a way to lose

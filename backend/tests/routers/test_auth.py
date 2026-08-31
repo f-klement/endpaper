@@ -57,6 +57,88 @@ class TestRegister:
         assert res.status_code == 201
 
 
+class TestAnAddressCanBeGivenWhileTheAccountIsBeingMade:
+    """#103. The one moment somebody is already typing their details.
+
+    The address is `User.email`, nullable, and it stays nullable: an account
+    made without one is the account this route made before the field existed,
+    which is every account today.
+    """
+
+    def test_an_address_sent_at_registration_is_stored(self, client, db):
+        res = client.post(
+            "/auth/register",
+            json={
+                "username": "first",
+                "password": "pw12345678",
+                "email": "first@example.org",
+            },
+        )
+        assert res.status_code == 201
+        assert db.query(User).filter(User.username == "first").one().email == (
+            "first@example.org"
+        )
+
+    def test_an_account_made_without_one_still_has_none(self, client, db):
+        client.post("/auth/register", json={"username": "first", "password": "pw12345678"})
+        assert db.query(User).filter(User.username == "first").one().email is None
+
+    def test_an_empty_string_is_no_address_rather_than_a_refusal(self, client, db):
+        """A browser sends "" for a field nobody filled in, and refusing that
+        would make the optional field compulsory for anyone using a form."""
+        res = client.post(
+            "/auth/register",
+            json={"username": "first", "password": "pw12345678", "email": "  "},
+        )
+        assert res.status_code == 201
+        assert db.query(User).filter(User.username == "first").one().email is None
+
+    def test_something_that_is_not_an_address_is_422(self, client, db):
+        res = client.post(
+            "/auth/register",
+            json={"username": "first", "password": "pw12345678", "email": "not one"},
+        )
+        assert res.status_code == 422
+        assert db.query(User).filter(User.username == "first").first() is None
+
+    def test_a_header_injection_attempt_is_422(self, client):
+        """The same rule `PUT /users/me/email` enforces, which is the point of
+        there being one rule: this address reaches `mailer` like any other."""
+        res = client.post(
+            "/auth/register",
+            json={
+                "username": "first",
+                "password": "pw12345678",
+                "email": "a@example.org\nBcc: victim@example.org",
+            },
+        )
+        assert res.status_code == 422
+
+    def test_an_address_past_the_column_is_422(self, client):
+        res = client.post(
+            "/auth/register",
+            json={
+                "username": "first",
+                "password": "pw12345678",
+                "email": f"{'a' * 320}@example.org",
+            },
+        )
+        assert res.status_code == 422
+
+    def test_the_address_is_not_served_back_with_the_account(self, client):
+        """`UserOut` carries no address, which is what stops one appearing in
+        every book payload. Registration returns a `UserOut` like any other."""
+        body = client.post(
+            "/auth/register",
+            json={
+                "username": "first",
+                "password": "pw12345678",
+                "email": "first@example.org",
+            },
+        ).json()
+        assert "email" not in body["user"]
+
+
 class TestRegistrationDisabled:
     @pytest.fixture(autouse=True)
     def disable_registration(self, monkeypatch):

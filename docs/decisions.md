@@ -7543,6 +7543,12 @@ filter for K10plus and the OENB as well. So the rule is right, its stated reason
 country's convention, and it covers every country: the recurring shape this register
 already has an entry for.
 
+**Superseded 2026-08-31**, by "`020 $q` is a qualifier about this record's item, and
+refusing it lost the book" below. The rule turned out not to be right: it was refusing 51
+records of the 1,197 misses in the 500 ISBN survey, on three sources rather than one, and
+35 of the 51 are German or Austrian rather than Greek. What survives from this entry is the
+prediction, which was correct, and the shape it names.
+
 ### A miss rate is not a gain: the candidate has to hold the book too
 
 | | keyless misses, of 50 | the candidate holds | realisable gain | 95% Wilson |
@@ -8013,7 +8019,7 @@ caught.
 
 ## The default source order, and what an order can and cannot buy
 
-Twelve entries from #115. The ticket asked for a tuple to be reordered; what it
+Eleven entries from #115. The ticket asked for a tuple to be reordered; what it
 cost was establishing that the tuple had never had a stated rule, and three of
 the four claims in its own description did not survive re-derivation.
 
@@ -8137,8 +8143,9 @@ the probes that produced them ran in a session directory that is deleted when th
 work ships. Three integers presented as measured, whose evidence is gone three
 days later, is the failure this repository already records as **a bound that
 stops guarding without ever failing**: nothing that could contradict it still
-exists. So the sample is committed, at
-`backend/tests/fixtures/catalogue_survey_2026_08_30.json`, 500 rows of an ISBN,
+exists. So the sample is committed. It was re-run for #111 and is now
+`backend/tests/fixtures/catalogue_survey_2026_08_31.json`, the same 500 books
+re-asked, 500 rows of an ISBN,
 what each free source answered and how long it took, and
 `TestTheConstantsAreRederivableFromTheCommittedSample` recomputes every constant
 from it. 109KB, ISBNs and verdicts only, and it is published like the rest of the
@@ -8256,5 +8263,211 @@ rechecking.** Both are the same rule as every stale number in `CLAUDE.md`, one
 level up from arithmetic: **a claim about what the tree contains is a claim, and
 it goes stale exactly like a figure does.** The seat found its own; the other was
 found by being contradicted and withdrew it with the mechanism named.
+
+## The National Library of Greece, and the rule that was refusing its records
+
+Five entries from #111. The ticket asked for one SRU adapter and predicted one
+obstacle; the obstacle turned out to belong to three sources rather than to the new
+one, and clearing it moved the whole chain's coverage.
+
+### `020 $q` is a qualifier about this record's item, and refusing it lost the book
+
+**#111.** `_marc_claims_isbn` skipped every `020` entry carrying a subfield `q`, on the
+reasoning that `$q` marks a cross reference to another edition. That reasoning came from
+one German record and does not reach the catalogues beside it. MARC21 defines `$q` as
+qualifying information about **this** record's item: its binding, its volume, its format.
+
+Measured 2026-08-30, records carrying an `020` whose entries are **all** qualified:
+
+| Source | All qualified | Of records with an 020 | What the qualifier says |
+|---|---|---|---|
+| DNB | 0 | 442 | it does not write them |
+| K10plus | 159 | 231 | `ePUB`, `PDF`, bindings, prices |
+| NLG | 63 | 317 | `χαρτόδετο` (paperback), `(τ.1)` (volume 1) |
+
+**So the rule refused the record's only identifier**, silently, as a `NOT_FOUND` for a
+book the source holds. Over the committed 500 ISBN survey, one fetch per source per ISBN
+with both rules read off the same body: the old rule reproduced the recorded outcomes
+exactly, 0 discrepancies in 1,197 probes, and preferring unqualified entries turns **51
+misses into hits**, 40 on K10plus and 11 on the OeNB. Every one of the 51 qualifiers
+describes the record's own item and none is a cross reference.
+
+**The fix is structural rather than a list of qualifier spellings**, because `Broschur`,
+`χαρτόδετο` and `pbk.` are one concept in three languages and the next catalogue has a
+fourth. `_isbn_entries` prefers unqualified entries and falls back to qualified ones only
+where a record has none.
+
+**The Dune failure cannot return, and the same ISBN proves both halves.** Read live
+2026-08-30, `pica.isb=9780441013593` answers with two records: the Ukrainian translation,
+which carries its own `9786171276895` unqualified **beside** the American ISBN as
+`$q amerik. Original`, and the American edition, both of whose entries read `$q : pbk.`.
+The first is refused because it names its own ISBN plainly; the second was refused before
+this change and is the book that was asked for. The test fixture for that case had been a
+simplification with the record's own ISBN left out, so it pinned a shape the catalogue
+does not produce.
+
+### Matching an ISBN and choosing one are two questions, and only the first is safe to answer
+
+**#111.** `_isbn_entries` has two readers. `_marc_claims_isbn` **matches**, against an ISBN
+the member already holds, and cannot be wrong about which entry it picks. `_marc_isbn`
+**chooses** the ISBN to store, and where a record carries no unqualified entry there is
+nothing to choose on but catalogue order: on a K10plus record whose three `020` entries are
+`ePUB`, `PDF` and `Broschur` it returns the ePUB's. `marc.py` calls it, and that module's
+docstring calls the ISBN the importer's primary match key.
+
+**Not fixed, deliberately.** Separating the formats means a list of spellings, `ePUB` and
+`PDF` and `e-book` and `EPUB` and whatever the next catalogue writes, which is the
+enumerating guard shape this register already holds several entries about: it goes stale
+without failing. The record is genuinely ambiguous, one row describing three saleable
+forms with no field saying which the row is for, and before this change the same record
+stored **no ISBN at all**. An ambiguous identifier beats none, the lookup path is
+unaffected because the adapters are handed the ISBN that was asked for, and the limitation
+is stated in `_marc_isbn` where somebody reading the code will meet it.
+
+Raised by the design seat, which executed it rather than reading it.
+
+### A pooled union over a country stratified sample is the wrong instrument for the first tier
+
+**#111.** The tier is asked on every lookup, and `TIER_UNION` picks the best union of each
+size from the 500 ISBN sample. With the NLG in the roster that arithmetic puts it in the
+**leading pair**: `k10plus + nlg` answers 242 of 500 against 221 for the pair that ships.
+
+**Every one of those 34 extra books is in one frame of the ten.** The sample is ten frames
+of fifty by country, so pooling weights ten national publishing outputs equally, and no
+household's shelf is one tenth Greek. What the tier costs is paid by one library on every
+scan; what a national catalogue answers is concentrated in the country it serves.
+
+`TIER_FRAMES_MINIMUM` states that measurably: a source asked on every lookup must answer
+in at least two of the ten frames. Measured 2026-08-30, K10plus and Open Library answer in
+10, the DNB in 5, the OeNB in 4 and the NLG in **1**, so every floor from 2 to 4 picks the
+same tier and the constant sits in a gap rather than on an edge.
+
+**A Greek library can still promote it**, which is what the provider list is for. The
+default is what nobody chose.
+
+### The tail's two candidate rules came apart, exactly where the guard said they would
+
+**#111.** `TestTheOrderFollowsTheMeasurement` disclosed that it ordered the tail by
+`answered / of` while the constant's own docstring ordered it by how often a source answers
+**a book the tier missed**, and that the two would part on a roster where a broad source
+only holds what the tier holds.
+
+The NLG is that roster. Pooled it answers 37 of 500 against the OeNB's 55; of the 279 the
+leading pair missed it answers **34 against the OeNB's 1**. The pooled rule would ask the
+OeNB first on every one of those lookups, to reach a source that answers one of them.
+
+`TAIL_MARGINAL` now carries the marginal count and the guard reads it. **The disclosure
+was worth more than the guard was**: it said in advance which roster would break it, and
+the roster arrived four days later.
+
+### The National Library of Greece is plaintext too, and the identity check is what that costs
+
+**#111.** `catalogue.nlg.gr:210` speaks no TLS, and `https://catalogue.nlg.gr` on 443 is a
+different service answering 404 to this path. Both measured 2026-08-30, which is the date
+`metadata._NLG_URL` carries for the same two probes. So this is the
+second source in the chain fetched over plaintext HTTP, after the Library of Congress, and
+the reasoning there applies unchanged: `fetch.RedirectedOffHost` is what stops an on path
+attacker turning the request into a request against an arbitrary address, and substituting
+a record is still open to them.
+
+**What it buys them differs by path, and the first draft of this entry got that wrong.**
+It said the exposure was narrower here than at the Library of Congress, because this source
+answers ISBN lookups and `_marc_claims_isbn` refuses a record that does not name the ISBN
+scanned. That is true of `_nlg` and false of `_nlg_search`, which is registered in
+`_FREE_SEARCHES`, is on by default, and has no identifier to check against. So the search
+path's exposure **equals** the Library of Congress's rather than being narrower, and only
+the lookup path is checked. Found by the security seat, by reading the two adapters instead
+of the sentence about them.
+
+A wrong index name is diagnosed by this endpoint rather than answered with the whole
+catalogue, which is the ÖNB's trap and does not exist here: `bib.isbn` and `srw.isbn`
+answer SRU diagnostic 1/15 and `bath.title` answers 1/16. The identity check is kept
+regardless, because on the lookup path it is now guarding the wire rather than the index.
+
+## An address at account creation
+
+### An email address belongs to creating an account, and a directory account has no creation moment to attach one to
+
+**#103.** The address is part of `POST /auth/register` and of the admin's account creation
+route, sharing one rule with the editing route: `schemas.user.AddressField`, which is
+`mailer.looks_like_address` and `MAX_ADDRESS`, so this app has one answer to "is that an
+address" rather than two that drift.
+
+**The second row is the admin's creation form**, `POST /api/users/test-accounts`, the only
+route by which an admin creates an account here. It takes an address because it takes
+`UserCreate` and there is one rule, and the form now offers the field. Owner's instruction,
+2026-08-31: "storing and changing an email only works if all the interested parties have
+access to the interface for it." Without the field an admin's route to giving a new account
+an address was to create it, find it in the member list and edit it, which is three screens
+for a field that belongs on the form.
+
+**The third row is the one `editable` could not express, and it needed a second flag.**
+A directory account is created by `upsert_directory_user` at a first sign in, with no form
+and nobody typing. Where the directory carries an address it is read and owned there. Where
+it does **not**, the account exists with none, the member may set one, and nobody had ever
+told them so: `editable` is true for that member and for a local account alike, so the
+screen had no way to say why the box was empty.
+
+`MemberEmailOut.from_directory` is that fact, and the pair separates three cases where one
+flag separated two. **The sentences are third person**, because `AddressField` has two
+render sites and only one of them is about the reader: an admin reads one of these per
+member, so "your directory" names the wrong person on every row but their own. Both critic
+seats found that independently, and the first draft of this very table quoted the second
+person wording it had just recorded replacing.
+
+| account | `from_directory` | `editable` | what the screen says |
+|---|---|---|---|
+| local | false | true | "None set." |
+| directory, no address attribute | **true** | **true** | the directory supplies none, it can be set here |
+| directory, an address attribute | true | false | this comes from the directory, change it there |
+
+**What was deliberately not built: a prompt outside Settings.** A banner on the shelf
+asking for an address would be nagging for a field that **sends nothing yet**, which is the
+lie `account.email.hint` exists to avoid. The interface is reachable by every account and
+states its own emptiness, which is what the owner's instruction asked for.
+
+The condition that reverses this is a sender that reaches a member's own address, and it is
+**recorded on #24 rather than here**, because a sentence that stops being true when
+somebody builds something is work rather than a decision. This register carries the refusal
+and its reason; the tracker carries what would undo it.
+
+## What the three seats caught, this wave
+
+### A fix round wrote an unmeasured reason into the paragraph about unmeasured reasons
+
+**#103.** `backend/tests/COVERAGE.md` states that its per file figures are collected tests
+and *not* `def test_` lines, and gives both numbers so the distinction is checkable. A
+recount moved the headline and every row and read straight past that sentence, leaving its
+companion figure at 2788 against a real 3426, stale by 638.
+
+The correction then added a second reason for the gap: that a `def test_` inside a mutation
+fixture is a line that is never collected. **There is no such line**, measured over every
+string constant in every module under `backend/tests`, and the arithmetic runs the other
+way in any case: 3965 collected exceeds 3426 written, so parametrisation alone accounts for
+it and a never collected line could only widen the gap in the opposite direction.
+
+So the paragraph whose whole subject is a number nobody re-derives acquired, in the act of
+being corrected, a **reason** nobody had measured. That is the same failure one level up
+from the one it records, and it is the third time this register has caught the shape: a
+count goes stale, and the fix for it is written with the same confidence that produced it.
+Found by a design critic, which had to read the reason rather than the number to see it.
+
+### Both critic seats found the same two things, from opposite ends
+
+**#111 and #103, the wave's own process note, because `CLAUDE.md` claims this is the
+strongest signal the three seat process produces and it is worth having an instance
+recorded.** The design seat and the security seat reviewed independently and converged on
+two defects neither was looking for: **the roster count had gone stale in fifteen places**,
+eleven of them published, and **`fetch._IDENTITY` claimed a live measurement the eighth
+source had never been given**, which is the claim the byte cap's whole memory bound rests
+on.
+
+They arrived from opposite ends. The design seat was auditing figures against the tree; the
+security seat was asking what bounds an outbound request. Neither had the other's findings.
+
+The implementer had already fixed four of the count's fifteen sites and believed the job
+done, which is the mechanism this register keeps recording: **a number stops being
+re-derived and starts being copied, and the person copying it is usually the one who
+corrected it last.**
 
 ---

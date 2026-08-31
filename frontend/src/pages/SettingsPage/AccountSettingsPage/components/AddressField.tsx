@@ -28,6 +28,25 @@ interface AddressFieldProps {
  * Empty is sent as `null`, which is what clears the column. The server accepts
  * either spelling, and picking one here keeps the request the same whether
  * somebody cleared the field or never filled it.
+ *
+ * **An empty editable field says so in words**, which it did not until #103.
+ * The read only case has always drawn "None set." because there is no box to
+ * infer it from; the editable case drew an empty box and left "nobody has set
+ * one" and "it failed to load" looking identical. The line below is the same
+ * sentence for the same fact.
+ *
+ * **And where the account came from a directory, it says which.** That is
+ * #103's third row: a member whose account appeared at a first sign in was
+ * never asked for an address and has no reason to know the field is theirs to
+ * fill. `from_directory` and `editable` are both true for exactly that member,
+ * which is why `MemberEmailOut` carries two flags rather than one.
+ *
+ * **Every sentence here is third person, because this component has two render
+ * sites and only one of them is about the reader.** `MemberAddresses` draws one
+ * of these per member, so "your directory" read off somebody else's row names
+ * the wrong person, and an admin may be local while the member is not. Both
+ * critics arrived at this independently; the read only sentence had carried the
+ * flaw since before #103 and the new one inherited it.
  */
 export default function AddressField({
   member,
@@ -89,6 +108,16 @@ export default function AddressField({
       <Button type="submit" disabled={disabled || unchanged}>
         {t("common.save")}
       </Button>
+      {/* **Gated on the draft as well as on the saved value**, or a member
+          giving their first address reads "None set." underneath what they
+          have just typed and not yet saved. */}
+      {member.email == null && trimmed === "" && (
+        <p className="w-full text-xs text-paper-600 dark:text-paper-400">
+          {member.from_directory
+            ? t("account.email.noneFromDirectory")
+            : t("account.email.none")}
+        </p>
+      )}
     </form>
   );
 }

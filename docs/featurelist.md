@@ -20,7 +20,9 @@ cover, page count, language, categories, series name and index, format
 **Adding a book** by ISBN, by barcode scan in the browser, by free text search,
 or by hand. ISBN lookup chains several sources so a European or pre-ISBN book
 still resolves rather than failing at one provider, and English, German, French,
-Spanish and Portuguese titles all resolve.
+Spanish, Portuguese and Greek titles all resolve. Greek is the newest and the
+clearest case for chaining them: of 50 Greek ISBNs the other free sources answer
+8 between them, and the Greek national catalogue answers 37.
 
 **Rapid mode** scans a whole shelf without stopping between books. The batch is
 reviewed before anything is written, so a misread barcode is caught before it
@@ -183,6 +185,14 @@ choice to open or close one is remembered.
 behind it: appearance, your account, catalogue sources, your library, the public
 catalogue, lending, data and accounts, and about. Nothing there folds. Every screen has its own address, so a
 setting can be linked to rather than described as "third card down".
+
+**An email address per member**, optional, set while an account is being created
+or afterwards on the account screen. Whoever creates the account can give one:
+the person registering, or the admin creating a test account. A
+member with none is told so rather than shown an empty box, and a member whose
+account came from a directory that supplies no address is told that the field is
+theirs to fill in. **Nothing is sent to it yet**: overdue reminders go to the
+household mailbox, and the address is there so that they can stop having to.
 
 **An About screen** names the version it is running, links the source, and asks
 once, in one sentence, whether you want to buy the author a coffee. Nothing else

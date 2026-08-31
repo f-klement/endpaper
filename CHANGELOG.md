@@ -4,6 +4,27 @@
 
 ### Added
 
+- **The National Library of Greece** is asked about a book, on an ISBN lookup and
+  on a title search. It is the Greek legal deposit catalogue, so it holds the
+  domestic edition under the domestic ISBN, which is the case the rest of the
+  chain missed: of 50 Greek ISBNs, the other free sources answer 8 between them
+  and this one answers 37. It is on by default and can be moved or switched off
+  in Settings, Catalogue sources.
+- **An email address can be given while an account is being created**, and every
+  account can now reach the place to set one. The registration form asks for it,
+  optionally, and so does the **test accounts** form in Settings, Data, which is
+  the only place an admin creates an account here. An address left empty is still
+  empty: nothing about an account without one has changed, and nothing is sent to
+  it yet.
+- **A member is told when they have no address**, rather than shown an empty box
+  that reads the same as a field which failed to load. An admin scanning the
+  member list for the row whose reminders go nowhere reads "None set." instead of
+  looking for the box that happens to be blank.
+- **A member whose account came from a directory is told the directory did not
+  supply an address, and that this one is theirs to fill in.** Those accounts
+  appear at a first sign in with nobody filling in a form, so nobody had ever
+  asked them for one, and the field looked identical to a local account that had
+  chosen not to give one.
 - **MARC21 import and export**, in library mode. A MARCXML file another library
   exported can be read at Settings, Your library, Take a catalogue across, and
   the whole shelf can be written back out from the export menu. Records are
@@ -28,13 +49,33 @@
   `description` is on the listing payload, so one oversized value was paid for
   on every page of every list.
 
+### Fixed
+
+- **A book whose catalogue record qualifies its ISBN was reported as not found.**
+  MARC lets a record note the binding, the volume, the price or the format beside
+  an ISBN, and this app read every such note as a cross reference to a different
+  edition and refused the record. That was right for the one German catalogue it
+  was written against and wrong beside it: measured over the same 500 ISBNs the
+  source order is derived from, it was refusing 51 records that K10plus and the
+  Austrian National Library already held. **Most of them are German language
+  publishing**, 21 Austrian and 14 German of the 51, with 7 Spanish, 5 Italian,
+  2 Brazilian, 1 Greek and 1 Uruguayan: the rule was written for those
+  catalogues and was costing them most. A record now keeps the old rule where it
+  names its own ISBN plainly as well, and drops it where a qualified entry is the
+  only identifier the record has. The MARC importer read the same rule, so a
+  catalogue file imported by hand lost those ISBNs too.
+
 ### Changed
 
 - The default catalogue order asks Open Library before the Austrian National
   Library. The fallback list is asked one source at a time and stops at the
-  first hit, so it is now ordered by how often a source answers a book the
-  leading pair missed: of 297 such ISBNs in 500, Open Library answered 96 and
-  the ÖNB answered 2. Nothing changes for a library that has set its own order.
+  first hit, so it is ordered by how often a source answers a book the leading
+  pair missed. **Re-measured for this release**, with the Greek catalogue in the
+  list and the qualified ISBN fix in place: of the 279 such ISBNs in 500, Open
+  Library answers 83, the National Library of Greece 34 and the ÖNB 1, and the
+  order is those three. The figures this entry carried a week ago, 297, 96 and
+  2, were the same measurement before either change. Nothing changes for a
+  library that has set its own order.
 - The duplicate finder and the importers now compute one identity key
   (`importing.identity_key`) rather than two. The CSV importer's title only
   fallback is unchanged; MARC never matches on a title alone.

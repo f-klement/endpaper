@@ -407,6 +407,17 @@ export const en = {
   "login.password": "Password",
   "login.usernamePlaceholder": "Enter username",
   "login.passwordPlaceholder": "Enter password",
+  "login.email": "Email address",
+  "login.emailOptional": "optional",
+  // `account.email.hint`'s sentence, kept rather than shortened. The first
+  // draft cut the "nothing is sent to it yet" clause on the grounds that a
+  // registration form is not the place for it, and that was backwards: this is
+  // the first and only place a household is **asked** for an address, so it is
+  // where the disclosure matters most. Promising a reminder that nothing sends
+  // would be the same lie one screen earlier.
+  "login.emailHint":
+    "Where a reminder addressed to you would go. Nothing is sent to it yet, and you can add it later.",
+  "login.emailPlaceholder": "you@example.org",
   "login.pleaseWait": "Please wait...",
   "login.browseCatalogue": "Browse the public catalogue",
   "login.firstAccountAdmin": "The first account created becomes the admin.",
@@ -495,8 +506,20 @@ export const en = {
   "account.email.yours": "Your address",
   "account.email.placeholder": "you@example.org",
   "account.email.none": "None set.",
+  // For an account that arrived from a directory carrying no address.
+  // `editable` is true for it and for a local account alike, so without this
+  // the one member who was never asked for an address reads the same sentence
+  // as the one who chose not to give one.
+  //
+  // **Third person, because `AddressField` has two render sites**: the member's
+  // own field and one row per member in the admin list. "Your directory" is the
+  // wrong person on the second, and the admin may be local while the member is
+  // not. `account.email.fromDirectory` below is the same sentence's read only
+  // twin and had the same flaw before this.
+  "account.email.noneFromDirectory":
+    "None set. The directory supplies none, so it can be set here.",
   "account.email.fromDirectory":
-    "This comes from your directory. Change it there.",
+    "This comes from the directory. Change it there.",
   "account.email.directoryRefused":
     "That address is the directory's to set, so it was not changed here.",
   "account.email.couldNotSave": "The address could not be saved.",
@@ -572,6 +595,13 @@ export const en = {
   "settings.testAccountsCreate": "Create test account",
   "settings.testAccountsCreateFailed": "Could not create that account.",
   "settings.testAccountsPasswordPlaceholder": "Password, at least 8 characters",
+  // The label and the placeholder differ, as they do on the two fields beside
+  // this one: a screen reader announces both, and identical words are heard
+  // twice for one box.
+  "settings.testAccountsAddress": "Email address for this account, optional",
+  "settings.testAccountsAddressPlaceholder": "Email address (optional)",
+  "settings.testAccountsAddressHint":
+    "Nothing is sent to it yet. Overdue reminders go to the household mailbox.",
   "settings.testAccountsSwitch": "Switch",
   "settings.testAccountsSwitchTo": "Switch to {name}",
   "settings.testAccountsSwitchFailed": "Could not switch to that account.",
@@ -1230,6 +1260,7 @@ export const en = {
   "providers.name.dnb": "German National Library",
   "providers.name.k10plus": "K10plus",
   "providers.name.oenb": "Austrian National Library",
+  "providers.name.nlg": "National Library of Greece",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

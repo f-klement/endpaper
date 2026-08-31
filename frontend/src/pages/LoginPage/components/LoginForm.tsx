@@ -10,7 +10,7 @@ interface LoginFormProps {
   isSubmitting: boolean;
   error: unknown;
   onModeChange: (mode: Mode) => void;
-  onSubmit: (username: string, password: string) => void;
+  onSubmit: (username: string, password: string, email: string) => void;
 }
 
 /** The credentials form. Presentational, used only by LoginPage. */
@@ -25,10 +25,11 @@ export default function LoginForm({
   const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSubmit(username, password);
+    onSubmit(username, password, email);
   }
 
   return (
@@ -103,6 +104,42 @@ export default function LoginForm({
             placeholder={t("login.passwordPlaceholder")}
           />
         </div>
+
+        {/*
+          Registration only. Signing in is a form about credentials, and an
+          address field there would look like a second thing to remember.
+          Optional, and it stays optional: an account with no address is what
+          every account here has been.
+        */}
+        {mode === "register" && (
+          <div>
+            <label
+              htmlFor="email"
+              className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+            >
+              {t("login.email")}{" "}
+              <span className="font-normal text-paper-600 dark:text-paper-400">
+                ({t("login.emailOptional")})
+              </span>
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              aria-describedby="email-hint"
+              className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+              placeholder={t("login.emailPlaceholder")}
+            />
+            <p
+              id="email-hint"
+              className="mt-1 text-xs text-paper-600 dark:text-paper-400"
+            >
+              {t("login.emailHint")}
+            </p>
+          </div>
+        )}
 
         {error != null && (
           <ErrorState error={error} fallback={t("login.failed")} />

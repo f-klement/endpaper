@@ -775,5 +775,6 @@ class CatalogueSource(StrEnum):
     DNB = "dnb"
     K10PLUS = "k10plus"
     OENB = "oenb"
+    NLG = "nlg"
     BNF = "bnf"
     LOC = "loc"

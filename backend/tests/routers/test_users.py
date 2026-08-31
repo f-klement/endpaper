@@ -236,6 +236,52 @@ class TestCreateTestAccount:
         assert stored != "pw12345678"
         assert stored.startswith("$2")
 
+    def test_an_address_can_be_set_while_the_account_is_being_made(
+        self, client, admin, db
+    ):
+        """#103's second row: an admin creating an account for somebody else.
+
+        `UserCreate` again, so the rule and the bound are registration's and
+        there is no second answer to what an address is.
+        """
+        res = client.post(
+            "/api/users/test-accounts",
+            json={
+                "username": "tester",
+                "password": "pw12345678",
+                "email": "tester@example.org",
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+        assert db.query(User).filter(User.username == "tester").one().email == (
+            "tester@example.org"
+        )
+
+    def test_one_made_without_an_address_has_none(self, client, admin, db):
+        client.post(
+            "/api/users/test-accounts",
+            json={"username": "tester", "password": "pw12345678"},
+            headers=admin["headers"],
+        )
+
+        assert db.query(User).filter(User.username == "tester").one().email is None
+
+    def test_something_that_is_not_an_address_is_422(self, client, admin, db):
+        res = client.post(
+            "/api/users/test-accounts",
+            json={
+                "username": "tester",
+                "password": "pw12345678",
+                "email": "not one",
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+        assert db.query(User).filter(User.username == "tester").first() is None
+
     def test_the_response_carries_no_password(self, client, admin):
         body = client.post(
             "/api/users/test-accounts",
@@ -532,6 +578,90 @@ class TestAnAdminReadsAndWritesAnybodys:
             headers=admin["headers"],
         )
         assert res.status_code == 422
+
+
+class TestWhetherAnAccountCameFromADirectory:
+    """#103's third row, which `editable` alone could not express.
+
+    A directory account whose directory carries no address attribute is
+    **editable and empty**, exactly like a local account that has not set one.
+    The screen has to tell those two apart to say why the box is empty, and
+    `editable` reads the same on both.
+    """
+
+    def test_a_local_account_did_not_come_from_a_directory(self, client, admin):
+        body = client.get("/api/users/me/email", headers=admin["headers"]).json()
+
+        assert body["from_directory"] is False
+        assert body["editable"] is True
+
+    def test_a_directory_account_with_no_attribute_is_editable_and_flagged(
+        self, client, admin, db
+    ):
+        """The case nobody could be told about: the account appeared at a first
+        sign in with nobody filling in a form, the directory carries no address,
+        and its owner is the only person who can give it one."""
+        _directory_member(db, "kim", "ldap")
+
+        rows = client.get("/api/users/emails", headers=admin["headers"]).json()
+
+        kim = next(row for row in rows if row["username"] == "kim")
+        assert kim["from_directory"] is True
+        assert kim["editable"] is True
+        assert kim["email"] is None
+
+    def test_a_directory_that_carries_an_address_owns_it(
+        self, client, admin, db, monkeypatch
+    ):
+        monkeypatch.setenv("PROXY_EMAIL_HEADER", "Remote-Email")
+        _directory_member(db, "kim", "proxy", "kim@example.org")
+
+        rows = client.get("/api/users/emails", headers=admin["headers"]).json()
+
+        kim = next(row for row in rows if row["username"] == "kim")
+        assert kim["from_directory"] is True
+        assert kim["editable"] is False
+
+    def test_no_row_is_owned_by_a_directory_it_did_not_come_from(
+        self, client, admin, db
+    ):
+        """The fourth combination the wire model can express and the server never
+        produces, which is the one direction the three tests above do not pin.
+
+        **Not "the flags are not each other's negation"**, which was this test's
+        first version and was strictly weaker than the one three lines above it:
+        that already asserts a row which is both. `editable` is
+        `not directory_owns_email(auth_source)` and that answers False for a
+        local row, so `from_directory=False, editable=False` is unreachable, and
+        a screen reading it would have no sentence to draw.
+        """
+        _directory_member(db, "kim", "ldap")
+        _directory_member(db, "sam", "proxy", "sam@example.org")
+
+        rows = client.get("/api/users/emails", headers=admin["headers"]).json()
+
+        assert len(rows) >= 3
+        assert not [
+            row
+            for row in rows
+            if not row["from_directory"] and not row["editable"]
+        ]
+
+    def test_a_row_no_directory_wrote_is_not_a_directory_row(
+        self, client, admin, db
+    ):
+        """`users.auth_source` has no `CheckConstraint`, so a restored or hand
+        edited row can spell it anything. Such a row belongs to no directory,
+        and telling its owner that a directory supplies no address names one
+        they do not have. Measured under the previous `!= LOCAL` rule: `''`,
+        `'LOCAL'` and arbitrary text all came back true."""
+        _directory_member(db, "kim", "sqlite-restored-junk")
+
+        rows = client.get("/api/users/emails", headers=admin["headers"]).json()
+
+        kim = next(row for row in rows if row["username"] == "kim")
+        assert kim["from_directory"] is False
+        assert kim["editable"] is True
 
 
 class TestWhereTheDirectoryOwnsIt:

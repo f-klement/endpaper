@@ -102,6 +102,7 @@ K10PLUS = "https://sru.k10plus.de/opac-de-627"
 BNF = "https://catalogue.bnf.fr/api/SRU"
 LOC = "http://lx2.loc.gov:210/lcdb"
 OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+NLG = "http://catalogue.nlg.gr:210/biblios"
 
 #: An SRU envelope holding no records. Every SRU source answers 200 with an
 #: empty set rather than a 404, so mocking a 404 would test a case none of them
@@ -154,6 +155,20 @@ def silence_oenb(mock: Any) -> Any:
     return mock
 
 
+def silence_nlg(mock: Any) -> Any:
+    """Answer the National Library of Greece with "nothing found".
+
+    `silence_oenb`'s helper, one source later and for the same reason: the NLG
+    joined a lookup chain and a search fan out that existing tests already
+    pinned, and each of those would fail on an unmocked request rather than on
+    anything about the NLG.
+
+    **Not autouse**, for `silence_oenb`'s reason.
+    """
+    mock.get(url__regex=f"{re.escape(NLG)}.*").mock(return_value=sru_response())
+    return mock
+
+
 def silence_open_library(mock: Any) -> Any:
     """Answer the whole Open Library host with "nothing found".
 
@@ -202,7 +217,7 @@ def silence_catalogues(mock: Any) -> Any:
       pattern left one route, this one, and the test's own Google response was
       silently discarded.
     """
-    for base in (DNB, K10PLUS, BNF, LOC, OENB):
+    for base in (DNB, K10PLUS, BNF, LOC, OENB, NLG):
         mock.get(url__regex=f"{re.escape(base)}.*").mock(return_value=sru_response())
     silence_covers(mock)
     mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(

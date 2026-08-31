@@ -19,7 +19,15 @@ function state(
   overrides: Partial<UseMemberEmailsResult> = {},
 ): UseMemberEmailsResult {
   return {
-    members: [{ id: 1, username: "kim", email: null, editable: true }],
+    members: [
+      {
+        id: 1,
+        username: "kim",
+        email: null,
+        editable: true,
+        from_directory: false,
+      },
+    ],
     isOffered: true,
     isLoading: false,
     isForbidden: false,

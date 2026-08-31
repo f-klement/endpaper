@@ -93,6 +93,7 @@ def create_test_account(
         is_admin=False,
         auth_source=AuthMode.LOCAL.value,
         is_test_account=True,
+        email=payload.email,
     )
     db.add(user)
     db.commit()
@@ -166,12 +167,26 @@ def set_my_appearance(
 
 
 def _member_email(user: User) -> MemberEmailOut:
-    """One row as the schema, including whether it is that row's to change."""
+    """One row as the schema, including whether it is that row's to change.
+
+    **Two flags rather than one**, because "may I type here" and "why is this
+    empty" are different questions and only the second can explain a directory
+    account that nobody ever asked for an address. See `MemberEmailOut`.
+    """
     return MemberEmailOut(
         id=user.id,
         username=user.username,
         email=user.email,
         editable=not directory_owns_email(user.auth_source),
+        # **Named directories, never "not local".** `users.auth_source` carries
+        # no `CheckConstraint`, which `directory_owns_email` states and relies
+        # on: an unknown spelling is a row no directory is configured for, and
+        # it answers False for one. `!= LOCAL` took the opposite stance on the
+        # same column, so `''`, `'LOCAL'` and a restored row of junk all came
+        # back as directory accounts and their owners were told a directory
+        # they do not have supplies no address. Measured over seven spellings by
+        # a design critic.
+        from_directory=user.auth_source in (AuthMode.LDAP.value, AuthMode.PROXY.value),
     )
 
 

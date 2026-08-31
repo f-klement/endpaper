@@ -360,11 +360,12 @@ class TestTheCapIsTheWholePoint:
         """The header is half the fix, and it is the half a reader cannot see.
 
         `aiter_raw` alone would leave every honest body arriving gzipped and
-        unparseable. Measured live 2026-08-27, all seven catalogues answer 200
-        under `identity`; four of them gzip when it is not sent. The names and
-        the byte counts are in `fetch._IDENTITY`, which is where they belong:
+        unparseable. Measured live, all eight catalogues answer 200 under
+        `identity`; four of them gzip when it is not sent. The names and the
+        byte counts are in `fetch._IDENTITY`, which is where they belong:
         restating them here is what left this sentence saying six and three
-        after a seventh source was added.
+        after a seventh source was added, and it went stale again at the
+        eighth.
         """
         with respx.mock:
             route = respx.get(URL).mock(return_value=httpx.Response(200))
@@ -442,6 +443,10 @@ class TestTheCapIsTheWholePoint:
     def test_the_default_cap_clears_the_largest_honest_page(self):
         """Measured live 2026-08-26, seven worst case queries at 50 records.
 
+        Eight sources are asked now. The eighth, the NLG, was measured at
+        604,964 bytes on 2026-08-31, under this figure, so the largest honest
+        body is still K10plus's and the bound below is unchanged.
+
         The largest was K10plus `pica.all=geschichte deutschland` at 687,481
         bytes. This test is here so that lowering the constant has to argue
         with the measurement rather than quietly refuse a real search.
@@ -461,8 +466,11 @@ class TestTheCapIsTheWholePoint:
         exists to prevent. The ceiling is the arithmetic the constant's own
         docstring states: every source `metadata.search` asks concurrently, each
         retaining a measured 15.28x its wire bytes, inside a 512Mi pod. Today
-        that is 224.3 MB against 536,870,912, and it permits growth to about
-        4.79 MiB before the two bounds meet.
+        that is 256.4 MB against 536,870,912, and it permits growth to about
+        4.19 MiB before the two bounds meet. Those read 224.3 MB and 4.79 MiB at
+        seven sources: the assertion is derived from `_CONCURRENT_SOURCES` and
+        this sentence was not, which is the drift the paragraph below records
+        happening to the prose instead of to the code.
 
         **The source count is read from `metadata`, not written here.** It was
         written here, as a literal 6, and it stayed 6 when the ÖNB became a

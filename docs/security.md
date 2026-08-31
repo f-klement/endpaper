@@ -652,7 +652,7 @@ paragraph.
 | `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
 | `/api/imports/*` | 3 / min | username | `/csv` writes thousands of rows in one transaction, holding the single SQLite writer against the library. `/preview` writes nothing and is limited for the other half of the cost: parsing a 5.02 MB, 20,000 row export is 3.081 seconds of CPU, measured, and `MAX_UPLOAD_BYTES` caps the body without capping the rate. One window covers both, so the ordinary flow of a preview then an import spends two of the three |
-| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as seven public catalogues that this library neither runs nor pays for |
+| metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as eight public catalogues that this library neither runs nor pays for |
 | `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF: **8 requests, about 1.08 MB, three hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **14 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches two hosts and no VIAF, and is the **larger of the two in requests**: its name search branch is 1 + 2 per candidate capped by `MAX_CANDIDATES`, so **11 requests and about 43 KB**, and its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. At ten a minute that is up to 250 outbound requests for lookups against 140 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
 | `POST /api/books/covers/backfill` | 6 / min | username | One run fetches up to a hundred images from the same services the metadata limit protects, and it is the call a member would press twice while the first is still running |
 | `GET /api/public/books`, `GET /api/public/books/{id}` | 120 / min | address | The fourth reason, and the only counter here whose caller holds no session: this is the published catalogue, so it is the first surface a stranger can reach. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes |
@@ -842,8 +842,9 @@ therefore never repair another member's private books. It is rate limited instea
 
 ## Catalogue requests
 
-Seven third party catalogues are asked for records: Open Library, the DNB, K10plus, the
-BnF, the Library of Congress, the Austrian National Library and Google Books. `backend/fetch.py` is the only place an HTTP
+Eight third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+BnF, the Library of Congress, the Austrian National Library, the National Library of
+Greece and Google Books. `backend/fetch.py` is the only place an HTTP
 client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
 over the tree, because the defect that produced the module was ten hand built clients that
 agreed on the timeout and agreed on nothing else.
@@ -863,7 +864,7 @@ stored configuration or a request body, that changes.
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
 per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
-mean adding seven catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+mean adding eight catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
 
 **Redirects are walked here, and only to the same host.** Measured live with redirects off,
@@ -875,10 +876,21 @@ send this server to a host of its choosing. `fetch.get` therefore sets
 implicit 443 and 80 filled in, at most `MAX_REDIRECTS` of them. Anything else raises
 `RedirectedOffHost`.
 
-That matters most at the Library of Congress, which has no TLS endpoint, so an on path
-attacker there could answer for it: `docs/decisions.md`, "The Library of Congress is fetched
-over plaintext HTTP, knowingly". Substituting a record is still open to such an attacker;
-turning one request into a request against an arbitrary internal address is not.
+That matters most at the two catalogues with no TLS endpoint, the Library of Congress and
+the National Library of Greece, where an on path attacker could answer for the catalogue:
+`docs/decisions.md`, "The Library of Congress is fetched over plaintext HTTP, knowingly"
+and "The National Library of Greece is plaintext too, and the identity check is what that
+costs". Substituting a record is still open to such an attacker; turning one request into a
+request against an arbitrary internal address is not.
+
+**The National Library of Greece answers on two paths and only one of them can check what
+comes back.** On an ISBN lookup a record has to name the ISBN that was scanned, because
+`metadata._marc_claims_isbn` refuses one that does not, so a substituted record chooses the
+metadata for the book in hand rather than the book. On a title search there is no
+identifier to check against, so a substituted body can offer any row it likes and a member
+picks one from a list. That second path is exactly the Library of Congress's exposure,
+which is title search only: the Greek source's search surface is **not** narrower than it,
+and its lookup surface is the half that is checked.
 
 **A `Location` naming an unusable host is refused the same way**, and it is worth knowing
 why it needed separate handling. httpx builds the redirect request inside `send()` **even
@@ -911,14 +923,15 @@ exactly that.** `aiter_bytes()` hands the decoder a whole raw chunk before yield
 anything, so the decompressed allocation happens *before* the running total is compared to
 the limit. Measured: **65,250 wire bytes reached 67,108,864 counted and 148.3 MB allocated**,
 and across the six sources `metadata.search` asked at once when that was measured, 463.8 MB
-peak in a pod limited to 512Mi. It asks seven now, so that figure is the shape it was taken
+peak in a pod limited to 512Mi. It asks eight now, so that figure is the shape it was taken
 at rather than today's. The cap was advertised at 1 MB throughout. Reading `aiter_raw()` under
 `accept-encoding: identity` brings the same payload to 0.1 MB.
 
-Measured live across seven worst case queries at each source's record ceiling, the largest
+Measured live across eight worst case queries at each source's record ceiling, the largest
 honest body was K10plus `pica.all=geschichte deutschland` at 687,481 bytes, so the cap sits
-3.05x over it. Parsing retains a measured 15.28x the wire bytes, giving a worst case of
-about 224 MB against 512Mi, which a test asserts. That test reads the source count off
+3.05x over it. The eighth source, the NLG, measured 604,964 bytes and did not move that.
+Parsing retains a measured 15.28x the wire bytes, giving a worst case of about 256 MB
+against 512Mi, which a test asserts. That test reads the source count off
 `metadata.search` rather than restating it, because it was written as a literal 6 and went
 on passing when a seventh source was added. The margin is deliberately generous rather
 than tight: the same quantity measured 587,810 bytes three days earlier, so the tail is being
@@ -926,7 +939,7 @@ sampled and not bounded.
 
 Going over raises `fetch.ResponseTooLarge`, which is an `httpx.HTTPError`, so it lands in
 the handler every caller already has for a timeout: that source is unavailable and the
-other six answer. `metadata._parsed` is the other half of the same bound, refusing a doctype so
+other seven answer. `metadata._parsed` is the other half of the same bound, refusing a doctype so
 that an honest looking body cannot expand past the cap after it has been let through.
 
 **The whole request is bounded in time, not each read.** `TIMEOUT_SECONDS` is a budget for

@@ -57,7 +57,12 @@ from metadata import (
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
-from tests.helpers import silence_covers, silence_oenb, silence_open_library
+from tests.helpers import (
+    silence_covers,
+    silence_nlg,
+    silence_oenb,
+    silence_open_library,
+)
 
 #: Every catalogue enabled, in the order a new install asks them.
 #:
@@ -261,6 +266,64 @@ def _oenb_envelope(*records: str) -> str:
 
 
 OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+
+#: The National Library of Greece. Plaintext HTTP on port 210, which is what
+#: the catalogue offers: see `metadata._NLG_URL`.
+NLG = "http://catalogue.nlg.gr:210/biblios"
+
+#: A real NLG record, trimmed to the fields this app reads.
+#:
+#: Captured live 2026-08-30 from `dc.title=ιστορία`, control number 434736.
+#: **Its only 020 is qualified**, `$q (τ.1)`, which is the case the whole source
+#: turns on: under the rule before `_isbn_entries` this record answered nothing.
+#: Its `$0` values are `urn:nbn:gr:nlg:` rather than `(DE-588)`, which is why the
+#: headings below are subjects and not GND rows.
+NLG_RECORD = _marc(
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01665nam a2200385 a 4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9789602118962</subfield>'
+    '<subfield code="q">(τ.1)</subfield></datafield>'
+    '<datafield tag="041" ind1="1" ind2=" ">'
+    '<subfield code="a">gre</subfield><subfield code="h">eng</subfield></datafield>'
+    '<datafield tag="082" ind1="0" ind2="4">'
+    '<subfield code="a">940</subfield><subfield code="2">21</subfield></datafield>'
+    '<datafield tag="100" ind1="1" ind2=" ">'
+    '<subfield code="a">Davies, Norman,</subfield>'
+    '<subfield code="d">1939-</subfield>'
+    '<subfield code="4">aut</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Ιστορία της Ευρώπης /</subfield>'
+    '<subfield code="c">Norman Davies</subfield></datafield>'
+    '<datafield tag="260" ind1=" " ind2=" ">'
+    '<subfield code="a">Αθήνα :</subfield>'
+    '<subfield code="b">Νεφέλη,</subfield>'
+    '<subfield code="c">2009-</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">640 σ. ;</subfield>'
+    '<subfield code="c">26εκ.</subfield></datafield>'
+    '<datafield tag="651" ind1=" " ind2="7">'
+    '<subfield code="a">Ευρώπη</subfield>'
+    '<subfield code="0">urn:nbn:gr:nlg:01-A273635</subfield>'
+    '<subfield code="2">nlgaf</subfield></datafield>'
+    "</record>"
+)
+
+#: The same catalogue answering about a different book, which is what a wrong
+#: index or a forged reply on a plaintext connection looks like from here.
+NLG_WRONG_BOOK = _marc(
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01665nam a2200385 a 4500</leader>"
+    '<datafield tag="020" ind1=" " ind2=" ">'
+    '<subfield code="a">9789600426656</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0">'
+    '<subfield code="a">Σημίνα, είσαι αστέρι</subfield></datafield>'
+    '<datafield tag="300" ind1=" " ind2=" ">'
+    '<subfield code="a">30 σ.</subfield></datafield>'
+    "</record>"
+)
+
+NLG_EMPTY = _marc()
 
 #: One live ÖNB record, ISBN 9783552058217, `Das angehaltene Leben`, Zsolnay.
 #:
@@ -539,6 +602,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -578,6 +642,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -610,6 +675,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=OPEN_LIBRARY).mock(
@@ -636,6 +702,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -658,6 +725,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -683,6 +751,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -703,6 +772,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -723,6 +793,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1033,6 +1104,7 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1096,6 +1168,7 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1186,6 +1259,7 @@ class TestCatalogueXml:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1320,12 +1394,13 @@ class TestTheResponseSizeCap:
             (DNB, "_marc_over_cap"),
             (K10PLUS, "_marc_over_cap"),
             (OENB, "_oenb_over_cap"),
+            (NLG, "_marc_over_cap"),
         ],
     )
     async def test_an_oversized_lookup_answer_costs_that_source(self, host, body):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            for other in (DNB, K10PLUS, OENB):
+            for other in (DNB, K10PLUS, OENB, NLG):
                 mock.get(url__startswith=other).mock(
                     return_value=_xml(
                         getattr(self, body)() if other == host else OENB_EMPTY
@@ -1339,7 +1414,7 @@ class TestTheResponseSizeCap:
             )
             result = await lookup(ENGLISH_ISBN)
 
-        name = {DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb"}[host]
+        name = {DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb", NLG: "nlg"}[host]
         assert (name, Outcome.UNAVAILABLE) in result.attempts
         assert result.outcome is not Outcome.FOUND
 
@@ -1350,6 +1425,7 @@ class TestTheResponseSizeCap:
             (DNB, "_marc_over_cap"),
             (K10PLUS, "_marc_over_cap"),
             (OENB, "_oenb_over_cap"),
+            (NLG, "_marc_over_cap"),
             ("https://catalogue.bnf.fr", "_dublincore_over_cap"),
             ("http://lx2.loc.gov", "_mods_over_cap"),
         ],
@@ -1363,6 +1439,7 @@ class TestTheResponseSizeCap:
                 (DNB, DNB_EMPTY),
                 (K10PLUS, K10PLUS_EMPTY),
                 (OENB, OENB_EMPTY),
+                (NLG, NLG_EMPTY),
                 ("https://catalogue.bnf.fr", DNB_EMPTY),
                 ("http://lx2.loc.gov", DNB_EMPTY),
             ):
@@ -1383,6 +1460,7 @@ class TestTheResponseSizeCap:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
             )
@@ -1636,15 +1714,25 @@ class TestK10plusIdentity:
     """Matching an ISBN is not the same as being the book it belongs to."""
 
     @pytest.mark.asyncio
-    async def test_a_qualified_isbn_is_a_cross_reference_not_a_match(self):
-        """`020 $q` names another edition, and taking it returns another book.
+    async def test_a_qualified_isbn_beside_the_records_own_is_a_cross_reference(self):
+        """`020 $q` beside an unqualified entry names another edition.
 
         Observed live: searching Dune's American ISBN returned a Ukrainian
         translation whose record carries `9780441013593 $q amerik. Original`.
+
+        **The record carries its own ISBN too, and this fixture used to leave it
+        out.** Re-read live on 2026-08-30, `pica.isb=9780441013593` returns two
+        records: the translation, `9786171276895` with the American ISBN beside
+        it as `$q amerik. Original`, and the American edition itself, both of
+        whose entries read `$q : pbk.`. Both halves of `_isbn_entries` are in
+        that one answer, which is why the two tests here are its two arms: the
+        translation is refused because it names its own ISBN plainly, and the
+        edition below is taken because it names nothing else.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
                     _marc(
@@ -1652,6 +1740,11 @@ class TestK10plusIdentity:
                             isbn=ENGLISH_ISBN,
                             isbn_qualifier="amerik. Original",
                             title='<subfield code="a">Velykyj Hetsbi</subfield>',
+                            extra=(
+                                '<datafield tag="020">'
+                                '<subfield code="a">9786171276895</subfield>'
+                                "</datafield>"
+                            ),
                         )
                     )
                 )
@@ -1666,6 +1759,31 @@ class TestK10plusIdentity:
             result = await lookup(ENGLISH_ISBN)
 
         assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_a_record_whose_every_isbn_is_qualified_is_still_this_book(self):
+        """A binding is not a cross reference, and refusing it lost the book.
+
+        The qualifier here is what a Greek record writes on a fifth of the books
+        it holds. Measured 2026-08-30 over 500 distinct NLG records drawn from
+        ten title searches: 317 carry an 020 and **63 of those name their ISBN
+        only in a qualified entry**. The K10plus figure from the same probe is
+        159 of 231.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            silence_oenb(mock)
+            silence_nlg(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(_marc_record(isbn=ENGLISH_ISBN, isbn_qualifier="χαρτόδετο"))
+                )
+            )
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            result = await lookup(ENGLISH_ISBN)
+
+        assert result.outcome is Outcome.FOUND
+        assert result.source == "k10plus"
 
     @pytest.mark.asyncio
     async def test_matches_a_record_holding_the_isbn_10_form(self):
@@ -2318,6 +2436,7 @@ class TestAHostileSourceCostsItsOwnRows:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -2346,6 +2465,7 @@ class TestAHostileSourceCostsItsOwnRows:
     async def test_an_unparsable_page_count_does_not_500_a_lookup(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -2408,6 +2528,7 @@ class TestAHostileSourceCostsItsOwnRows:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -3315,6 +3436,7 @@ class TestTheCandidates:
             return_value=httpx.Response(500)
         )
         silence_oenb(mock)
+        silence_nlg(mock)
 
     @pytest.mark.asyncio
     async def test_the_cluster_leads(self):
@@ -3500,6 +3622,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3521,15 +3644,16 @@ class TestTheAustrianNationalLibrary:
         **It used to be the other way and the reason was latency**, which was
         the wrong question: the tail is asked one at a time and stops at the
         first hit, so what it costs is a round trip to whoever does not answer,
-        and what orders it is how often each one does. Of the 297 ISBNs in 500
-        that the leading pair missed, Open Library answered 96 and the OENB
-        answered 2, measured 2026-08-30. The frames are named in
-        `sources.MEASURED` and the rule is asserted in
+        and what orders it is how often each one does. Of the 279 ISBNs in 500
+        that the leading pair missed, Open Library answers 83 and the OENB
+        answers 1, re-measured 2026-08-31 with the NLG in the roster and the
+        `020` rule fixed. The frames are named in `sources.MEASURED`, the
+        marginal counts in `sources.TAIL_MARGINAL`, and the rule is asserted in
         `tests/test_sources.py::TestTheOrderFollowsTheMeasurement`.
 
         The old reason is not wrong about the seconds, and the seconds are not
         what is being bought: the OENB is faster, and asking it first buys a
-        fast answer twice in 297 and a wasted round trip 295 times.
+        fast answer once in 279 and a wasted round trip 278 times.
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
@@ -3558,6 +3682,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3580,6 +3705,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3606,6 +3732,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3632,6 +3759,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3646,6 +3774,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3669,6 +3798,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_open_library(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             route = mock.get(url__startswith=OENB).mock(
@@ -3685,6 +3815,7 @@ class TestTheAustrianNationalLibrary:
     async def test_a_throttled_oenb_is_not_reported_as_a_missing_book(self):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
@@ -3710,6 +3841,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3736,6 +3868,7 @@ class TestTheAustrianNationalLibrary:
         """
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3761,6 +3894,7 @@ class TestTheAustrianNationalLibrarySearch:
     def _quiet(mock):
         """Every source but the ÖNB answering nothing."""
         silence_covers(mock)
+        silence_nlg(mock)
         mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
         mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
         mock.get(url__startswith=OPEN_LIBRARY).mock(
@@ -3885,6 +4019,7 @@ class TestTheAustrianNationalLibrarySearch:
         """User story 5, from the search side."""
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -3956,6 +4091,7 @@ class TestTheAustrianNationalLibrarySearch:
 
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
+            silence_nlg(mock)
             mock.get(url__startswith=OENB).mock(side_effect=_crawl)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -3979,6 +4115,171 @@ class TestTheAustrianNationalLibrarySearch:
             f"a source sleeping {self._SLOWER_THAN_THE_DEADLINE}s was waited for"
         )
         assert [row.title for row in rows] == ["The Great Gatsby"]
+
+
+class TestTheNationalLibraryOfGreece:
+    """The fourth MARCXML source, and the first outside German language Europe.
+
+    **It is here because the chain held nothing for Greek publishing**, which is
+    the same argument that put the ÖNB in it: a legal deposit library holds the
+    domestic edition under the domestic ISBN, and that is exactly the book the
+    other seven miss.
+
+    Three things made it cheap, all measured 2026-08-30 and all recorded beside
+    the constants they decided: it speaks SRU, its records are MARC21, and its
+    p90 lookup is a fifth of a second.
+
+    **One thing made it not cheap**, and it is the reason this class exists
+    rather than a line in the ÖNB's: `_marc_claims_isbn` refused the records
+    that prove it works. See `_isbn_entries`.
+
+    **A wrong index name is diagnosed here**, unlike at the ÖNB, and the identity
+    check is kept regardless: this is a plaintext connection, so the record that
+    arrives is not necessarily the record the catalogue sent.
+    """
+
+    ISBN = "9789602118962"
+
+    @pytest.mark.asyncio
+    async def test_a_greek_book_whose_only_isbn_is_qualified_resolves(self):
+        """The finding the ticket was written around, as a test.
+
+        Measured 2026-08-30 over 500 distinct NLG records drawn from ten title
+        searches: 317 carry an 020 and 63 of those name their ISBN only in a
+        qualified entry. **A different sample from the 400 records
+        `metadata._nlg_records` cites**, which is eight searches and answers a
+        different question, the bibliographic level. Refusing those refuses a
+        fifth of the catalogue.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            silence_open_library(mock)
+            silence_oenb(mock)
+            mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
+            result = await lookup(self.ISBN)
+
+        assert result.outcome is Outcome.FOUND
+        assert result.source == "nlg"
+        assert result.record is not None
+        assert result.record.title == "Ιστορία της Ευρώπης"
+        assert result.record.author == "Norman Davies"
+        assert result.record.publisher == "Νεφέλη"
+        assert result.record.year == 2009
+        assert result.record.language == "el"
+
+    @pytest.mark.asyncio
+    async def test_the_dewey_number_is_read_and_the_greek_authority_is_not(self):
+        """`082` is Dewey wherever it appears, and `$0` is a GND number only
+        where it says so. The NLG writes `urn:nbn:gr:nlg:` in `$0`, and reading
+        that as an identifier would file a Greek authority record's number under
+        the German one's scheme."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
+            result = await metadata._SOURCES[CatalogueSource.NLG](self.ISBN, "")
+
+        assert result.record is not None
+        assert [
+            (heading.scheme, heading.number) for heading in result.record.headings
+        ] == [(ClassificationScheme.DDC, "940")]
+        assert "Ευρώπη" in result.record.subjects
+
+    @pytest.mark.asyncio
+    async def test_a_record_that_names_another_isbn_is_refused(self):
+        """The identity check, which here guards a plaintext connection rather
+        than an index name: anyone on the path can answer for this catalogue,
+        and what stops that becoming a member's book is that the record has to
+        name the ISBN that was scanned."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_WRONG_BOOK))
+            result = await metadata._SOURCES[CatalogueSource.NLG](self.ISBN, "")
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_the_isbn_index_is_the_one_that_was_probed(self):
+        """`dc.isbn`, established by probing and confirmed by round trip. The
+        alternatives answer an SRU diagnostic rather than the catalogue, which
+        is stated beside the constant; this pins what is actually sent."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
+            await metadata._SOURCES[CatalogueSource.NLG](self.ISBN, "")
+
+        assert route.calls[0].request.url.params["query"] == f"dc.isbn={self.ISBN}"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_answer_is_not_found_rather_than_unavailable(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
+            result = await metadata._SOURCES[CatalogueSource.NLG](self.ISBN, "")
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_a_component_part_is_not_a_book(self):
+        """Measured zero times of 400 live records, and kept: an article is
+        never a book, and the leader is one read."""
+        article = NLG_RECORD.replace(
+            "01665nam a2200385 a 4500", "01665naa a2200385 a 4500"
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NLG).mock(return_value=_xml(article))
+            result = await metadata._SOURCES[CatalogueSource.NLG](self.ISBN, "")
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+
+class TestTheNationalLibraryOfGreeceSearch:
+    """The title path, which is the same shape as the two SRU sources above."""
+
+    @pytest.mark.asyncio
+    async def test_terms_are_anded_over_the_title_index(self):
+        """One term per index reference. Measured 2026-08-30 against the live
+        endpoint, `dc.title=zorba` answers 15 and `dc.title=zorba and
+        dc.title=xyzzyqq` answers 0, so the second term is applied."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
+            await metadata._nlg_search("moby dick", 5)
+
+        assert route.calls[0].request.url.params["query"] == (
+            "dc.title=moby and dc.title=dick"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_request_is_bounded_because_the_endpoint_bounds_nothing(self):
+        """This target returns 200 records when asked for 200, where the ÖNB
+        silently caps at 50. So the cap in the request is the only one there is
+        short of `fetch.MAX_RESPONSE_BYTES`."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
+            await metadata._nlg_search("ιστορία", 100)
+
+        assert route.calls[0].request.url.params["maximumRecords"] == "50"
+
+    @pytest.mark.asyncio
+    async def test_a_search_result_is_parsed_as_a_book(self):
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
+            rows = await metadata._nlg_search("ιστορία", 5)
+
+        assert route.called
+        assert [row.title for row in rows] == ["Ιστορία της Ευρώπης"]
+        assert [row.source for row in rows] == ["nlg"]
+
+    @pytest.mark.asyncio
+    async def test_a_query_of_nothing_but_noise_asks_nobody(self):
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
+            rows = await metadata._nlg_search("a", 5)
+
+        assert rows == []
+        assert not route.called
 
 
 class TestTheComponentPartRefusal:
@@ -4099,6 +4400,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             "dnb": (DNB, _xml(marc)),
             "k10plus": (K10PLUS, _xml(marc)),
             "oenb": (OENB, _xml(oenb)),
+            "nlg": (NLG, _xml(marc)),
             "open_library": (
                 OPEN_LIBRARY,
                 httpx.Response(200, json={"title": "The Great Gatsby"}),
@@ -4440,7 +4742,7 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
         assert clause == (
             "**Tier two, free, regional:** the BnF for French, the Library of Congress\n"
             "for Uruguayan printings and for anything printed before ISBNs existed, the\n"
-            "ÖNB for Austrian imprints"
+            "ÖNB for Austrian imprints, the NLG for Greek publishing"
         ), f"the tier two clause changed and nothing re-derived it:\n{clause!r}"
 
     #: Which columns each aggregate in the prose sums, by position in `COUNTRIES`.

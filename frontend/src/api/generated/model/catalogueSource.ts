@@ -29,6 +29,7 @@ export const CatalogueSource = {
   dnb: "dnb",
   k10plus: "k10plus",
   oenb: "oenb",
+  nlg: "nlg",
   bnf: "bnf",
   loc: "loc",
 } as const;

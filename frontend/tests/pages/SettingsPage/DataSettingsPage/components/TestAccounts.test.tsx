@@ -115,7 +115,66 @@ describe("TestAccounts", () => {
       screen.getByRole("button", { name: "Create test account" }),
     );
 
-    expect(props.onCreate).toHaveBeenCalledWith("newcomer", "pw12345678");
+    // The third argument is the optional address, empty here because the box
+    // was not filled in. The hook is what turns "" into no field at all.
+    expect(props.onCreate).toHaveBeenCalledWith("newcomer", "pw12345678", "");
+  });
+
+  // #103's second row: the one moment an admin is already typing somebody
+  // else's details. Without the field, giving a new account an address means
+  // creating it, finding it in the member list and editing it.
+  it("creates an account with the address given", async () => {
+    const user = userEvent.setup();
+    const props = renderSection();
+
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "newcomer" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "pw12345678" },
+    });
+    fireEvent.change(
+      screen.getByLabelText("Email address for this account, optional"),
+      {
+        target: { value: " new@example.org " },
+      },
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create test account" }),
+    );
+
+    // Trimmed here rather than at the server, which would refuse the spaces:
+    // `mailer.looks_like_address` admits no whitespace anywhere.
+    expect(props.onCreate).toHaveBeenCalledWith(
+      "newcomer",
+      "pw12345678",
+      "new@example.org",
+    );
+  });
+
+  it("clears the address box after a creation, like the other two", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "newcomer" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "pw12345678" },
+    });
+    fireEvent.change(
+      screen.getByLabelText("Email address for this account, optional"),
+      {
+        target: { value: "new@example.org" },
+      },
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create test account" }),
+    );
+
+    expect(
+      screen.getByLabelText("Email address for this account, optional"),
+    ).toHaveValue("");
   });
 
   it("says how to come back, per mode", () => {

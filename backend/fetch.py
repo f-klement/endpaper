@@ -1,6 +1,6 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask seven third party catalogues for records.
+`metadata.py` and `google_books.py` ask eight third party catalogues for records.
 Every one of those requests used to be built by hand: nine `httpx.AsyncClient(...)`
 constructions in `metadata.py` and one in `google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
@@ -12,7 +12,7 @@ question: `cover_url` arrives on `BookCreate` from any signed in member, so the
 host is chosen by an attacker and has to be tested against an allowlist
 (`covers.is_fetchable`) on every hop. Here the host is a module constant and the
 member supplies at most a query string, so there is no allowlist to apply and
-nothing an allowlist would refuse. Folding them together would mean adding seven
+nothing an allowlist would refuse. Folding them together would mean adding eight
 catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's `img-src`
 is generated from: the merge would widen the browser policy to pay for a fetch
 policy. What the two do share is the *shape* of the read loop, and both now have
@@ -73,29 +73,33 @@ MAX_REDIRECTS: Final = 2
 #:
 #: What it defends: a hostile or broken source filling a pod limited to 512Mi,
 #: where a 1.8 GB peak has already caused an OOMKill once. `metadata.search`
-#: asks seven sources at once and parsing retains a measured 15.28x the wire
-#: bytes, so the worst case this admits is 7 x 2 MiB x 15.28, about 224 MB.
+#: asks eight sources at once and parsing retains a measured 15.28x the wire
+#: bytes, so the worst case this admits is 8 x 2 MiB x 15.28, about 256 MB.
 #:
 #: **Which makes the ceiling sixteen concurrent sources, and it is worth having
 #: written down before somebody proposes the seventeenth.** 536,870,912 divided
-#: by (2,097,152 x 15.28) is 16.75, so seven spends 41.8% of the pod and the
-#: seventeenth source exceeds it outright. The provider list (`sources.py`) lets
-#: a library switch sources **off**, never on beyond the roster, so nothing a
-#: household does moves this: the bound is the roster's size, which is why
-#: `tests/test_fetch.py::_concurrent_search_sources` counts
+#: by (2,097,152 x 15.28) is 16.75, so eight spends 47.8% of the pod and the
+#: seventeenth source exceeds it outright. **The roster is now half of that
+#: ceiling**, and #91 proposes national catalogues for six more countries, so
+#: the next source but eight is the one that does not fit. The provider list
+#: (`sources.py`) lets a library switch sources **off**, never on beyond the
+#: roster, so nothing a household does moves this: the bound is the roster's
+#: size, which is why `tests/test_fetch.py::_concurrent_search_sources` counts
 #: `sources.SEARCH_SOURCES` rather than whatever is enabled.
-#: Seven *honest* worst cases is about 4.49 MiB on the wire and about 72 MB
-#: parsed. The seventh is the ÖNB, and the figure is its **largest** measured
-#: page, 516,771 bytes (`alma.publisher=Zsolnay`, 50 records, 2026-08-27), not
-#: the 295,821 an `alma.title=wien` page happened to cost. Picking the smaller
-#: one was this comment's own version of sampling the tail rather than bounding
-#: it, which is the mistake the paragraph above exists to record.
+#: Eight *honest* worst cases is about 5.07 MiB on the wire and about 81 MB
+#: parsed. The eighth is the NLG, and the figure is its **largest** measured
+#: page, 604,964 bytes (`dc.title=history`, 50 records, 2026-08-31), not the
+#: 287,736 a Greek language query happened to cost. The seventh was the ÖNB, at
+#: 516,771 bytes (`alma.publisher=Zsolnay`, 2026-08-27). Picking the smaller
+#: page each time would be this comment's own version of sampling the tail
+#: rather than bounding it, which is the mistake the paragraph above exists to
+#: record.
 #:
-#: **That 4.49 is 516,771 added to a base that was already rounded**, the "4
-#: MiB" the six-source version of this sentence carried, whose per source bodies
-#: were not written down. So it is exact in its new term and rounded in the
-#: other, and anyone re-deriving it from six live responses should expect to
-#: land near rather than on it.
+#: **That 5.07 is two measured pages added to a base that was already rounded**,
+#: the "4 MiB" the six-source version of this sentence carried, whose per source
+#: bodies were not written down. So it is exact in its two newest terms and
+#: rounded in the rest, and anyone re-deriving it from six live responses should
+#: expect to land near rather than on it.
 #:
 #: **Going over is not an error the reader sees.** Every caller already treats a
 #: transport failure as "this source is unavailable" and answers from the
@@ -114,16 +118,20 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: 215.8 MB traced peak. `aiter_raw()` on the identical response counted 65,250.
 #:
 #: So the bytes are counted raw, and compression is not requested, which keeps
-#: "the wire bytes" and "the memory" the same number. Measured live 2026-08-27,
-#: all seven sources answer under `identity`: DNB, the BnF, Google Books and
-#: the ÖNB gzip when offered and honour this, K10plus, Open Library and the
-#: Library of Congress never compressed anyway. The one that would cost most,
-#: K10plus at 687,481 bytes, is uncompressed today either way. The ÖNB was the
-#: seventh, and it was measured both ways rather than assumed: one
-#: `alma.title=wien` page at `maximumRecords=50` is **295,821 bytes** under
-#: `accept-encoding: identity` and **25,934** under `gzip, deflate, br`, both
-#: 2026-08-27. It honours the header rather than ignoring it, which is what
-#: this depends on.
+#: "the wire bytes" and "the memory" the same number. Measured live, all eight
+#: sources answer under `identity`: DNB, the BnF, Google Books and the ÖNB gzip
+#: when offered and honour this, K10plus, Open Library, the Library of Congress
+#: and the NLG never compressed anyway. The one that would cost most, K10plus at
+#: 687,481 bytes, is uncompressed today either way.
+#:
+#: **The two newest were each measured both ways rather than assumed**, because
+#: a source that ignored the header would put a decompressed body past the cap.
+#: The ÖNB was the seventh: one `alma.title=wien` page at `maximumRecords=50` is
+#: **295,821 bytes** under `accept-encoding: identity` and **25,934** under
+#: `gzip, deflate, br`, both 2026-08-27, so it honours the header. The NLG is
+#: the eighth: `dc.title=history` at 50 records is **604,964 bytes under both**,
+#: with no `content-encoding` on either reply, 2026-08-31, so it compresses
+#: nothing to begin with.
 _IDENTITY: Final = {"accept-encoding": "identity"}
 
 

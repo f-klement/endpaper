@@ -1959,6 +1959,7 @@
           "dnb",
           "k10plus",
           "oenb",
+          "nlg",
           "bnf",
           "loc"
         ],
@@ -2583,7 +2584,7 @@
         "type": "object"
       },
       "EmailUpdate": {
-        "description": "An address, or null to clear it.\n\nChecked with `mailer.looks_like_address`, the rule the household address\nalready passes, so this app has one answer to \"is that an address\" rather\nthan two that drift. It is also the header injection control: it refuses\nwhitespace anywhere, **a trailing newline included**, every control and non\nprinting character, and the comma and semicolon that turn one `To` header\ninto two.\n\nThe trailing newline is named because it is the one spelling this rule used\nto accept: `looks_like_address` was anchored with `$` under `match`, which\nmatches before a final newline. The `.strip()` below happened to hide it and\nis not what stops it. See `mailer.looks_like_address`.\n\nAn empty or blank string is stored as null rather than refused. A member\nclearing the field types nothing into it, and a 422 for \"\" would make\n\"remove my address\" the one edit the form could not express.",
+        "description": "An address, or null to clear it. The rule is `AddressField`.",
         "properties": {
           "email": {
             "anyOf": [
@@ -3200,7 +3201,7 @@
         "type": "object"
       },
       "MemberEmailOut": {
-        "description": "One member's address, on the only routes that serve one.\n\n**One model for the caller's own address and for an admin reading\nsomebody's**, rather than two. The two differ in who may ask, which is the\nroute's business, and not in what an address is. Two models would be two\nentries in the guard above and two places for the next field to be added to\none of.\n\n`id` and `username` are on it even for `GET /me/email`, where the caller\nalready knows both. They cost nothing there and they are what makes the\nadmin list a list of members rather than a list of strings.\n\n`editable` is per row, not per deployment: `auth_backends.directory_owns_email`\nreads that member's own `auth_source`, so a local test account stays\neditable in a library running LDAP. The client draws a read only field with\n\"from your directory\" when it is false; the server refuses the write\nregardless, because a client is not a control.",
+        "description": "One member's address, on the only routes that serve one.\n\n**One model for the caller's own address and for an admin reading\nsomebody's**, rather than two. The two differ in who may ask, which is the\nroute's business, and not in what an address is. Two models would be two\nentries in the guard above and two places for the next field to be added to\none of.\n\n`id` and `username` are on it even for `GET /me/email`, where the caller\nalready knows both. They cost nothing there and they are what makes the\nadmin list a list of members rather than a list of strings.\n\n`editable` is per row, not per deployment: `auth_backends.directory_owns_email`\nreads that member's own `auth_source`, so a local test account stays\neditable in a library running LDAP. The client draws a read only field\nsaying the address comes from the directory when it is false; the server\nrefuses the write regardless, because a client is not a control.\n\n**`from_directory` is not the negation of `editable`, and that is the whole\nreason it exists.** Three cases, and the two flags separate them where one\ncould not:\n\n| account | `from_directory` | `editable` |\n|---|---|---|\n| local | false | true |\n| directory, no address attribute configured | **true** | **true** |\n| directory, an address attribute configured | true | false |\n| `auth_source` spelled as nothing this build knows | false | true |\n\n**The fourth row is why this is computed from the named directories rather\nthan from \"not local\".** `users.auth_source` carries no `CheckConstraint`,\nwhich `auth_backends.directory_owns_email` states and depends on, so a\nrestored or hand edited row can hold anything. Under `!= LOCAL` such a row\nread as a directory account and its owner was told a directory they do not\nhave supplies no address.\n\nThe middle row is #103's open question and the one nobody could be told\nabout: the account appeared at a first sign in with nobody filling in a\nform, and the directory carries no address, so it has none and its owner is\nthe only person who can give it one. `editable` alone says \"you may type\nhere\" and cannot say why the box is empty. This is what lets the screen say\nthe directory did not supply one rather than leaving a member to infer it.\n\nIt discloses no address and widens nothing: this model is already restricted\nto the four routes in `routers/users.py`, and the caller is the member\nthemselves or an admin.",
         "properties": {
           "editable": {
             "title": "Editable",
@@ -3217,6 +3218,10 @@
             ],
             "title": "Email"
           },
+          "from_directory": {
+            "title": "From Directory",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -3229,7 +3234,8 @@
         "required": [
           "id",
           "username",
-          "editable"
+          "editable",
+          "from_directory"
         ],
         "title": "MemberEmailOut",
         "type": "object"
@@ -4692,7 +4698,7 @@
                 "items": {
                   "$ref": "#/components/schemas/CatalogueSourcePreference"
                 },
-                "maxItems": 7,
+                "maxItems": 8,
                 "type": "array"
               },
               {
@@ -5308,8 +5314,20 @@
         "type": "object"
       },
       "UserCreate": {
-        "description": "Registration. The length floor is a policy for *new* passwords only.",
+        "description": "Registration. The length floor is a policy for *new* passwords only.\n\n**The address is optional and stays optional**, which is the whole of the\ncompatibility story: an account with none must keep working, because that is\nevery account that existed before the column did. A client that sends no\n`email` creates exactly the account it created before.",
         "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
           "password": {
             "maxLength": 72,
             "minLength": 8,

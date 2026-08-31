@@ -17,7 +17,14 @@ import { renderLocalised } from "../../../../utils";
 function member(
   overrides: Partial<Parameters<typeof AddressField>[0]["member"]> = {},
 ) {
-  return { id: 1, username: "kim", email: null, editable: true, ...overrides };
+  return {
+    id: 1,
+    username: "kim",
+    email: null,
+    editable: true,
+    from_directory: false,
+    ...overrides,
+  };
 }
 
 describe("AddressField", () => {
@@ -96,6 +103,50 @@ describe("AddressField", () => {
         onSave={vi.fn()}
       />,
     );
+
+    expect(screen.getByText("None set.")).toBeInTheDocument();
+  });
+
+  it("stops saying none is set once something has been typed", async () => {
+    // **The clause this pins survived a mutation.** Deleting `trimmed === ""`
+    // from the component left all 27 tests in this directory green: the only
+    // absence assertion ran on a member whose address was already set, so
+    // `member.email == null` was false and the draft half of the condition was
+    // holding nothing up. A member giving their first address would read
+    // "None set." underneath what they had just typed.
+    renderLocalised(
+      <AddressField
+        member={member()}
+        label="Your address"
+        disabled={false}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("None set.")).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByLabelText("Your address"),
+      "k@example.org",
+    );
+
+    expect(screen.queryByText("None set.")).not.toBeInTheDocument();
+  });
+
+  it("says none is set again if the box is emptied without saving", async () => {
+    // The other half of the same clause: it follows the draft rather than
+    // latching once.
+    renderLocalised(
+      <AddressField
+        member={member()}
+        label="Your address"
+        disabled={false}
+        onSave={vi.fn()}
+      />,
+    );
+    const field = screen.getByLabelText("Your address");
+
+    await userEvent.type(field, "k@example.org");
+    await userEvent.clear(field);
 
     expect(screen.getByText("None set.")).toBeInTheDocument();
   });

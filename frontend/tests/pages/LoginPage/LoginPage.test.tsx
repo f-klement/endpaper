@@ -177,6 +177,60 @@ describe("LoginPage", () => {
       ).toBeInTheDocument();
     });
 
+    // #103. The address is part of making the account, and it is optional at
+    // both ends: the field may be left empty and the payload then carries none.
+    it("offers no address field on the sign-in form", async () => {
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+      await screen.findByLabelText("Username");
+
+      expect(screen.queryByLabelText(/email address/i)).not.toBeInTheDocument();
+    });
+
+    it("sends an address given at registration", async () => {
+      api.on("/auth/register", {
+        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+      });
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("button", { name: "Switch to registration" }),
+      );
+      await user.type(
+        screen.getByLabelText(/email address/i),
+        "new@example.org",
+      );
+      await fillAndSubmit("newcomer", "password123");
+
+      await waitFor(() =>
+        expect(api.lastCall("/auth/register", "POST")?.body).toEqual({
+          username: "newcomer",
+          password: "password123",
+          email: "new@example.org",
+        }),
+      );
+    });
+
+    it("sends no address field when the box is left empty", async () => {
+      api.on("/auth/register", {
+        body: { access_token: "t", token_type: "bearer", user: makeUser() },
+      });
+      renderWithProviders(<LoginPage onSignIn={vi.fn()} />);
+
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("button", { name: "Switch to registration" }),
+      );
+      await fillAndSubmit("newcomer", "password123");
+
+      await waitFor(() =>
+        expect(api.lastCall("/auth/register", "POST")?.body).toEqual({
+          username: "newcomer",
+          password: "password123",
+        }),
+      );
+    });
+
     it("clears a previous error when switching tabs", async () => {
       api.on("/auth/login", {
         status: 401,

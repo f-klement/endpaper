@@ -63,10 +63,15 @@ def register(
     # Whoever registers first becomes the admin. There is no other way to
     # become one, and no endpoint grants the flag afterwards.
     is_first = db.query(User).count() == 0
+    # **The address is set here rather than only on the settings screen**, which
+    # is the one moment somebody is already typing their details. `UserCreate`
+    # normalises it, so "" from a form nobody filled in arrives as None and the
+    # account is created exactly as it was before the field existed.
     user = User(
         username=payload.username,
         password_hash=hash_password(payload.password),
         is_admin=is_first,
+        email=payload.email,
     )
     db.add(user)
     db.commit()

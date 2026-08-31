@@ -8,8 +8,14 @@
 
 /**
  * Registration. The length floor is a policy for *new* passwords only.
+ *
+ * **The address is optional and stays optional**, which is the whole of the
+ * compatibility story: an account with none must keep working, because that is
+ * every account that existed before the column did. A client that sends no
+ * `email` creates exactly the account it created before.
  */
 export interface UserCreate {
+  email?: string | null;
   /**
    * @minLength 8
    * @maxLength 72

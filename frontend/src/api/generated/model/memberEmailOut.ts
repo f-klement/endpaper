@@ -21,13 +21,43 @@
  *
  * `editable` is per row, not per deployment: `auth_backends.directory_owns_email`
  * reads that member's own `auth_source`, so a local test account stays
- * editable in a library running LDAP. The client draws a read only field with
- * "from your directory" when it is false; the server refuses the write
- * regardless, because a client is not a control.
+ * editable in a library running LDAP. The client draws a read only field
+ * saying the address comes from the directory when it is false; the server
+ * refuses the write regardless, because a client is not a control.
+ *
+ * **`from_directory` is not the negation of `editable`, and that is the whole
+ * reason it exists.** Three cases, and the two flags separate them where one
+ * could not:
+ *
+ * | account | `from_directory` | `editable` |
+ * |---|---|---|
+ * | local | false | true |
+ * | directory, no address attribute configured | **true** | **true** |
+ * | directory, an address attribute configured | true | false |
+ * | `auth_source` spelled as nothing this build knows | false | true |
+ *
+ * **The fourth row is why this is computed from the named directories rather
+ * than from "not local".** `users.auth_source` carries no `CheckConstraint`,
+ * which `auth_backends.directory_owns_email` states and depends on, so a
+ * restored or hand edited row can hold anything. Under `!= LOCAL` such a row
+ * read as a directory account and its owner was told a directory they do not
+ * have supplies no address.
+ *
+ * The middle row is #103's open question and the one nobody could be told
+ * about: the account appeared at a first sign in with nobody filling in a
+ * form, and the directory carries no address, so it has none and its owner is
+ * the only person who can give it one. `editable` alone says "you may type
+ * here" and cannot say why the box is empty. This is what lets the screen say
+ * the directory did not supply one rather than leaving a member to infer it.
+ *
+ * It discloses no address and widens nothing: this model is already restricted
+ * to the four routes in `routers/users.py`, and the caller is the member
+ * themselves or an admin.
  */
 export interface MemberEmailOut {
   editable: boolean;
   email?: string | null;
+  from_directory: boolean;
   id: number;
   username: string;
 }

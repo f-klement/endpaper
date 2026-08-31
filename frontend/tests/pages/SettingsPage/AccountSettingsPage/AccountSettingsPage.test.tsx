@@ -12,7 +12,7 @@
  * that does not exist.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -27,6 +27,7 @@ const MINE = {
   username: "kim",
   email: null as string | null,
   editable: true,
+  from_directory: false,
 };
 
 function render(isAdmin = false) {
@@ -127,8 +128,43 @@ describe("AccountSettingsPage", () => {
     expect(
       await screen.findByText("kim@directory.example"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/comes from your directory/)).toBeInTheDocument();
+    expect(screen.getByText(/comes from the directory/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Your address")).not.toBeInTheDocument();
+  });
+
+  // #103. An empty editable box left "nobody set one" and "it did not load"
+  // looking the same, and the member who was never asked for an address is the
+  // one who most needs telling that the field is theirs.
+  it("says plainly when no address is set", async () => {
+    api.on("/api/users/me/email", { body: MINE });
+    render();
+
+    expect(await screen.findByText("None set.")).toBeInTheDocument();
+  });
+
+  it("says nothing about none when an address is set", async () => {
+    api.on("/api/users/me/email", {
+      body: { ...MINE, email: "kim@example.org" },
+    });
+    render();
+
+    await screen.findByDisplayValue("kim@example.org");
+    expect(screen.queryByText(/None set/)).not.toBeInTheDocument();
+  });
+
+  it("tells a directory member the directory supplies none and this is theirs", async () => {
+    // Editable **and** from a directory: the account appeared at a first sign
+    // in and the directory carries no address attribute. `editable` alone reads
+    // the same as a local account that has not set one.
+    api.on("/api/users/me/email", {
+      body: { ...MINE, from_directory: true },
+    });
+    render();
+
+    expect(
+      await screen.findByText(/The directory supplies none/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Your address")).toBeInTheDocument();
   });
 
   it("explains a 409 rather than reporting it as an error", async () => {
@@ -156,15 +192,49 @@ describe("AccountSettingsPage", () => {
       api.on("/api/users/emails", {
         body: [
           MINE,
-          { id: 2, username: "sam", email: null, editable: true },
+          {
+            id: 2,
+            username: "sam",
+            email: null,
+            editable: true,
+            from_directory: false,
+          },
           {
             id: 3,
             username: "alex",
             email: "alex@directory.example",
             editable: false,
+            from_directory: true,
+          },
+          // The middle case, and the admin list had no row of it, which is why
+          // nothing caught the sentence being second person: sam is local and
+          // empty, alex is a directory row the directory owns.
+          {
+            id: 4,
+            username: "robin",
+            email: null,
+            editable: true,
+            from_directory: true,
           },
         ],
       });
+    });
+
+    // #103. An admin looking for the row whose reminders go nowhere reads a
+    // word rather than hunting for the box that happens to be empty.
+    it("names the rows that have no address", async () => {
+      render(true);
+
+      // **Three, not two**, and the third is the reason to say so here: an
+      // admin's own address is drawn twice on this page, once in their own
+      // section and once as their row of the member list, which is every
+      // member and includes them. So the plain "None set." rows are the
+      // caller's own twice and sam's once. Alex has an address, and robin's
+      // row carries the directory sentence instead.
+      expect(await screen.findAllByText("None set.")).toHaveLength(3);
+      expect(
+        screen.getByText(/The directory supplies none/),
+      ).toBeInTheDocument();
     });
 
     it("lists every member beside their address", async () => {
@@ -180,8 +250,15 @@ describe("AccountSettingsPage", () => {
       const field = await screen.findByLabelText("sam");
 
       await userEvent.type(field, "sam@example.org");
-      const rows = screen.getAllByRole("button", { name: "Save" });
-      await userEvent.click(rows[rows.length - 1]!);
+      // **Sam's own Save, found through sam's own form**, rather than the last
+      // of the "Save" buttons on the page. That positional locator meant this
+      // test asserted about whichever member the fixture happened to list last,
+      // and it broke the moment a fourth member was added for a different
+      // reason. Every row draws the same accessible name, so the form is the
+      // only handle that says which row.
+      const row = field.closest("form");
+      expect(row).not.toBeNull();
+      await userEvent.click(within(row!).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(api.lastCall("/api/users/2/email", "PUT")?.body).toEqual({

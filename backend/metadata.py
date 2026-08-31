@@ -1046,7 +1046,10 @@ def _dnb_record(
     **Shared by the ÖNB too, which is why the source is a parameter.** Its
     records are this profile and not K10plus's: measured over 150 live records
     on 2026-08-27, 360 `(DE-588)` subfields on 600/650/651/655/689, 102 Dewey
-    082 fields on 85 records, and the same 020 `$q` cross references. A second
+    082 fields on 85 records, and the same 020 `$q` usage. **Not the same
+    meaning**, which is worth the two words: 11 of the 51 records
+    `_isbn_entries` recovered are this catalogue's, and its qualifiers there are
+    `Broschur` and `Festeinband` rather than a cross reference. A second
     parser would be the two dialects `catalogue.Record` has just finished
     deleting, in miniature. `Record` is frozen and no module outside
     `catalogue.py` may `replace` a field on one, so the source has to be known
@@ -1076,8 +1079,11 @@ def _dnb_record(
     **The Dewey number is first in `headings`**, which costs nothing and
     is not what makes it survive the per book ceiling: `routers/books._headings`
     sorts by scheme before it slices, because by the time a list reaches there
-    `_merge` has concatenated up to four catalogues and no parser can order
-    that. Measured over 85 live records on 2026-08-24: one produced 13 entries
+    a merge has concatenated up to six catalogues and no parser can order that.
+    **Six of the eight**, counted from the record builders rather than from the
+    roster: the BnF and Google Books construct no `Heading` at all, and this
+    parser is three of the remaining six because the DNB, the ÖNB and the NLG
+    share it. Measured over 85 live records on 2026-08-24: one produced 13 entries
     and every other produced 8 or fewer.
     """
     title_entry = (fields.get("245") or [_Subfields(())])[0]
@@ -1229,24 +1235,97 @@ _K10PLUS_RECORDS: Final = 5
 _AUTHOR_RELATORS: Final = ("aut", "cre")
 
 
+def _isbn_entries(fields: dict[str, list[_Subfields]]) -> list[_Subfields]:
+    """The 020 entries that identify this record's own book.
+
+    **Unqualified entries where a record has any, and all of them where it has
+    none.** One rule, read by `_marc_claims_isbn` and `_marc_isbn`, so the
+    question "which ISBN is this record's" has one answer.
+
+    ## Why a subfield `q` is distrusted at all
+
+    It is a qualifier such as "amerik. Original" or "Hardback". The first is a
+    **cross reference to a different edition**, and taking it as identity
+    returned a Ukrainian translation of Dune for the American ISBN.
+
+    ## Why refusing them outright was too much
+
+    That rule was written against German records and does not reach the ones
+    beside them, which is the shape `CLAUDE.md` records under *"A guard proved
+    on one validated field is then trusted for the fields beside it"*. MARC21
+    defines `$q` as qualifying information about **this** record's item: its
+    binding, its volume, its format. A cross reference is one catalogue's use
+    of the subfield, not the subfield's meaning.
+
+    Measured 2026-08-30, records carrying an 020 whose entries are **all**
+    qualified:
+
+    | Source | All qualified | Of records with an 020 | What the qualifiers say |
+    |---|---|---|---|
+    | DNB | 0 | 442 | nothing: it does not write them |
+    | K10plus | 159 | 231 | `ePUB`, `PDF`, bindings, prices |
+    | NLG | 63 | 317 | `χαρτόδετο` (paperback), `(τ.1)` (volume 1) |
+
+    So refusing every qualified entry refuses **the record's only identifier**
+    on a fifth of Greek records and two thirds of the K10plus records that
+    carry one, and it does so silently: the source reports `NOT_FOUND` for a
+    book it holds.
+
+    ## Why the fallback does not reintroduce the Dune failure here
+
+    The German record carries the cross reference **beside** its own ISBN, so it
+    has an unqualified entry and the fallback never fires on it. Every record
+    that names somebody else's edition and has an ISBN of its own is that shape.
+    The case that is not is below, under what this cannot do.
+
+    Measured over the committed 500 ISBN survey, one fetch per source per ISBN
+    with both rules read off the same body: the old rule reproduces the recorded
+    outcomes exactly (0 discrepancies in 1,197 probes), and the new one turns
+    **51 misses into hits**, 40 on K10plus and 11 on the OeNB. Every one of the
+    51 qualifiers describes the record's own item (`Broschur`, `Festeinband`,
+    `paperback`, `: pbk.`, a price), and none is a cross reference.
+
+    **Not a list of qualifier spellings**, deliberately. `Broschur` and
+    `χαρτόδετο` and `pbk.` are one concept in three languages and the next
+    catalogue has a fourth, so a denylist of meanings is a rule that goes stale
+    without failing. What separates the two cases here is the shape of the
+    record, which is checkable.
+
+    ## Two things this cannot do, stated rather than left to be found
+
+    **An entry with no `$a` is not an entry**, and leaving that out broke the
+    whole rule on a shape MARC produces routinely. `020 $z` is a cancelled or
+    invalid ISBN and carries no `$q`, so under a bare `"q" not in entry` it
+    counted as unqualified, made `unqualified` non-empty, and suppressed the
+    fallback for the record's only real identifier. Measured on a record holding
+    `$z 9781111111111` beside `$a <its own isbn> $q paperback`: refused, where
+    the same record without the `$z` resolves. Found by the design seat.
+
+    **The fallback's safety is measured rather than structural**, which an
+    earlier draft of this docstring overstated. The argument is that a record
+    naming another edition also names its own, so the fallback never fires on
+    it, and that holds only for a book that **has** an ISBN of its own. A record
+    for a pre ISBN or ISBN-less item carrying nothing but a cross reference in
+    `020 $a ... $q` is matched by this rule and was not before. The evidence
+    that it does not happen is 0 of 442 live DNB records with every entry
+    qualified, on the one catalogue whose practice produced the Dune failure.
+    That is a measurement on the case that matters, not a proof.
+    """
+    entries = [entry for entry in fields.get("020", []) if "a" in entry]
+    unqualified = [entry for entry in entries if "q" not in entry]
+    return unqualified or entries
+
+
 def _marc_claims_isbn(fields: dict[str, list[_Subfields]], isbn: str) -> bool:
     """Whether 020 names this book, rather than merely mentioning it.
 
-    Two traps, both hit on real records:
-
-    * A subfield `q` is a qualifier such as "amerik. Original" or "Hardback".
-      The first is a **cross reference to a different edition**, and taking it
-      as a match returned a Ukrainian translation of Dune for the American
-      ISBN. Qualified entries are therefore not accepted as identity.
-    * 020 often holds the **ISBN-10** even when the search was by ISBN-13, so
-      both sides are canonicalised rather than compared as strings.
+    Which entries count is `_isbn_entries`. The other trap is here: 020 often
+    holds the **ISBN-10** even when the search was by ISBN-13, so both sides are
+    canonicalised rather than compared as strings.
     """
-    for entry in fields.get("020", []):
-        if "q" in entry:
-            continue
-        if parse_isbn(entry.get("a", "")) == isbn:
-            return True
-    return False
+    return any(
+        parse_isbn(entry.get("a", "")) == isbn for entry in _isbn_entries(fields)
+    )
 
 
 #: What a catalogue hangs off a person's name. The BnF writes
@@ -1574,10 +1653,35 @@ def _marc_ddc(fields: dict[str, list[_Subfields]]) -> list[Heading]:
 
 
 def _marc_isbn(fields: dict[str, list[_Subfields]]) -> str | None:
-    """The record's own ISBN, ignoring cross references to other editions."""
-    for entry in fields.get("020", []):
-        if "q" in entry:
-            continue
+    """The record's own ISBN, ignoring cross references to other editions.
+
+    Which entries are the record's own is `_isbn_entries`, and this is the
+    second reader of that rule: the first decides whether a record answers a
+    lookup, this decides what is stored on it. They were one rule spelled twice
+    until 2026-08-30, and the copy here was the one the MARC importer reads
+    through `marc.py`, so a Greek or Spanish file imported by hand lost its ISBN
+    for the same reason a lookup missed it.
+
+    **The two readers ask different questions and only one of them can be
+    wrong here.** `_marc_claims_isbn` matches against an ISBN somebody already
+    holds. This one **chooses**, and where a record has no unqualified entry
+    there is nothing to choose on but catalogue order. On a K10plus record whose
+    three entries are `ePUB`, `PDF` and `Broschur` this returns the ePUB's, and
+    that is the ambiguity of the record rather than of the rule: one record
+    describes three saleable forms and MARC gives no field saying which the
+    record is *for*.
+
+    **Refused rather than fixed, and the reason is worth more than the fix would
+    be.** Separating them means a list of format words, `ePUB` and `PDF` and
+    `e-book` and `EPUB`, which is the enumerating guard this repository has paid
+    for several times: it goes stale without failing, in a language nobody here
+    reads, on a catalogue that adds a spelling. What this replaced stored
+    **no ISBN at all** for such a record, so an ambiguous identifier is the
+    improvement over none, and the lookup path is unaffected because
+    `_dnb_record` is handed the ISBN that was asked for. A design critic raised
+    it; `docs/decisions.md` carries the decision.
+    """
+    for entry in _isbn_entries(fields):
         parsed = parse_isbn(entry.get("a", ""))
         if parsed is not None:
             return parsed
@@ -1668,7 +1772,7 @@ def _k10plus_record(
 # below and in `sources.DEFAULT_ORDER`, and are not repeated here.
 #
 # Mean lookup latency over that sample: DNB 0.210s, ÖNB 0.240s, K10plus 0.390s.
-# Superseded as a ranking by `sources.MEASURED`, which times all four free
+# Superseded as a ranking by `sources.MEASURED`, which times all five free
 # sources on one 500 ISBN sample rather than three of them on this one.
 
 _OENB_URL: Final = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
@@ -1867,6 +1971,191 @@ async def _oenb_search(query: str, limit: int) -> list[Record]:
     return results
 
 
+# ── The National Library of Greece ────────────────────────────────────────────
+
+#: The Greek legal deposit catalogue, over SRU.
+#:
+#: **Plaintext HTTP by necessity, which is the second source here that is.**
+#: Port 210 speaks no TLS, and `https://catalogue.nlg.gr` on 443 is a different
+#: service that answers 404 to this path. Both measured 2026-08-30.
+#:
+#: So this carries the exposure `_LOC_URL` already documents: the ISBN or the
+#: title asked about travels in clear, and anyone on the path, or anyone
+#: answering DNS for the pod, can answer for the catalogue.
+#:
+#: `fetch.RedirectedOffHost` refuses any hop off this host on both paths, so a
+#: forged reply cannot turn a request into a GET somewhere else, which is the
+#: SSRF.
+#:
+#: **The identity check covers one of the two paths and not the other, and the
+#: difference is worth stating rather than leaving to be inferred.** `_nlg`
+#: filters through `_marc_claims_isbn`, so a forged body has to be a plausible
+#: MARC record for the book the member scanned rather than for any book.
+#: `_nlg_search` has no identifier to check against, exactly as `_loc_search`
+#: has none, so a forged body there can offer any row it likes. What stands
+#: between that and a shelf is the same thing that stands there for the Library
+#: of Congress: a person reads the row and picks it. The search path's exposure
+#: is the Library of Congress's, not narrower.
+_NLG_URL: Final = "http://catalogue.nlg.gr:210/biblios"
+
+#: The CQL index that means "the ISBN", established by probing. The endpoint
+#: answers `explain`, and its explain record carries the record schemas and no
+#: index list at all, so the documentation could not settle this.
+#:
+#: **A wrong index here fails loudly, unlike the ÖNB's**, and the defence built
+#: for that one is kept all the same. Measured 2026-08-30 against this endpoint:
+#:
+#: | query | answer |
+#: |---|---|
+#: | `dc.isbn=9789600426656` | 1 record |
+#: | `isbn=9789600426656` | 1 record |
+#: | `bib.isbn=...`, `srw.isbn=...` | SRU diagnostic 1/15, unsupported context set |
+#: | `bath.title=...`, `cql.anywhere=...` | SRU diagnostic 1/16, unsupported index |
+#: | `dc.identifier=9789600426656` | 0 records |
+#:
+#: None of them answers with the catalogue, which is what `alma.isbn13` did at
+#: the ÖNB. Confirmed the only way it can be: an ISBN read off a live NLG record
+#: and put back through this index returns exactly that record, in 0.186s.
+_NLG_ISBN_INDEX: Final = "dc.isbn"
+
+#: The CQL index for a title word, ANDed one term per reference like the two
+#: SRU sources above.
+#:
+#: **The AND is applied rather than ignored**, which is the thing to check on a
+#: target whose explain record lists no indexes: measured 2026-08-30,
+#: `dc.title=zorba` answers 15 and `dc.title=zorba and dc.title=xyzzyqq`
+#: answers 0. A target that ignored the second term would have answered 15
+#: twice and every search here would have been one word wide.
+_NLG_TITLE_INDEX: Final = "dc.title"
+
+#: Five, for the reason `_OENB_RECORDS` is five: one ISBN reaches several
+#: printings and the fullest of them should win.
+_NLG_RECORDS: Final = 5
+
+#: What one title search may bring back.
+#:
+#: **This endpoint does not clamp `maximumRecords`, so this number is the only
+#: bound there is.** Measured 2026-08-30, asking for 200 returns 200 records
+#: where the ÖNB silently caps at 50. `fetch.MAX_RESPONSE_BYTES` is the backstop
+#: and it is a byte count rather than a record count, so a catalogue with fat
+#: records could spend the whole cap before this fired. Fifty is the same
+#: ceiling `_oenb_search` asks for, so the fan out's worst case is unchanged.
+_NLG_SEARCH_RECORDS: Final = 50
+
+
+def _nlg_records(root: ElementTree.Element) -> list[ElementTree.Element]:
+    """Every MARC record in an NLG response that describes a whole publication.
+
+    **The component part filter is here on the concept, not on a measurement
+    that needs it.** Measured over 400 live records on 2026-08-30, drawn from
+    eight title searches and not the same sample as the 500 record probe behind
+    `_isbn_entries`' table, the leader bibliographic level is `m` 371 times and
+    `s` 29 times, and a component part appears **zero** times, where the same
+    measurement at the ÖNB found 55.4%.
+    It is kept because an article is never a book in any MARC21 catalogue and
+    reading one leader costs nothing, and it is documented because the next
+    reader would otherwise have to re-measure to know whether it is load
+    bearing here. It is not, today.
+
+    A serial is not refused, which is the ÖNB's decision and is not re-taken
+    here: refusing them is a decision about what this app catalogues.
+    """
+    return [
+        record
+        for record in root.iter(f"{_MARC}record")
+        if not _is_component_part(record)
+    ]
+
+
+async def _nlg(isbn: str, api_key: str) -> Lookup:
+    del api_key  # A public endpoint with no registration behind it.
+
+    params = {
+        "version": "1.1",
+        "operation": "searchRetrieve",
+        "query": f"{_NLG_ISBN_INDEX}={isbn}",
+        "recordSchema": "marcxml",
+        "maximumRecords": str(_NLG_RECORDS),
+    }
+    try:
+        response = await fetch.get_once(_NLG_URL, params=params)
+        if response.status_code == 429:
+            return Lookup(Outcome.RATE_LIMITED, source="nlg")
+        if response.status_code != 200:
+            return Lookup(Outcome.UNAVAILABLE, source="nlg")
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError):
+        logger.warning("NLG lookup failed for %s", isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source="nlg")
+
+    # The same check the ÖNB runs, and for a weaker reason that still holds: a
+    # wrong index is diagnosed here rather than answered with the catalogue, so
+    # this is not the whole defence it is there. It is still what stands between
+    # a forged reply on a plaintext connection and a member's shelf.
+    records = [
+        fields
+        for fields in (_marc_fields(node) for node in _nlg_records(root))
+        if _marc_claims_isbn(fields, isbn)
+    ]
+    parsed = [
+        record
+        for fields in records
+        for record in [
+            _dnb_record(fields, isbn, source="nlg", read_author_identifiers=False)
+        ]
+        if record is not None
+    ]
+    if not parsed:
+        return Lookup(Outcome.NOT_FOUND, source="nlg")
+
+    return Lookup(
+        Outcome.FOUND,
+        source="nlg",
+        record=max(parsed, key=lambda record: record.completeness),
+    )
+
+
+async def _nlg_search(query: str, limit: int) -> list[Record]:
+    """The NLG, one ANDed title term per word.
+
+    The same shape as `_oenb_search` and `_k10plus_search`, and the reason to
+    prefer the title index over a catch-all is the reason those two give.
+    """
+    terms = _search_terms(query)
+    if not terms:
+        return []
+
+    cql = " and ".join(f"{_NLG_TITLE_INDEX}={term}" for term in terms)
+    params = {
+        "version": "1.1",
+        "operation": "searchRetrieve",
+        "query": cql,
+        "recordSchema": "marcxml",
+        "maximumRecords": str(min(limit * 3, _NLG_SEARCH_RECORDS)),
+    }
+    try:
+        response = await fetch.get_once(_NLG_URL, params=params)
+        if response.status_code != 200:
+            return []
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError):
+        logger.warning("NLG search failed for %r", query, exc_info=True)
+        return []
+
+    results: list[Record] = []
+    for node in _nlg_records(root):
+        fields = _marc_fields(node)
+        record = _dnb_record(
+            fields, isbn=None, source="nlg", read_author_identifiers=False
+        )
+        if record is None or not _is_physical_book(
+            _marc_extent(fields), record.title
+        ):
+            continue
+        results.append(record)
+    return results
+
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -1917,9 +2206,10 @@ async def _oenb_search(query: str, limit: int) -> list[Record]:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Google Books needs one (`sources.NEEDS_A_KEY`) and most
 # installations have none, so the chain most deployments actually run is the
-# four free sources. Measured 2026-08-30 over 500 domestic ISBNs across ten
-# frames: the free four answer 300 and miss 200, and outside German language
-# publishing they miss 196 of 400. So a sentence anywhere in this module saying
+# five free sources. Measured over 500 domestic ISBNs across ten frames, re-run
+# 2026-08-31: the free five answer 336 and miss 164, and outside German language
+# publishing they miss 160 of 400. The same run under the previous roster and
+# the previous `020` rule answered 300. So a sentence anywhere in this module saying
 # the chain covers a country is a statement about a **keyed** install. #91
 # measured the size of that on the same books, Italy 36% missed keyless against
 # 0% with a key and Greece 86% against 54%; **that keyed half is #91's
@@ -1939,6 +2229,7 @@ _SOURCES: Final[dict[CatalogueSource, Callable[[str, str], Awaitable[Lookup]]]] 
     CatalogueSource.DNB: _dnb,
     CatalogueSource.K10PLUS: _k10plus,
     CatalogueSource.OENB: _oenb,
+    CatalogueSource.NLG: _nlg,
 }
 
 #: Bookland registration group for German-language publishing.
@@ -2770,7 +3061,7 @@ _LANGUAGE_WEIGHT: Final = 3
 #: only they found is worth having; a row they merely duplicate is not worth
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb"})
+_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg"})
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a row pickable rather than a stub. Scored **separately**
@@ -2882,7 +3173,7 @@ async def search(
 
     **Which catalogues those are is `plan`**, and it is the household's, not
     this module's. A source switched off is never constructed and never
-    awaited. What follows describes the seven a new install asks, which is the
+    awaited. What follows describes the eight a new install asks, which is the
     seeded default and the shape every measurement below was taken at.
 
     Three tiers, and the tiering is what keeps this both broad and quick.
@@ -2892,9 +3183,9 @@ async def search(
 
     **Tier two, free, regional:** the BnF for French, the Library of Congress
     for Uruguayan printings and for anything printed before ISBNs existed, the
-    ÖNB for Austrian imprints. All three are ranked a point below the primaries:
-    they are here for the books nobody else holds, not to reorder the ones
-    everybody does.
+    ÖNB for Austrian imprints, the NLG for Greek publishing. All four are ranked
+    a point below the primaries: they are here for the books nobody else holds,
+    not to reorder the ones everybody does.
 
     **That line has now named the wrong countries twice, and the second time was
     the correction.** It said "Spanish, Portuguese and Latin American printings",
@@ -2949,6 +3240,12 @@ async def search(
     budget is spent waiting on the slowest survivor. What it does buy is the
     request never being made, which is the point of the switch.
 
+    **The eighth did not move it**, and that is a measurement rather than an
+    inference from the sentence above: across 12 live NLG title searches on
+    2026-08-31, at the 30 records this function requests, latency ran **0.237s
+    to 0.432s**, mean 0.319s. It is the fastest source in the fan out and is
+    nowhere near being the one the deadline drops.
+
     **The seventh moved that, and the honest figure is a range rather than a
     number.** Across 24 live ÖNB title searches on 2026-08-27, at the shape this
     function actually requests, latency ran **0.156s to 3.23s**. It is variable
@@ -2962,7 +3259,7 @@ async def search(
 
     What matters is not which one is slowest, it is that a single measured ÖNB
     request has come within **0.8s of `SEARCH_DEADLINE_SECONDS`**. So this
-    source is the most likely of the seven to be the one the deadline drops, and
+    source is the most likely of the eight to be the one the deadline drops, and
     the deadline is what stops that costing the search. An earlier version of
     this sentence said 0.82s to 1.41s, which was in no record, was about half
     the true upper bound, and read as "the seventh source changes nothing".
@@ -2987,7 +3284,7 @@ async def search(
         return []
 
     # **Only the enabled sources are constructed**, so a source this library
-    # turned off is never built and never awaited. Building all seven and
+    # turned off is never built and never awaited. Building all eight and
     # dropping some would leave un-awaited coroutines behind, which is a warning
     # per search and a request nobody asked for if one ever ran.
     #
@@ -3033,6 +3330,7 @@ _FREE_SEARCHES: Final[
     CatalogueSource.BNF: _bnf_search,
     CatalogueSource.LOC: _loc_search,
     CatalogueSource.OENB: _oenb_search,
+    CatalogueSource.NLG: _nlg_search,
 }
 
 
@@ -3076,7 +3374,7 @@ _METERED_SEARCHES: Final[
 
 #: How long a search may take, whatever the catalogues do.
 #:
-#: Seven sources are asked at once, so the wall clock is the slowest of them, and
+#: Eight sources are asked at once, so the wall clock is the slowest of them, and
 #: one national catalogue having a bad afternoon was turning a 1.3s search into
 #: a 7s one. A deadline degrades the *results* instead of the latency: whatever
 #: has answered is ranked and returned, and the straggler is cancelled.
@@ -3125,12 +3423,18 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
-    # Last, and named rather than left to the default so that a reader can see
-    # it was decided. It is the newest and the least compared of the seven, and
-    # the field it would win is a field the DNB or K10plus has already filled
-    # for any book all three hold. Where it is the only catalogue with a row,
-    # precedence never runs.
+    # Last two, and named rather than left to the default so that a reader can
+    # see it was decided. They are the newest and the least compared of the
+    # eight, and the field either would win is a field the DNB or K10plus has
+    # already filled for any book all three hold. Where one is the only
+    # catalogue with a row, precedence never runs.
+    #
+    # **The NLG is behind the ÖNB and the order between those two is arbitrary**,
+    # which is worth saying rather than implying a comparison nobody made. They
+    # collect different countries, so a book both hold is a book the primary
+    # three hold as well, and the tie this would break has not been observed.
     "oenb",
+    "nlg",
 )
 
 

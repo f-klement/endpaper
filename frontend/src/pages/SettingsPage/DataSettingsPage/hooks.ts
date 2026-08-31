@@ -103,8 +103,13 @@ export function useTestAccounts(enabled: boolean) {
     error: query.error,
     // `mutate`, not `mutateAsync`: the failure is rendered from `createError`,
     // and a rejected promise nobody holds is an unhandled rejection.
-    create: (username: string, password: string) =>
-      create.mutate({ data: { username, password } }),
+    // An empty box sends no field at all, the same shape registration sends.
+    // `UserCreate` reads "" as no address, and agreeing with it here rather
+    // than relying on it keeps one meaning of "left blank" across both forms.
+    create: (username: string, password: string, email: string) =>
+      create.mutate({
+        data: { username, password, ...(email ? { email } : {}) },
+      }),
     isCreating: create.isPending,
     createError: create.error,
     created: create.data ?? null,

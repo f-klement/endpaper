@@ -2008,11 +2008,15 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
         assert not self._offenders_naming_the_flag([innocent])
 
 class TestAnAddressIsServedOnlyWhereItIsNamed:
-    """A member's address reaches the two schemas that exist for it, and no other.
+    """A member's address reaches the three schemas that exist for it, and no other.
 
     The rule is issue #80's, settled by the owner: an admin may read and write
     any address, a member may read and write their own, and **it is used and
-    shown nowhere else**. The last one is load bearing, and an intention is not
+    shown nowhere else**. #103 added one moment to that and no new disclosure:
+    an address may be **set** while an account is being created, by the person
+    creating it. `UserCreate` is a request body, so it takes an address in and
+    serves none back, and the route answers with `UserOut`, which this rule
+    still keeps clear of one. The last one is load bearing, and an intention is not
     a mechanism: `UserOut` is served inside every book payload and by the member
     list, so one field added there discloses an address to every member who can
     see a book, with a 200 and nothing in any log. That is the shape the
@@ -2093,6 +2097,7 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     ADDRESS_MODELS = {
         "MemberEmailOut": "the four routes in routers/users.py",
         "EmailUpdate": "the body those two writes take",
+        "UserCreate": "the body the two routes that create an account take, #103",
     }
 
     #: The modules allowed to read `.email`, and why each must.
@@ -2103,6 +2108,22 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     ADDRESS_READERS = {
         "auth_backends.py": "the directory writes it, and compares before writing",
         "routers/users.py": "the routes that serve it",
+    }
+
+    #: Modules where **one receiver** may be read, rather than the whole module.
+    #:
+    #: **`routers/auth.py` is exempt for a request body and nothing else**, and
+    #: the distinction is not pedantry: that module builds `Token`, which nests
+    #: `UserOut`, which is the disclosure this whole rule exists to prevent. A
+    #: module wide exemption there would forgive a future `user.email` on the
+    #: response as readily as the `payload.email` #103 needs. The security seat
+    #: found the wider version in review.
+    #:
+    #: The receiver is matched by name, so this says "reads off the thing called
+    #: `payload`" rather than "reads off the request body", which is as far as an
+    #: `ast` pass can see and is stated here rather than implied.
+    ADDRESS_READERS_BY_RECEIVER = {
+        "routers/auth.py": ({"payload"}, "registration sets one on the account it creates, #103"),
     }
 
     #: The name an address goes by on the wire.
@@ -2224,9 +2245,18 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
             where = str(path.relative_to(BACKEND))
             if where in self.ADDRESS_READERS:
                 continue
+            allowed, _ = self.ADDRESS_READERS_BY_RECEIVER.get(where, (frozenset(), ""))
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
                 if isinstance(node, ast.Attribute) and node.attr == self.ADDRESS_FIELD:
+                    # A read off a named receiver this module may read, and only
+                    # that. `payload.email` passes; `user.email` in the same
+                    # module is reported.
+                    if (
+                        isinstance(node.value, ast.Name)
+                        and node.value.id in allowed
+                    ):
+                        continue
                     offenders.append(f"{where}:{node.lineno}")
                 elif (
                     isinstance(node, ast.Call)
@@ -2241,6 +2271,11 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
         assert not offenders, (
             "These read a member's address, and only "
             + "; ".join(f"{where} ({why})" for where, why in self.ADDRESS_READERS.items())
+            + ", plus "
+            + "; ".join(
+                f"{where} off {sorted(names)} ({why})"
+                for where, (names, why) in self.ADDRESS_READERS_BY_RECEIVER.items()
+            )
             + " may:\n  "
             + "\n  ".join(sorted(offenders))
         )
@@ -2278,11 +2313,29 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
                 for node in ast.walk(ast.parse(path.read_text()))
             )
         }
-        assert readers == set(self.ADDRESS_READERS), (
+        exempted = set(self.ADDRESS_READERS) | set(self.ADDRESS_READERS_BY_RECEIVER)
+        assert readers == exempted, (
             "the reader pass is exempting modules that do not read an address, "
             f"or missing one that does: reads it {sorted(readers)}, "
-            f"exempted {sorted(self.ADDRESS_READERS)}"
+            f"exempted {sorted(exempted)}"
         )
+        # **The narrow exemption has to still be narrow**, or it has quietly
+        # become the wide one this pair was split to avoid: the module must read
+        # the address off the receiver it names and off nothing else.
+        for where, (allowed, _) in self.ADDRESS_READERS_BY_RECEIVER.items():
+            tree = ast.parse((BACKEND / where).read_text())
+            receivers = {
+                node.value.id
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute)
+                and node.attr == self.ADDRESS_FIELD
+                and isinstance(node.value, ast.Name)
+            }
+            assert receivers, f"{where} no longer reads an address, so it is exempted for nothing"
+            assert receivers <= allowed, (
+                f"{where} reads an address off {sorted(receivers - allowed)}, which "
+                f"the narrow exemption does not cover"
+            )
 
 
 
@@ -2392,7 +2445,9 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Four exemptions, each a deliberate, named table that something else pins:
+    Five exemptions over six names, each a deliberate table that something
+    else pins. The counts differ because one bullet covers the two dispatch
+    tables together:
 
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
@@ -2400,6 +2455,12 @@ class TestNoModuleHardCodesASourceOrder:
     * `metadata._SOURCES` and `metadata._FREE_SEARCHES`, the dispatch tables.
       They are mappings rather than orders, and `TestTheProviderRosterIsOneList`
       is what keeps them equal to the roster.
+    * `sources.TAIL_MARGINAL`, how many books the leading tier missed that each
+      source asked in turn answers. `MEASURED`'s case exactly: a table of
+      measurements keyed on a source, whose completeness is pinned by
+      `test_the_marginal_table_covers_the_whole_measured_tail` and whose values
+      are recomputed from the committed sample. It is what orders the tail, so
+      it is data the order is derived **from** rather than a copy of the order.
     * `sources.MEASURED`, what each free lookup source was measured to do.
       **Justified by what is checkable rather than by what is obvious.** Nothing
       outside `backend/tests/` reads it, `TIER_UNION` or `SLOT_MUST_EARN` at all,
@@ -2441,7 +2502,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
-        "sources.py": {"DEFAULT_ORDER", "MEASURED"},
+        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
         "metadata.py": {"_MATCH_PRECEDENCE", "_SOURCES", "_FREE_SEARCHES"},
     }
 

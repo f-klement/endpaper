@@ -7,23 +7,7 @@
  */
 
 /**
- * An address, or null to clear it.
- *
- * Checked with `mailer.looks_like_address`, the rule the household address
- * already passes, so this app has one answer to "is that an address" rather
- * than two that drift. It is also the header injection control: it refuses
- * whitespace anywhere, **a trailing newline included**, every control and non
- * printing character, and the comma and semicolon that turn one `To` header
- * into two.
- *
- * The trailing newline is named because it is the one spelling this rule used
- * to accept: `looks_like_address` was anchored with `$` under `match`, which
- * matches before a final newline. The `.strip()` below happened to hide it and
- * is not what stops it. See `mailer.looks_like_address`.
- *
- * An empty or blank string is stored as null rather than refused. A member
- * clearing the field types nothing into it, and a 422 for "" would make
- * "remove my address" the one edit the form could not express.
+ * An address, or null to clear it. The rule is `AddressField`.
  */
 export interface EmailUpdate {
   email?: string | null;

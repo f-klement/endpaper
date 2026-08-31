@@ -11,7 +11,9 @@ a MARC record is everybody's.
 fields from contact with live catalogues rather than from a specification
 reading: the non-sorting delimiters in two spellings, NFC normalisation, the
 repeated `$a` in an 082, the `$q` that marks a cross reference to another
-edition, the ISBD punctuation that introduces the *next* subfield. None of that
+edition **beside the record's own ISBN and not where it is the only one**
+(`metadata._isbn_entries`), the ISBD punctuation that introduces the *next*
+subfield. None of that
 is derivable from the standard and all of it is wrong to write twice.
 `ddc.notation` records what three notions of a Dewey number cost the last time
 this was got wrong.

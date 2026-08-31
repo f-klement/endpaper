@@ -545,6 +545,34 @@ class TestReadingRealCatalogueShapes:
         )
         assert parsed.records[0].isbn == "9783446249974"
 
+    def test_a_record_whose_only_isbn_is_qualified_still_carries_it(self):
+        """`020 $q` is a binding or a volume, not only a cross reference.
+
+        A Greek or Spanish catalogue file imported by hand used to lose its
+        ISBNs here, because this reader shares `metadata._marc_isbn` with the
+        lookup path and that rule refused every qualified entry.
+        """
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "T")),
+                datafield("020", ("a", "9789602118962"), ("q", "(τ.1)")),
+            )
+        )
+        assert parsed.records[0].isbn == "9789602118962"
+
+    def test_a_cancelled_isbn_does_not_hide_the_records_own(self):
+        """`020 $z` is a cancelled ISBN and carries no `$q`, so a rule that only
+        asked about `$q` counted it as the record's plain identifier and dropped
+        the qualified entry that actually names the book."""
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "T")),
+                datafield("020", ("z", "9781111111111")),
+                datafield("020", ("a", "9789602118962"), ("q", "paperback")),
+            )
+        )
+        assert parsed.records[0].isbn == "9789602118962"
+
     def test_the_older_260_is_read_where_a_record_has_no_264(self):
         parsed = marc.read(
             a_record(

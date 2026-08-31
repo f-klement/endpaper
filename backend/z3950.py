@@ -103,7 +103,7 @@ TIMEOUT_SECONDS: Final = 10.0
 #:
 #: The same 2 MiB `fetch.MAX_RESPONSE_BYTES` allows, so one hostile source costs the same
 #: whichever transport it is reached over, and so the worst case `fetch.py` works out for
-#: a seven source fan out does not have to be worked out twice. It is also the ceiling on
+#: an eight source fan out does not have to be worked out twice. It is also the ceiling on
 #: a caller supplied `limit`: a bound a caller can raise is not a bound.
 #:
 #: **Counted here because the protocol's own bound is advisory.** Z39.50 negotiates
@@ -137,7 +137,7 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: target measured 0.82s, 1.00s and 1.35s over three runs, the difference being the open
 #: and the search.
 #:
-#: `metadata.SEARCH_DEADLINE_SECONDS` is 4.0 for the **whole fan out** across seven
+#: `metadata.SEARCH_DEADLINE_SECONDS` is 4.0 for the **whole fan out** across eight
 #: sources, so 5 spends 15% of it on one target and 20 would spend two thirds. And
 #: `_exchange` is all or nothing, so a walk that runs out of time discards every record
 #: it already paid for.

@@ -24,6 +24,7 @@ from tests.helpers import (
     GOOGLE_BOOKS,
     K10PLUS,
     LOC,
+    NLG,
     OENB,
     OPEN_LIBRARY_SEARCH,
     silence_catalogues,
@@ -424,6 +425,36 @@ def oenb_record(title: str = "&lt;&lt;Das&gt;&gt; angehaltene Leben") -> str:
     )
 
 
+def nlg_record(title: str = "Ιστορία της Ευρώπης") -> str:
+    """One NLG MARCXML record, with the convention that makes this source real.
+
+    **Its only 020 is qualified**, `$q (τ.1)` for volume one, which is what four
+    fifths of that catalogue's records with an ISBN look like and what
+    `metadata._isbn_entries` exists for. A search does not check an ISBN, so this
+    is not what the assertion turns on; it is here because a fixture that
+    quietly drops the one convention the source needed would pass while
+    describing a record the catalogue does not write.
+    """
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+        "<zs:records><zs:record><zs:recordData>"
+        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+        "<leader>01665nam a2200385 a 4500</leader>"
+        '<datafield tag="020"><subfield code="a">9789602118962</subfield>'
+        '<subfield code="q">(τ.1)</subfield></datafield>'
+        f'<datafield tag="245"><subfield code="a">{title}</subfield></datafield>'
+        '<datafield tag="100"><subfield code="a">Davies, Norman,</subfield>'
+        '<subfield code="4">aut</subfield></datafield>'
+        '<datafield tag="260"><subfield code="b">Νεφέλη,</subfield>'
+        '<subfield code="c">2009</subfield></datafield>'
+        '<datafield tag="300"><subfield code="a">640 σ.</subfield></datafield>'
+        '<datafield tag="041"><subfield code="a">gre</subfield></datafield>'
+        "</record></zs:recordData></zs:record></zs:records>"
+        "</zs:searchRetrieveResponse>"
+    )
+
+
 def dnb_marc(title: str = "Der Zauberberg", *, subtitle: str = "Roman",
              creator: str = "Mann, Thomas", extent: str = "992 Seiten") -> str:
     """One MARC21 record, as the DNB returns it since 2026-08-24.
@@ -474,12 +505,19 @@ def mods_record(title: str = "sombra del viento", non_sort: str = "La ",
 class TestEveryCatalogueAnswers:
     """Search reaches the non-English catalogues, not just the English two.
 
-    **Five of the seven, and the name overstates it.** Open Library and Google
-    Books are covered by their own files; the five checked here are K10plus, the
-    DNB, the BnF, the Library of Congress and the ÖNB, which are the ones a
-    reader would doubt answer at all. The docstring said "all six sources" while
-    covering four, so the count moved when a seventh was added and the gap did
-    not: it is written out here rather than carried as a number.
+    **Six of the eight, and the name overstates it.** Open Library and Google
+    Books are covered by their own files; the six checked here are K10plus, the
+    DNB, the BnF, the Library of Congress, the ÖNB and the NLG, which are the
+    ones a reader would doubt answer at all.
+
+    **This paragraph has now been stale twice, and the second time it was stale
+    inside the sentence explaining why it would not be.** It said "all six
+    sources" while covering four, and the fix wrote the sources out and declared
+    the count no longer carried as a number, in a sentence that carried it as a
+    number: "five of the seven" went stale the moment an eighth source joined.
+    Found by a design critic in the round that added the eighth. The names below
+    are what makes this class checkable; the count is prose and goes stale like
+    every other count in this tree, which #123 is about.
     """
 
     def _search(self, client, headers, query="zauberberg mann", **routes):
@@ -528,6 +566,26 @@ class TestEveryCatalogueAnswers:
         )
         assert match["title"] == "Das angehaltene Leben"
         assert match["source"] == "oenb"
+
+    def test_the_nlg_contributes_for_greek(self, client, admin):
+        """The NLG reaches the picker through the route, not just the adapter.
+
+        `TestTheNationalLibraryOfGreeceSearch` covers the adapter at
+        `metadata.py`'s seam. This is the one check that a Greek record survives
+        the whole request: the fan out, the merge, the ranking and the response
+        schema. Without it the class named for every catalogue had no row for the
+        newest one, and nothing failed, because `silence_catalogues` mocks the
+        host either way.
+        """
+        [match] = self._search(
+            client,
+            admin["headers"],
+            "ιστορία ευρώπης",
+            **{NLG: nlg_record()},
+        )
+        assert match["title"] == "Ιστορία της Ευρώπης"
+        assert match["author"] == "Norman Davies"
+        assert match["source"] == "nlg"
 
     def test_the_library_of_congress_contributes_for_spanish(self, client, admin):
         [match] = self._search(

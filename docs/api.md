@@ -468,7 +468,7 @@ cluster with the book's own ISBN: every row in it is a printing of the same book
 Library's own merge rather than by a title match. Underneath it sits the free text search
 across every catalogue the library has switched on, which is the only answer for a book
 with no ISBN, for a work Open Library has not merged, and for a good deal of German
-publishing, where Open Library returns 404. A new install has all seven on; see the
+publishing, where Open Library returns 404. A new install has all eight on; see the
 provider list below.
 
 **Open Library switched off answers no cluster at all**, because nothing else here holds
@@ -527,12 +527,12 @@ one more source when a key is set.
 `GET /api/books/search?q=&limit=&lang=` is how a book with no barcode, a damaged one, or
 one printed before ISBNs existed gets added. **It needs no API key.**
 
-Seven catalogues, in three tiers, all asked concurrently:
+Eight catalogues, in three tiers, all asked concurrently:
 
 | Tier | Sources | For |
 |---|---|---|
 | Primary | Open Library, K10plus, DNB | Breadth and covers; German and European publishing; German legal deposit |
-| Regional | BnF, Library of Congress, Austrian National Library | French; Spanish, Portuguese and Latin American; Austrian imprints |
+| Regional | BnF, Library of Congress, Austrian National Library, National Library of Greece | French; Spanish, Portuguese and Latin American; Austrian imprints; Greek publishing |
 | Keyed | Google Books | The blurb and the categories, when an API key is configured |
 
 Regional sources are ranked one point below the primaries, so they surface the books
@@ -597,7 +597,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks five catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks six catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -608,24 +608,35 @@ nothing overwritten, so a page count from one and a subject heading from the oth
 the same book.
 
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
-**Austrian National Library**, then **Google Books**. Phase two stops at the first hit, so
-it is ordered by how often a source answers a book phase one missed: of 297 such ISBNs in
-500, Open Library answered 96 and the ÖNB 2. Open Library is the broadest source and much
-the slowest, which is why it is here rather than in phase one; Google is the only one with
-a key, a quota and a bill attached, and an ordinary lookup therefore spends no quota at
-all.
+**National Library of Greece**, then the **Austrian National Library**, then **Google
+Books**. Phase two stops at the first hit, so it is ordered by how often a source answers a
+book phase one missed: of 279 such ISBNs in 500, Open Library answered 83, the NLG 34 and
+the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it is
+here rather than in phase one; Google is the only one with a key, a quota and a bill
+attached, and an ordinary lookup therefore spends no quota at all.
 
-**No order of these five finds more books than another.** Every enabled source is asked
+**A national catalogue is never in phase one**, however well it does on the whole sample.
+Phase one is paid on every lookup by every install, and what a national catalogue answers
+is concentrated in the country it serves: the NLG answers 34 of the books phase one missed
+and **all 34 are Greek**. Pooled over ten countries that reads like the best second slot
+there is. For nine of the ten it is a request that never answers. A Greek library can
+promote it in Settings, which is what the provider list is for.
+
+**No order of these six finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
 **What the chain covers without a Google Books key, which is what a stock install runs.**
-Four of the five are free; Google Books needs a key you supply. Measured over 500 domestic
-ISBNs across ten countries on 2026-08-30, the four free sources answer **300 and miss
-200**, and outside German language publishing they miss **196 of 400**. So a statement
-that this chain covers a given country is a statement about a keyed install: an earlier
-survey put Italy at 36% missed keyless against 0% with a key, and Greece at 86% against
-54%. The per source figures are in `backend/sources.py`, `MEASURED`.
+Five of the six are free; Google Books needs a key you supply. Measured over 500 domestic
+ISBNs across ten countries, re-run 2026-08-31, the five free sources answer **336 and miss
+164**, and outside German language publishing they miss **160 of 400**. The same books
+under the previous release answered 300: the NLG accounts for part of that and a fix to
+how a qualified `020` is read accounts for the rest, 51 records that three sources already
+held and this app was refusing. So a statement that this chain covers a given country is
+still a statement about a keyed install: an earlier survey put Italy at 36% missed keyless
+against 0% with a key, and Greece at 86% against 54%, and the Greek half of that has since
+moved on its own, from 7 of 50 keyless to 39 of 50. The per source figures are in
+`backend/sources.py`, `MEASURED`.
 
 Open Library is read as three records rather than one: the **edition** for the printing,
 the **work** behind it for the subjects and the author the edition mostly omits, and one
@@ -650,7 +661,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the five sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the six sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the
@@ -1199,13 +1210,20 @@ does.
 | GET | `/api/stats` | user | Totals, per-member, per-tag, per-month, pages read |
 | GET | `/api/users` | user | The member list |
 | GET | `/api/users/test-accounts` | **admin** | The accounts an admin may switch into |
-| POST | `/api/users/test-accounts` | **admin** | 201. **400** if the name is taken, **422** under the 8 character floor |
+| POST | `/api/users/test-accounts` | **admin** | 201, and takes an optional address. **400** if the name is taken, **422** under the 8 character floor or if the address is not one |
 | GET | `/api/users/me/appearance` | user | The caller's own palette, mode and wallpaper |
 | PUT | `/api/users/me/appearance` | user | Replaces all three |
-| GET | `/api/users/me/email` | user | The caller's own address, and whether it is theirs to change |
+| GET | `/api/users/me/email` | user | The caller's own address, whether it is theirs to change, and whether the account came from a directory |
 | PUT | `/api/users/me/email` | user | Sets or clears it. **409** where the directory owns it, **422** if it is not an address |
 | GET | `/api/users/emails` | **admin** | Every member's address |
 | PUT | `/api/users/{user_id}/email` | **admin** | Same body and the same two refusals, for anybody. **404** for no such member |
+
+**`editable` and `from_directory` are two flags because there are three cases.** A local
+account is neither owned nor from a directory; a directory account whose directory carries
+an address attribute is read only; and a directory account whose directory carries **none**
+is editable, empty, and belonged to somebody nobody ever asked for an address. The third is
+the only case where a screen has something to explain, and `editable` alone reads the same
+on it as on the first.
 
 `/api/settings/features` is public for the same reason the login image is: the login page
 is localised, so the default language has to be known before a token exists. It carries no

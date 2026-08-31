@@ -17,10 +17,12 @@ import { fireEvent, screen } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  CatalogueSourceOut,
-  SettingsOut,
+import {
+  CatalogueSource,
+  type CatalogueSourceOut,
+  type SettingsOut,
 } from "../../../../../src/api/generated/model";
+import { de, en } from "../../../../../src/i18n";
 import ProviderSection from "../../../../../src/pages/SettingsPage/CatalogueSettingsPage/components/ProviderSection";
 import { renderLocalised } from "../../../../utils";
 
@@ -301,4 +303,20 @@ describe("ProviderSection", () => {
       screen.getByText("Off. This catalogue is never asked."),
     ).toBeInTheDocument();
   });
+
+  // `sourceName` builds its key with a template literal and casts the result to
+  // `MessageKey`, so the compiler cannot see a missing one and the screen would
+  // draw the key itself. A source is added to the enum by regenerating the
+  // client, which is a step that touches no message catalogue at all.
+  it.each(Object.values(CatalogueSource))(
+    "has a name in every catalogue for %s",
+    (source) => {
+      for (const [locale, messages] of Object.entries({ en, de })) {
+        expect(
+          Object.keys(messages),
+          `providers.name.${source} is missing from ${locale}`,
+        ).toContain(`providers.name.${source}`);
+      }
+    },
+  );
 });

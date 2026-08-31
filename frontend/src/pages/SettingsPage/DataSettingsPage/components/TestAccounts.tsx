@@ -8,7 +8,7 @@ interface TestAccountsProps {
   accounts: UserOut[];
   isLoading: boolean;
   error: unknown;
-  onCreate: (username: string, password: string) => void;
+  onCreate: (username: string, password: string, email: string) => void;
   isCreating: boolean;
   createError: unknown;
   onSwitch: (username: string, password: string) => void;
@@ -44,6 +44,7 @@ export default function TestAccounts({
   const { t } = useTranslation();
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   // Which row has its password field open. One at a time, so the field is
   // never ambiguous about which account it is for.
   const [selected, setSelected] = useState<string | null>(null);
@@ -51,9 +52,10 @@ export default function TestAccounts({
 
   function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onCreate(newUsername.trim(), newPassword);
+    onCreate(newUsername.trim(), newPassword, newEmail.trim());
     setNewUsername("");
     setNewPassword("");
+    setNewEmail("");
   }
 
   function submitSwitch(event: FormEvent<HTMLFormElement>, username: string) {
@@ -187,6 +189,36 @@ export default function TestAccounts({
               placeholder={t("settings.testAccountsPasswordPlaceholder")}
             />
           </div>
+        </div>
+        {/* Optional, and the one moment an admin is already typing somebody
+            else's details. Without it the only way to give a new account an
+            address is to make it, find it in the member list and edit it,
+            which is three screens for a field that was on the form.
+
+            **The hint is not decoration.** Registration and the account screen
+            both say that nothing is sent to the address yet, and the admin
+            typing somebody else's is the reader most likely to assume it will
+            be used. */}
+        <div>
+          <label htmlFor="test-account-email" className="sr-only">
+            {t("settings.testAccountsAddress")}
+          </label>
+          <input
+            id="test-account-email"
+            type="email"
+            className="field"
+            autoComplete="off"
+            aria-describedby="test-account-email-hint"
+            value={newEmail}
+            onChange={(event) => setNewEmail(event.target.value)}
+            placeholder={t("settings.testAccountsAddressPlaceholder")}
+          />
+          <p
+            id="test-account-email-hint"
+            className="mt-1 text-xs text-paper-600 dark:text-paper-400"
+          >
+            {t("settings.testAccountsAddressHint")}
+          </p>
         </div>
         <Button type="submit" variant="secondary" isLoading={isCreating}>
           {t("settings.testAccountsCreate")}
