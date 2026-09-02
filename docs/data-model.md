@@ -197,6 +197,30 @@ values the Library of Congress mixes into one record (`fast`, `lcshac`, `rvm`, `
 the rest): each is a separate authority file, so folding them into `lcsh` would make the
 scheme name a lie. Argued in [`decisions.md`](decisions.md).
 
+**A subject heading now arrives with the vocabulary the record declared and the identifier
+it gave, and neither is stored.** `catalogue.Subject` carries the words, the `$2` code and
+the `$0` value, so `Ευρώπη` from the National Library of Greece keeps `nlgaf` and
+`urn:nbn:gr:nlg:01-A273635` where both used to be discarded. What reaches the database is
+still the words, in `books.categories`, because `scheme` here is a closed four member enum
+and a declared vocabulary is an open set: twelve distinct codes turned up in one day's
+sampling of four catalogues, against a MARC source code list holding hundreds. Giving them
+a store is a separate change, and mapping one vocabulary onto another is refused outright.
+
+**Nothing reads either field yet, and that is the honest state rather than a step
+missing.** The two things that consume a record's subjects, the tag suggestion and the
+`categories` string, both take the words alone and would be wrong to do otherwise: showing
+one word twice because two vocabularies claim it is a worse page, not a better one. So
+this change is visible in no response and in no column today. What it is for is the
+tickets that come after it, which cannot record membership of a list nothing records.
+
+What it does change is inside the record, where the fold now keeps assertions apart that it
+used to merge. `Roemisches Recht` is a `gnd` subject and a `local` one on the same German
+record, 15 of 765 live (record, label) pairs are that shape, and one of the two used to be
+dropped as a duplicate. A word one field declared and another restated undeclared is still
+one subject, 169 of the same 765, which is what the German `689` chain does to every
+heading it was built from. The joined `categories` string is unchanged either way: it
+carries each word once, in the order the first record used.
+
 **An author identifier is not one of these.** The DNB writes it in the same `$0`, and
 `100 $0` says who wrote the book where every scheme here says what the book is about. It is
 deliberately read by nothing: see [decisions.md](decisions.md).

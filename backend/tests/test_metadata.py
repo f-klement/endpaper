@@ -28,8 +28,10 @@ catalogue.
 
 import asyncio
 import itertools
+import logging
 import math
 import re
+from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
@@ -41,28 +43,38 @@ import covers
 import fetch
 import metadata
 import sources
-from catalogue import AuthorityAssertion, Heading, Record
+import z3950
+from catalogue import AuthorityAssertion, Heading, Record, Subject
 from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
+from isbn import registration_group
 from metadata import (
     Outcome,
     _dc_title_statement,
+    _dnb_subjects,
     _flip_catalogue_name,
     _is_placeholder_title,
     _loc_record,
+    _loc_subjects,
     _marc_author_identifiers,
     _marc_authors,
     _marc_fields,
     _pages_from_extent,
     _parsed,
+    _subject_identifier,
+    _subject_vocabulary,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.helpers import (
     silence_covers,
+    silence_nkp,
     silence_nlg,
     silence_oenb,
     silence_open_library,
 )
+
+#: The `backend/` directory, so a doc guard can reach the repository root.
+BACKEND = Path(__file__).resolve().parent.parent
 
 #: Every catalogue enabled, in the order a new install asks them.
 #:
@@ -104,6 +116,10 @@ K10PLUS = "https://sru.k10plus.de/opac-de-627"
 
 GERMAN_ISBN = "9783960092353"
 ENGLISH_ISBN = "9780743273565"
+#: A real Greek registration group, 978-960. Named because
+#: `sources.SERVES_GROUPS` makes a lookup's chain depend on the group, so a test
+#: that wants the NLG asked has to hand it a book the NLG could hold.
+GREEK_ISBN = "9789602118962"
 
 #: One DNB MARC21 record, in the shape the live endpoint returns since the
 #: switch away from Dublin Core. Copied from ISBN 9783446249974's real response
@@ -324,6 +340,63 @@ NLG_WRONG_BOOK = _marc(
 )
 
 NLG_EMPTY = _marc()
+
+
+#: The Czech National Library. Plaintext HTTP on 9991, and the `/NKC` path is
+#: part of the address: the host alone answers "database does not exist".
+NKP = "http://aleph.nkp.cz:9991/NKC"
+
+
+def _nkp_envelope(*records: str, empty_stubs: int = 0) -> str:
+    """An NKP SRU envelope, including the empty stubs this target really sends.
+
+    **`empty_stubs` is not a contrivance.** Measured 2026-08-31, this server
+    renders exactly one populated record per response and pads the rest of the
+    page with `zs:record` elements carrying a packing and a position and no
+    `recordData` at all: 391 of 400 records over eight searches. A fixture
+    without them would test a response shape this target does not produce.
+    """
+    stubs = "".join(
+        f"<zs:record><zs:recordPacking>xml</zs:recordPacking>"
+        f"<zs:recordPosition>{i + 1}</zs:recordPosition></zs:record>"
+        for i in range(empty_stubs)
+    )
+    body = "".join(
+        f"<zs:record><zs:recordPacking>xml</zs:recordPacking>"
+        f"<zs:recordData><record-list>{record}</record-list></zs:recordData>"
+        f"<zs:recordPosition>{empty_stubs + i + 1}</zs:recordPosition></zs:record>"
+        for i, record in enumerate(records)
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/">'
+        "<zs:version>1.1</zs:version>"
+        f"<zs:numberOfRecords>{len(records)}</zs:numberOfRecords>"
+        f"<zs:records>{stubs}{body}</zs:records></zs:searchRetrieveResponse>"
+    )
+
+
+#: A real NKP record, trimmed to what this app reads.
+#:
+#: Captured live 2026-08-31. Its shape carries three of this source's four
+#: surprises: the elements are **un-namespaced**, there is **no `creator`** and
+#: the people are `contributor`, and the identifier is hyphenated as printed.
+NKP_RECORD = (
+    "<dc-record>"
+    "<type>text</type>"
+    "<language>cze</language>"
+    "<identifier>978-80-257-1294-8</identifier>"
+    "<contributor>Hrabal, Bohumil, 1914-1997</contributor>"
+    "<contributor>Argo (firma)</contributor>"
+    "<title>Ostře sledované vlaky /</title>"
+    "<publisher>Argo,</publisher>"
+    "<date>2018</date>"
+    "<format>96 stran ;</format>"
+    "<subject>česká próza</subject>"
+    "</dc-record>"
+)
+
+NKP_EMPTY = _nkp_envelope()
 
 #: One live ÖNB record, ISBN 9783552058217, `Das angehaltene Leben`, Zsolnay.
 #:
@@ -602,6 +675,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -642,6 +716,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -675,6 +750,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
@@ -702,6 +778,7 @@ class TestSourceOrder:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -725,6 +802,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -751,6 +829,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -772,6 +851,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -793,6 +873,7 @@ class TestOutcome:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -929,7 +1010,7 @@ class TestDnbRecord:
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
-        assert result.record.subjects == ("Informatik",)
+        assert result.record.subject_labels == ["Informatik"]
 
     @pytest.mark.asyncio
     async def test_the_same_heading_in_650_and_689_is_one_subject(self):
@@ -1104,6 +1185,7 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1168,6 +1250,7 @@ class TestDnbRecord:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1259,6 +1342,7 @@ class TestCatalogueXml:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1335,6 +1419,19 @@ class TestTheResponseSizeCap:
             _oenb_envelope(OENB_MONOGRAPH), "</records>"
         )
 
+    def _nkp_over_cap(self) -> str:
+        """The Czech envelope, which is neither `_marc` nor the BnF's."""
+        return self._padded(
+            _nkp_envelope(
+                "<dc-record><type>text</type>"
+                "<identifier>9780743273565</identifier>"
+                "<title>The Great Gatsby</title>"
+                "<date>1925</date>"
+                "<format>218 p.</format></dc-record>"
+            ),
+            "</zs:records>",
+        )
+
     def _dublincore_over_cap(self) -> str:
         return self._padded(
             '<?xml version="1.0" encoding="UTF-8"?>'
@@ -1386,21 +1483,31 @@ class TestTheResponseSizeCap:
             is not None
         )
         assert _parsed(self._mods_over_cap()).find(f".//{metadata._MODS}mods") is not None
+        assert _parsed(self._nkp_over_cap()).find(".//dc-record") is not None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "host, body",
+        "host, body, isbn",
         [
-            (DNB, "_marc_over_cap"),
-            (K10PLUS, "_marc_over_cap"),
-            (OENB, "_oenb_over_cap"),
-            (NLG, "_marc_over_cap"),
+            (DNB, "_marc_over_cap", ENGLISH_ISBN),
+            (K10PLUS, "_marc_over_cap", ENGLISH_ISBN),
+            # **An ISBN each source is asked about, which is not one ISBN any
+            # more.** `sources.SERVES_GROUPS` skips a national catalogue on the
+            # lookup path for a registration group outside its remit, so the two
+            # restricted sources are handed a book from their own group. With
+            # `ENGLISH_ISBN` they are never asked, the cap is never reached, and
+            # this test passes with the handler deleted.
+            (OENB, "_oenb_over_cap", GERMAN_ISBN),
+            (NLG, "_marc_over_cap", GREEK_ISBN),
+            (NKP, "_nkp_over_cap", ENGLISH_ISBN),
         ],
     )
-    async def test_an_oversized_lookup_answer_costs_that_source(self, host, body):
+    async def test_an_oversized_lookup_answer_costs_that_source(
+        self, host, body, isbn
+    ):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            for other in (DNB, K10PLUS, OENB, NLG):
+            for other in (DNB, K10PLUS, OENB, NLG, NKP):
                 mock.get(url__startswith=other).mock(
                     return_value=_xml(
                         getattr(self, body)() if other == host else OENB_EMPTY
@@ -1412,9 +1519,11 @@ class TestTheResponseSizeCap:
             mock.get(url__startswith=GOOGLE_BOOKS).mock(
                 return_value=httpx.Response(200, json={"items": []})
             )
-            result = await lookup(ENGLISH_ISBN)
+            result = await lookup(isbn)
 
-        name = {DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb", NLG: "nlg"}[host]
+        name = {
+            DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb", NLG: "nlg", NKP: "nkp"
+        }[host]
         assert (name, Outcome.UNAVAILABLE) in result.attempts
         assert result.outcome is not Outcome.FOUND
 
@@ -1460,6 +1569,7 @@ class TestTheResponseSizeCap:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1547,6 +1657,233 @@ class TestMarcSubfields:
             '<subfield code="a">Mu\u0308ller, Hans</subfield></datafield>'
         ))
         assert fields["100"][0]["a"] == "M\u00fcller, Hans"
+
+
+class TestASubjectCarriesTheVocabularyTheRecordDeclared:
+    """#134: the `$2` and the `$0`, which were both discarded before it.
+
+    Everything here is a parser test on a field, because that is where the
+    ticket's whole change is. Nothing is stored: a subject reaches
+    `books.categories` as words and nothing else, and giving the vocabulary a
+    column is #143. What these pin is that the stamp survives as far as the
+    seam, and that nothing is invented on the way.
+    """
+
+    @staticmethod
+    def _subjects(datafields: str) -> list[Subject]:
+        subjects, _ = _dnb_subjects(_marc_fields(_marc_element(datafields)))
+        return subjects
+
+    def test_the_declared_vocabulary_and_the_identifier_are_both_kept(self):
+        """The DNB's ordinary `650`: `$2 gnd` with a `(DE-588)` in `$0`."""
+        assert self._subjects(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="2">gnd</subfield></datafield>'
+        ) == [Subject("Informatik", "gnd", "(DE-588)4026894-9")]
+
+    def test_the_greek_authority_identifier_is_kept_whole(self):
+        """The field the ticket was written around. `_gnd_identifier` drops
+        this, and measured 2026-08-31 it drops **11 of 11** of the National
+        Library of Greece's identifiers, because none is a `(DE-588)`."""
+        assert self._subjects(
+            '<datafield tag="651" ind1=" " ind2="7">'
+            '<subfield code="a">Ευρώπη</subfield>'
+            '<subfield code="0">urn:nbn:gr:nlg:01-A273635</subfield>'
+            '<subfield code="2">nlgaf</subfield></datafield>'
+        ) == [Subject("Ευρώπη", "nlgaf", "urn:nbn:gr:nlg:01-A273635")]
+
+    def test_a_record_declaring_nothing_leaves_the_vocabulary_null(self):
+        """Null and never guessed at, which is 199 of 199 live DNB `689`
+        fields and 130 of 133 live K10plus `650` fields."""
+        assert self._subjects(
+            '<datafield tag="650" ind1=" " ind2=" ">'
+            '<subfield code="a">Kochbuch</subfield></datafield>'
+        ) == [Subject("Kochbuch", None, None)]
+
+    def test_an_identifier_with_no_vocabulary_beside_it_is_still_kept(self):
+        """K10plus writes `$0 (OCoLC)fst…` with no `$2` at all, on 3 of 133
+        live `650` fields. The ticket asks for the identifier *whatever* the
+        scheme, and a missing `$2` is not a reason to drop one."""
+        assert self._subjects(
+            '<datafield tag="650" ind1=" " ind2=" ">'
+            '<subfield code="a">Psychology</subfield>'
+            '<subfield code="0">(OCoLC)fst01081447</subfield></datafield>'
+        ) == [Subject("Psychology", None, "(OCoLC)fst01081447")]
+
+    def test_a_vocabulary_with_no_identifier_beside_it_is_still_kept(self):
+        """The OENB's `655 $2 bellobv`, which carries no `$0`."""
+        assert self._subjects(
+            '<datafield tag="655" ind1=" " ind2="7">'
+            '<subfield code="a">Roman</subfield>'
+            '<subfield code="2">bellobv</subfield></datafield>'
+        ) == [Subject("Roman", "bellobv", None)]
+
+    def test_the_vocabulary_code_is_lower_cased(self):
+        """Two of the twelve codes measured are upper case, `VLK` on the OENB
+        and `DLC` on K10plus. Unfolded, one vocabulary is two strings."""
+        assert self._subjects(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="a">Drittes Reich</subfield>'
+            '<subfield code="2">VLK</subfield></datafield>'
+        ) == [Subject("Drittes Reich", "vlk", None)]
+
+    def test_the_identifier_keeps_the_prefix_a_classification_drops(self):
+        """`Classification.number` stores a GND number bare because the row has
+        a scheme column. Here there is none, and `$2` does not supply one: this
+        field names the DNB's genre list and the DNB's own authority file, which
+        are two different answers."""
+        assert self._subjects(
+            '<datafield tag="655" ind1=" " ind2="7">'
+            '<subfield code="a">Lyrik</subfield>'
+            '<subfield code="0">(DE-101)1010836315</subfield>'
+            '<subfield code="2">gatbeg</subfield></datafield>'
+        ) == [Subject("Lyrik", "gatbeg", "(DE-101)1010836315")]
+
+    def test_an_empty_leading_dollar_zero_does_not_lose_the_identifier(self):
+        """The shape the live measurement could not see, because no catalogue
+        writes it: `_marc_text` turns `<subfield code="0"/>` into `""`, so the
+        first value is empty and the number sits behind it. 0 of the 718 live
+        fields carry an empty `$0` anywhere, which is exactly why "the first
+        `$0`" read as safe.
+
+        **The two readers disagreeing is the defect, not the None.**
+        `_gnd_identifier` scans every `$0`, so it found the number and wrote a
+        classification row, while the subject beside it carried no identifier at
+        all off the same field.
+        """
+        entry = _marc_fields(_marc_element(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="0"/>'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="2">gnd</subfield></datafield>'
+        ))["650"][0]
+
+        assert entry.all("0") == ["", "(DE-588)4026894-9"]
+        assert _subject_identifier(entry) == "(DE-588)4026894-9"
+        assert metadata._gnd_identifier(entry) == "4026894-9"
+
+    def test_a_field_whose_only_identifier_is_empty_has_none(self):
+        """The diagonal for the test above: skipping empties must not invent
+        one. Without this, a reader returning the last value would pass the
+        test above and fail here."""
+        entry = _marc_fields(_marc_element(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="0"/></datafield>'
+        ))["650"][0]
+
+        assert _subject_identifier(entry) is None
+
+    def test_the_first_identifier_is_the_one_taken(self):
+        """Where a live subject field carries a `(DE-588)` it is the first of
+        its `$0` values, 691 of 691, and the `d-nb.info` URL and the `(DE-101)`
+        house number follow. This is that order, and taking the last would file
+        the DNB's own shelf number where the GND identifier is the point."""
+        assert self._subjects(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="0">https://d-nb.info/gnd/4026894-9</subfield>'
+            '<subfield code="0">(DE-101)4026894-9</subfield>'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="2">gnd</subfield></datafield>'
+        ) == [Subject("Informatik", "gnd", "(DE-588)4026894-9")]
+
+    def test_a_dewey_edition_number_is_never_read_as_a_vocabulary(self):
+        """`$2` means something else on `082`: it is the Dewey **edition**, and
+        the three fixtures in this file spell it `23sdnb`, `22/ger` and `21`.
+
+        **This test used to assert the trap open.** It read
+        `_subject_vocabulary(fields["082"][0]) == "21"` to show the field really
+        carries a readable `$2`, which was true and was also the call the
+        docstring claimed was impossible. The reader now takes the tag and
+        raises, so the same demonstration is a `pytest.raises`, and the
+        anti vacuity it was there for is unchanged: without it the two
+        assertions below pass on a record with no subject field, which is every
+        record.
+        """
+        fields = _marc_fields(_marc_element(
+            '<datafield tag="082" ind1="0" ind2="4">'
+            '<subfield code="a">940</subfield>'
+            '<subfield code="2">21</subfield></datafield>'
+        ))
+        subjects, headings = _dnb_subjects(fields)
+
+        with pytest.raises(ValueError, match="082"):
+            _subject_vocabulary("082", fields["082"][0])
+        assert subjects == []
+        assert headings == []
+        assert [heading.number for heading in metadata._marc_ddc(fields)] == ["940"]
+
+    def test_a_classification_row_is_still_written_for_the_gnd_alone(self):
+        """The half that deliberately did not change. A `classifications` row
+        names a scheme from a closed four member set, so the Greek authority
+        file cannot be one however well the record declares it."""
+        greek = (
+            '<datafield tag="651" ind1=" " ind2="7">'
+            '<subfield code="a">Ευρώπη</subfield>'
+            '<subfield code="0">urn:nbn:gr:nlg:01-A273635</subfield>'
+            '<subfield code="2">nlgaf</subfield></datafield>'
+        )
+        german = (
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="2">gnd</subfield></datafield>'
+        )
+        _, headings = _dnb_subjects(_marc_fields(_marc_element(greek + german)))
+
+        assert headings == [
+            Heading(ClassificationScheme.GND, "4026894-9", "Informatik")
+        ]
+
+    def test_the_689_restatement_folds_into_the_field_that_declared(self):
+        """A whole DNB record, through the parser and the seam. `650` declares
+        `gnd` and `689` restates the same words declaring nothing, on 199 of 199
+        live fields, and the record must carry the heading once."""
+        node = next(_parsed(DNB_RECORD).iter(f"{metadata._MARC}record"))
+        record = metadata._dnb_record(_marc_fields(node), "9783960092353")
+
+        assert record is not None
+        assert record.subjects == (
+            Subject("Informatik", "gnd", "(DE-588)4026894-9"),
+        )
+
+
+class TestASubfieldReaderIsNotTwoReaders:
+    """The two `$0` questions, which look like one rule and are not."""
+
+    def test_the_vocabulary_reader_answers_none_where_there_is_no_dollar_two(self):
+        entry = _marc_fields(_marc_element(
+            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
+        ))["650"][0]
+
+        assert _subject_vocabulary("650", entry) is None
+
+    def test_the_identifier_reader_answers_none_where_there_is_no_dollar_zero(self):
+        entry = _marc_fields(_marc_element(
+            '<datafield tag="650"><subfield code="a">X</subfield></datafield>'
+        ))["650"][0]
+
+        assert _subject_identifier(entry) is None
+
+    def test_the_gnd_reader_still_searches_past_a_leading_house_number(self):
+        """`_gnd_identifier` asks whether the field names a GND record, so it
+        looks at every `$0`. `_subject_identifier` asks what the record led
+        with, so it looks at one. A field written in the other order separates
+        them, and no live catalogue writes that order: this pins the difference
+        rather than the data."""
+        entry = _marc_fields(_marc_element(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="0">(DE-101)1010836315</subfield>'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="a">Informatik</subfield></datafield>'
+        ))["650"][0]
+
+        assert metadata._gnd_identifier(entry) == "4026894-9"
+        assert _subject_identifier(entry) == "(DE-101)1010836315"
 
 
 class TestTheAuthorsAuthorityIdentifier:
@@ -1732,6 +2069,7 @@ class TestK10plusIdentity:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
@@ -1773,6 +2111,7 @@ class TestK10plusIdentity:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
@@ -2043,7 +2382,7 @@ class TestMerge:
             result = await lookup(GERMAN_ISBN)
 
         assert result.record is not None
-        assert set(result.record.subjects) == {"Informatik", "Science Fiction"}
+        assert set(result.record.subject_labels) == {"Informatik", "Science Fiction"}
 
     @pytest.mark.asyncio
     async def test_a_classification_is_kept_whole_and_its_caption_too(self):
@@ -2437,6 +2776,7 @@ class TestAHostileSourceCostsItsOwnRows:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -2466,6 +2806,7 @@ class TestAHostileSourceCostsItsOwnRows:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -2528,6 +2869,7 @@ class TestAHostileSourceCostsItsOwnRows:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
@@ -2828,6 +3170,138 @@ OL_WORK = {
     "authors": [{"author": {"key": "/authors/OL23919A"}}],
 }
 
+class TestWhatEachReaderCanSupply:
+    """#134 is bounded by the formats, and the bound is worth pinning.
+
+    Two of the six shapes carry no stamp at all and one carries only half, so a
+    subject with a null vocabulary is the ordinary case rather than a gap in a
+    parser. Measured 2026-08-31 against the live endpoints: the BnF's 153
+    `dc:subject` elements in 200 records carry `xml:lang` and nothing else, the
+    NKP's 17 in 5 carry no attribute at all, and MODS names an authority on 399
+    of 432 while carrying `valueURI` on **0**.
+    """
+
+    def test_mods_supplies_the_vocabulary_and_never_an_identifier(self):
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            '<subject authority="lcsh"><topic>Computer programming</topic></subject>'
+            "</mods>"
+        )
+
+        assert _loc_subjects(mods) == (Subject("Computer programming", "lcsh"),)
+
+    def test_an_authority_this_app_has_no_reading_for_is_still_a_subject(self):
+        """`_loc_subject_headings` drops everything but `lcsh`, because a
+        `classifications` row needs a scheme from a closed set. A subject has no
+        such requirement, and dropping `fast` here would throw away a heading
+        the record gave us for nothing."""
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            '<subject authority="fast"><topic>Software engineering</topic></subject>'
+            "</mods>"
+        )
+
+        assert _loc_subjects(mods) == (Subject("Software engineering", "fast"),)
+
+    def test_a_mods_subject_naming_no_authority_leaves_the_vocabulary_null(self):
+        """33 of 432 live elements, and null is the honest answer."""
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            "<subject><topic>Uncontrolled</topic></subject></mods>"
+        )
+
+        assert _loc_subjects(mods) == (Subject("Uncontrolled", None),)
+
+    def test_a_mods_authority_is_lower_cased(self):
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            '<subject authority="LCSH"><topic>Programming</topic></subject></mods>'
+        )
+
+        assert _loc_subjects(mods) == (Subject("Programming", "lcsh"),)
+
+    def test_an_empty_mods_topic_is_not_a_subject(self):
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            '<subject authority="lcsh"><topic>  </topic></subject></mods>'
+        )
+
+        assert _loc_subjects(mods) == ()
+
+    def test_the_subdivisions_stay_separate_words_here(self):
+        """`_loc_subject_headings` joins them into the authorised heading,
+        because that is what LCSH files a book under. A subject feeds a tag
+        guess and a `categories` string, where the parts are the useful shape,
+        and that is what this reader did before #134."""
+        mods = ElementTree.fromstring(
+            '<mods xmlns="http://www.loc.gov/mods/v3">'
+            '<subject authority="lcsh"><topic>Computer software</topic>'
+            "<topic>Development</topic></subject></mods>"
+        )
+
+        assert _loc_subjects(mods) == (
+            Subject("Computer software", "lcsh"),
+            Subject("Development", "lcsh"),
+        )
+
+    def test_dublin_core_supplies_neither_half(self):
+        """Both dialects, in one test, because it is the format and not the
+        catalogue: the BnF's is namespaced and the NKP's is not."""
+        bnf = metadata._bnf_record(
+            ElementTree.fromstring(
+                '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                "<dc:title>Un livre</dc:title>"
+                "<dc:type>text</dc:type>"
+                "<dc:format>200 p.</dc:format>"
+                '<dc:subject xml:lang="fre">Roman francais</dc:subject>'
+                "</record>"
+            )
+        )
+        nkp = metadata._nkp_record(
+            ElementTree.fromstring(
+                "<dc-record><title>Kniha</title><type>text</type>"
+                "<format>200 s.</format><subject>Roman</subject></dc-record>"
+            ),
+            "9788072033034",
+        )
+
+        assert bnf is not None
+        assert bnf.subjects == (Subject("Roman francais", None, None),)
+        assert nkp is not None
+        assert nkp.subjects == (Subject("Roman", None, None),)
+
+    def test_k10plus_reads_the_same_two_subfields(self):
+        """3 of 133 live `650` fields carry either, and both are read anyway:
+        a reader that is correct only while a catalogue's habits hold is the
+        thing #134 exists to stop."""
+        record = metadata._k10plus_record(
+            _marc_fields(_marc_element(
+                '<datafield tag="650" ind1=" " ind2="7">'
+                "<subfield code=\"a\">Psychology</subfield>"
+                '<subfield code="0">(OCoLC)fst01081447</subfield>'
+                '<subfield code="2">DLC</subfield></datafield>'
+            ))
+        )
+
+        assert record.subjects == (
+            Subject("Psychology", "dlc", "(OCoLC)fst01081447"),
+        )
+
+    def test_a_k10plus_subdivision_shares_the_fields_one_vocabulary(self):
+        """`$x` subdivides the `$a` above it rather than being a heading of its
+        own, so the joined string takes the field's one `$2`."""
+        record = metadata._k10plus_record(
+            _marc_fields(_marc_element(
+                '<datafield tag="650" ind1=" " ind2="7">'
+                "<subfield code=\"a\">Frankreich</subfield>"
+                "<subfield code=\"x\">Geschichte</subfield>"
+                '<subfield code="2">gnd</subfield></datafield>'
+            ))
+        )
+
+        assert record.subjects == (Subject("Frankreich Geschichte", "gnd", None),)
+
+
 OL_AUTHOR = {"name": "Thomas H. Cormen"}
 
 
@@ -2940,11 +3414,11 @@ class TestTheOpenLibraryLookup:
 
         assert result.found
         assert result.record is not None
-        assert result.record.subjects == (
+        assert result.record.subject_labels == [
             "Computer algorithms",
             "Algorithms",
             "open_syllabus_project",
-        )
+        ]
 
     @pytest.mark.asyncio
     async def test_a_subject_list_is_bounded(self):
@@ -2978,7 +3452,7 @@ class TestTheOpenLibraryLookup:
             result = await self._lookup(mock)
 
         assert result.record is not None
-        assert result.record.subjects[0] == "Set theory"
+        assert result.record.subject_labels[0] == "Set theory"
 
     @pytest.mark.asyncio
     async def test_a_subject_is_never_a_classification(self):
@@ -3623,6 +4097,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3683,6 +4158,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3706,6 +4182,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3733,13 +4210,14 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
             result = await lookup("9783552058217")
 
         assert result.record is not None
-        assert "Roman" in result.record.subjects
+        assert "Roman" in result.record.subject_labels
         assert not [
             heading for heading in result.record.headings if heading.number == "Roman"
         ]
@@ -3760,6 +4238,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3775,6 +4254,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -3799,6 +4279,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_open_library(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             route = mock.get(url__startswith=OENB).mock(
@@ -3816,6 +4297,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
@@ -3842,6 +4324,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -3869,6 +4352,7 @@ class TestTheAustrianNationalLibrary:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4020,6 +4504,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -4092,6 +4577,7 @@ class TestTheAustrianNationalLibrarySearch:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_nlg(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=OENB).mock(side_effect=_crawl)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -4155,6 +4641,7 @@ class TestTheNationalLibraryOfGreece:
             silence_covers(mock)
             silence_open_library(mock)
             silence_oenb(mock)
+            silence_nkp(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
@@ -4184,7 +4671,7 @@ class TestTheNationalLibraryOfGreece:
         assert [
             (heading.scheme, heading.number) for heading in result.record.headings
         ] == [(ClassificationScheme.DDC, "940")]
-        assert "Ευρώπη" in result.record.subjects
+        assert "Ευρώπη" in result.record.subject_labels
 
     @pytest.mark.asyncio
     async def test_a_record_that_names_another_isbn_is_refused(self):
@@ -4280,6 +4767,275 @@ class TestTheNationalLibraryOfGreeceSearch:
 
         assert rows == []
         assert not route.called
+
+
+def _unescaped(text: str, character: str) -> int:
+    """How many of `character` are not escaped by a preceding backslash.
+
+    Walks rather than matching, because a backslash can escape a backslash: in
+    `a\\\\@b` the `@` is unescaped, and a regex for "not preceded by a
+    backslash" reports it as escaped.
+    """
+    count = 0
+    index = 0
+    while index < len(text):
+        if text[index] == "\\":
+            index += 2
+            continue
+        if text[index] == character:
+            count += 1
+        index += 1
+    return count
+
+
+class TestTheNkpQueryIsQuotedByThePqfRule:
+    """The injection control for the one source whose query is not CQL.
+
+    **This class used to test a second PQF rule, and the rule was wrong.** The
+    adapter carried its own `_pqf_literal`, which removed the double quote and
+    nothing else, and the fixtures below were chosen to agree with it: the
+    operator list carried `@attr` with a space and a comment saying the ticket's
+    `@1=1016` was *not* one of the shapes that mattered. It is the shape that
+    matters most. `z3950.pqf_term` was measured on 2026-08-28 with `p_query_rpn`
+    and records that an `@` followed by a digit is read before the quoted run,
+    so it survives quoting and takes the pinned use attribute with it.
+
+    The fixtures are now that measurement's, and the assertions are about the
+    query the adapter builds rather than about a helper of its own.
+    """
+
+    #: Shapes that reach a PQF parser as something other than text unless escaped.
+    #:
+    #: The first three are `z3950.pqf_term`'s own measured table, which the old
+    #: local rule failed on two of three. The rest survive `_search_terms`, which
+    #: strips `=` and so cannot reassemble `@attr 1=4`, but PQF's operators need
+    #: no `=`.
+    HOSTILE = (
+        '@1=1016 praha',
+        'praha\\',
+        'moby" @attr 1=1016 "x',
+        "@and",
+        "@or",
+        "@not",
+        "@set",
+        "@attrset",
+        "@attr",
+    )
+
+    def test_the_cql_sanitiser_leaves_every_pqf_operator_intact(self):
+        """The measurement the source's quoting rests on, as an assertion.
+
+        A CQL constant that happens to cover PQF is a coincidence, not a control.
+        If this fails because `_CQL_UNSAFE` grew an arm, the arm is the finding.
+        """
+        for operator in ("@and", "@or", "@not", "@set", "@attrset", "@attr"):
+            assert operator in metadata._search_terms(f"{operator} 1=1016 praha")
+
+    def test_the_isbn_query_puts_the_attribute_outside_the_literal(self):
+        """`@attr 1=7` is the adapter's, the term is the caller's, and the quote
+        is the boundary between them."""
+        assert metadata._nkp_query("9788025712948") == '@attr 1=7 "9788025712948"'
+
+    @pytest.mark.parametrize("hostile", HOSTILE)
+    def test_nothing_hostile_reaches_the_parser_as_structure(self, hostile):
+        """One quoted run, and the adapter's attribute is the only thing outside it.
+
+        Structural rather than a comparison against an expected string: the
+        injected text is still in there, and that is the point. It is inside the
+        quotes, where PQF reads it as characters to match. What must hold is that
+        it cannot get **out**.
+        """
+        built = metadata._nkp_query(hostile)
+
+        prefix, quote, rest = built.partition('"')
+        assert prefix == "@attr 1=7 "
+        assert quote == '"'
+        # Every `"` and `@` inside the run is escaped, so the only unescaped
+        # quote left is the closing one. Counting quotes would pass on the old
+        # rule, which reached two by deleting the character instead.
+        assert rest.endswith('"')
+        assert _unescaped(rest[:-1], '"') == 0
+        assert _unescaped(rest[:-1], "@") == 0
+
+    def test_a_trailing_backslash_cannot_escape_the_closing_quote(self):
+        """The arm the deleted local rule missed in full.
+
+        `praha\\` quoted without escaping is `"praha\\"`, whose closing quote is
+        escaped, so the term runs on into whatever follows.
+        """
+        assert metadata._nkp_query("praha\\") == '@attr 1=7 "praha\\\\"'
+
+    def test_an_at_sign_before_a_digit_cannot_repin_the_use_attribute(self):
+        """The shape the old rule's docstring named and dismissed.
+
+        `parse_isbn` does now yield thirteen ASCII digits or nothing, and until
+        this was written it did not: it gated on `str.isdigit()`, which admits
+        every Unicode digit. Pinned because the guard here is `z3950.pqf_term`
+        and the next caller of this builder may not be `parse_isbn` at all.
+        """
+        assert metadata._nkp_query("@1=1016 praha") == '@attr 1=7 "\\@1=1016 praha"'
+
+    def test_the_whole_query_is_the_z3950_rule_rather_than_a_copy_of_it(self):
+        """One PQF rule in the repository, not two that agree today.
+
+        **Both halves, because the fix for the term half left the attribute half
+        duplicated.** `_NKP_ISBN_ATTRIBUTE = "@attr 1=7"` sat beside
+        `z3950.USE_ISBN = 7` in a module whose `isbn_query` already names this
+        catalogue in its own measurement, so guarding only the term would have
+        pinned the smaller of the two copies.
+
+        The defect was two rules rather than one wrong rule: the local copy was
+        defensible in isolation and disagreed with the measured one on two shapes
+        out of three.
+        """
+        assert not hasattr(metadata, "_pqf_literal")
+        assert not hasattr(metadata, "_NKP_ISBN_ATTRIBUTE")
+        for hostile in self.HOSTILE:
+            assert metadata._nkp_query(hostile) == z3950.isbn_query(hostile)
+
+
+class TestTheCzechNationalLibrary:
+    """The fifth SRU source, the first that is lookup only, and the first whose
+    query is not CQL.
+
+    Three things here are this target's rather than SRU's, and each is measured
+    beside the constant it decided: the query goes in `x-pquery` because `query`
+    answers diagnostic 1/11, the database path `/NKC` is part of the address, and
+    **one record per response is populated whatever page size is asked for**,
+    which is why it answers no title search.
+    """
+
+    ISBN = "9788025712948"
+
+    @pytest.mark.asyncio
+    async def test_a_czech_book_resolves(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(
+                return_value=_xml(_nkp_envelope(NKP_RECORD))
+            )
+            result = await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert result.outcome is Outcome.FOUND
+        assert result.record is not None
+        assert result.record.title == "Ostře sledované vlaky"
+        assert result.record.publisher == "Argo"
+        assert result.record.year == 2018
+        assert result.record.page_count == 96
+
+    @pytest.mark.asyncio
+    async def test_the_empty_stubs_this_target_pads_a_page_with_are_skipped(self):
+        """391 of 400 records over eight live searches carried no `recordData`.
+
+        A reader that assumed every `zs:record` has content would raise on the
+        first page of the first query rather than on some rare shape.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(
+                return_value=_xml(_nkp_envelope(NKP_RECORD, empty_stubs=19))
+            )
+            result = await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert result.outcome is Outcome.FOUND
+
+    @pytest.mark.asyncio
+    async def test_the_first_contributor_is_the_author_and_the_firm_is_not(self):
+        """This catalogue writes no `creator` at all, measured 0 of 400, and up
+        to three contributors of which the trailing ones are the supply chain.
+        `Argo (firma)` is a company."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(
+                return_value=_xml(_nkp_envelope(NKP_RECORD))
+            )
+            result = await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert result.record is not None
+        # `_flip_catalogue_name` puts the forename first and `_PERSON_NOISE`
+        # takes the life dates off, which is what every other source here gets.
+        assert result.record.author == "Bohumil Hrabal"
+
+    @pytest.mark.asyncio
+    async def test_a_record_naming_another_isbn_is_refused(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(
+                return_value=_xml(
+                    _nkp_envelope(
+                        NKP_RECORD.replace("978-80-257-1294-8", "978-80-000-0000-0")
+                    )
+                )
+            )
+            result = await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_the_hyphenated_identifier_matches_the_isbn_asked_for(self):
+        """The catalogue prints `978-80-257-1294-8`; the scan is 13 digits."""
+        assert metadata._nkp_claims_isbn(
+            ElementTree.fromstring(NKP_RECORD), self.ISBN
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_query_goes_in_the_parameter_this_target_reads(self):
+        """`query` answers SRU diagnostic 1/11 here and `queryType` answers 1/8,
+        both measured live, so the parameter name is a fact about the target
+        rather than a style."""
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            route = mock.get(url__startswith=NKP).mock(
+                return_value=_xml(NKP_EMPTY)
+            )
+            await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        params = route.calls[0].request.url.params
+        assert params["x-pquery"] == f'@attr 1=7 "{self.ISBN}"'
+        assert "query" not in params
+
+    @pytest.mark.asyncio
+    async def test_one_record_is_asked_for_because_one_is_all_that_arrives(self):
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            route = mock.get(url__startswith=NKP).mock(
+                return_value=_xml(NKP_EMPTY)
+            )
+            await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert route.calls[0].request.url.params["maximumRecords"] == "1"
+
+    @pytest.mark.asyncio
+    async def test_an_online_resource_is_refused_in_this_catalogues_own_words(self):
+        """`_NOT_A_BOOK` is German and English and cannot see `online zdroj`."""
+        online = NKP_RECORD.replace(
+            "<format>96 stran ;</format>",
+            "<format>1 online zdroj (106 pages) :</format>",
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=NKP).mock(
+                return_value=_xml(_nkp_envelope(online))
+            )
+            result = await metadata._SOURCES[CatalogueSource.NKP](self.ISBN, "")
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    def test_the_shared_online_rule_is_left_alone(self):
+        """The Czech phrasing is this source's constant and not a widening of
+        `_NOT_A_BOOK`, which every other source is filtered by. Widening that on
+        a phrase measured in one catalogue would change what seven other sources
+        refuse."""
+        assert not metadata._NOT_A_BOOK.search("1 online zdroj (106 pages) :")
+        assert metadata._NKP_ONLINE.search("1 online zdroj (106 pages) :")
+
+    def test_it_answers_no_title_search(self):
+        """The scope this ticket narrowed to, as an assertion rather than a
+        sentence: the server renders one populated record per response whatever
+        is asked for, so ten candidates would be ten requests."""
+        assert CatalogueSource.NKP in sources.LOOKUP_SOURCES
+        assert CatalogueSource.NKP not in sources.SEARCH_SOURCES
+        assert CatalogueSource.NKP not in metadata._FREE_SEARCHES
 
 
 class TestTheComponentPartRefusal:
@@ -4401,6 +5157,22 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             "k10plus": (K10PLUS, _xml(marc)),
             "oenb": (OENB, _xml(oenb)),
             "nlg": (NLG, _xml(marc)),
+            # Dublin Core rather than MARC, and the identifier carries the
+            # ISBN-10 so the assertion stays discriminating: `_nkp_claims_isbn`
+            # canonicalises both sides, leaving the 13 digit form obtainable
+            # only from the argument.
+            "nkp": (
+                NKP,
+                _xml(
+                    _nkp_envelope(
+                        "<dc-record><type>text</type>"
+                        "<identifier>0743273567</identifier>"
+                        "<title>The Great Gatsby</title>"
+                        "<date>1925</date>"
+                        "<format>218 p.</format></dc-record>"
+                    )
+                ),
+            ),
             "open_library": (
                 OPEN_LIBRARY,
                 httpx.Response(200, json={"title": "The Great Gatsby"}),
@@ -4482,9 +5254,31 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     reorder buys is latency and which records `_merge` folds. A future change
     that makes a hit depend on position, an early exit or a per tier deadline
     say, breaks this rather than quietly narrowing what the chain finds.
+
+    **Each holder is asked about a book in its own registration group, and #122
+    is why.** `sources.SERVES_GROUPS` skips a national catalogue on the lookup
+    path for a group outside its remit, so a source in the tail genuinely is
+    unreachable for a foreign ISBN and the invariant above is now conditional on
+    the remit rather than absolute. Handing every holder one English ISBN would
+    make this class fail for two sources on a change that is deliberate, and
+    hiding that by dropping those two rows would leave the strongest test of the
+    order silently not covering them.
+
+    **What that condition costs is measured and is zero.** A source may carry a
+    remit only if it uniquely answers nothing outside it, which
+    `test_no_source_with_a_remit_uniquely_answers_outside_it` recomputes from the
+    committed sample. So the books this class is about are unaffected; what moved
+    is which ISBN each of two sources has to be asked about to be reached at all.
     """
 
+    #: One ISBN per holder, in a group that holder's remit reaches. Sources with
+    #: no remit take the English one, which is outside both declared remits and
+    #: therefore also proves the unrestricted ones are not filtered.
     ISBN = "9780306406157"
+    ISBNS = {
+        CatalogueSource.NLG: GREEK_ISBN,
+        CatalogueSource.OENB: GERMAN_ISBN,
+    }
 
     def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
         return sources.parse(
@@ -4512,10 +5306,25 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("holder", sorted(sources.LOOKUP_SOURCES))
     async def test_every_permutation_finds_a_book_any_one_source_holds(
-        self, holder: CatalogueSource, monkeypatch: pytest.MonkeyPatch
+        self,
+        holder: CatalogueSource,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Parametrised on the holder, because a table where nothing answers
         would pass this with the chain deleted."""
+        # **Silenced for memory, not for tidiness.** `lookup` logs one line per
+        # resolved ISBN, and pytest's capture handler holds every record emitted
+        # inside a single test. This loop is one test, so at 9! orders it held
+        # 362,880 LogRecords and their argument tuples at once: measured 15 live
+        # objects per iteration, a peak of 1059 MB on the xdist worker that runs
+        # this file, and an OOMKill of `test:backend` against the runner's 2Gi
+        # from 2026-08-31, the day the ninth source took 8! to 9!.
+        #
+        # Setting the level stops the record being CREATED, so it is the loop
+        # that gets cheaper rather than the handler. Nothing here reads the log.
+        # Restored by caplog at teardown, so a later test still captures.
+        caplog.set_level(logging.WARNING, logger="endpaper.metadata")
         monkeypatch.setattr(metadata, "_SOURCES", self._only(holder))
 
         # The signature is mirrored rather than swallowed with **kwargs, for
@@ -4527,12 +5336,11 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
             return None
 
         monkeypatch.setattr(covers, "resolve", no_cover)
+        isbn = self.ISBNS.get(holder, self.ISBN)
         first_asked = set()
         for order in itertools.permutations(sources.DEFAULT_ORDER):
             metadata.clear_cache()
-            result = await metadata.lookup(
-                self.ISBN, "a-key", plan=self._plan(order)
-            )
+            result = await metadata.lookup(isbn, "a-key", plan=self._plan(order))
             assert result.outcome is metadata.Outcome.FOUND, order
             # **`record.sources`, not `in result.source`.** That was a substring
             # match on a joined string, and `"dnb" in "oenb"` is True, so it
@@ -4841,3 +5649,351 @@ class TestTheLibraryOfCongressTableAgreesWithItself:
             f"the docstring says {stated.groups()} and the table gives "
             f"{difference:.1f}, {low:.1f}, {high:.1f}"
         )
+
+
+class TestThePlaintextSourcesAreCounted:
+    """The documented count of plaintext catalogues is derived, not written down.
+
+    **This exists because the number went stale four times.** Each plaintext
+    source that landed left the previous source's prose behind: when the Czech
+    national library was added, `docs/legend.md` still said two,
+    `docs/security.md` still named two, and a `metadata.py` docstring still said
+    "the one catalogue here reached over plaintext HTTP". None of them failed
+    anything, because a count in prose does not recount itself.
+
+    So the set is recomputed from the module's own endpoint values and the docs
+    are checked against it. A fourth plaintext source fails this test rather than
+    quietly making three documents wrong.
+
+    **Two critics broke the first version of this class independently and it is
+    worth recording how**, because every hole was in the guard rather than in its
+    subject. It keyed on a `_*_URL` name, so a fourth endpoint spelled anything
+    else passed. Its mutation test re-spelled the matching rule inline instead of
+    calling it, so blanking the real rule left all five tests green. It scanned
+    two files when the class docstring names three. And it matched a line at a
+    time, so the retired sentence wrapped across two lines went unseen, which is
+    the likely shape in a file that wraps prose at ninety five characters.
+    """
+
+    #: Number words as the docs spell them. Deliberately not a digit parse: the
+    #: docs are prose and spell these out, and a test that accepted either would
+    #: pass on a sentence no reviewer would let through.
+    WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+
+    #: The sentence that went stale, which names no number and so cannot be
+    #: caught by counting words.
+    RETIRED = "the one catalogue here reached over plaintext"
+
+    #: Every file that states the count or the claim, checked as one list so a
+    #: relapse cannot land in a document the tests happen not to read.
+    DOCUMENTS = (
+        "docs/legend.md",
+        "docs/security.md",
+        "docs/decisions.md",
+        "backend/metadata.py",
+        "README.md",
+    )
+
+    @staticmethod
+    def plaintext() -> dict[str, str]:
+        """Every endpoint this module reaches without TLS, by constant name.
+
+        **Every module level string starting `http://`, with no filter on the
+        name.** The first version required the name to end `_URL`, which made the
+        guard agree with a convention rather than with the code: an endpoint
+        added as `_NKP_MIRROR_ENDPOINT` passed it, measured. Nothing enforces that
+        spelling, so nothing may depend on it.
+
+        The XML namespace URIs are not module level values here, so dropping the
+        name filter costs nothing. Should one ever be added, this test fails and
+        the fix is to name the exclusion, not to guess at a prefix again.
+        """
+        return {
+            name: value
+            for name, value in vars(metadata).items()
+            if isinstance(value, str) and value.startswith("http://")
+        }
+
+    @staticmethod
+    def mentions_only(text: str, phrase: str) -> bool:
+        """Whether every occurrence of `phrase` opens a quotation rather than a claim.
+
+        **The one rule, called by the check and by its own mutation test.** An
+        earlier version spelled the regex inline in both places, so blanking the
+        real rule left the mutation test passing on its own copy: it validated the
+        idiom rather than the subject.
+
+        **It does not pair quotes, and that is the point.** The version before
+        this collapsed the whole document to one line and asked whether each
+        occurrence fell inside a `"[^"]*"` span. Pairing quotes across a whole
+        file is unbounded: `backend/metadata.py` holds 1,901 double quotes at odd
+        parity, every string literal is a pair, and the gaps between pairs are
+        wide enough to swallow a bare claim. Measured by planting the unquoted
+        sentence at ten evenly spaced positions in each of the five documents:
+        **6 of 50 went undetected**, five of them in `metadata.py`. Collapsing per
+        paragraph instead brings that to 1 of 50. Asking what precedes the phrase
+        brings it to **0 of 50**, and needs no pairing at all.
+
+        So: a mention is an occurrence immediately preceded by `"` or a backtick,
+        which is what quoting the retired sentence actually looks like. Anything
+        else is the document saying it.
+
+        **Whitespace is collapsed per paragraph** so a sentence wrapped across two
+        lines is still seen; `docs/decisions.md` wraps prose at about ninety five
+        characters and the retired sentence is forty six, so the wrapped form is
+        the likely one and a line scoped match never sees it.
+
+        **A quotation the phrase sits in the middle of reads as a claim here.**
+        That is a false positive and it is the safe direction: it forces a
+        rewording rather than hiding a relapse.
+        """
+        for paragraph in re.split(r"\n\s*\n", text):
+            flat = " ".join(paragraph.split())
+            index = flat.find(phrase)
+            while index != -1:
+                if index == 0 or flat[index - 1] not in '"`':
+                    return False
+                index = flat.find(phrase, index + 1)
+        return True
+
+    def test_the_set_is_the_three_this_repository_has_accepted(self):
+        """The guard's own subject, pinned.
+
+        Without this the test passes on an empty set, which is what it would
+        compute if every endpoint moved to HTTPS or was renamed.
+        """
+        assert set(self.plaintext()) == {"_LOC_URL", "_NLG_URL", "_NKP_URL"}
+
+    def test_the_legend_states_the_current_count(self):
+        legend = (BACKEND.parent / "docs" / "legend.md").read_text(encoding="utf-8")
+        expected = self.WORDS[len(self.plaintext())]
+
+        assert f"One of the {expected} sources fetched over plaintext HTTP" in legend
+
+    def test_the_security_note_states_the_current_count(self):
+        security = (BACKEND.parent / "docs" / "security.md").read_text(encoding="utf-8")
+        expected = self.WORDS[len(self.plaintext())]
+
+        assert f"the {expected} catalogues with no TLS endpoint" in security
+
+    def test_no_document_asserts_a_single_plaintext_catalogue(self):
+        """The retired sentence may be quoted, and may not be said.
+
+        **This failed on its first run against the entry recording that the
+        sentence was wrong.** `docs/decisions.md` quotes it while explaining that
+        three catalogues were configured when it still read "one". A plain
+        substring check cannot tell that apart from the claim itself.
+
+        The rule is **use against mention**: a document saying the sentence in its
+        own voice is a defect, one quoting it as an error is the record of the
+        defect, and quotation marks separate them.
+        """
+        for relative in self.DOCUMENTS:
+            text = (BACKEND.parent / relative).read_text(encoding="utf-8")
+
+            assert self.mentions_only(text, self.RETIRED), (
+                f"{relative} states the retired sentence rather than quoting it"
+            )
+
+    def test_the_use_against_mention_rule_still_refuses_the_bare_claim(self):
+        """Or the test above passes on a document that does assert it.
+
+        **Calls `mentions_only` rather than re-spelling it**, which is the whole
+        point: the first version matched its own inline copy of the regex, so
+        blanking the real rule left this green. A critic demonstrated that by
+        replacing the pattern with `.*` and watching all five tests pass.
+
+        The mutation that matters is not deleting the sentence, it is writing it
+        unquoted, and writing it unquoted **across a line break**, which is how it
+        would actually appear in a wrapped document.
+        """
+        stated = f"It is {self.RETIRED} HTTP, and that is fine."
+        wrapped = "It is the one catalogue here reached over\nplaintext HTTP, and that is fine."
+        mentioned = f'It said "{self.RETIRED} HTTP" and was wrong.'
+        absent = "Nothing here says anything about that at all."
+
+        assert not self.mentions_only(stated, self.RETIRED)
+        assert not self.mentions_only(wrapped, self.RETIRED)
+        assert self.mentions_only(mentioned, self.RETIRED)
+        assert self.mentions_only(absent, self.RETIRED)
+
+
+class TestACatalogueIsNotAskedAboutAForeignIsbn:
+    """`sources.SERVES_GROUPS` reaching `lookup`, from the call site rather than
+    from the plan.
+
+    **The plan level tests cannot see any of this**, which is why the class
+    exists. `Plan.lookup_together` takes no registration group, so an assertion
+    that the tier is unfiltered is true by construction there and pins nothing;
+    the thing that could go wrong is `lookup` deciding to filter the tier too,
+    and only a call site test sees that.
+    """
+
+    @staticmethod
+    def _plan(*names: str) -> sources.Plan:
+        """A plan holding exactly these sources, **in the order given here**.
+
+        The named ones lead, then every other source disabled. Ordering by
+        `DEFAULT_ORDER` instead was the first version and it silently ignored the
+        argument order: `_plan("oenb", "nlg", "dnb")` came back as the default
+        order filtered, so a test meaning to put two restricted sources in the
+        leading tier got the DNB in it and passed on a different plan than the
+        one it named.
+        """
+        plan = sources.parse(
+            {
+                "sources": [{"source": name, "enabled": True} for name in names]
+                + [
+                    {"source": source.value, "enabled": False}
+                    for source in sources.DEFAULT_ORDER
+                    if source.value not in names
+                ]
+            }
+        )
+        assert [source.value for source in plan.asked] == list(names)
+        return plan
+
+    @staticmethod
+    def _recording(asked: list[str]):
+        """A `_SOURCES` table where nothing answers and everything is recorded.
+
+        Nothing answers on purpose: the chain then runs to the end and the list
+        is every source the ISBN actually reached, rather than every source
+        ahead of the first hit.
+        """
+
+        def make(name: CatalogueSource):
+            async def answer(isbn: str, api_key: str) -> metadata.Lookup:
+                asked.append(name.value)
+                return metadata.Lookup(metadata.Outcome.NOT_FOUND)
+
+            return answer
+
+        return {name: make(name) for name in metadata._SOURCES}
+
+    @pytest.fixture
+    def asked(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        seen: list[str] = []
+        monkeypatch.setattr(metadata, "_SOURCES", self._recording(seen))
+        metadata.clear_cache()
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_a_national_catalogue_in_the_tail_is_skipped_for_a_foreign_isbn(
+        self, asked: list[str]
+    ):
+        await metadata.lookup(
+            ENGLISH_ISBN, plan=self._plan("dnb", "k10plus", "nlg", "oenb")
+        )
+        assert asked == ["dnb", "k10plus"]
+
+    @pytest.mark.asyncio
+    async def test_the_same_plan_asks_it_about_a_book_from_its_own_group(
+        self, asked: list[str]
+    ):
+        """The other half, and without it the test above passes on a `lookup`
+        that never reaches the tail at all."""
+        await metadata.lookup(
+            GREEK_ISBN, plan=self._plan("dnb", "k10plus", "nlg", "oenb")
+        )
+        assert asked == ["dnb", "k10plus", "nlg"]
+
+    @pytest.mark.asyncio
+    async def test_the_leading_tier_is_asked_whatever_the_isbn(
+        self, asked: list[str]
+    ):
+        """**The tier is gathered, so it costs its slowest member and not their
+        sum**, measured in `sources.DEFAULT_ORDER` at 0.389s for the German pair
+        against 0.388s for K10plus alone. There is no round trip to save, and
+        filtering it would resize per ISBN the one cost bound `ALWAYS_ASKED`
+        promises a household is fixed.
+
+        Both restricted sources lead here and the ISBN is in neither remit, so a
+        `lookup` that filtered the tier would ask nobody at all. The DNB behind
+        them is unrestricted and is the arm that keeps this from passing on a
+        `lookup` that never reaches the tail.
+        """
+        plan = self._plan("oenb", "nlg", "dnb")
+        assert plan.lookup_together == (CatalogueSource.OENB, CatalogueSource.NLG)
+        await metadata.lookup(ENGLISH_ISBN, plan=plan)
+        assert sorted(asked[: sources.ALWAYS_ASKED]) == ["nlg", "oenb"]
+        assert asked[sources.ALWAYS_ASKED :] == ["dnb"]
+
+    @pytest.mark.asyncio
+    async def test_an_isbn_with_no_decodable_group_asks_everyone(
+        self, asked: list[str]
+    ):
+        """**Fail open.** `isbn.registration_group` returns None for a group the
+        published ranges do not cover, and the answer to no claim is to ask
+        everyone, because the alternative is a catalogue quietly not asked about
+        a book it holds.
+        """
+        assert registration_group("9789999912341") is None
+        await metadata.lookup(
+            "9789999912341", plan=self._plan("dnb", "k10plus", "nlg", "oenb")
+        )
+        assert asked == ["dnb", "k10plus", "nlg", "oenb"]
+
+    @pytest.mark.asyncio
+    async def test_a_book_no_enabled_catalogue_serves_is_not_found_rather_than_unasked(
+        self, asked: list[str]
+    ):
+        """**`NO_SOURCES` is a fact about the library and this is a fact about
+        the book.** Its 409 tells a household it has switched every catalogue off
+        and to go and switch one back on, which is the wrong sentence entirely
+        for a full list that simply does not reach Spanish publishing. The
+        outcome is read off `Plan.lookup_chain` rather than off `attempts` for
+        exactly this, since the group rule made an empty `attempts` mean two
+        different things.
+        """
+        # **Checked rather than assumed, because it was wrong.** The first
+        # spelling of this ISBN failed its own checksum, so `lookup` returned
+        # before asking anybody, `asked` was empty for that reason, and the
+        # outcome assertion below passed on a lookup that never happened.
+        spanish = "9788420471839"
+        assert registration_group(spanish) == "978-84"
+        result = await metadata.lookup(spanish, plan=self._plan("nlg", "oenb"))
+        assert asked == ["nlg", "oenb"]
+        assert result.outcome is metadata.Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_a_library_with_every_catalogue_off_still_says_nothing_was_asked(
+        self, asked: list[str]
+    ):
+        """The arm that keeps the test above from deleting `NO_SOURCES`."""
+        result = await metadata.lookup(ENGLISH_ISBN, plan=self._plan())
+        assert asked == []
+        assert result.outcome is metadata.Outcome.NO_SOURCES
+
+    @pytest.mark.asyncio
+    async def test_a_metered_source_with_a_remit_is_still_not_no_sources(
+        self, asked: list[str], monkeypatch: pytest.MonkeyPatch
+    ):
+        """**The one case where reading the chain and reading `attempts` differ,
+        made reachable.**
+
+        On today's roster they agree: the leading tier is never filtered and
+        holds a non metered chain member whenever one exists, and no metered
+        source has a remit, so an empty `attempts` implies an empty chain. That
+        makes `lookup`'s choice between them untestable and therefore
+        unenforced, which is how a defensive branch comes to be deleted by
+        somebody simplifying.
+
+        One row makes them disagree. A metered source is barred from the tier
+        whatever its position, so with it alone the tier is empty; give it a
+        remit and a foreign ISBN empties the tail too, and `attempts` is empty
+        while the library has a catalogue switched on. That is a fact about the
+        book, and a 409 saying "switch a catalogue back on" would be the mistake
+        `NO_SOURCES` exists to fix, pointed the other way.
+        """
+        monkeypatch.setattr(
+            sources,
+            "SERVES_GROUPS",
+            {**sources.SERVES_GROUPS, CatalogueSource.GOOGLE_BOOKS: frozenset({"978-3"})},
+        )
+        plan = self._plan("google_books")
+        assert plan.lookup_together == ()
+        assert plan.lookup_chain == (CatalogueSource.GOOGLE_BOOKS,)
+        result = await metadata.lookup("9788420471839", "a-key", plan=plan)
+        assert asked == []
+        assert result.outcome is metadata.Outcome.NOT_FOUND

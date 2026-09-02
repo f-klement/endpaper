@@ -2,8 +2,75 @@
 
 ## Unreleased
 
+### Changed
+
+- A national catalogue is asked only about the ISBNs it could hold. An ISBN names its own
+  registration group, and a catalogue whose collecting remit is one group is skipped for a
+  book from another: the National Library of Greece for `978-960` and `978-618`, the
+  Austrian National Library for `978-3`. Measured over the committed 500 ISBN sample,
+  1.396s per lookup becomes 1.279s and the second phase makes 518 requests instead of 753,
+  for the same 377 books. The rule applies to the sources asked one at a time and never to
+  the leading pair, which is gathered and so costs its slowest member rather than their
+  sum. A catalogue may carry a remit only where there is no book it alone answers outside
+  it, which is why the Czech National Library carries none.
+- The provider list on the settings screen says which registration groups a catalogue
+  collects, which is the third thing a row can be beside on and off.
+- **A subject heading now carries the vocabulary the record declared and the
+  identifier it gave.** A Greek record saying `Ευρώπη` also says that the heading
+  comes from `nlgaf`, the National Library of Greece's own authority file, and
+  that its number there is `urn:nbn:gr:nlg:01-A273635`. Both were discarded: the
+  identifier reader accepted a German `(DE-588)` prefix and nothing else, which
+  dropped **11 of 11** of that catalogue's identifiers and 27 of 718 across four
+  catalogues measured on 2026-08-31. Nothing is mapped between vocabularies and
+  nothing is guessed: a heading whose record declared no vocabulary stays
+  unlabelled.
+- **Nothing on screen changes.** No column holds either value yet and nothing
+  reads them: the tag suggestion and the `categories` string both take the words
+  alone, and showing one word twice because two vocabularies claim it would be a
+  worse page. This is the half a later change needs in hand, and it is worth a
+  line only because the identifier stopped being thrown away.
+```
+
+Nothing under `### Added`: no column, no endpoint, no visible feature.
+
+**The first draft of this entry claimed "two identical strings from two vocabularies stop
+being merged" as a user visible change and that was wrong.** `Record.subject_labels`
+deduplicates by label before either consumer sees the subjects, and that property's own
+docstring says both consumers would be wrong to show the distinction. The fold does keep
+them apart inside the record; nothing downstream can tell.
+
+**"The wire is byte identical" was also wrong, and was fixed in the code rather than in the
+prose.** `categories` is a joined string of these labels and is stored on the Book, and the
+first fold emitted surviving entries in key order, so a record carrying `Roman` undeclared
+before `Informatik` declared answered `Informatik; Roman` where the rule it replaced
+answered `Roman; Informatik`. The fold now groups by label, so a label keeps the place of
+its first occurrence and the string is unchanged. `frontend/openapi.json` is separately
+byte identical, which is about the schema and was never about this.
+
+### Fixed
+
+- An ISBN of Unicode digits that are not ASCII is refused rather than accepted or crashing.
+  `str.isdigit()` is true of far more than `0` to `9`, and the two halves failed in
+  opposite directions: a superscript two made `GET /api/books/lookup` raise, and an
+  Arabic-Indic zero passed the checksum, so `POST /api/books` stored a string the unique
+  ISBN constraint could not see as the same book. The tag filter had the first shape on a
+  query string. Every digit predicate in the backend is now narrowed to ASCII, and a house
+  rule requires it.
+
+## v0.12.0
+
+_2026-08-31_
+
 ### Added
 
+- **The Czech National Library** is asked about a book by ISBN. Of 50 Czech
+  ISBNs the rest of the chain answers 10 between them and this one answers 49.
+  It is on by default and can be moved or switched off in Settings, Catalogue
+  sources.
+- **It is asked about an ISBN and never about a title**, which is the server's
+  doing rather than a choice: it returns one filled in record per reply whatever
+  is asked for, so offering ten search results would mean ten separate requests
+  to a catalogue somebody else pays to run. A scan wants one record and gets one.
 - **The National Library of Greece** is asked about a book, on an ISBN lookup and
   on a title search. It is the Greek legal deposit catalogue, so it holds the
   domestic edition under the domestic ISBN, which is the case the rest of the

@@ -202,10 +202,21 @@ export const login = async (
   loginRequest: LoginRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<Token> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<Token>(getLoginUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(loginRequest),
   });
 };
@@ -217,14 +228,14 @@ export const getLoginMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof login>>,
     TError,
-    { data: LoginRequest },
+    LoginMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof login>>,
   TError,
-  { data: LoginRequest },
+  LoginMutationVariables,
   TContext
 > => {
   const mutationKey = ["login"];
@@ -238,7 +249,7 @@ export const getLoginMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof login>>,
-    { data: LoginRequest }
+    LoginMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -253,6 +264,7 @@ export type LoginMutationResult = NonNullable<
 >;
 export type LoginMutationBody = LoginRequest;
 export type LoginMutationError = HTTPValidationError;
+export type LoginMutationVariables = { data: LoginRequest };
 
 /**
  * @summary Login
@@ -262,7 +274,7 @@ export const useLogin = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof login>>,
       TError,
-      { data: LoginRequest },
+      LoginMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -271,7 +283,7 @@ export const useLogin = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof login>>,
   TError,
-  { data: LoginRequest },
+  LoginMutationVariables,
   TContext
 > => {
   return useMutation(getLoginMutationOptions(options), queryClient);
@@ -497,10 +509,21 @@ export const register = async (
   userCreate: UserCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<Token> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<Token>(getRegisterUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(userCreate),
   });
 };
@@ -512,14 +535,14 @@ export const getRegisterMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof register>>,
     TError,
-    { data: UserCreate },
+    RegisterMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof register>>,
   TError,
-  { data: UserCreate },
+  RegisterMutationVariables,
   TContext
 > => {
   const mutationKey = ["register"];
@@ -533,7 +556,7 @@ export const getRegisterMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof register>>,
-    { data: UserCreate }
+    RegisterMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -548,6 +571,7 @@ export type RegisterMutationResult = NonNullable<
 >;
 export type RegisterMutationBody = UserCreate;
 export type RegisterMutationError = HTTPValidationError;
+export type RegisterMutationVariables = { data: UserCreate };
 
 /**
  * @summary Register
@@ -557,7 +581,7 @@ export const useRegister = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof register>>,
       TError,
-      { data: UserCreate },
+      RegisterMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -566,7 +590,7 @@ export const useRegister = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof register>>,
   TError,
-  { data: UserCreate },
+  RegisterMutationVariables,
   TContext
 > => {
   return useMutation(getRegisterMutationOptions(options), queryClient);
@@ -604,10 +628,21 @@ export const switchAccount = async (
   loginRequest: LoginRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<Token> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<Token>(getSwitchAccountUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(loginRequest),
   });
 };
@@ -619,14 +654,14 @@ export const getSwitchAccountMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof switchAccount>>,
     TError,
-    { data: LoginRequest },
+    SwitchAccountMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof switchAccount>>,
   TError,
-  { data: LoginRequest },
+  SwitchAccountMutationVariables,
   TContext
 > => {
   const mutationKey = ["switchAccount"];
@@ -640,7 +675,7 @@ export const getSwitchAccountMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof switchAccount>>,
-    { data: LoginRequest }
+    SwitchAccountMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -655,6 +690,7 @@ export type SwitchAccountMutationResult = NonNullable<
 >;
 export type SwitchAccountMutationBody = LoginRequest;
 export type SwitchAccountMutationError = HTTPValidationError;
+export type SwitchAccountMutationVariables = { data: LoginRequest };
 
 /**
  * @summary Switch Account
@@ -667,7 +703,7 @@ export const useSwitchAccount = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof switchAccount>>,
       TError,
-      { data: LoginRequest },
+      SwitchAccountMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -676,7 +712,7 @@ export const useSwitchAccount = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof switchAccount>>,
   TError,
-  { data: LoginRequest },
+  SwitchAccountMutationVariables,
   TContext
 > => {
   return useMutation(getSwitchAccountMutationOptions(options), queryClient);

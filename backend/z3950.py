@@ -416,7 +416,7 @@ class Client(Protocol):
         ...
 
 
-def _term(value: str) -> str:
+def pqf_term(value: str) -> str:
     """One PQF term, quoted, with everything that could change the query escaped.
 
     **Getting this wrong does not raise, it rewrites the query.** Measured 2026-08-28
@@ -494,7 +494,7 @@ def query(use: int, value: str) -> str:
     form. Callers use `isbn_query` and `title_query` rather than this, which exists so a
     new access point is one constant rather than a new string format.
     """
-    return f"@attr 1={use} {_term(value)}"
+    return f"@attr 1={use} {pqf_term(value)}"
 
 
 def isbn_query(isbn: str) -> str:

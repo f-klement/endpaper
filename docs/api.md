@@ -597,21 +597,21 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks six catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks seven catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
-two fastest sources here: 0.25s and 0.45s at the ninetieth percentile over the 500 ISBN
-sample below. They are asked together, so the pair costs the slower of the two rather than
+two fastest sources here that answer broadly: 0.26s and 0.51s at the ninetieth percentile
+over the 500 ISBN sample below. They are asked together, so the pair costs the slower of the two rather than
 the sum. Their records are merged field by field,
 nothing overwritten, so a page count from one and a subject heading from the other land on
 the same book.
 
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
-**National Library of Greece**, then the **Austrian National Library**, then **Google
-Books**. Phase two stops at the first hit, so it is ordered by how often a source answers a
-book phase one missed: of 279 such ISBNs in 500, Open Library answered 83, the NLG 34 and
-the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it is
+**Czech National Library**, then the **National Library of Greece**, then the **Austrian
+National Library**, then **Google Books**. Phase two stops at the first hit, so it is
+ordered by how often a source answers a book phase one missed: of 278 such ISBNs in 500,
+Open Library answers 82, the NKP 42, the NLG 34 and the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it is
 here rather than in phase one; Google is the only one with a key, a quota and a bill
 attached, and an ordinary lookup therefore spends no quota at all.
 
@@ -619,20 +619,52 @@ attached, and an ordinary lookup therefore spends no quota at all.
 Phase one is paid on every lookup by every install, and what a national catalogue answers
 is concentrated in the country it serves: the NLG answers 34 of the books phase one missed
 and **all 34 are Greek**. Pooled over ten countries that reads like the best second slot
-there is. For nine of the ten it is a request that never answers. A Greek library can
-promote it in Settings, which is what the provider list is for.
+there is. A Greek library can promote it in Settings, which is what the provider list is
+for.
 
-**No order of these six finds more books than another.** Every enabled source is asked
+**And in phase two it is asked only about the ISBNs it could hold.** An ISBN names its own
+registration group, `978-3` for German language publishing, `978-960` and `978-618` for
+Greek, and a catalogue whose collecting remit is one of those is skipped for a book from
+another. So a German library stops paying a round trip to Athens on every scan the German
+pair misses. Measured over the same 500 ISBNs: **1.396s per lookup becoming 1.279s**, and
+**753 phase two requests becoming 518**, for the same 377 books.
+
+**No book is lost to it, and that is a measured bound rather than an intention.** A
+catalogue may carry a remit only if there is no book it alone answers outside that remit,
+which rules the Czech National Library out on two: a Portuguese one and an Argentinian one
+that nothing else in the roster holds. `backend/sources.py` carries the table and the
+measurement, as `SERVES_GROUPS`.
+
+**Three things are asked anyway**, and each is a place the rule declines to make a claim
+rather than a hole in it. Phase one is never filtered, so a catalogue a library has
+promoted there is asked about every ISBN whatever its remit. An ISBN whose registration
+group this build cannot decode goes to everybody. And so does one whose **Bookland
+prefix** no remit mentions: `978` and `979` are separate assignment spaces, a catalogue
+whose country has no `979` group yet cannot say so, and silence there is read as no claim.
+Without that last one every `979` ISBN would have lost both national catalogues, and the
+500 ISBN sample is entirely `978`, so nothing in it would have said so.
+
+**The Czech National Library answers a scan and never a search**, which is the one
+asymmetry in this table and is the server's rather than a preference: it returns a single
+filled in record per reply whatever page size is asked for, so ten search results would be
+ten requests. A lookup wants one record and gets one.
+
+**No order of these seven finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
+The one thing that does change what a source is asked about is its **remit**, above, and
+it is a different axis from the order: a national catalogue below phase one is asked about
+the registration groups it collects and no others. The bound on that is zero books, so the
+sentence above holds in practice as well as in principle.
+
 **What the chain covers without a Google Books key, which is what a stock install runs.**
-Five of the six are free; Google Books needs a key you supply. Measured over 500 domestic
-ISBNs across ten countries, re-run 2026-08-31, the five free sources answer **336 and miss
-164**, and outside German language publishing they miss **160 of 400**. The same books
-under the previous release answered 300: the NLG accounts for part of that and a fix to
-how a qualified `020` is read accounts for the rest, 51 records that three sources already
-held and this app was refusing. So a statement that this chain covers a given country is
+Six of the seven are free; Google Books needs a key you supply. Measured over 500 domestic
+ISBNs across ten countries, re-run 2026-08-31, the six free sources answer **377 and miss
+123**, and outside German language publishing they miss **119 of 400**. The same books
+under the previous release answered 300: the two national catalogues added since, the NLG
+and the NKP, account for part of that and a fix to how a qualified `020` is read accounts
+for the rest, 51 records that three sources already held and this app was refusing. So a statement that this chain covers a given country is
 still a statement about a keyed install: an earlier survey put Italy at 36% missed keyless
 against 0% with a key, and Greece at 86% against 54%, and the Greek half of that has since
 moved on its own, from 7 of 50 keyless to 39 of 50. The per source figures are in
@@ -648,8 +680,11 @@ ISBNs measured 1.24s then 1.15s before the change and 1.34s then 1.46s after it,
 network variance around two extra requests on a source that is only asked when the DNB and
 K10plus have both missed.
 
-A 404 means every one of them was asked and none holds the ISBN. The ranking and the
-measurements behind it are in `backend/metadata.py`.
+A 404 means every source whose remit reaches this ISBN was asked and none holds it. That
+is still a claim about the book rather than about the library, which is why a library whose
+whole list is national catalogues and whose book is foreign to all of them gets a 404 here
+and not the 409 below: the catalogues are switched on, they simply do not collect it.
+The ranking and the measurements behind it are in `backend/metadata.py`.
 
 The response carries `classifications`, each a scheme, a number and the caption the
 catalogue gave it, and `suggested_tag_ids`. Four schemes are produced. `ddc` and `lcc`
@@ -1245,8 +1280,20 @@ Only `source` and `enabled` are the library's to set. The rest are computed on t
 so a browser cannot get the rule wrong: `answers_lookup` and `answers_search` say which
 questions this catalogue can answer at all (the BnF and the Library of Congress answer
 title search only), `asked_first` says whether it is in the leading pair asked together on
-every ISBN lookup, and `needs_a_key` with `ready` say whether it can answer at all in this
-deployment.
+every ISBN lookup, `serves_groups` names the registration groups this catalogue's remit
+covers and is empty for one with no remit to state, and `needs_a_key` with `ready` say
+whether it can answer at all in this deployment.
+
+`serves_groups` is the third thing a row can be, beside on and off: asked, at the position
+it holds, for some books and not others. Without it a national catalogue reads as switched
+on and answers nothing on nine scans in ten.
+
+**It is the remit a catalogue declares, not the filter that was applied to it**, and the
+difference shows on one row. Phase one is never filtered, but a catalogue promoted into
+phase one still reports its remit here: a list of just the Austrian and Greek national
+libraries returns both with `asked_first` true and `serves_groups` populated, and both are
+then asked about every ISBN. `asked_first` is the field that answers "is this filtered",
+so anything drawing this reads that one first.
 
 **What the order decides, and what it does not.** It is the order sources are **asked**.
 It is not the order they are **believed** when two disagree about one field, which stays

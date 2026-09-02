@@ -583,7 +583,10 @@ def stored_ids() -> set[int]:
     for entry in directory.iterdir():
         if not entry.is_file() or entry.suffix.lstrip(".").lower() not in ALLOWED_IMAGE_EXTENSIONS:
             continue
-        if entry.stem.isdigit():
+        # `isascii()` beside `isdigit()`, so a filename of non ASCII digits
+        # cannot raise out of the `int()` and take the whole orphan sweep with
+        # it. See `isbn.is_valid_isbn13`.
+        if entry.stem.isascii() and entry.stem.isdigit():
             found.add(int(entry.stem))
     return found
 

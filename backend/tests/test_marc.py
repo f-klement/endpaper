@@ -616,7 +616,41 @@ class TestReadingRealCatalogueShapes:
             a_record(datafield("245", ("a", "T")), datafield("650", ("a", "Cookery")))
         )
         assert parsed.records[0].headings == ()
-        assert parsed.records[0].subjects == ("Cookery",)
+        assert parsed.records[0].subject_labels == ["Cookery"]
+
+    def test_an_uploaded_file_shouting_the_vocabulary_still_gets_its_headings(self):
+        """The dependency the case folding actually protects, pinned.
+
+        `_extra_headings` decides an LCSH row by `== "lcsh"`, so a file writing
+        `$2 LCSH` loses every one of them, silently, with the record otherwise
+        whole. **That, and not the catalogues, is why
+        `metadata._subject_vocabulary` lower cases**: measured 2026-08-31, 0 of
+        the twelve `$2` codes seen live appeared in two cases, and the two upper
+        case ones are each written by one catalogue only. So no served record
+        motivates the folding and this one line does, which is a reason nothing
+        stated until the second round of #134.
+
+        A cataloguer's own export is exactly where the shouted spelling lives,
+        because MARC's source codes are conventionally lower case and a hand
+        maintained file is under nobody's validator.
+        """
+        shouted = marc.read(
+            a_record(
+                datafield("245", ("a", "T")),
+                datafield("650", ("a", "Treasure troves"), ("2", "LCSH")),
+            )
+        )
+        quiet = marc.read(
+            a_record(
+                datafield("245", ("a", "T")),
+                datafield("650", ("a", "Treasure troves"), ("2", "lcsh")),
+            )
+        )
+
+        assert shouted.records[0].headings == (
+            Heading(ClassificationScheme.LCSH, "Treasure troves", None),
+        )
+        assert shouted.records[0].headings == quiet.records[0].headings
 
 
 class TestTheSeamIntoMetadataIsPinned:

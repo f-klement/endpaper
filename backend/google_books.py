@@ -56,7 +56,11 @@ def _volume_to_fields(volume: dict[str, Any]) -> dict[str, Any]:
     )
 
     published = str(info.get("publishedDate") or "")
-    year = int(published[:4]) if published[:4].isdigit() else None
+    # `isascii()` beside `isdigit()`: this is somebody else's JSON, and a year
+    # of four superscript digits would satisfy `isdigit()` and raise out of
+    # `int()`. See `isbn.is_valid_isbn13` for the measurement.
+    head = published[:4]
+    year = int(head) if head.isascii() and head.isdigit() else None
 
     series_name, series_index = _series_from(info)
 

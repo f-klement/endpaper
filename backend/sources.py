@@ -35,9 +35,9 @@ one that decides it:
    `_is_placeholder_title` exists to catch.
 3. **A single list would have to reproduce today's belief on the search path,
    and no order of this roster does.** `metadata._SECONDARY_SOURCES` is
-   `{bnf, loc, oenb, nlg}` and it is exactly `_MATCH_PRECEDENCE[4:]`, so
+   `{bnf, loc, oenb, nlg, nkp}` and it is exactly `_MATCH_PRECEDENCE[4:]`, so
    "believed last" is a contiguous tail **of that order**. In this module's
-   order those four sit at positions 3, 4, 6 and 7, which is not a tail and not
+   order those five sit at positions 3, 4, 5, 7 and 8, which is not a tail and not
    contiguous.
    So a cut position in the ask order cannot express the regional set, and
    seeding a different ask order to make it contiguous changes the lookup chain
@@ -45,7 +45,7 @@ one that decides it:
 
 **The two paths do not share a roster either**, which is not an argument on its
 own but is why a single list would have two entries that mean nothing on half
-the paths they claim to order: six sources answer an ISBN, eight answer a
+the paths they claim to order: seven sources answer an ISBN, eight answer a
 title.
 
 So the stored list is the **ask** order, and the settings screen says so rather
@@ -89,6 +89,7 @@ German one does not. A position is the thing a household can actually move.
 from dataclasses import dataclass
 from typing import Any, Final
 
+import isbn
 from enums import CatalogueSource
 
 
@@ -131,22 +132,27 @@ class Measured:
     #: flight. **p90 and not the mean**, because a tier is gathered and so costs
     #: its slowest member, and a mean hides the case that decides the budget.
     p90_seconds: float
-    #: How many of the sample's ten country frames this source answers anything
-    #: in.
+    #: How many of this source's answers fall in its single largest frame.
     #:
-    #: **The field that separates a general catalogue from a national one**, and
-    #: it exists because the NLG made the difference decidable. Everything else
-    #: in this table is pooled over 500 ISBNs drawn as ten frames of fifty, so a
-    #: source that answers one frame perfectly and nine not at all is scored as
-    #: though its coverage were spread. That is the right instrument for
-    #: coverage, where the question is whether a book resolves at all, and the
-    #: wrong one for the **tier**, which every household pays on every lookup
-    #: while its own shelf sits in one or two frames rather than ten.
+    #: **With `answered`, this is what separates a general catalogue from a
+    #: national one**, and the ratio rather than either number is the thing:
+    #: `largest_frame / answered` is how concentrated the source is. Stored as
+    #: the raw count so this table stays measurements and the conclusion is
+    #: computed. See `TIER_MAX_CONCENTRATION`.
     #:
-    #: Measured in the coverage pass of 2026-08-30: K10plus and Open Library
-    #: answer in 10 frames, the DNB in 5, the OeNB in 4 and the NLG in **1**.
-    #: See `TIER_FRAMES_MINIMUM`.
-    frames_answered: int
+    #: **This replaced a count of frames answered, and the replacement is the
+    #: whole point.** The first version asked how many of the ten frames a source
+    #: answers **anything** in, which a design critic measured as too weak in the
+    #: round that introduced it: it flatters the DNB, which scores 5 frames while
+    #: 83 of its 91 answers are in two, and it admits the OeNB at 4 frames and
+    #: **1** marginal answer while barring the NLG at 1 frame and **34**. It is a
+    #: rule about presence standing in for a rule about generality.
+    #:
+    #: The Czech National Library is what made that undeniable: it answers in
+    #: **6** frames, so the frame count admits it to the tier, and **49 of its 59
+    #: answers are Czech**. Concentration puts it where it belongs without
+    #: anybody re-deciding.
+    largest_frame: int
 
 
 #: What each free lookup source does, measured on the night of 2026-08-30.
@@ -202,19 +208,22 @@ class Measured:
 #: covers them all, so a source added to the roster cannot quietly go unmeasured.
 MEASURED: Final[dict[CatalogueSource, Measured]] = {
     CatalogueSource.DNB: Measured(
-        answered=91, of=500, p90_seconds=0.251, frames_answered=5
+        answered=91, of=500, p90_seconds=0.258, largest_frame=44
     ),
     CatalogueSource.K10PLUS: Measured(
-        answered=208, of=500, p90_seconds=0.471, frames_answered=10
+        answered=210, of=500, p90_seconds=0.512, largest_frame=45
     ),
     CatalogueSource.OENB: Measured(
-        answered=55, of=500, p90_seconds=0.539, frames_answered=4
+        answered=55, of=500, p90_seconds=0.538, largest_frame=30
     ),
     CatalogueSource.OPEN_LIBRARY: Measured(
-        answered=237, of=500, p90_seconds=2.757, frames_answered=10
+        answered=237, of=500, p90_seconds=2.562, largest_frame=36
     ),
     CatalogueSource.NLG: Measured(
-        answered=37, of=500, p90_seconds=0.236, frames_answered=1
+        answered=37, of=500, p90_seconds=0.238, largest_frame=37
+    ),
+    CatalogueSource.NKP: Measured(
+        answered=59, of=500, p90_seconds=0.239, largest_frame=49
     ),
 }
 
@@ -224,8 +233,10 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: answer the same books are worth less together than two that miss different
 #: ones, and a per source table has no way of saying so. Each entry is the best
 #: tier of that size that `FIRST_TIER_BUDGET_SECONDS` allows: K10plus alone,
-#: then K10plus with the DNB, then both with the OENB, which is every source
-#: inside the budget and so the largest tier there can be.
+#: then K10plus with the DNB, then both with the OENB. That is every source the
+#: tier **rule** allows, which is narrower than every source inside the budget:
+#: five are inside the budget and three are inside it and under
+#: `TIER_MAX_CONCENTRATION` as well.
 #:
 #: **It exists to pin the tier's size against something other than the tier.**
 #: Without it, a guard that derives the tier from `MEASURED` slices with
@@ -236,82 +247,89 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: Recomputed from the committed sample beside `MEASURED`, and subject to the
 #: same limit: it is evidence about that run and not about a re-run.
 #:
-#: **Over the sources a tier may hold, which is now narrower than "inside the
-#: budget".** `TIER_FRAMES_MINIMUM` keeps a national catalogue out, and it has
-#: to be applied here as well or this table would price a tier that cannot be
-#: built: the best pair of everything inside the budget is K10plus with the NLG
-#: at 242, against 221 for the pair that ships, and all 34 books of that
-#: difference are in one frame.
-TIER_UNION: Final[dict[int, int]] = {1: 208, 2: 221, 3: 222}
+#: **Over the sources a tier may hold, which is narrower than "inside the
+#: budget".** `TIER_MAX_CONCENTRATION` keeps two national catalogues out, and it
+#: has to be applied here as well or this table would price a tier that cannot
+#: be built: the best pair of everything inside the budget is K10plus with the
+#: NKP at **254**, against **222** for the pair that ships. That pair reaches 42
+#: books the shipping pair does not, and **40 of the 42 are Czech**. The NLG pair
+#: is the same shape one step milder, 244, with all 37 of its answers in the
+#: Greek frame.
+TIER_UNION: Final[dict[int, int]] = {1: 210, 2: 222, 3: 223}
 
-#: How many of the sample's ten frames a source must answer in to be asked on
+#: How much of a source's coverage may sit in one frame and still be asked on
 #: **every** lookup.
 #:
-#: **What it decides is the tier's size, not its membership**, and stating that
-#: the other way round was this constant's first draft. The membership rule
-#: ranks by pooled rate and the NLG is fourth of the four sources inside the
-#: budget, 37 of 500 against the OeNB's 55, so `_tier_for` excludes it unaided:
-#: the tier is `{dnb, k10plus}` under every frame floor from 0 to 5. A design
-#: critic executed that and the first version of this docstring was wrong.
+#: **What it decides is the tier's size, not its membership.** The membership
+#: rule ranks by pooled rate and no national catalogue reaches the top two on it.
+#: The **size** rule is `TIER_UNION` with `SLOT_MUST_EARN`, and that unions
+#: rather than ranks, so without this the arithmetic demands a third concurrent
+#: request from every install everywhere.
 #:
-#: **The size rule is where it bites, because `TIER_UNION` does not rank, it
-#: unions.** With the frame rule off, the best tier of each size reads
-#: `{1: 208, 2: 242, 3: 255, 4: 256}`, so the slots earn 208, 34, 13 and 1, and
-#: the third clears `SLOT_MUST_EARN` at 10. That is a measurement saying every
-#: install everywhere should make a third concurrent request on every lookup.
-#: With the frame rule on it reads `{1: 208, 2: 221, 3: 222}`, the third slot
-#: earns 1, and `ALWAYS_ASKED` stays 2.
+#: **Concentration rather than a count of frames answered**, which is what this
+#: constant measured first and which was too weak. The count asks how many of the
+#: ten frames a source answers **anything** in. That admitted the OeNB at 4
+#: frames and **1** marginal answer while barring the NLG at 1 frame and **34**,
+#: it flattered the DNB, and the Czech National Library then walked straight
+#: through it: **6** frames answered, and **49 of 59 answers Czech**. A design
+#: critic had already named the weakness in the round that introduced it.
 #:
-#: **The reason to disbelieve the wider tier is the sample's own shape.** It is
-#: ten frames of fifty by country, so a pooled union weights ten national
-#: publishing outputs equally, and no household's shelf is one tenth Greek. What
-#: the tier costs is paid by one library on every scan; what a national
-#: catalogue answers is concentrated in the country it serves. All 34 of the
-#: NLG's marginal answers are in one frame.
+#: Measured over the coverage pass, largest frame as a share of a source's own
+#: answers:
 #:
-#: **Three things wrong with the metric, stated because the next reader will
-#: otherwise have to find them again.** A design critic found all three.
+#: | source | answers | largest frame | concentrated |
+#: |---|---|---|---|
+#: | Open Library | 237 | 36 | 15% |
+#: | K10plus | 210 | 45 | 21% |
+#: | DNB | 91 | 44 | 48% |
+#: | OeNB | 55 | 30 | 55% |
+#: | **NKP** | 59 | 49 | **83%** |
+#: | **NLG** | 37 | 37 | **100%** |
 #:
-#: * It counts "answers anything in", not "answers usefully in", which flatters
-#:   the DNB: it scores 5 and 83 of its 91 answers are in two frames.
-#: * It admits the OeNB, at 4 frames and **1** marginal answer, and bars the
-#:   NLG, at 1 frame and **34**. So it is not a rule about contribution and
-#:   should not be read as one. It is a rule about whether a contribution is
-#:   general enough to charge every install for.
-#: * The NLG sits at 1 and **one record moves it to 2**: a single Greek imprint
-#:   catalogued under another frame's registration group. So the gap below is
-#:   wide in this sample and the value is one observation from the boundary.
-#:   `test_the_frame_rule_is_what_holds_the_tier_at_two` pins the decision rather
-#:   than the count, which is why it survives that.
+#: **A statement of intent sitting in a gap**, like the two constants below. The
+#: most concentrated source kept is 55% and the least concentrated one excluded
+#: is 83%, so every threshold from 56% to 83% picks the same tier and two thirds
+#: sits 42% into that gap. `test_the_concentration_bound_is_not_fitted_to_this_roster`
+#: sweeps it rather than asserting it.
 #:
-#: The roster is otherwise nowhere near it: the sources this keeps answer in 4,
-#: 5, 10 and 10 frames and the one it excludes answers in **1**, so every value
-#: from 2 to 4 picks the same tier.
+#: **Why concentration is the right question and not a proxy for one.** The tier
+#: is gathered on every lookup of every install, and what one household gets from
+#: a slot is what that source answers **for the books on its own shelf**. A shelf
+#: sits in one or two frames. A source whose value is nearly all in one frame is
+#: therefore worth a great deal to one library and nothing to the rest, and the
+#: pooled union cannot see the difference: it weights ten national publishing
+#: outputs equally because the sample was drawn that way.
+#:
+#: **A concentrated source is not a worse source.** The NKP answers 42 of the 278
+#: books the leading pair missed, second only to Open Library, and it is on by
+#: default. This decides where it is asked, not whether.
 #:
 #: **What it does not claim.** Ten frames are ten sampled countries, not the
-#: world, so "answers in one frame" means one of the ten that were asked. A
-#: catalogue serving a country nobody sampled would read as answering none, and
-#: it would be kept out of the tier for the right reason by accident.
-TIER_FRAMES_MINIMUM: Final = 2
+#: world. A catalogue serving a country nobody sampled would read as answering
+#: almost nothing, and would be kept out of the tier by the rate rule first.
+TIER_MAX_CONCENTRATION: Final = 2 / 3
 
 #: For each source asked one at a time, how many of the books the leading tier
 #: missed it answers, of the same 500.
 #:
-#: **The tail's rule is marginal and no per source count can express it**, which
-#: `TestTheOrderFollowsTheMeasurement` disclosed as a blind spot before this
-#: table existed: it ordered the tail by `answered / of`, which counts books the
-#: tier already had. The two agreed while the tail was Open Library and the
-#: OeNB, and the NLG is where they come apart. Measured over the 279 ISBNs of
-#: 500 that the leading pair missed: Open Library answers 83, the **NLG 34** and
-#: the OeNB **1**, while the pooled counts read 237, 37 and 55. So the pooled
-#: rule would ask the OeNB before the NLG on every one of those 279 lookups, to
-#: reach a source that answers one of them.
+#: **The tail's rule is marginal and no per source count can express it.** The
+#: pooled counts read 237, 59, 37 and 55; against the 278 books the leading pair
+#: missed, the answers are 82, 42, 34 and 1. So the pooled rule would ask the
+#: OeNB before either national catalogue, to reach a source that answers one of
+#: those 278.
+#:
+#: **This is where a concentrated source earns its place.** The NKP is kept out
+#: of the tier by `TIER_MAX_CONCENTRATION` and is second here, ahead of two
+#: sources that answer more books overall, because what the tail is asked for is
+#: precisely the books the tier could not find. The rule decides **where** a
+#: national catalogue is asked, never whether.
 #:
 #: Google Books is absent for `MEASURED`'s reason: it is metered, a default
-#: install has no key, and its position is a metering rule rather than a
-#: coverage one.
+#: install has no key, and its position is a metering rule rather than a coverage
+#: one.
 TAIL_MARGINAL: Final[dict[CatalogueSource, int]] = {
-    CatalogueSource.OPEN_LIBRARY: 83,
+    CatalogueSource.OPEN_LIBRARY: 82,
+    CatalogueSource.NKP: 42,
     CatalogueSource.NLG: 34,
     CatalogueSource.OENB: 1,
 }
@@ -320,11 +338,11 @@ TAIL_MARGINAL: Final[dict[CatalogueSource, int]] = {
 #:
 #: Ten books per 500, and like `FIRST_TIER_BUDGET_SECONDS` it is a statement of
 #: intent placed in a gap rather than a threshold fitted to the roster. The
-#: second slot earns **13** and the third earns **1**, so every value from 2 to
-#: 13 gives the same answer, and
+#: second slot earns **12** and the third earns **1**, so every value from 2 to
+#: 12 gives the same answer, and
 #: `test_the_slot_threshold_is_not_fitted_to_this_roster` sweeps that rather
 #: than asserting it. **The gap was [3, 35] before the NLG joined and the 020
-#: rule changed**, and 10 sits 72.7% into the narrower one, which is inside that
+#: rule changed**, and 10 sits 80.0% into the narrower one, which is inside that
 #: test's bound and closer to an edge than it was.
 #:
 #: The cost the other side of it is not in this file and is the reason the
@@ -337,11 +355,11 @@ SLOT_MUST_EARN: Final = 10
 #: **A statement of intent, not a threshold fitted to the roster.** Somebody is
 #: standing at a shelf with a phone when this runs, and one second is what this
 #: project is willing to spend before the first answer. The roster is nowhere
-#: near it: the slowest source inside the budget is 0.539s (the OENB, which is
+#: near it: the slowest source inside the budget is 0.538s (the OENB, which is
 #: not in the tier) and the only one outside is
-#: 2.757s, so every bound from 0.471s up to but not including 2.757s picks the
+#: 2.562s, so every bound from 0.512s up to but not including 2.562s picks the
 #: same tier. The endpoint is exclusive and that is not pedantry: at exactly
-#: 2.757s Open Library qualifies and wins on coverage, so the tier changes.
+#: 2.562s Open Library qualifies and wins on coverage, so the tier changes.
 #:
 #: **The guard states that slack as a proportion of the interval, not in
 #: seconds**, and that was a correction. An absolute floor of half a second left
@@ -360,7 +378,7 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: **It does not decide which books are found.** `metadata.lookup` asks every
 #: enabled source until one answers, so the set of ISBNs the chain resolves is
 #: the same under any permutation of it. Modelled over seven candidate orders
-#: against the 500 ISBN outcome set behind `MEASURED`: **336 of 500 under every
+#: against the 500 ISBN outcome set behind `MEASURED`: **377 of 500 under every
 #: one of them.** So there is no ordering of this roster that "covers more", and
 #: a reorder is never the fix for a book the chain misses.
 #:
@@ -378,9 +396,11 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: `_MATCH_PRECEDENCE` decides it on the search path, so promoting a source here
 #: changes whether it is asked and never whether it is believed.
 #:
-#: **The frame condition is the newer half and `TIER_FRAMES_MINIMUM` carries the
-#: reason.** Without it the NLG takes the second slot on the pooled measurement,
-#: on 34 books that are all in one frame of ten.
+#: **The concentration condition is the newer half and
+#: `TIER_MAX_CONCENTRATION` carries the reason.** Without it the NKP takes the
+#: second slot on the pooled measurement, on 42 books of which 49 of its 59
+#: answers sit in one frame of ten, and the NLG follows it with all 37 of its
+#: answers in one frame.
 #:
 #: **Position inside the tier is immaterial only while the tier holds the source
 #: `_preferred_source` names for that ISBN.** That is true of this tier and not
@@ -394,18 +414,18 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: **The DNB leads and costs nothing.** It answers 8 of the 400 ISBNs outside
 #: German publishing, which reads as a wasted slot, and it is not one: the tier
 #: is gathered, so it costs its slowest member. `dnb + k10plus` costs a mean of
-#: 0.369s and **K10plus alone costs a mean of 0.369s**, p90 0.471s against
-#: 0.471s. What the slot spends is one HTTP request and under a millisecond.
+#: 0.389s and **K10plus alone costs a mean of 0.388s**, p90 0.513s against
+#: 0.512s. What the slot spends is one HTTP request and under a millisecond.
 #: What it buys is the 44 of 50 German language ISBNs and the 39 of 50 Austrian
 #: ones it answers, and demoting it to the tail instead costs a modelled mean of
-#: **1.447s against 1.366s** for the same 336 books.
+#: **1.472s against 1.396s** for the same 377 books.
 #:
 #: **Open Library is the broadest source and is kept out of the tier.** Paired
-#: with K10plus it reaches 297 of 500 against the leading pair's 221, and its
-#: `p90_seconds` is nearly six times the tier's. That is paid on every lookup,
-#: including the 221 the fast pair already answers, and it makes the whole
-#: lookup slower rather than faster: modelled mean **1.868s against 1.366s**,
-#: for the same 336 books.
+#: with K10plus it reaches 297 of 500 against the leading pair's 222, and its
+#: `p90_seconds` is five times the tier's. That is paid on every lookup,
+#: including the 222 the fast pair already answers, and it makes the whole
+#: lookup slower rather than faster: modelled mean **1.850s against 1.396s**,
+#: for the same 377 books.
 #:
 #: **Every modelled figure here walks `lookup`'s two phases over the 500 rows
 #: and costs a gathered tier as that row's own maximum**, never as the maximum
@@ -417,42 +437,46 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: ## The tail is ordered by how often it answers a book the tier missed
 #:
 #: `Plan.lookup_in_turn` stops at the first hit, so a source ahead of the one
-#: that would have answered costs a round trip and nothing else. Of the 279
-#: ISBNs of 500 the leading pair missed, Open Library answers **83**, the NLG
-#: **34** and the OENB **1**. `TAIL_MARGINAL` carries those three and
-#: `test_the_tail_is_ordered_by_how_often_it_answers_what_the_tier_missed`
+#: that would have answered costs a round trip and nothing else. It is also
+#: where `SERVES_GROUPS` applies, so a source's position matters only among the
+#: ISBNs it is asked about at all. Of the 278
+#: ISBNs of 500 the leading pair missed, Open Library answers **82**, the NKP
+#: **42**, the NLG **34** and the OENB **1**. `TAIL_MARGINAL` carries those four
+#: and `test_the_tail_is_ordered_by_how_often_it_answers_what_the_tier_missed`
 #: enforces them.
 #:
-#: **That rule minimises requests and not seconds, and here the two disagree.**
-#: Modelled over the 500: the shipped tail costs a mean of **1.366s**, and
-#: putting the NLG ahead of Open Library costs **1.329s**, because Open Library
-#: is six times slower than the NLG and answers nothing at all in the Greek
-#: frame. The 0.037s is not taken, for `TIER_FRAMES_MINIMUM`'s reason one
-#: position down: it would ask a single frame catalogue before the broadest
-#: source for every book in every library. Reversing the other pair is worse on
-#: both counts, 1.381s and one fewer marginal answer.
+#: **The pooled counts disagree with two of the four**, which is why the
+#: marginal table exists: 237, 59, 55 and 37 keep Open Library and the NKP where
+#: they are and swap the last two, putting the OENB ahead of the NLG to reach a
+#: source that answers one of those 278 rather than 34.
 #:
-#: **What a national catalogue in the tail costs a library that is not Greek**,
-#: stated because the pooled mean hides it: it is a round trip on every lookup
-#: the tier misses, for a source that will not answer. Modelled per frame,
-#: promoting the NLG out of the tail and into the tier saves 0.928s in the Greek
-#: frame and 0.000s to 0.171s in the other nine, and the second range is that
-#: cost rather than a benefit. Asking a national catalogue only for the
-#: registration groups it serves is the fix and it is a separate piece of work.
+#: **The rule minimises requests and not seconds, and the shipped order happens
+#: to be good at both here.** Modelled over the 500, the shipped tail costs a
+#: mean of **1.396s**; ordering it by the pooled counts instead costs
+#: **1.414s**, so the marginal rule is 0.018s cheaper as well as being the one
+#: the constant states. That is a coincidence of this roster rather than a
+#: property of the rule, and it is recorded so that the next roster where they
+#: disagree is recognised as the ordinary case.
 #:
-#: **What the reorder tells whom, since it changes who is asked about a book.**
-#: The OENB now sees 165 lookups of 500 rather than 279, because Open Library
-#: and the NLG answer first. The NLG sees 196: every lookup the leading pair
-#: misses and Open Library does not answer, whatever country the book is from.
-#: No new identifier is sent that was not already sent to the two sources ahead
-#: of it, and it is an ISBN.
+#: **What a national catalogue in the tail cost a library it does not serve**,
+#: stated because the pooled mean hid it: a round trip on every lookup the tier
+#: missed, for a source that will not answer. `SERVES_GROUPS` is where that is
+#: now paid only by the books it can be paid for, and it is #122.
 #:
-#: **196 minus 165 is 31 and `TAIL_MARGINAL` says 34**, which is not an error in
-#: either: the table is marginal against the **tier**, and a position in the
-#: tail is marginal against everything ahead of it. Open Library answers 3 of
-#: the NLG's 34 first, so 31 of them are still unanswered when the NLG is
-#: reached. Stated because the two numbers sit four lines apart and do not
-#: reconcile on sight.
+#: **What the order tells whom, since it changes who is asked about a book.**
+#: Each tail source sees only what everything ahead of it missed, and then only
+#: the registration groups its own remit reaches. Of 500 lookups: Open Library
+#: 278, the NKP 196, the NLG **42**, the OENB **2**. Before `SERVES_GROUPS` the
+#: last two were 155 and 124, so the whole tail fell from 753 requests to 518.
+#: No new identifier is sent that was not already sent to the sources ahead, and
+#: it is an ISBN.
+#:
+#: **Those four numbers do not equal `TAIL_MARGINAL` minus each other**, and
+#: that is not an error in either: the table is marginal against the **tier**,
+#: while a position is marginal against everything ahead of it. The NKP answers
+#: 42 of the tier's misses and **41** of the 196 it is actually asked, because
+#: Open Library answers **1** of them first. Stated because the two sets of figures sit
+#: ten lines apart and do not reconcile on sight.
 #:
 #: **The OENB's position corrects a reason that did not reproduce, #115.** This
 #: docstring used to put it third as "the only source that answers for an
@@ -466,7 +490,7 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: answer how often the OENB answers where the German pair did not, which is the
 #: question this position turns on.
 #:
-#: **Google Books is last of the six that answer an ISBN** because it is the
+#: **Google Books is last of the seven that answer an ISBN** because it is the
 #: only one with a key, a quota and a bill attached, and BNF and LOC come after
 #: it because they answer no ISBN lookup at all, so their position here only
 #: ever breaks a tie on the search path.
@@ -474,6 +498,7 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     CatalogueSource.DNB,
     CatalogueSource.K10PLUS,
     CatalogueSource.OPEN_LIBRARY,
+    CatalogueSource.NKP,
     CatalogueSource.NLG,
     CatalogueSource.OENB,
     CatalogueSource.GOOGLE_BOOKS,
@@ -492,13 +517,39 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
         CatalogueSource.K10PLUS,
         CatalogueSource.OENB,
         CatalogueSource.NLG,
+        CatalogueSource.NKP,
         CatalogueSource.OPEN_LIBRARY,
         CatalogueSource.GOOGLE_BOOKS,
     }
 )
 
-#: The sources that can answer a title search. All of them.
-SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(DEFAULT_ORDER)
+#: The sources that can answer a title search.
+#:
+#: **Not "all of them" any more, and the exception is the server's rather than
+#: ours.** This was `frozenset(DEFAULT_ORDER)` with a comment saying every source
+#: answers a title search, which was true until the Czech National Library
+#: joined. That target renders **one populated record per response** whatever
+#: page size is asked for, measured across three queries and four page sizes on
+#: 2026-08-31, so ten candidates would be ten sequential requests to somebody
+#: else's free catalogue inside a 4.0s shared deadline. Its ISBN lookup wants one
+#: record and gets one, 20 of 20, so that path is unaffected.
+#:
+#: **Written out rather than derived**, because a derivation would have to
+#: encode the exception anyway and `TestTheProviderRosterIsOneList` compares this
+#: against `metadata`'s own dispatch tables: a source added here with no search
+#: adapter fails there rather than raising a `KeyError` on a member's search.
+SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
+    {
+        CatalogueSource.DNB,
+        CatalogueSource.K10PLUS,
+        CatalogueSource.OENB,
+        CatalogueSource.NLG,
+        CatalogueSource.OPEN_LIBRARY,
+        CatalogueSource.GOOGLE_BOOKS,
+        CatalogueSource.BNF,
+        CatalogueSource.LOC,
+    }
+)
 
 #: Sources that cost money per request, so asking one for a book another source
 #: already answered is a bill for nothing. See `Plan.lookup_together`.
@@ -512,8 +563,8 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_B
 #: single answer to whether there is one.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The five free sources answer 336 of the 500 ISBNs behind `MEASURED` and miss
-#: 164, and outside German language publishing they miss 160 of 400. #91
+#: The six free sources answer 377 of the 500 ISBNs behind `MEASURED` and miss
+#: 123, and outside German language publishing they miss 119 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
 #: about a keyed install, and it is worth saying wherever the chain's coverage
@@ -521,9 +572,9 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_B
 #:
 #: **"Most of the chain's coverage" was true when it was written and is not
 #: now**, which is why this paragraph says "much". Two things moved the free
-#: figure from 300 to 336 on the same 500 books: the NLG, and the `020 $q` rule
-#: in `metadata._isbn_entries`, which was refusing 51 records the sources
-#: already held. The Greek figure above is the sharpest case, and it moved in
+#: figure from 300 to 377 on the same 500 books: two national catalogues, and
+#: the `020 $q` rule in `metadata._isbn_entries`, which was refusing 51 records
+#: the sources already held. The Greek figure above is the sharpest case, and it moved in
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
@@ -535,30 +586,211 @@ NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
 #:
 #: A cost bound rather than a taste: an ordinary lookup makes this many outbound
 #: requests whatever the household puts in the list, so reordering cannot turn
-#: every lookup into an eight way fan out. What a household changes is **which**
-#: sources fill the slots, which is the whole point of the control.
+#: every lookup into a seven way fan out. **Seven, not nine**, and the number is
+#: `LOOKUP_SOURCES` rather than the roster: two of the nine answer a title search
+#: only and are never asked about an ISBN at all. What a household changes is
+#: **which** sources fill the slots, which is the whole point of the control.
 #:
 #: **Three was measured and refused, #115, and re-measured and refused again on
 #: a roster with two more candidates.** Open Library is outside
 #: `FIRST_TIER_BUDGET_SECONDS` and Google Books is metered, so the candidates
-#: are the OENB and, but for `TIER_FRAMES_MINIMUM`, the NLG.
+#: are the OENB and, but for `TIER_MAX_CONCENTRATION`, the NKP and the NLG.
 #:
 #: **The OENB is nearly free in wall clock and buys nothing.** The tier is
-#: gathered and it is barely slower than K10plus, p90 0.471s becoming 0.579s,
-#: and it takes a round trip off the miss path, so it models **0.032s** faster
-#: over the whole 500, 1.366s to 1.334s. What it buys is **0 books**: it answers
-#: 1 of the 279 the pair missed, and the tail reaches that one anyway.
+#: gathered and it is barely slower than K10plus, p90 0.513s becoming 0.574s,
+#: and it takes a round trip off the miss path, so it models **0.022s** faster
+#: over the whole 500, 1.396s to 1.374s. What it buys is **0 books**: it answers
+#: 1 of the 278 the pair missed, and the tail reaches that one anyway.
 #:
-#: **The NLG would be the better third slot on every pooled number and is
-#: refused on a different one.** It models 0.159s faster, 1.366s to 1.207s, and
-#: also buys 0 books. Per frame that saving is 0.928s in the Greek frame and
-#: 0.000s to 0.171s in the other nine, so most of it is one tenth of the sample,
-#: and what the slot costs is a request on every lookup of every install
-#: everywhere. `TIER_FRAMES_MINIMUM` is where that is decided.
+#: **The NKP is the best third slot on every pooled number and is refused on a
+#: different one**, and the NLG is the same case one step milder. The NKP models
+#: 0.160s faster, 1.396s to 1.236s; the NLG 0.158s faster, to 1.238s. Both buy
+#: **0 books**, because the tail reaches everything they would. Per frame the
+#: NKP's saving is concentrated the way its coverage is: it answers 49 of its 59
+#: in the Czech frame, and what the slot costs is a request on every lookup of
+#: every install everywhere, including every install that will never see a Czech
+#: ISBN. `TIER_MAX_CONCENTRATION` is where that is decided.
+#:
+#: **The NKP being the strongest candidate is why the rule was changed rather
+#: than the constant raised.** The retired `TIER_FRAMES_MINIMUM` asked a source
+#: to answer in at least two frames of ten; the NKP answers in **six**, so it
+#: passed a rule written to exclude exactly this shape, while the NLG, whose 37
+#: answers sit in one frame, failed it. Counting frames answers "how many places did it
+#: appear", and what the tier needs to know is "how much of it is one place".
 #:
 #: Recorded with the numbers so the next reader can reverse it against them
 #: rather than guess.
 ALWAYS_ASKED: Final = 2
+
+#: Which registration groups a catalogue's collecting remit covers, for the
+#: sources whose remit is one, and nothing at all for the sources whose is not.
+#:
+#: **What it buys.** `Plan.lookup_in_turn` asks one source at a time and stops at
+#: the first hit, so a source that cannot answer this ISBN is a round trip spent
+#: to learn nothing. Modelled over the 500 ISBNs behind `MEASURED`, walking
+#: `lookup`'s two phases per row: **1.396s mean today, 1.279s with this table**,
+#: for the same **377** books, and **518** tail requests instead of **753**. Per
+#: frame it runs from 0.000s (german, answered by the leading pair before the
+#: tail is reached) to 0.239s (argentina). #122 is the ticket.
+#:
+#: **The whole saving is on the lookups that fail, and that is not a caveat, it
+#: is the mechanism.** A lookup that succeeds either stopped before reaching the
+#: dead source or was answered by it; only a lookup that finds nothing pays every
+#: source in the tail. 123 of the 500 fail on a keyless install and cost 2.115s
+#: each, which is a quarter of scans waiting two seconds to be told to type the
+#: book in by hand.
+#:
+#: **Two designs that keep every book were tried first and both save nothing.**
+#: Demoting a non serving source to the back of the tail, and skipping it but
+#: sweeping the skipped ones when nothing was found, are the same design and
+#: model identically: **1.3959s against 1.3964s**, a saving of half a
+#: millisecond. The reason is the sentence above. Ordering only decides who pays
+#: on the rows where somebody answers, and on the rows where nobody does every
+#: source is asked whatever the order. So there is no version of this that is
+#: free, and the trade has to be bounded rather than avoided.
+#:
+#: **Both of those figures are for the table below and not for a bigger one**,
+#: which is the correction worth keeping. Demotion first measured at 1.385s,
+#: which reads as a real if small saving, and that run had the NKP in the table
+#: as well. Under what actually ships it saves nothing at all. A measurement is
+#: evidence about the configuration it was taken under, and a two source table
+#: and a three source one are two configurations.
+#:
+#: **The bound: a source may declare groups only where doing so costs the chain
+#: no book.** Measured over the sample, answers falling outside the declared
+#: groups, and how many of those no other source in the roster holds:
+#:
+#: | source | answers | outside | outside and held by nobody else |
+#: |---|---|---|---|
+#: | NLG | 37 | 0 | 0 |
+#: | OeNB | 55 | 5 | 0 |
+#: | NKP | 59 | 10 | **2** |
+#: | DNB | 91 | 13 | 0 |
+#:
+#: **Zero is not a threshold and needs no sweep**, unlike
+#: `TIER_MAX_CONCENTRATION` and `SLOT_MUST_EARN` beside it. The objection this
+#: whole rule has to answer is that a catalogue silently stops being asked about
+#: a book it holds, and the only tolerable number of those is none, so there is
+#: no gap to place a value in.
+#:
+#: **The Czech National Library is refused by it**, on `9789727765584` (978-972,
+#: Portuguese) and `9789878853932` (978-987, Argentinian), which it is the only
+#: source in the roster to hold. It would have been the largest single saving
+#: here, 0.060s and 156 requests, and it is left out because those two books are
+#: exactly what this rule exists to protect. `TIER_MAX_CONCENTRATION` refused the
+#: same source on a different measurement; twice refused is not a verdict on the
+#: catalogue, which answers 42 of the 278 the leading pair misses.
+#:
+#: **That finer measurement is prose and not a guard, which the next row adder
+#: has to know.** `test_no_source_with_a_remit_uniquely_answers_outside_it`
+#: computes the bound over the **whole roster**, so a DNB row would pass it: the
+#: zero it checks is "held by nobody else", not "held by the leading pair". The
+#: suite therefore refuses the NKP and would accept the DNB, and the paragraph
+#: below is the judgement a person still has to make on top of it. Coding it
+#: would mean picking which reduced roster to measure against, and a household
+#: can switch off any source it likes, so there is no principled one to pick.
+#:
+#: **The DNB qualifies and is absent anyway, and the first reason given here was
+#: wrong.** It said the DNB sits in `lookup_together` where this table has no
+#: effect, which holds only in the **default** plan: a household reordering the
+#: list is the whole point of the provider table, and a demoted DNB would be
+#: filtered like anything else. The real reason is the same measurement one notch
+#: finer. Of answers falling outside the declared groups, and how many of those
+#: the leading pair does **not** hold: the NLG 0 of 0, the OeNB 0 of 5, the DNB
+#: **5 of 13**. So the OeNB's strays survive on the two catalogues every default
+#: install keeps, and the DNB's five need Open Library or the NKP as well. Both
+#: pass the roster wide bound; only one passes it on the roster a household is
+#: likely to be left with. K10plus and Open Library are absent for a different
+#: reason again: a union catalogue and a general one have no remit to state.
+#:
+#: **The asymmetry with `isbn._GROUP_RANGES`, which is the other half of this
+#: rule and fails the other way.** That table is deliberately narrow, because an
+#: unknown range there decodes to None and every caller reads None as "ask", so
+#: narrow makes an answer unknown rather than wrong. This table is the opposite:
+#: inside a Bookland prefix it names, a group it does not list is a **skip**. So
+#: "widen it late rather than early" is right for the ranges and exactly wrong
+#: here, and a group missing from a row below costs books rather than round
+#: trips. Dropping `978-618` from the NLG loses seven of the fifty sampled Greek
+#: ISBNs. `_serves` carries the third arm that keeps the two from disagreeing
+#: across prefixes.
+#:
+#: **What the sample cannot show, and the first version of this paragraph named
+#: the wrong axis.** It said ten frames are ten sampled countries, which is true
+#: and is not the sharpest limit. **All 500 rows are `978` and none of them fails
+#: to decode**, so the zero above is measured over one Bookland prefix, and the
+#: two fail open paths this design rests on are exercised by no sample row at
+#: all. They are exercised by tests instead, which is a weaker thing and is worth
+#: saying rather than leaving to be found.
+#: `test_the_sample_is_one_bookland_prefix_and_the_bound_says_so` pins the
+#: composition so this stays visible rather than being inferred.
+#: `Measured`'s own docstring states the country limit for the figures beside it.
+#:
+#: **Austria has no registration group**, which is why the Austrian National
+#: Library's row reads `978-3`: that group is German, Austrian and Swiss
+#: publishing together. A country does not imply a group and this is the row
+#: where assuming it would have been wrong.
+SERVES_GROUPS: Final[dict[CatalogueSource, frozenset[str]]] = {
+    CatalogueSource.NLG: frozenset({"978-960", "978-618"}),
+    CatalogueSource.OENB: frozenset({"978-3"}),
+}
+
+
+def _serves(source: CatalogueSource, registration_group: str | None) -> bool:
+    """Whether this source's remit reaches an ISBN in that registration group.
+
+    Three ways of answering yes, and the third is the one that took a round to
+    find.
+
+    **A source with no row in `SERVES_GROUPS`** has no remit to state and is
+    asked about everything.
+
+    **A group of None** is `isbn.registration_group` declining to make a claim,
+    for an unassigned range or a group added to the published list after this
+    build, and every source is asked then.
+
+    **A group in a Bookland prefix the remit never mentions.** 978 and 979 are
+    two separate assignment spaces, so a remit listing only 978 groups is
+    **silent** about 979 rather than negative about it, and a catalogue whose
+    country has no 979 group yet has no way to say "none". Without this arm every
+    979 ISBN lost both national catalogues: `979-8` is a real group, it is in
+    neither remit, and both were dropped. The sample behind `SERVES_GROUPS` is
+    500 rows of `978`, so nothing measured it and nothing failed.
+
+    **Within a prefix the remit does mention, the listing is exhaustive and a
+    miss is a skip.** That is the positive claim the whole feature rests on, and
+    it is the arm the zero book bound guards: dropping `978-618` from the NLG's
+    row costs seven books and
+    `test_no_source_with_a_remit_uniquely_answers_outside_it` fails. The two arms
+    cover the two ways a remit can be incomplete, and neither guards the other.
+
+    **Every default here is "ask", including a group neither side can parse.**
+    `group_prefix` answers None for anything it cannot take apart, on either the
+    ISBN's group or a declared one, and both are read as "no claim" rather than
+    "no match", because the failure the other way is a catalogue quietly not
+    asked about a book it holds and nothing reports it.
+
+    The incoming half of that is reachable: `Plan.lookup_in_turn` is public and
+    takes any string, so `registration_group`'s guarantee is the caller's rather
+    than this function's. A mutation harness found it unreachable through the
+    only caller that exists, which is how it came to be pinned by
+    `test_a_group_nobody_can_parse_asks_everyone` rather than left as a
+    defensive arm nothing exercises.
+
+    **An empty remit behaves exactly like no remit**, because a remit with no
+    groups mentions no prefixes and the arm above then forgives everything. So
+    the `groups is None` return is about not testing membership against None,
+    not about behaviour.
+    """
+    groups = SERVES_GROUPS.get(source)
+    if groups is None or registration_group is None:
+        return True
+    if registration_group in groups:
+        return True
+    prefix = isbn.group_prefix(registration_group)
+    return prefix is None or not any(
+        isbn.group_prefix(group) == prefix for group in groups
+    )
+
 
 #: The key the stored object hangs the list off. An object rather than a bare
 #: list because `settings_store.get_json` refuses a list on purpose: a list
@@ -607,19 +839,45 @@ class Plan:
         which is where being asked can actually save a miss.
         """
         return tuple(
-            name for name in self._lookup_chain if name not in METERED
+            name for name in self.lookup_chain if name not in METERED
         )[:ALWAYS_ASKED]
 
-    @property
-    def lookup_in_turn(self) -> tuple[CatalogueSource, ...]:
+    def lookup_in_turn(
+        self, registration_group: str | None
+    ) -> tuple[CatalogueSource, ...]:
         """Asked one at a time, and only if the first tier found nothing.
 
         Everything in the chain that the first tier did not take, in the
         household's order, so a metered source excluded from that tier is asked
-        here at the position it was given rather than dropped.
+        here at the position it was given rather than dropped, **minus the
+        sources whose `SERVES_GROUPS` remit does not reach this ISBN**.
+
+        **The argument is required and has no default**, which is the point of
+        it being a method rather than two properties. A default of None would
+        mean "filter nothing", so a caller that forgot to pass the group would
+        get today's behaviour: every dead source asked, no error, no log line,
+        and the entire cost this rule removes back again. Required, it is a type
+        error instead.
+
+        **None filters nothing, deliberately.** It is what
+        `isbn.registration_group` returns when it has no claim to make, and the
+        answer to "no claim" is to ask everyone, because the alternative is a
+        catalogue not asked about a book it holds.
+
+        **This filters the tail and never the tier.** A gathered tier costs its
+        slowest member rather than their sum, measured in `DEFAULT_ORDER` at
+        0.389s for dnb with k10plus against 0.388s for k10plus alone, so a tier
+        member that cannot answer costs one request and under a millisecond and
+        there is no round trip to take away. Filtering it would also resize it
+        per ISBN, and its size is the one cost bound `ALWAYS_ASKED` promises a
+        household is fixed.
         """
         leading = frozenset(self.lookup_together)
-        return tuple(name for name in self._lookup_chain if name not in leading)
+        return tuple(
+            name
+            for name in self.lookup_chain
+            if name not in leading and _serves(name, registration_group)
+        )
 
     @property
     def searched(self) -> tuple[CatalogueSource, ...]:
@@ -627,7 +885,16 @@ class Plan:
         return tuple(name for name in self.asked if name in SEARCH_SOURCES)
 
     @property
-    def _lookup_chain(self) -> tuple[CatalogueSource, ...]:
+    def lookup_chain(self) -> tuple[CatalogueSource, ...]:
+        """Every enabled source that can answer an ISBN at all, in order.
+
+        **Public because emptiness here is what `metadata.Outcome.NO_SOURCES`
+        means**, and that is a different question from what any one ISBN is
+        asked. `lookup_in_turn` can be empty because this library's catalogues
+        do not reach one registration group, which is a fact about the book;
+        this being empty is a fact about the library, and it is the one the 409
+        and its "switch one back on" wording describe.
+        """
         return tuple(name for name in self.asked if name in LOOKUP_SOURCES)
 
 
@@ -665,7 +932,7 @@ def parse(stored: dict[str, Any]) -> Plan:
     seen: set[CatalogueSource] = set()
     for entry in entries:
         # **No truncation, deliberately, and it was here once.** A cap of 100
-        # entries read against a roster of eight looks like a bound on a hostile
+        # entries read against a roster of nine looks like a bound on a hostile
         # row and is an **on switch**: a hundred unrecognised entries followed by
         # `google_books` switched off drops the real entry, and the tail below
         # then appends google_books enabled. The bound meant to contain a
@@ -729,6 +996,20 @@ class Described:
     needs_a_key: bool
     has_key: bool
     ready: bool
+    #: The registration groups this catalogue's remit covers, empty for a source
+    #: with no remit to state. Sorted, so the screen and the tests read one order
+    #: and a `frozenset`'s iteration order never reaches either.
+    #:
+    #: **The declared remit, not the filter that was applied**, and the two are
+    #: not the same row. `SERVES_GROUPS` is a fact about the catalogue and this
+    #: field repeats it unconditionally, while the filter reaches only the
+    #: sources asked one at a time. So a source in `lookup_together` carries a
+    #: non empty value here and is asked about every ISBN regardless of it,
+    #: measured: a plan of `oenb, nlg` gives both `asked_first=True` **and** a
+    #: populated `serves_groups`. Anything rendering this has to read
+    #: `asked_first` first, which is what `ProviderSection.statusOf` does and
+    #: says.
+    serves_groups: tuple[str, ...]
 
 
 def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
@@ -802,6 +1083,18 @@ def describe(
             needs_a_key=entry.source in NEEDS_A_KEY,
             has_key=entry.source in credentials,
             ready=entry.source in ready,
+            # **Sent rather than left for the screen to infer**, for the reason
+            # every other derived field here is: a source that is switched on,
+            # in position, and silent on nine ISBNs in ten is the sharpest
+            # version of "why is this not answering", and the screen cannot work
+            # it out from `enabled` and `asked_first`.
+            #
+            # **Unconditional, deliberately, and not conjoined with `leading`
+            # above.** This reports the remit; whether the remit is applied to a
+            # given lookup is `asked_first`'s business, and folding the two would
+            # make one field answer two questions and lose the ability to say
+            # "regional, but promoted, so asked about everything".
+            serves_groups=tuple(sorted(SERVES_GROUPS.get(entry.source, ()))),
         )
         for entry in plan.preferences
     )
@@ -825,7 +1118,7 @@ def from_wire(entries: list[Preference], current: Plan) -> Plan:
     a gap from `DEFAULT_ORDER`, enabled, because there the gap means "a source
     this release added after that row was written". Here it means "the client
     did not mention it", and defaulting that to enabled turns a payload naming
-    one source into an instruction to switch the other seven **on**: a request to
+    one source into an instruction to switch the other eight **on**: a request to
     disable Google Books would have re-enabled everything a household had
     turned off.
 

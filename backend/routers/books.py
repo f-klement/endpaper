@@ -431,7 +431,7 @@ async def lookup_isbn(
         **record.as_lookup(),
         classifications=classifications,
         suggested_tag_ids=suggested_tag_ids(
-            list(record.subjects), classifications, all_tags
+            record.subject_labels, classifications, all_tags
         ),
     )
 
@@ -499,7 +499,7 @@ def _match_rows(
         # model so the bounds and the tidying are not run twice.
         if all_tags is not None:
             row.suggested_tag_ids = suggested_tag_ids(
-                list(match.subjects), row.classifications, all_tags
+                match.subject_labels, row.classifications, all_tags
             )
         rows.append(row)
     return rows

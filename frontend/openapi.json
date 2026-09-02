@@ -1952,7 +1952,7 @@
         "type": "object"
       },
       "CatalogueSource": {
-        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `metadata._SOURCES` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental: BNF and LOC are title search only, because neither was\nworth an ISBN request. See `sources.LOOKUP_SOURCES`.",
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `metadata._SOURCES` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP is the other way round, **lookup only**, and for\na reason that is the server's rather than ours: it renders one populated\nrecord per response whatever page size is asked for, so a search for ten\ncandidates would be ten requests. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.",
         "enum": [
           "open_library",
           "google_books",
@@ -1960,6 +1960,7 @@
           "k10plus",
           "oenb",
           "nlg",
+          "nkp",
           "bnf",
           "loc"
         ],
@@ -1997,6 +1998,13 @@
             "title": "Ready",
             "type": "boolean"
           },
+          "serves_groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Serves Groups",
+            "type": "array"
+          },
           "source": {
             "$ref": "#/components/schemas/CatalogueSource"
           }
@@ -2009,7 +2017,8 @@
           "asked_first",
           "needs_a_key",
           "has_key",
-          "ready"
+          "ready",
+          "serves_groups"
         ],
         "title": "CatalogueSourceOut",
         "type": "object"
@@ -4698,7 +4707,7 @@
                 "items": {
                   "$ref": "#/components/schemas/CatalogueSourcePreference"
                 },
-                "maxItems": 8,
+                "maxItems": 9,
                 "type": "array"
               },
               {

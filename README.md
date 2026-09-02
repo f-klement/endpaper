@@ -44,11 +44,13 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 ## Features
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
 - **Auto metadata**: title, author, publisher, page count, language and cover art, looked
-  up in six catalogues (the German National Library, K10plus, Open Library, the National
-  Library of Greece, the Austrian National Library, Google Books). The first two are asked
-  together and their records are merged; the rest are asked in turn until one answers.
-  Five are free and need nothing; Google Books needs an API key you supply, so a stock
-  install runs the other five.
+  up in seven catalogues (the German National Library, K10plus, Open Library, the Czech
+  National Library, the National Library of Greece, the Austrian National Library, Google
+  Books). The first two are asked together and their records are merged; the rest are asked
+  in turn until one answers. A national catalogue in that second group is asked only about
+  the ISBN registration groups it collects, so a German library is not waiting on Athens for
+  a German book. Six are free and need nothing; Google Books needs an API key
+  you supply, so a stock install runs the other six.
   A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
   English one suggest the same one
 - **Covers are downloaded and served from here**, not linked to somebody else's server, so
@@ -181,8 +183,9 @@ frontend with Bun, then copies only the built assets into the Python image. Bun 
 ```
 Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together, merged)
                   │                       ↳ Open Library  (fallback)
-                  │                       ↳ National Library of Greece (fallback)
-                  │                       ↳ Austrian National Library (fallback)
+                  │                       ↳ Czech National Library (fallback)
+                  │                       ↳ National Library of Greece (Greek ISBNs)
+                  │                       ↳ Austrian National Library (978-3 ISBNs)
                   │                       ↳ Google Books  (needs a key)
                   │
                   │          search a title: Open Library + K10plus + DNB

@@ -96,14 +96,14 @@ export const getImportCsvMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof importCsv>>,
     TError,
-    { data: BodyImportCsv; params?: ImportCsvParams },
+    ImportCsvMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof importCsv>>,
   TError,
-  { data: BodyImportCsv; params?: ImportCsvParams },
+  ImportCsvMutationVariables,
   TContext
 > => {
   const mutationKey = ["importCsv"];
@@ -117,7 +117,7 @@ export const getImportCsvMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof importCsv>>,
-    { data: BodyImportCsv; params?: ImportCsvParams }
+    ImportCsvMutationVariables
   > = (props) => {
     const { data, params } = props ?? {};
 
@@ -132,6 +132,10 @@ export type ImportCsvMutationResult = NonNullable<
 >;
 export type ImportCsvMutationBody = BodyImportCsv;
 export type ImportCsvMutationError = HTTPValidationError;
+export type ImportCsvMutationVariables = {
+  data: BodyImportCsv;
+  params?: ImportCsvParams;
+};
 
 /**
  * @summary Import Csv
@@ -141,7 +145,7 @@ export const useImportCsv = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof importCsv>>,
       TError,
-      { data: BodyImportCsv; params?: ImportCsvParams },
+      ImportCsvMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -150,7 +154,7 @@ export const useImportCsv = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof importCsv>>,
   TError,
-  { data: BodyImportCsv; params?: ImportCsvParams },
+  ImportCsvMutationVariables,
   TContext
 > => {
   return useMutation(getImportCsvMutationOptions(options), queryClient);
@@ -220,14 +224,14 @@ export const getImportMarcMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof importMarc>>,
     TError,
-    { data: BodyImportMarc; params?: ImportMarcParams },
+    ImportMarcMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof importMarc>>,
   TError,
-  { data: BodyImportMarc; params?: ImportMarcParams },
+  ImportMarcMutationVariables,
   TContext
 > => {
   const mutationKey = ["importMarc"];
@@ -241,7 +245,7 @@ export const getImportMarcMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof importMarc>>,
-    { data: BodyImportMarc; params?: ImportMarcParams }
+    ImportMarcMutationVariables
   > = (props) => {
     const { data, params } = props ?? {};
 
@@ -256,6 +260,10 @@ export type ImportMarcMutationResult = NonNullable<
 >;
 export type ImportMarcMutationBody = BodyImportMarc;
 export type ImportMarcMutationError = HTTPValidationError;
+export type ImportMarcMutationVariables = {
+  data: BodyImportMarc;
+  params?: ImportMarcParams;
+};
 
 /**
  * @summary Import Marc
@@ -265,7 +273,7 @@ export const useImportMarc = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof importMarc>>,
       TError,
-      { data: BodyImportMarc; params?: ImportMarcParams },
+      ImportMarcMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -274,7 +282,7 @@ export const useImportMarc = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof importMarc>>,
   TError,
-  { data: BodyImportMarc; params?: ImportMarcParams },
+  ImportMarcMutationVariables,
   TContext
 > => {
   return useMutation(getImportMarcMutationOptions(options), queryClient);
@@ -340,14 +348,14 @@ export const getPreviewMarcMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewMarc>>,
     TError,
-    { data: BodyPreviewMarc },
+    PreviewMarcMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof previewMarc>>,
   TError,
-  { data: BodyPreviewMarc },
+  PreviewMarcMutationVariables,
   TContext
 > => {
   const mutationKey = ["previewMarc"];
@@ -361,7 +369,7 @@ export const getPreviewMarcMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof previewMarc>>,
-    { data: BodyPreviewMarc }
+    PreviewMarcMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -376,6 +384,7 @@ export type PreviewMarcMutationResult = NonNullable<
 >;
 export type PreviewMarcMutationBody = BodyPreviewMarc;
 export type PreviewMarcMutationError = HTTPValidationError;
+export type PreviewMarcMutationVariables = { data: BodyPreviewMarc };
 
 /**
  * @summary Preview Marc
@@ -388,7 +397,7 @@ export const usePreviewMarc = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof previewMarc>>,
       TError,
-      { data: BodyPreviewMarc },
+      PreviewMarcMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -397,7 +406,7 @@ export const usePreviewMarc = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof previewMarc>>,
   TError,
-  { data: BodyPreviewMarc },
+  PreviewMarcMutationVariables,
   TContext
 > => {
   return useMutation(getPreviewMarcMutationOptions(options), queryClient);
@@ -452,14 +461,14 @@ export const getPreviewImportMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof previewImport>>,
     TError,
-    { data: BodyPreviewImport; params?: PreviewImportParams },
+    PreviewImportMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof previewImport>>,
   TError,
-  { data: BodyPreviewImport; params?: PreviewImportParams },
+  PreviewImportMutationVariables,
   TContext
 > => {
   const mutationKey = ["previewImport"];
@@ -473,7 +482,7 @@ export const getPreviewImportMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof previewImport>>,
-    { data: BodyPreviewImport; params?: PreviewImportParams }
+    PreviewImportMutationVariables
   > = (props) => {
     const { data, params } = props ?? {};
 
@@ -488,6 +497,10 @@ export type PreviewImportMutationResult = NonNullable<
 >;
 export type PreviewImportMutationBody = BodyPreviewImport;
 export type PreviewImportMutationError = HTTPValidationError;
+export type PreviewImportMutationVariables = {
+  data: BodyPreviewImport;
+  params?: PreviewImportParams;
+};
 
 /**
  * @summary Preview Import
@@ -500,7 +513,7 @@ export const usePreviewImport = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof previewImport>>,
       TError,
-      { data: BodyPreviewImport; params?: PreviewImportParams },
+      PreviewImportMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -509,7 +522,7 @@ export const usePreviewImport = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof previewImport>>,
   TError,
-  { data: BodyPreviewImport; params?: PreviewImportParams },
+  PreviewImportMutationVariables,
   TContext
 > => {
   return useMutation(getPreviewImportMutationOptions(options), queryClient);

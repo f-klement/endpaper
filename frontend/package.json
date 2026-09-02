@@ -14,7 +14,8 @@
     "test:coverage": "vitest run --coverage",
     "check:build": "bun run scripts/check-build.ts",
     "api:schema": "uv --directory ../backend run python scripts/dump_openapi.py > openapi.json",
-    "api:generate": "bun run api:schema && orval",
+    "api:generate": "bun run api:schema && bun run api:client",
+    "api:client": "orval",
     "format": "prettier --write src tests",
     "format:check": "prettier --check src tests"
   },

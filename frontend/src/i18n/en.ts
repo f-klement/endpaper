@@ -1261,6 +1261,7 @@ export const en = {
   "providers.name.k10plus": "K10plus",
   "providers.name.oenb": "Austrian National Library",
   "providers.name.nlg": "National Library of Greece",
+  "providers.name.nkp": "Czech National Library",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
@@ -1269,10 +1270,24 @@ export const en = {
     "A key is stored, but this catalogue is switched off in its own card below.",
   "providers.status.searchOnly":
     "Answers title searches only, so its position does not affect scanning.",
+  "providers.status.lookupOnly":
+    "Answers scans only, so its position does not affect a title search.",
   "providers.status.askedFirst":
     "Asked on every scan, with the others at the top of this list.",
   "providers.status.askedAfter":
     "Asked only when the ones above it find nothing.",
+  // The third thing a row can be, beside on and off: asked, at the position it
+  // holds, for some books and not others. The groups are printed as the ISBN
+  // itself carries them, because that is the one form a reader can check
+  // against the barcode in front of them.
+  "providers.status.regional":
+    "Asked only when the ones above it find nothing, and only for ISBNs beginning {groups}.",
+  // The one combination the single line statuses could not express. A catalogue
+  // may be lookup only and regional at once: the Czech National Library is
+  // exactly that shape, and it is the source this ticket came closest to giving
+  // a remit.
+  "providers.status.lookupOnlyRegional":
+    "Answers scans only, and only for ISBNs beginning {groups}, so its position does not affect a title search.",
   "providers.status.off": "Off. This catalogue is never asked.",
 } as const;
 

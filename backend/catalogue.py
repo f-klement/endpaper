@@ -116,6 +116,58 @@ class Heading:
 
 
 @dataclass(frozen=True, slots=True)
+class Subject:
+    """One subject heading a catalogue asserted, with the stamp it came with.
+
+    Three fields, and only the first is always there: the words, the vocabulary
+    the record said they came from, and the identifier that vocabulary gives
+    them. A record declaring neither produces `Subject("Fantasy")`, which is what
+    every uncontrolled supplier here produces, and a null is the ordinary state
+    rather than a parser that forgot: 199 of 453 live DNB subject fields declare
+    no vocabulary and both Dublin Core dialects have nowhere to declare one.
+
+    **Not a `Heading`, and the difference is the closed set.**
+    `ClassificationScheme` has four members and everything that sorts, filters
+    or orders headings reads it. A `$2` is an open set: **twelve** distinct
+    codes turned up in one day's sampling of four catalogues, counted rather
+    than listed from memory on 2026-08-31 (`bellobv`, `bisacsh`, `DLC`, `fhv`,
+    `gatbeg`, `gnd`, `gnd-carrier`, `gnd-content`, `local`, `nlgaf`, `nlggf`,
+    `VLK`), against a MARC source code list holding hundreds. Mapping one onto
+    the other is a crosswalk, which #134 refuses outright, so the code is
+    carried as the record wrote it and nothing here reads it as a scheme.
+
+    **`vocabulary` is lower cased and `identifier` is not.** The folding is
+    `metadata._subject_vocabulary`'s, and the reason is in this repository
+    rather than in the catalogues: `marc._extra_headings` decides an LCSH
+    heading by `== "lcsh"`, so an uploaded file writing `$2 LCSH` would lose
+    every one of them silently. **No served record motivates it**, which is
+    worth saying because the first version of this paragraph said one did: 0 of
+    the twelve codes measured appeared in two cases, and the two upper case ones
+    are each written by a single catalogue, `VLK` by the OENB and `DLC` by
+    K10plus. An identifier is a value in somebody else's file and case may be
+    part of it (`urn:nbn:gr:nlg:01-A273635`), so it is left alone.
+
+    **`identifier` keeps its prefix, where `Classification.number` drops it.**
+    That is the opposite rule and it is deliberate. There the `(DE-588)` names
+    a scheme the row already has a column for, so keeping it would spell one
+    heading two ways. Here there is no scheme column and the prefix is the only
+    thing saying which file the number is in: `$2 gatbeg` arrives with
+    `$0 (DE-101)1010008188`, so the vocabulary and the identifier's namespace
+    are two different answers and neither derives the other.
+
+    **Never a Classification.** Nothing writes a `classifications` row from one
+    of these. What a subject is worth is argued in `models.Classification`: a
+    row there is an assertion from a published scheme this app has a reading
+    for, and a `$2` this app has never heard of is not that. Storing these is
+    #143 and #140, and this type is the half those need in hand first.
+    """
+
+    label: str
+    vocabulary: str | None = None
+    identifier: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AuthorityAssertion:
     """One catalogue saying which record in an authority file an author is.
 
@@ -219,12 +271,13 @@ class Record:
     #: Google's own volume id, which only Google supplies and only
     #: `google_books.merge_into` stores.
     google_books_id: str | None = None
-    #: The publisher's and the catalogue's uncontrolled words for what this book
-    #: is about. Feed the tag suggestion, never stored as headings: an Open
-    #: Library subject list carries `open_syllabus_project` and
-    #: `fiction classics`, which are somebody's words rather than an assertion
-    #: from a published scheme.
-    subjects: tuple[str, ...] = ()
+    #: What this book is about, in the catalogue's own words, each carrying the
+    #: vocabulary the record declared and the identifier it gave. Feeds the tag
+    #: suggestion, never stored as headings: an Open Library subject list
+    #: carries `open_syllabus_project` and `fiction classics`, which are
+    #: somebody's words rather than an assertion from a published scheme, and a
+    #: declared vocabulary does not change that. See `Subject`.
+    subjects: tuple[Subject, ...] = ()
     #: Assertions from a published scheme, which is what §30i's table holds.
     headings: tuple[Heading, ...] = ()
     #: Which record in an authority file each credited person is, where the
@@ -299,10 +352,23 @@ class Record:
         `object.__setattr__` because the class is frozen: this is construction,
         not mutation. It runs **once** per set of collections: see `_folded` for
         the measurement that makes that a requirement rather than a saving.
+
+        **The subject fold has three passes since #134 and is still linear.**
+        Counted rather than carried forward: `kept`, then `by_label`, then the
+        filter that calls `_restates`. This said **two** until the pass that
+        calls `_restates` was added and the sentence was not recounted.
+
+        The third is the one worth checking, because `_restates` scans a whole
+        label group and so looks quadratic. It is not: `kept` is keyed on
+        (label, vocabulary), so a group holds **at most one** entry whose
+        vocabulary is None, and `or` short circuits, so `_restates` runs at most
+        once per group and costs that group's length. The total is the sum of
+        the group lengths, which is the number of kept entries. The budget in
+        `_folded` counts inspections per merge and is unchanged.
         """
         if self._folded:
             return
-        object.__setattr__(self, "subjects", _unique(self.subjects))
+        object.__setattr__(self, "subjects", _folded_subjects(self.subjects))
         object.__setattr__(self, "headings", _union(self.headings))
         object.__setattr__(
             self, "author_identifiers", _distinct(self.author_identifiers)
@@ -323,6 +389,28 @@ class Record:
     def sources(self) -> frozenset[str]:
         """Every catalogue that answered for this book."""
         return frozenset(part for part in self.source.split(_SOURCE_JOIN) if part)
+
+    @property
+    def subject_labels(self) -> list[str]:
+        """The subject words, each once, in order. What a reader is shown.
+
+        **A second deduplication, and it is not the fold repeated.**
+        `_folded_subjects` keeps `Roemisches Recht` twice on purpose, once for
+        `gnd` and once for `local`, because they are two catalogued assertions.
+        Neither of the two consumers can use that distinction and both would be
+        wrong to show it: `as_match` joins these into the one `categories`
+        string a person reads, where the same word twice reads as a bug, and
+        `suggested_tag_ids` matches them against tag names, where a repeat buys
+        nothing. Measured over the same live sample, 15 of 765 (record, label)
+        pairs are affected.
+
+        A `list` rather than a tuple because both callers pass it straight into
+        a function taking one.
+        """
+        seen: dict[str, None] = {}
+        for subject in self.subjects:
+            seen.setdefault(subject.label, None)
+        return list(seen)
 
     def filled_from(self, other: Record) -> Record:
         """This record, with its gaps filled from another. The search path rule.
@@ -473,7 +561,7 @@ class Record:
             "description": self.description,
             "page_count": self.page_count,
             "language": self.language,
-            "categories": google_books.join_categories(list(self.subjects)) or None,
+            "categories": google_books.join_categories(self.subject_labels) or None,
             "cover_url": self.cover_url,
             "isbn13": self.isbn,
             "series_name": self.series_name,
@@ -481,12 +569,142 @@ class Record:
         }
 
 
-def _unique(values: Iterable[str]) -> tuple[str, ...]:
-    """The same strings, first occurrence kept, order preserved."""
-    seen: dict[str, None] = {}
-    for value in values:
-        seen.setdefault(value, None)
-    return tuple(seen)
+def uncontrolled(labels: Iterable[str]) -> tuple[Subject, ...]:
+    """Subjects from a source that declares no vocabulary and no identifier.
+
+    Named rather than left as a comprehension at each site, so that a reader
+    comparing the adapters sees which of them **cannot** supply the stamp rather
+    than which of them forgot to.
+
+    **Four catalogues**, at five call sites: the BnF, the NKP, Google Books and
+    Open Library, the last of which builds a record on both the lookup path and
+    the edition cluster. The reason is the format rather than the catalogue.
+    Dublin Core has nowhere to put either, in both its dialects, measured
+    2026-08-31 over the BnF's 153 `dc:subject` elements in 200 records, whose
+    only attribute is `xml:lang`, and the NKP's 17 in 5, which carry no
+    attribute at all. Google and Open Library publish uncontrolled words by
+    nature.
+
+    The Library of Congress is **not** here and is the reason this is not simply
+    "the non MARC sources": MODS names the vocabulary in an `authority`
+    attribute and carries no identifier, so `metadata._loc_subjects` supplies
+    half and calls nothing.
+
+    A source that stops being in that list stops calling this, which is a change
+    to one line and visible in a diff.
+    """
+    return tuple(Subject(label) for label in labels)
+
+
+def _restates(bare: Subject, entries: list[Subject]) -> bool:
+    """Whether an undeclared subject only repeats something declared beside it.
+
+    True when some entry sharing its label declares a vocabulary **and** the
+    bare one adds no identifier of its own: either it carries none, or it
+    carries one a declared entry already names.
+
+    **The identifier clause is the whole of this rule and it is measured.** Over
+    the 169 live (record, label) pairs that carry a declared and an undeclared
+    occurrence together, the undeclared entry this function is handed carries
+    the identical identifier **147** times, none at all **20** times, and a
+    **different** one **2** times. **147 + 20 + 2 = 169**, which is the check,
+    and stating it is the point rather than decoration: the first version of
+    this paragraph read 27, 150 and 2, which sums to 179, in the same commit
+    whose headline correction is that a partition must sum.
+
+    **179 is a real number and it counts something else.** It is the undeclared
+    **occurrences**, and a record may write several for one label. It cannot be
+    the unit here, because `_folded_subjects` collapses every undeclared
+    occurrence of a label into the one key `(label, None)` before this function
+    ever runs, so what this decides is one entry per pair. Recounted per pair by
+    mirroring the fold rather than by reconciling the old rows, which also moved
+    the occurrence figures to 149, 27 and 3.
+
+    The 2 are real and are the reason this is not simply "an undeclared repeat
+    folds away": the OENB writes
+    `650 $a Oesterreich $2 VLK $0 (AT-VLB)LA01044691` and, on the same record, a
+    `689 $a Oesterreich $0 (DE-588)4043271-3`. Folding the second into the first
+    throws away the GND number, which is the better identifier of the two.
+
+    **And it is not fixed by filling the identifier across the fold**, which is
+    the obvious repair and is wrong. Writing `(DE-588)4043271-3` onto the `VLK`
+    entry asserts that the GND number is the identifier of a heading in the
+    Vorarlberg list. That is a crosswalk between two vocabularies, which #134
+    refuses outright, and it is exactly the assertion nobody made. So the two
+    stay side by side, labelled differently, which is what this whole ticket is
+    for.
+    """
+    declared = [entry for entry in entries if entry.vocabulary is not None]
+    if not declared:
+        return False
+    return bare.identifier is None or any(
+        entry.identifier == bare.identifier for entry in declared
+    )
+
+
+def _folded_subjects(subjects: Iterable[Subject]) -> tuple[Subject, ...]:
+    """One subject per label and vocabulary, and an undeclared restatement of a
+    declared label folds away.
+
+    Measured on 2026-08-31 over 765 distinct (record, label) pairs from live
+    DNB, OENB, NLG and K10plus records.
+
+    **A label under two declared vocabularies stays two subjects**, 15 pairs of
+    the 765: `Woerterbuch` is a `gnd` subject and a `gnd-content` form type on
+    one record, `Roemisches Recht` is `gnd` and `local` on another. Folding
+    those together asserts that one vocabulary's heading is the other's, which
+    is the crosswalk #134 refuses in as many words.
+
+    **A label some field declared and another restated undeclared is one
+    subject**, 169 pairs of the 765 and the same 169 `_restates` partitions. It
+    is the ordinary shape rather than an edge: the DNB's `689` restates the
+    `600`, `650` and `651` headings it was built from and declares no `$2` on
+    any of 199 live fields. This is not
+    inference. It gives no undeclared value a vocabulary; it drops a second copy
+    of something the record already wrote. **What counts as a restatement is
+    `_restates`**, and the identifier is why that is a function rather than a
+    label comparison.
+
+    **A label keeps the place of its first occurrence, whichever entry
+    survives.** This is the half that was wrong when the rule was written: the
+    fold emitted surviving entries in key order, so dropping an undeclared entry
+    that came first moved its label to wherever the declared one sat, and
+    `Roman; Informatik` became `Informatik; Roman`. That is not internal.
+    `as_match` joins these labels into `categories`, `categories` is **stored on
+    the Book**, and a person reads it, so "nothing reads the order" was false as
+    written: a human reading the order is reading the order. K10plus reaches the
+    shape on its own (`650` declares nothing, `689` declares `gnd`) and a merge
+    of two catalogues reaches it without either doing so.
+
+    Grouping by label rather than sorting keeps this linear: a dict preserves
+    insertion order, and a label's first key is inserted at its first
+    occurrence, so the groups come out in first occurrence order for free. The
+    budget in `Record._folded` counts inspections per merge and is unchanged.
+
+    Within one label the entries keep the order the records wrote them, and an
+    identifier is filled in from whichever occurrence has one and never
+    overwritten, which is `_union`'s rule for a caption applied to the half a
+    record more often omits.
+    """
+    kept: dict[tuple[str, str | None], Subject] = {}
+    for subject in subjects:
+        key = (subject.label, subject.vocabulary)
+        existing = kept.get(key)
+        if existing is None:
+            kept[key] = subject
+        elif existing.identifier is None and subject.identifier is not None:
+            kept[key] = dataclasses.replace(existing, identifier=subject.identifier)
+
+    by_label: dict[str, list[Subject]] = {}
+    for (label, _), subject in kept.items():
+        by_label.setdefault(label, []).append(subject)
+
+    return tuple(
+        subject
+        for entries in by_label.values()
+        for subject in entries
+        if subject.vocabulary is not None or not _restates(subject, entries)
+    )
 
 
 def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssertion, ...]:

@@ -204,10 +204,21 @@ export const updateSettings = async (
   settingsUpdate: SettingsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SettingsOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<SettingsOut>(getUpdateSettingsUrl(), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(settingsUpdate),
   });
 };
@@ -219,14 +230,14 @@ export const getUpdateSettingsMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateSettings>>,
     TError,
-    { data: SettingsUpdate },
+    UpdateSettingsMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateSettings>>,
   TError,
-  { data: SettingsUpdate },
+  UpdateSettingsMutationVariables,
   TContext
 > => {
   const mutationKey = ["updateSettings"];
@@ -240,7 +251,7 @@ export const getUpdateSettingsMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateSettings>>,
-    { data: SettingsUpdate }
+    UpdateSettingsMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -255,6 +266,7 @@ export type UpdateSettingsMutationResult = NonNullable<
 >;
 export type UpdateSettingsMutationBody = SettingsUpdate;
 export type UpdateSettingsMutationError = HTTPValidationError;
+export type UpdateSettingsMutationVariables = { data: SettingsUpdate };
 
 /**
  * @summary Update Settings
@@ -267,7 +279,7 @@ export const useUpdateSettings = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof updateSettings>>,
       TError,
-      { data: SettingsUpdate },
+      UpdateSettingsMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -276,7 +288,7 @@ export const useUpdateSettings = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof updateSettings>>,
   TError,
-  { data: SettingsUpdate },
+  UpdateSettingsMutationVariables,
   TContext
 > => {
   return useMutation(getUpdateSettingsMutationOptions(options), queryClient);
@@ -600,14 +612,14 @@ export const getSetLoginImageMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setLoginImage>>,
     TError,
-    { data: BodySetLoginImage },
+    SetLoginImageMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setLoginImage>>,
   TError,
-  { data: BodySetLoginImage },
+  SetLoginImageMutationVariables,
   TContext
 > => {
   const mutationKey = ["setLoginImage"];
@@ -621,7 +633,7 @@ export const getSetLoginImageMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setLoginImage>>,
-    { data: BodySetLoginImage }
+    SetLoginImageMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -636,6 +648,7 @@ export type SetLoginImageMutationResult = NonNullable<
 >;
 export type SetLoginImageMutationBody = BodySetLoginImage;
 export type SetLoginImageMutationError = HTTPValidationError;
+export type SetLoginImageMutationVariables = { data: BodySetLoginImage };
 
 /**
  * @summary Set Login Image
@@ -648,7 +661,7 @@ export const useSetLoginImage = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setLoginImage>>,
       TError,
-      { data: BodySetLoginImage },
+      SetLoginImageMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -657,7 +670,7 @@ export const useSetLoginImage = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setLoginImage>>,
   TError,
-  { data: BodySetLoginImage },
+  SetLoginImageMutationVariables,
   TContext
 > => {
   return useMutation(getSetLoginImageMutationOptions(options), queryClient);

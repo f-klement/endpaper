@@ -766,8 +766,12 @@ class CatalogueSource(StrEnum):
     a roster `sources.parse` can validate a stored row against.
 
     **Not every source answers every question**, and the split is real rather
-    than incidental: BNF and LOC are title search only, because neither was
-    worth an ISBN request. See `sources.LOOKUP_SOURCES`.
+    than incidental. BNF and LOC are title search only, because neither was
+    worth an ISBN request. NKP is the other way round, **lookup only**, and for
+    a reason that is the server's rather than ours: it renders one populated
+    record per response whatever page size is asked for, so a search for ten
+    candidates would be ten requests. See `sources.LOOKUP_SOURCES` and
+    `SEARCH_SOURCES`, which is why those are two sets and not one.
     """
 
     OPEN_LIBRARY = "open_library"
@@ -776,5 +780,6 @@ class CatalogueSource(StrEnum):
     K10PLUS = "k10plus"
     OENB = "oenb"
     NLG = "nlg"
+    NKP = "nkp"
     BNF = "bnf"
     LOC = "loc"

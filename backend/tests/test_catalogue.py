@@ -8,7 +8,7 @@ XML is pinned in `test_metadata.py`, which is where the parsers are.
 import dataclasses
 
 import catalogue
-from catalogue import AuthorityAssertion, Heading, Record
+from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import AuthorityScheme, ClassificationScheme
 from schemas.book import BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
@@ -51,9 +51,128 @@ class TestARecordFoldsWhatOneSourceRepeats:
 
     def test_a_subject_repeated_in_one_record_is_kept_once(self):
         """The DNB's 689 restates the 600, 650 and 651 it was built from."""
-        record = Record(subjects=("Informatik", "Roman", "Informatik"))
+        record = Record(subjects=uncontrolled(("Informatik", "Roman", "Informatik")))
 
-        assert record.subjects == ("Informatik", "Roman")
+        assert record.subjects == (Subject("Informatik"), Subject("Roman"))
+
+    def test_an_undeclared_repeat_of_a_declared_subject_folds_away(self):
+        """The 689 restatement carries no `$2`, on 199 of 199 live DNB fields.
+
+        Both orders, because a catalogue may declare on either field: the DNB
+        declares on `650` and restates on `689`, K10plus is the exact mirror.
+        """
+        declared = Subject("Informatik", "gnd", "(DE-588)4026894-9")
+        restated = Subject("Informatik")
+
+        assert Record(subjects=(declared, restated)).subjects == (declared,)
+        assert Record(subjects=(restated, declared)).subjects == (declared,)
+
+    def test_one_label_under_two_vocabularies_stays_two_subjects(self):
+        """15 of 765 live (record, label) pairs, and merging them is the
+        crosswalk #134 refuses: `Woerterbuch` is a `gnd` subject and a
+        `gnd-content` form type on one DNB record."""
+        subject = Subject("Woerterbuch", "gnd", "(DE-588)4066724-8")
+        form = Subject("Woerterbuch", "gnd-content", "(DE-588)4066724-8")
+
+        assert Record(subjects=(subject, form)).subjects == (subject, form)
+
+    def test_an_identifier_is_filled_in_from_whichever_entry_carries_one(self):
+        """`_union`'s caption rule, applied to the half a record omits more."""
+        bare = Subject("Europe", "nlgaf")
+        identified = Subject("Europe", "nlgaf", "urn:nbn:gr:nlg:01-A273635")
+
+        assert Record(subjects=(bare, identified)).subjects == (identified,)
+
+    def test_a_later_identifier_never_replaces_one_already_found(self):
+        first = Subject("Europe", "nlgaf", "urn:nbn:gr:nlg:01-A273635")
+        second = Subject("Europe", "nlgaf", "urn:nbn:gr:nlg:99-B000000")
+
+        assert Record(subjects=(first, second)).subjects == (first,)
+
+    def test_an_undeclared_subject_no_field_declared_is_kept(self):
+        """The fold drops an undeclared copy of a **declared** label only. A
+        record whose every subject is undeclared keeps every one of them, which
+        is what every Dublin Core source produces."""
+        record = Record(subjects=uncontrolled(("Fantasy", "Roman")))
+
+        assert record.subjects == (Subject("Fantasy"), Subject("Roman"))
+
+    def test_an_undeclared_repeat_carrying_its_own_identifier_is_kept(self):
+        """A restatement adds nothing; this adds an identifier nobody else
+        named, so it is a second assertion.
+
+        Measured live, twice in 169 pairs, and both are the OENB: it writes
+        `650 $a Oesterreich $2 VLK $0 (AT-VLB)LA01044691` and, on the same
+        record, `689 $a Oesterreich $0 (DE-588)4043271-3`. Folding the second
+        away throws out the GND number, which is the better identifier of the
+        two.
+        """
+        local = Subject("Oesterreich", "vlk", "(AT-VLB)LA01044691")
+        gnd_number = Subject("Oesterreich", None, "(DE-588)4043271-3")
+
+        assert Record(subjects=(local, gnd_number)).subjects == (local, gnd_number)
+
+    def test_the_kept_identifier_is_never_moved_onto_the_other_vocabulary(self):
+        """The obvious repair for the case above, refused.
+
+        Writing `(DE-588)4043271-3` onto the `VLK` entry says the GND number
+        identifies a heading in the Vorarlberg list. That is a crosswalk between
+        two vocabularies, which is what #134 refuses, so the fix is to keep both
+        rather than to fill one from the other.
+        """
+        local = Subject("Psychology", "gnd", None)
+        fast = Subject("Psychology", None, "(OCoLC)fst01081447")
+        folded = Record(subjects=(fast, local)).subjects
+
+        assert [subject.identifier for subject in folded] == [
+            "(OCoLC)fst01081447",
+            None,
+        ]
+
+    def test_an_undeclared_repeat_of_the_same_identifier_still_folds(self):
+        """147 of the 169 live pairs, and the commonest shape of all: the DNB's
+        `689` restates the `650` heading **with its `(DE-588)` number** and no
+        `$2`. A rule that kept every undeclared entry carrying an identifier
+        would put that word on the wire twice."""
+        declared = Subject("Informatik", "gnd", "(DE-588)4026894-9")
+        restated = Subject("Informatik", None, "(DE-588)4026894-9")
+
+        assert Record(subjects=(declared, restated)).subjects == (declared,)
+
+    def test_a_label_keeps_the_place_of_its_first_occurrence(self):
+        """`categories` is joined from these labels **and stored on the Book**,
+        so a person reads the order.
+
+        The fold used to emit surviving entries in key order, so dropping an
+        undeclared entry that came first moved its label to wherever the
+        declared one sat: this record answered `Informatik; Roman` where the
+        plain string deduplication it replaced answered `Roman; Informatik`.
+        """
+        record = Record(
+            subjects=(
+                Subject("Roman"),
+                Subject("Informatik", "gnd"),
+                Subject("Roman", "gnd"),
+            )
+        )
+
+        assert record.subject_labels == ["Roman", "Informatik"]
+        assert record.as_match()["categories"] == "Roman; Informatik"
+
+    def test_an_undeclared_subject_survives_beside_a_declared_one(self):
+        """The label matters and not merely whether anything was declared.
+
+        Written after attacking the rule: a fold asking "did **any** field
+        declare" rather than "did any field declare *this label*" passes every
+        other test in this class, and drops `Roman` off any record that also
+        carries one GND heading. That is a live shape, not a hypothetical: a DNB
+        record declaring `gnd` on its `650` and a K10plus record declaring
+        nothing on its own reach one `Record` through `merged_with`.
+        """
+        declared = Subject("Informatik", "gnd", "(DE-588)4026894-9")
+        other = Subject("Roman")
+
+        assert Record(subjects=(declared, other)).subjects == (declared, other)
 
     def test_one_author_named_by_both_100_and_700_is_asserted_once(self):
         record = Record(author_identifiers=(KANE, KANE))
@@ -191,16 +310,38 @@ class TestMergingTwoCataloguesOfOnePrinting:
         assert dnb.merged_with(k10plus).headings == (GND, DDC_004)
 
     def test_both_catalogues_subjects_are_kept_in_order(self):
-        dnb = Record(source="dnb", title="X", subjects=("Informatik",))
-        k10plus = Record(source="k10plus", title="X", subjects=("Roman",))
+        dnb = Record(source="dnb", title="X", subjects=uncontrolled(("Informatik",)))
+        k10plus = Record(source="k10plus", title="X", subjects=uncontrolled(("Roman",)))
 
-        assert dnb.merged_with(k10plus).subjects == ("Informatik", "Roman")
+        assert dnb.merged_with(k10plus).subjects == (
+            Subject("Informatik"),
+            Subject("Roman"),
+        )
 
     def test_one_subject_both_catalogues_carry_is_kept_once(self):
-        dnb = Record(source="dnb", title="X", subjects=("Informatik",))
-        k10plus = Record(source="k10plus", title="X", subjects=("Informatik",))
+        dnb = Record(source="dnb", title="X", subjects=uncontrolled(("Informatik",)))
+        k10plus = Record(
+            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
+        )
 
-        assert dnb.merged_with(k10plus).subjects == ("Informatik",)
+        assert dnb.merged_with(k10plus).subjects == (Subject("Informatik"),)
+
+    def test_one_catalogues_stamp_reaches_the_others_bare_subject(self):
+        """Two catalogues describing one printing, one of which said which
+        vocabulary the heading is from. The fold is across the merge, so the
+        merged record carries the stamp once rather than the word twice."""
+        dnb = Record(
+            source="dnb",
+            title="X",
+            subjects=(Subject("Informatik", "gnd", "(DE-588)4026894-9"),),
+        )
+        k10plus = Record(
+            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
+        )
+
+        assert dnb.merged_with(k10plus).subjects == (
+            Subject("Informatik", "gnd", "(DE-588)4026894-9"),
+        )
 
     def test_one_number_from_two_sources_keeps_the_caption(self):
         """Taking the leading source whole would throw a caption away.
@@ -237,7 +378,7 @@ class TestHowCompleteARecordIs:
         assert record.completeness == 3
 
     def test_subjects_count_once_however_many_there_are(self):
-        assert Record(subjects=("a", "b", "c")).completeness == 1
+        assert Record(subjects=uncontrolled(("a", "b", "c"))).completeness == 1
 
     def test_a_title_does_not_count(self):
         """Every record has one, so it separates nothing."""
@@ -287,9 +428,21 @@ class TestTheTwoDraftShapes:
     def test_a_category_containing_a_comma_survives_the_round_trip(self):
         """Google's own category names contain commas, which is why the joined
         column uses a semicolon. A record holding one must come back whole."""
-        record = Record(subjects=("Fiction, general", "Computers"))
+        record = Record(subjects=uncontrolled(("Fiction, general", "Computers")))
 
         assert record.as_match()["categories"] == "Fiction, general; Computers"
+
+    def test_one_word_under_two_vocabularies_reaches_the_wire_once(self):
+        """`_folded_subjects` keeps both on purpose. `categories` is one string
+        a person reads, where the same word twice reads as a defect."""
+        record = Record(
+            subjects=(
+                Subject("Roemisches Recht", "gnd", "(DE-588)4076560-1"),
+                Subject("Roemisches Recht", "local"),
+            )
+        )
+
+        assert record.as_match()["categories"] == "Roemisches Recht"
 
     def test_a_record_with_no_subjects_carries_no_categories(self):
         """`null` rather than `""`, so a client tests for one absence."""
@@ -353,9 +506,10 @@ class TestTheFoldRunsOncePerSetOfCollections:
 
     @staticmethod
     def _counting(monkeypatch) -> list[int]:
-        """Every entry `_unique` and `_union` look at, one entry per element."""
+        """Every entry the three folds look at, one entry per element."""
         inspected: list[int] = []
-        real_unique, real_union = catalogue._unique, catalogue._union
+        real_unique = catalogue._folded_subjects
+        real_union = catalogue._union
         # The third collection is counted too, and deliberately: a fold that
         # escaped `_folded` here would be invisible to a counter watching only
         # the two that existed when this test was written.
@@ -376,7 +530,7 @@ class TestTheFoldRunsOncePerSetOfCollections:
             inspected.append(len(assertions))
             return real_distinct(assertions)
 
-        monkeypatch.setattr(catalogue, "_unique", unique)
+        monkeypatch.setattr(catalogue, "_folded_subjects", unique)
         monkeypatch.setattr(catalogue, "_union", union)
         monkeypatch.setattr(catalogue, "_distinct", distinct)
         return inspected
@@ -386,7 +540,7 @@ class TestTheFoldRunsOncePerSetOfCollections:
         return Record(
             source="loc",
             title="X",
-            subjects=tuple(f"subject {index}" for index in range(200)),
+            subjects=uncontrolled(f"subject {index}" for index in range(200)),
             headings=tuple(
                 Heading(ClassificationScheme.LCSH, f"heading {index}")
                 for index in range(200)
@@ -415,16 +569,20 @@ class TestTheFoldRunsOncePerSetOfCollections:
         row = self._fat()
         inspected = self._counting(monkeypatch)
 
-        row.merged_with(Record(source="dnb", title="X", subjects=("subject 0",)))
+        row.merged_with(
+            Record(source="dnb", title="X", subjects=uncontrolled(("subject 0",)))
+        )
 
         assert sum(inspected) > 0
 
     def test_a_repeat_the_second_catalogue_brings_is_still_folded(self):
         """What the count above is protecting, asserted on the values."""
-        first = Record(source="dnb", title="X", subjects=("Informatik",))
-        second = Record(source="k10plus", title="X", subjects=("Informatik",))
+        first = Record(source="dnb", title="X", subjects=uncontrolled(("Informatik",)))
+        second = Record(
+            source="k10plus", title="X", subjects=uncontrolled(("Informatik",))
+        )
 
-        assert first.merged_with(second).subjects == ("Informatik",)
+        assert first.merged_with(second).subjects == (Subject("Informatik"),)
 
 
 class TestWhatARecordFillsIsEveryScalarItHolds:

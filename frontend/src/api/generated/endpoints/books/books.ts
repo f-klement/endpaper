@@ -466,10 +466,21 @@ export const addBook = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getAddBookUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookCreate),
   });
 };
@@ -481,14 +492,14 @@ export const getAddBookMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addBook>>,
     TError,
-    { data: BookCreate },
+    AddBookMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addBook>>,
   TError,
-  { data: BookCreate },
+  AddBookMutationVariables,
   TContext
 > => {
   const mutationKey = ["addBook"];
@@ -502,7 +513,7 @@ export const getAddBookMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addBook>>,
-    { data: BookCreate }
+    AddBookMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -517,6 +528,7 @@ export type AddBookMutationResult = NonNullable<
 >;
 export type AddBookMutationBody = BookCreate;
 export type AddBookMutationError = HTTPValidationError;
+export type AddBookMutationVariables = { data: BookCreate };
 
 /**
  * @summary Add Book
@@ -526,7 +538,7 @@ export const useAddBook = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addBook>>,
       TError,
-      { data: BookCreate },
+      AddBookMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -535,7 +547,7 @@ export const useAddBook = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof addBook>>,
   TError,
-  { data: BookCreate },
+  AddBookMutationVariables,
   TContext
 > => {
   return useMutation(getAddBookMutationOptions(options), queryClient);
@@ -725,14 +737,14 @@ export const getUnmergeAuthorMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof unmergeAuthor>>,
     TError,
-    { aliasId: number },
+    UnmergeAuthorMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof unmergeAuthor>>,
   TError,
-  { aliasId: number },
+  UnmergeAuthorMutationVariables,
   TContext
 > => {
   const mutationKey = ["unmergeAuthor"];
@@ -746,7 +758,7 @@ export const getUnmergeAuthorMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof unmergeAuthor>>,
-    { aliasId: number }
+    UnmergeAuthorMutationVariables
   > = (props) => {
     const { aliasId } = props ?? {};
 
@@ -761,6 +773,7 @@ export type UnmergeAuthorMutationResult = NonNullable<
 >;
 
 export type UnmergeAuthorMutationError = HTTPValidationError;
+export type UnmergeAuthorMutationVariables = { aliasId: number };
 
 /**
  * @summary Unmerge Author
@@ -773,7 +786,7 @@ export const useUnmergeAuthor = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof unmergeAuthor>>,
       TError,
-      { aliasId: number },
+      UnmergeAuthorMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -782,7 +795,7 @@ export const useUnmergeAuthor = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof unmergeAuthor>>,
   TError,
-  { aliasId: number },
+  UnmergeAuthorMutationVariables,
   TContext
 > => {
   return useMutation(getUnmergeAuthorMutationOptions(options), queryClient);
@@ -1056,10 +1069,21 @@ export const confirmAuthorIdentifier = async (
   authorIdentifierRequest: AuthorIdentifierRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ConfirmedIdentifierOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<ConfirmedIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(authorIdentifierRequest),
   });
 };
@@ -1071,14 +1095,14 @@ export const getConfirmAuthorIdentifierMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
     TError,
-    { data: AuthorIdentifierRequest },
+    ConfirmAuthorIdentifierMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
   TError,
-  { data: AuthorIdentifierRequest },
+  ConfirmAuthorIdentifierMutationVariables,
   TContext
 > => {
   const mutationKey = ["confirmAuthorIdentifier"];
@@ -1092,7 +1116,7 @@ export const getConfirmAuthorIdentifierMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
-    { data: AuthorIdentifierRequest }
+    ConfirmAuthorIdentifierMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -1107,6 +1131,9 @@ export type ConfirmAuthorIdentifierMutationResult = NonNullable<
 >;
 export type ConfirmAuthorIdentifierMutationBody = AuthorIdentifierRequest;
 export type ConfirmAuthorIdentifierMutationError = HTTPValidationError;
+export type ConfirmAuthorIdentifierMutationVariables = {
+  data: AuthorIdentifierRequest;
+};
 
 /**
  * @summary Confirm Author Identifier
@@ -1119,7 +1146,7 @@ export const useConfirmAuthorIdentifier = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
       TError,
-      { data: AuthorIdentifierRequest },
+      ConfirmAuthorIdentifierMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1128,7 +1155,7 @@ export const useConfirmAuthorIdentifier = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof confirmAuthorIdentifier>>,
   TError,
-  { data: AuthorIdentifierRequest },
+  ConfirmAuthorIdentifierMutationVariables,
   TContext
 > => {
   return useMutation(
@@ -1172,14 +1199,14 @@ export const getForgetAuthorIdentifierMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
     TError,
-    { identifierId: number },
+    ForgetAuthorIdentifierMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
   TError,
-  { identifierId: number },
+  ForgetAuthorIdentifierMutationVariables,
   TContext
 > => {
   const mutationKey = ["forgetAuthorIdentifier"];
@@ -1193,7 +1220,7 @@ export const getForgetAuthorIdentifierMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
-    { identifierId: number }
+    ForgetAuthorIdentifierMutationVariables
   > = (props) => {
     const { identifierId } = props ?? {};
 
@@ -1208,6 +1235,7 @@ export type ForgetAuthorIdentifierMutationResult = NonNullable<
 >;
 
 export type ForgetAuthorIdentifierMutationError = HTTPValidationError;
+export type ForgetAuthorIdentifierMutationVariables = { identifierId: number };
 
 /**
  * @summary Forget Author Identifier
@@ -1220,7 +1248,7 @@ export const useForgetAuthorIdentifier = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
       TError,
-      { identifierId: number },
+      ForgetAuthorIdentifierMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1229,7 +1257,7 @@ export const useForgetAuthorIdentifier = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof forgetAuthorIdentifier>>,
   TError,
-  { identifierId: number },
+  ForgetAuthorIdentifierMutationVariables,
   TContext
 > => {
   return useMutation(
@@ -1269,10 +1297,21 @@ export const mergeAuthors = async (
   authorMergeRequest: AuthorMergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AuthorOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<AuthorOut>(getMergeAuthorsUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(authorMergeRequest),
   });
 };
@@ -1284,14 +1323,14 @@ export const getMergeAuthorsMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof mergeAuthors>>,
     TError,
-    { data: AuthorMergeRequest },
+    MergeAuthorsMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof mergeAuthors>>,
   TError,
-  { data: AuthorMergeRequest },
+  MergeAuthorsMutationVariables,
   TContext
 > => {
   const mutationKey = ["mergeAuthors"];
@@ -1305,7 +1344,7 @@ export const getMergeAuthorsMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof mergeAuthors>>,
-    { data: AuthorMergeRequest }
+    MergeAuthorsMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -1320,6 +1359,7 @@ export type MergeAuthorsMutationResult = NonNullable<
 >;
 export type MergeAuthorsMutationBody = AuthorMergeRequest;
 export type MergeAuthorsMutationError = HTTPValidationError;
+export type MergeAuthorsMutationVariables = { data: AuthorMergeRequest };
 
 /**
  * @summary Merge Authors
@@ -1332,7 +1372,7 @@ export const useMergeAuthors = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof mergeAuthors>>,
       TError,
-      { data: AuthorMergeRequest },
+      MergeAuthorsMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1341,7 +1381,7 @@ export const useMergeAuthors = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof mergeAuthors>>,
   TError,
-  { data: AuthorMergeRequest },
+  MergeAuthorsMutationVariables,
   TContext
 > => {
   return useMutation(getMergeAuthorsMutationOptions(options), queryClient);
@@ -1755,10 +1795,21 @@ export const bulkAction = async (
   bulkRequest: BulkRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BulkResult> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BulkResult>(getBulkActionUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bulkRequest),
   });
 };
@@ -1770,14 +1821,14 @@ export const getBulkActionMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof bulkAction>>,
     TError,
-    { data: BulkRequest },
+    BulkActionMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof bulkAction>>,
   TError,
-  { data: BulkRequest },
+  BulkActionMutationVariables,
   TContext
 > => {
   const mutationKey = ["bulkAction"];
@@ -1791,7 +1842,7 @@ export const getBulkActionMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof bulkAction>>,
-    { data: BulkRequest }
+    BulkActionMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -1806,6 +1857,7 @@ export type BulkActionMutationResult = NonNullable<
 >;
 export type BulkActionMutationBody = BulkRequest;
 export type BulkActionMutationError = HTTPValidationError;
+export type BulkActionMutationVariables = { data: BulkRequest };
 
 /**
  * @summary Bulk Action
@@ -1815,7 +1867,7 @@ export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof bulkAction>>,
       TError,
-      { data: BulkRequest },
+      BulkActionMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1824,7 +1876,7 @@ export const useBulkAction = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof bulkAction>>,
   TError,
-  { data: BulkRequest },
+  BulkActionMutationVariables,
   TContext
 > => {
   return useMutation(getBulkActionMutationOptions(options), queryClient);
@@ -2068,14 +2120,14 @@ export const getBackfillCoversMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof backfillCovers>>,
     TError,
-    { params?: BackfillCoversParams },
+    BackfillCoversMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof backfillCovers>>,
   TError,
-  { params?: BackfillCoversParams },
+  BackfillCoversMutationVariables,
   TContext
 > => {
   const mutationKey = ["backfillCovers"];
@@ -2089,7 +2141,7 @@ export const getBackfillCoversMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof backfillCovers>>,
-    { params?: BackfillCoversParams }
+    BackfillCoversMutationVariables
   > = (props) => {
     const { params } = props ?? {};
 
@@ -2104,6 +2156,7 @@ export type BackfillCoversMutationResult = NonNullable<
 >;
 
 export type BackfillCoversMutationError = HTTPValidationError;
+export type BackfillCoversMutationVariables = { params?: BackfillCoversParams };
 
 /**
  * @summary Backfill Covers
@@ -2116,7 +2169,7 @@ export const useBackfillCovers = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof backfillCovers>>,
       TError,
-      { params?: BackfillCoversParams },
+      BackfillCoversMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -2125,7 +2178,7 @@ export const useBackfillCovers = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof backfillCovers>>,
   TError,
-  { params?: BackfillCoversParams },
+  BackfillCoversMutationVariables,
   TContext
 > => {
   return useMutation(getBackfillCoversMutationOptions(options), queryClient);
@@ -2310,10 +2363,21 @@ export const defineCustomField = async (
   customFieldCreate: CustomFieldCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<CustomFieldOut>(getDefineCustomFieldUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(customFieldCreate),
   });
 };
@@ -2325,14 +2389,14 @@ export const getDefineCustomFieldMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof defineCustomField>>,
     TError,
-    { data: CustomFieldCreate },
+    DefineCustomFieldMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof defineCustomField>>,
   TError,
-  { data: CustomFieldCreate },
+  DefineCustomFieldMutationVariables,
   TContext
 > => {
   const mutationKey = ["defineCustomField"];
@@ -2346,7 +2410,7 @@ export const getDefineCustomFieldMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof defineCustomField>>,
-    { data: CustomFieldCreate }
+    DefineCustomFieldMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -2361,6 +2425,7 @@ export type DefineCustomFieldMutationResult = NonNullable<
 >;
 export type DefineCustomFieldMutationBody = CustomFieldCreate;
 export type DefineCustomFieldMutationError = HTTPValidationError;
+export type DefineCustomFieldMutationVariables = { data: CustomFieldCreate };
 
 /**
  * @summary Define Custom Field
@@ -2373,7 +2438,7 @@ export const useDefineCustomField = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof defineCustomField>>,
       TError,
-      { data: CustomFieldCreate },
+      DefineCustomFieldMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -2382,7 +2447,7 @@ export const useDefineCustomField = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof defineCustomField>>,
   TError,
-  { data: CustomFieldCreate },
+  DefineCustomFieldMutationVariables,
   TContext
 > => {
   return useMutation(getDefineCustomFieldMutationOptions(options), queryClient);
@@ -2426,14 +2491,14 @@ export const getDeleteCustomFieldMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteCustomField>>,
     TError,
-    { fieldId: number },
+    DeleteCustomFieldMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteCustomField>>,
   TError,
-  { fieldId: number },
+  DeleteCustomFieldMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteCustomField"];
@@ -2447,7 +2512,7 @@ export const getDeleteCustomFieldMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteCustomField>>,
-    { fieldId: number }
+    DeleteCustomFieldMutationVariables
   > = (props) => {
     const { fieldId } = props ?? {};
 
@@ -2462,6 +2527,7 @@ export type DeleteCustomFieldMutationResult = NonNullable<
 >;
 
 export type DeleteCustomFieldMutationError = HTTPValidationError;
+export type DeleteCustomFieldMutationVariables = { fieldId: number };
 
 /**
  * @summary Delete Custom Field
@@ -2474,7 +2540,7 @@ export const useDeleteCustomField = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteCustomField>>,
       TError,
-      { fieldId: number },
+      DeleteCustomFieldMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -2483,7 +2549,7 @@ export const useDeleteCustomField = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteCustomField>>,
   TError,
-  { fieldId: number },
+  DeleteCustomFieldMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteCustomFieldMutationOptions(options), queryClient);
@@ -2505,10 +2571,21 @@ export const renameCustomField = async (
   customFieldRename: CustomFieldRename,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<CustomFieldOut>(getRenameCustomFieldUrl(fieldId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(customFieldRename),
   });
 };
@@ -2520,14 +2597,14 @@ export const getRenameCustomFieldMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof renameCustomField>>,
     TError,
-    { fieldId: number; data: CustomFieldRename },
+    RenameCustomFieldMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof renameCustomField>>,
   TError,
-  { fieldId: number; data: CustomFieldRename },
+  RenameCustomFieldMutationVariables,
   TContext
 > => {
   const mutationKey = ["renameCustomField"];
@@ -2541,7 +2618,7 @@ export const getRenameCustomFieldMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof renameCustomField>>,
-    { fieldId: number; data: CustomFieldRename }
+    RenameCustomFieldMutationVariables
   > = (props) => {
     const { fieldId, data } = props ?? {};
 
@@ -2556,6 +2633,10 @@ export type RenameCustomFieldMutationResult = NonNullable<
 >;
 export type RenameCustomFieldMutationBody = CustomFieldRename;
 export type RenameCustomFieldMutationError = HTTPValidationError;
+export type RenameCustomFieldMutationVariables = {
+  fieldId: number;
+  data: CustomFieldRename;
+};
 
 /**
  * @summary Rename Custom Field
@@ -2568,7 +2649,7 @@ export const useRenameCustomField = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof renameCustomField>>,
       TError,
-      { fieldId: number; data: CustomFieldRename },
+      RenameCustomFieldMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -2577,7 +2658,7 @@ export const useRenameCustomField = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof renameCustomField>>,
   TError,
-  { fieldId: number; data: CustomFieldRename },
+  RenameCustomFieldMutationVariables,
   TContext
 > => {
   return useMutation(getRenameCustomFieldMutationOptions(options), queryClient);
@@ -3220,10 +3301,21 @@ export const mergeBooks = async (
   mergeRequest: MergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getMergeBooksUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(mergeRequest),
   });
 };
@@ -3235,14 +3327,14 @@ export const getMergeBooksMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof mergeBooks>>,
     TError,
-    { data: MergeRequest },
+    MergeBooksMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof mergeBooks>>,
   TError,
-  { data: MergeRequest },
+  MergeBooksMutationVariables,
   TContext
 > => {
   const mutationKey = ["mergeBooks"];
@@ -3256,7 +3348,7 @@ export const getMergeBooksMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof mergeBooks>>,
-    { data: MergeRequest }
+    MergeBooksMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -3271,6 +3363,7 @@ export type MergeBooksMutationResult = NonNullable<
 >;
 export type MergeBooksMutationBody = MergeRequest;
 export type MergeBooksMutationError = HTTPValidationError;
+export type MergeBooksMutationVariables = { data: MergeRequest };
 
 /**
  * @summary Merge Books
@@ -3280,7 +3373,7 @@ export const useMergeBooks = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof mergeBooks>>,
       TError,
-      { data: MergeRequest },
+      MergeBooksMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -3289,7 +3382,7 @@ export const useMergeBooks = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof mergeBooks>>,
   TError,
-  { data: MergeRequest },
+  MergeBooksMutationVariables,
   TContext
 > => {
   return useMutation(getMergeBooksMutationOptions(options), queryClient);
@@ -3488,10 +3581,21 @@ export const scanAdd = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getScanAddUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookCreate),
   });
 };
@@ -3503,14 +3607,14 @@ export const getScanAddMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof scanAdd>>,
     TError,
-    { data: BookCreate },
+    ScanAddMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof scanAdd>>,
   TError,
-  { data: BookCreate },
+  ScanAddMutationVariables,
   TContext
 > => {
   const mutationKey = ["scanAdd"];
@@ -3524,7 +3628,7 @@ export const getScanAddMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof scanAdd>>,
-    { data: BookCreate }
+    ScanAddMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -3539,6 +3643,7 @@ export type ScanAddMutationResult = NonNullable<
 >;
 export type ScanAddMutationBody = BookCreate;
 export type ScanAddMutationError = HTTPValidationError;
+export type ScanAddMutationVariables = { data: BookCreate };
 
 /**
  * @summary Scan Add
@@ -3548,7 +3653,7 @@ export const useScanAdd = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof scanAdd>>,
       TError,
-      { data: BookCreate },
+      ScanAddMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -3557,7 +3662,7 @@ export const useScanAdd = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof scanAdd>>,
   TError,
-  { data: BookCreate },
+  ScanAddMutationVariables,
   TContext
 > => {
   return useMutation(getScanAddMutationOptions(options), queryClient);
@@ -4042,10 +4147,21 @@ export const createTag = async (
   tagCreate: TagCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<TagOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<TagOut>(getCreateTagUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(tagCreate),
   });
 };
@@ -4057,14 +4173,14 @@ export const getCreateTagMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createTag>>,
     TError,
-    { data: TagCreate },
+    CreateTagMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createTag>>,
   TError,
-  { data: TagCreate },
+  CreateTagMutationVariables,
   TContext
 > => {
   const mutationKey = ["createTag"];
@@ -4078,7 +4194,7 @@ export const getCreateTagMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createTag>>,
-    { data: TagCreate }
+    CreateTagMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -4093,6 +4209,7 @@ export type CreateTagMutationResult = NonNullable<
 >;
 export type CreateTagMutationBody = TagCreate;
 export type CreateTagMutationError = HTTPValidationError;
+export type CreateTagMutationVariables = { data: TagCreate };
 
 /**
  * @summary Create Tag
@@ -4102,7 +4219,7 @@ export const useCreateTag = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createTag>>,
       TError,
-      { data: TagCreate },
+      CreateTagMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -4111,7 +4228,7 @@ export const useCreateTag = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof createTag>>,
   TError,
-  { data: TagCreate },
+  CreateTagMutationVariables,
   TContext
 > => {
   return useMutation(getCreateTagMutationOptions(options), queryClient);
@@ -4155,14 +4272,14 @@ export const getDeleteTagMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteTag>>,
     TError,
-    { tagId: number },
+    DeleteTagMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteTag>>,
   TError,
-  { tagId: number },
+  DeleteTagMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteTag"];
@@ -4176,7 +4293,7 @@ export const getDeleteTagMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteTag>>,
-    { tagId: number }
+    DeleteTagMutationVariables
   > = (props) => {
     const { tagId } = props ?? {};
 
@@ -4191,6 +4308,7 @@ export type DeleteTagMutationResult = NonNullable<
 >;
 
 export type DeleteTagMutationError = HTTPValidationError;
+export type DeleteTagMutationVariables = { tagId: number };
 
 /**
  * @summary Delete Tag
@@ -4200,7 +4318,7 @@ export const useDeleteTag = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteTag>>,
       TError,
-      { tagId: number },
+      DeleteTagMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -4209,7 +4327,7 @@ export const useDeleteTag = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteTag>>,
   TError,
-  { tagId: number },
+  DeleteTagMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteTagMutationOptions(options), queryClient);
@@ -4496,14 +4614,14 @@ export const getDeleteBookMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteBook>>,
     TError,
-    { bookId: number },
+    DeleteBookMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteBook>>,
   TError,
-  { bookId: number },
+  DeleteBookMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteBook"];
@@ -4517,7 +4635,7 @@ export const getDeleteBookMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteBook>>,
-    { bookId: number }
+    DeleteBookMutationVariables
   > = (props) => {
     const { bookId } = props ?? {};
 
@@ -4532,6 +4650,7 @@ export type DeleteBookMutationResult = NonNullable<
 >;
 
 export type DeleteBookMutationError = HTTPValidationError;
+export type DeleteBookMutationVariables = { bookId: number };
 
 /**
  * @summary Delete Book
@@ -4541,7 +4660,7 @@ export const useDeleteBook = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteBook>>,
       TError,
-      { bookId: number },
+      DeleteBookMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -4550,7 +4669,7 @@ export const useDeleteBook = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteBook>>,
   TError,
-  { bookId: number },
+  DeleteBookMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteBookMutationOptions(options), queryClient);
@@ -4718,10 +4837,21 @@ export const updateBookDetails = async (
   bookDetailsUpdate: BookDetailsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getUpdateBookDetailsUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookDetailsUpdate),
   });
 };
@@ -4733,14 +4863,14 @@ export const getUpdateBookDetailsMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateBookDetails>>,
     TError,
-    { bookId: number; data: BookDetailsUpdate },
+    UpdateBookDetailsMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateBookDetails>>,
   TError,
-  { bookId: number; data: BookDetailsUpdate },
+  UpdateBookDetailsMutationVariables,
   TContext
 > => {
   const mutationKey = ["updateBookDetails"];
@@ -4754,7 +4884,7 @@ export const getUpdateBookDetailsMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateBookDetails>>,
-    { bookId: number; data: BookDetailsUpdate }
+    UpdateBookDetailsMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -4769,6 +4899,10 @@ export type UpdateBookDetailsMutationResult = NonNullable<
 >;
 export type UpdateBookDetailsMutationBody = BookDetailsUpdate;
 export type UpdateBookDetailsMutationError = HTTPValidationError;
+export type UpdateBookDetailsMutationVariables = {
+  bookId: number;
+  data: BookDetailsUpdate;
+};
 
 /**
  * @summary Update Book Details
@@ -4781,7 +4915,7 @@ export const useUpdateBookDetails = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof updateBookDetails>>,
       TError,
-      { bookId: number; data: BookDetailsUpdate },
+      UpdateBookDetailsMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -4790,7 +4924,7 @@ export const useUpdateBookDetails = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof updateBookDetails>>,
   TError,
-  { bookId: number; data: BookDetailsUpdate },
+  UpdateBookDetailsMutationVariables,
   TContext
 > => {
   return useMutation(getUpdateBookDetailsMutationOptions(options), queryClient);
@@ -4817,10 +4951,21 @@ export const setCollection = async (
   collectionAssign: CollectionAssign,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getSetCollectionUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(collectionAssign),
   });
 };
@@ -4832,14 +4977,14 @@ export const getSetCollectionMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setCollection>>,
     TError,
-    { bookId: number; data: CollectionAssign },
+    SetCollectionMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setCollection>>,
   TError,
-  { bookId: number; data: CollectionAssign },
+  SetCollectionMutationVariables,
   TContext
 > => {
   const mutationKey = ["setCollection"];
@@ -4853,7 +4998,7 @@ export const getSetCollectionMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setCollection>>,
-    { bookId: number; data: CollectionAssign }
+    SetCollectionMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -4868,6 +5013,10 @@ export type SetCollectionMutationResult = NonNullable<
 >;
 export type SetCollectionMutationBody = CollectionAssign;
 export type SetCollectionMutationError = HTTPValidationError;
+export type SetCollectionMutationVariables = {
+  bookId: number;
+  data: CollectionAssign;
+};
 
 /**
  * @summary Set Collection
@@ -4880,7 +5029,7 @@ export const useSetCollection = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setCollection>>,
       TError,
-      { bookId: number; data: CollectionAssign },
+      SetCollectionMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -4889,7 +5038,7 @@ export const useSetCollection = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setCollection>>,
   TError,
-  { bookId: number; data: CollectionAssign },
+  SetCollectionMutationVariables,
   TContext
 > => {
   return useMutation(getSetCollectionMutationOptions(options), queryClient);
@@ -5080,10 +5229,21 @@ export const addCopy = async (
   copyCreate: CopyCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getAddCopyUrl(bookId), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(copyCreate),
   });
 };
@@ -5095,14 +5255,14 @@ export const getAddCopyMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addCopy>>,
     TError,
-    { bookId: number; data: CopyCreate },
+    AddCopyMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addCopy>>,
   TError,
-  { bookId: number; data: CopyCreate },
+  AddCopyMutationVariables,
   TContext
 > => {
   const mutationKey = ["addCopy"];
@@ -5116,7 +5276,7 @@ export const getAddCopyMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addCopy>>,
-    { bookId: number; data: CopyCreate }
+    AddCopyMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -5131,6 +5291,7 @@ export type AddCopyMutationResult = NonNullable<
 >;
 export type AddCopyMutationBody = CopyCreate;
 export type AddCopyMutationError = HTTPValidationError;
+export type AddCopyMutationVariables = { bookId: number; data: CopyCreate };
 
 /**
  * @summary Add Copy
@@ -5140,7 +5301,7 @@ export const useAddCopy = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addCopy>>,
       TError,
-      { bookId: number; data: CopyCreate },
+      AddCopyMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5149,7 +5310,7 @@ export const useAddCopy = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof addCopy>>,
   TError,
-  { bookId: number; data: CopyCreate },
+  AddCopyMutationVariables,
   TContext
 > => {
   return useMutation(getAddCopyMutationOptions(options), queryClient);
@@ -5183,14 +5344,14 @@ export const getUploadCoverMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof uploadCover>>,
     TError,
-    { bookId: number; data: BodyUploadCover },
+    UploadCoverMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof uploadCover>>,
   TError,
-  { bookId: number; data: BodyUploadCover },
+  UploadCoverMutationVariables,
   TContext
 > => {
   const mutationKey = ["uploadCover"];
@@ -5204,7 +5365,7 @@ export const getUploadCoverMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof uploadCover>>,
-    { bookId: number; data: BodyUploadCover }
+    UploadCoverMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -5219,6 +5380,10 @@ export type UploadCoverMutationResult = NonNullable<
 >;
 export type UploadCoverMutationBody = BodyUploadCover;
 export type UploadCoverMutationError = HTTPValidationError;
+export type UploadCoverMutationVariables = {
+  bookId: number;
+  data: BodyUploadCover;
+};
 
 /**
  * @summary Upload Cover
@@ -5231,7 +5396,7 @@ export const useUploadCover = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof uploadCover>>,
       TError,
-      { bookId: number; data: BodyUploadCover },
+      UploadCoverMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5240,7 +5405,7 @@ export const useUploadCover = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof uploadCover>>,
   TError,
-  { bookId: number; data: BodyUploadCover },
+  UploadCoverMutationVariables,
   TContext
 > => {
   return useMutation(getUploadCoverMutationOptions(options), queryClient);
@@ -5444,12 +5609,23 @@ export const setCustomField = async (
   customFieldValueUpdate: CustomFieldValueUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldValueOut[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<CustomFieldValueOut[]>(
     getSetCustomFieldUrl(bookId, fieldId),
     {
       ...options,
       method: "PUT",
-      headers: { "Content-Type": "application/json", ...options?.headers },
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
       body: JSON.stringify(customFieldValueUpdate),
     },
   );
@@ -5462,14 +5638,14 @@ export const getSetCustomFieldMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setCustomField>>,
     TError,
-    { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+    SetCustomFieldMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setCustomField>>,
   TError,
-  { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+  SetCustomFieldMutationVariables,
   TContext
 > => {
   const mutationKey = ["setCustomField"];
@@ -5483,7 +5659,7 @@ export const getSetCustomFieldMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setCustomField>>,
-    { bookId: number; fieldId: number; data: CustomFieldValueUpdate }
+    SetCustomFieldMutationVariables
   > = (props) => {
     const { bookId, fieldId, data } = props ?? {};
 
@@ -5498,6 +5674,11 @@ export type SetCustomFieldMutationResult = NonNullable<
 >;
 export type SetCustomFieldMutationBody = CustomFieldValueUpdate;
 export type SetCustomFieldMutationError = HTTPValidationError;
+export type SetCustomFieldMutationVariables = {
+  bookId: number;
+  fieldId: number;
+  data: CustomFieldValueUpdate;
+};
 
 /**
  * @summary Set Custom Field
@@ -5510,7 +5691,7 @@ export const useSetCustomField = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setCustomField>>,
       TError,
-      { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+      SetCustomFieldMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5519,7 +5700,7 @@ export const useSetCustomField = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setCustomField>>,
   TError,
-  { bookId: number; fieldId: number; data: CustomFieldValueUpdate },
+  SetCustomFieldMutationVariables,
   TContext
 > => {
   return useMutation(getSetCustomFieldMutationOptions(options), queryClient);
@@ -5548,10 +5729,21 @@ export const setDiscuss = async (
   bookDiscussUpdate: BookDiscussUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getSetDiscussUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookDiscussUpdate),
   });
 };
@@ -5563,14 +5755,14 @@ export const getSetDiscussMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setDiscuss>>,
     TError,
-    { bookId: number; data: BookDiscussUpdate },
+    SetDiscussMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setDiscuss>>,
   TError,
-  { bookId: number; data: BookDiscussUpdate },
+  SetDiscussMutationVariables,
   TContext
 > => {
   const mutationKey = ["setDiscuss"];
@@ -5584,7 +5776,7 @@ export const getSetDiscussMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setDiscuss>>,
-    { bookId: number; data: BookDiscussUpdate }
+    SetDiscussMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -5599,6 +5791,10 @@ export type SetDiscussMutationResult = NonNullable<
 >;
 export type SetDiscussMutationBody = BookDiscussUpdate;
 export type SetDiscussMutationError = HTTPValidationError;
+export type SetDiscussMutationVariables = {
+  bookId: number;
+  data: BookDiscussUpdate;
+};
 
 /**
  * @summary Set Discuss
@@ -5608,7 +5804,7 @@ export const useSetDiscuss = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setDiscuss>>,
       TError,
-      { bookId: number; data: BookDiscussUpdate },
+      SetDiscussMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5617,7 +5813,7 @@ export const useSetDiscuss = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof setDiscuss>>,
   TError,
-  { bookId: number; data: BookDiscussUpdate },
+  SetDiscussMutationVariables,
   TContext
 > => {
   return useMutation(getSetDiscussMutationOptions(options), queryClient);
@@ -5676,14 +5872,14 @@ export const getEnrichBookMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof enrichBook>>,
     TError,
-    { bookId: number; params?: EnrichBookParams },
+    EnrichBookMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof enrichBook>>,
   TError,
-  { bookId: number; params?: EnrichBookParams },
+  EnrichBookMutationVariables,
   TContext
 > => {
   const mutationKey = ["enrichBook"];
@@ -5697,7 +5893,7 @@ export const getEnrichBookMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof enrichBook>>,
-    { bookId: number; params?: EnrichBookParams }
+    EnrichBookMutationVariables
   > = (props) => {
     const { bookId, params } = props ?? {};
 
@@ -5712,6 +5908,10 @@ export type EnrichBookMutationResult = NonNullable<
 >;
 
 export type EnrichBookMutationError = HTTPValidationError;
+export type EnrichBookMutationVariables = {
+  bookId: number;
+  params?: EnrichBookParams;
+};
 
 /**
  * @summary Enrich Book
@@ -5721,7 +5921,7 @@ export const useEnrichBook = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof enrichBook>>,
       TError,
-      { bookId: number; params?: EnrichBookParams },
+      EnrichBookMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5730,7 +5930,7 @@ export const useEnrichBook = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof enrichBook>>,
   TError,
-  { bookId: number; params?: EnrichBookParams },
+  EnrichBookMutationVariables,
   TContext
 > => {
   return useMutation(getEnrichBookMutationOptions(options), queryClient);
@@ -5777,10 +5977,21 @@ export const applyEnrichment = async (
   params?: ApplyEnrichmentParams,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookEnrichmentOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookEnrichmentOut>(getApplyEnrichmentUrl(bookId, params), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookMatch),
   });
 };
@@ -5792,14 +6003,14 @@ export const getApplyEnrichmentMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof applyEnrichment>>,
     TError,
-    { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+    ApplyEnrichmentMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof applyEnrichment>>,
   TError,
-  { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+  ApplyEnrichmentMutationVariables,
   TContext
 > => {
   const mutationKey = ["applyEnrichment"];
@@ -5813,7 +6024,7 @@ export const getApplyEnrichmentMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof applyEnrichment>>,
-    { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams }
+    ApplyEnrichmentMutationVariables
   > = (props) => {
     const { bookId, data, params } = props ?? {};
 
@@ -5828,6 +6039,11 @@ export type ApplyEnrichmentMutationResult = NonNullable<
 >;
 export type ApplyEnrichmentMutationBody = BookMatch;
 export type ApplyEnrichmentMutationError = HTTPValidationError;
+export type ApplyEnrichmentMutationVariables = {
+  bookId: number;
+  data: BookMatch;
+  params?: ApplyEnrichmentParams;
+};
 
 /**
  * @summary Apply Enrichment
@@ -5840,7 +6056,7 @@ export const useApplyEnrichment = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof applyEnrichment>>,
       TError,
-      { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+      ApplyEnrichmentMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -5849,7 +6065,7 @@ export const useApplyEnrichment = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof applyEnrichment>>,
   TError,
-  { bookId: number; data: BookMatch; params?: ApplyEnrichmentParams },
+  ApplyEnrichmentMutationVariables,
   TContext
 > => {
   return useMutation(getApplyEnrichmentMutationOptions(options), queryClient);
@@ -6194,10 +6410,21 @@ export const addNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<NoteOut>(getAddNoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(noteCreate),
   });
 };
@@ -6209,14 +6436,14 @@ export const getAddNoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addNote>>,
     TError,
-    { bookId: number; data: NoteCreate },
+    AddNoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addNote>>,
   TError,
-  { bookId: number; data: NoteCreate },
+  AddNoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["addNote"];
@@ -6230,7 +6457,7 @@ export const getAddNoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addNote>>,
-    { bookId: number; data: NoteCreate }
+    AddNoteMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -6245,6 +6472,7 @@ export type AddNoteMutationResult = NonNullable<
 >;
 export type AddNoteMutationBody = NoteCreate;
 export type AddNoteMutationError = HTTPValidationError;
+export type AddNoteMutationVariables = { bookId: number; data: NoteCreate };
 
 /**
  * @summary Add Note
@@ -6254,7 +6482,7 @@ export const useAddNote = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addNote>>,
       TError,
-      { bookId: number; data: NoteCreate },
+      AddNoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6263,7 +6491,7 @@ export const useAddNote = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof addNote>>,
   TError,
-  { bookId: number; data: NoteCreate },
+  AddNoteMutationVariables,
   TContext
 > => {
   return useMutation(getAddNoteMutationOptions(options), queryClient);
@@ -6293,14 +6521,14 @@ export const getDeleteNoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteNote>>,
     TError,
-    { bookId: number; noteId: number },
+    DeleteNoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteNote>>,
   TError,
-  { bookId: number; noteId: number },
+  DeleteNoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteNote"];
@@ -6314,7 +6542,7 @@ export const getDeleteNoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteNote>>,
-    { bookId: number; noteId: number }
+    DeleteNoteMutationVariables
   > = (props) => {
     const { bookId, noteId } = props ?? {};
 
@@ -6329,6 +6557,7 @@ export type DeleteNoteMutationResult = NonNullable<
 >;
 
 export type DeleteNoteMutationError = HTTPValidationError;
+export type DeleteNoteMutationVariables = { bookId: number; noteId: number };
 
 /**
  * @summary Delete Note
@@ -6338,7 +6567,7 @@ export const useDeleteNote = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteNote>>,
       TError,
-      { bookId: number; noteId: number },
+      DeleteNoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6347,7 +6576,7 @@ export const useDeleteNote = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteNote>>,
   TError,
-  { bookId: number; noteId: number },
+  DeleteNoteMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteNoteMutationOptions(options), queryClient);
@@ -6365,10 +6594,21 @@ export const editNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<NoteOut>(getEditNoteUrl(bookId, noteId), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(noteCreate),
   });
 };
@@ -6380,14 +6620,14 @@ export const getEditNoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof editNote>>,
     TError,
-    { bookId: number; noteId: number; data: NoteCreate },
+    EditNoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof editNote>>,
   TError,
-  { bookId: number; noteId: number; data: NoteCreate },
+  EditNoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["editNote"];
@@ -6401,7 +6641,7 @@ export const getEditNoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof editNote>>,
-    { bookId: number; noteId: number; data: NoteCreate }
+    EditNoteMutationVariables
   > = (props) => {
     const { bookId, noteId, data } = props ?? {};
 
@@ -6416,6 +6656,11 @@ export type EditNoteMutationResult = NonNullable<
 >;
 export type EditNoteMutationBody = NoteCreate;
 export type EditNoteMutationError = HTTPValidationError;
+export type EditNoteMutationVariables = {
+  bookId: number;
+  noteId: number;
+  data: NoteCreate;
+};
 
 /**
  * @summary Edit Note
@@ -6425,7 +6670,7 @@ export const useEditNote = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof editNote>>,
       TError,
-      { bookId: number; noteId: number; data: NoteCreate },
+      EditNoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6434,7 +6679,7 @@ export const useEditNote = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof editNote>>,
   TError,
-  { bookId: number; noteId: number; data: NoteCreate },
+  EditNoteMutationVariables,
   TContext
 > => {
   return useMutation(getEditNoteMutationOptions(options), queryClient);
@@ -6451,10 +6696,21 @@ export const setOwnership = async (
   ownershipUpdate: OwnershipUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getSetOwnershipUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(ownershipUpdate),
   });
 };
@@ -6466,14 +6722,14 @@ export const getSetOwnershipMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setOwnership>>,
     TError,
-    { bookId: number; data: OwnershipUpdate },
+    SetOwnershipMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setOwnership>>,
   TError,
-  { bookId: number; data: OwnershipUpdate },
+  SetOwnershipMutationVariables,
   TContext
 > => {
   const mutationKey = ["setOwnership"];
@@ -6487,7 +6743,7 @@ export const getSetOwnershipMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setOwnership>>,
-    { bookId: number; data: OwnershipUpdate }
+    SetOwnershipMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -6502,6 +6758,10 @@ export type SetOwnershipMutationResult = NonNullable<
 >;
 export type SetOwnershipMutationBody = OwnershipUpdate;
 export type SetOwnershipMutationError = HTTPValidationError;
+export type SetOwnershipMutationVariables = {
+  bookId: number;
+  data: OwnershipUpdate;
+};
 
 /**
  * @summary Set Ownership
@@ -6514,7 +6774,7 @@ export const useSetOwnership = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setOwnership>>,
       TError,
-      { bookId: number; data: OwnershipUpdate },
+      SetOwnershipMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6523,7 +6783,7 @@ export const useSetOwnership = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setOwnership>>,
   TError,
-  { bookId: number; data: OwnershipUpdate },
+  SetOwnershipMutationVariables,
   TContext
 > => {
   return useMutation(getSetOwnershipMutationOptions(options), queryClient);
@@ -6553,14 +6813,14 @@ export const getPurgeBookMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof purgeBook>>,
     TError,
-    { bookId: number },
+    PurgeBookMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof purgeBook>>,
   TError,
-  { bookId: number },
+  PurgeBookMutationVariables,
   TContext
 > => {
   const mutationKey = ["purgeBook"];
@@ -6574,7 +6834,7 @@ export const getPurgeBookMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof purgeBook>>,
-    { bookId: number }
+    PurgeBookMutationVariables
   > = (props) => {
     const { bookId } = props ?? {};
 
@@ -6589,6 +6849,7 @@ export type PurgeBookMutationResult = NonNullable<
 >;
 
 export type PurgeBookMutationError = HTTPValidationError;
+export type PurgeBookMutationVariables = { bookId: number };
 
 /**
  * @summary Purge Book
@@ -6598,7 +6859,7 @@ export const usePurgeBook = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof purgeBook>>,
       TError,
-      { bookId: number },
+      PurgeBookMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6607,7 +6868,7 @@ export const usePurgeBook = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof purgeBook>>,
   TError,
-  { bookId: number },
+  PurgeBookMutationVariables,
   TContext
 > => {
   return useMutation(getPurgeBookMutationOptions(options), queryClient);
@@ -6624,10 +6885,21 @@ export const setPrivacy = async (
   privacyUpdate: PrivacyUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getSetPrivacyUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(privacyUpdate),
   });
 };
@@ -6639,14 +6911,14 @@ export const getSetPrivacyMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setPrivacy>>,
     TError,
-    { bookId: number; data: PrivacyUpdate },
+    SetPrivacyMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setPrivacy>>,
   TError,
-  { bookId: number; data: PrivacyUpdate },
+  SetPrivacyMutationVariables,
   TContext
 > => {
   const mutationKey = ["setPrivacy"];
@@ -6660,7 +6932,7 @@ export const getSetPrivacyMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setPrivacy>>,
-    { bookId: number; data: PrivacyUpdate }
+    SetPrivacyMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -6675,6 +6947,10 @@ export type SetPrivacyMutationResult = NonNullable<
 >;
 export type SetPrivacyMutationBody = PrivacyUpdate;
 export type SetPrivacyMutationError = HTTPValidationError;
+export type SetPrivacyMutationVariables = {
+  bookId: number;
+  data: PrivacyUpdate;
+};
 
 /**
  * @summary Set Privacy
@@ -6684,7 +6960,7 @@ export const useSetPrivacy = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setPrivacy>>,
       TError,
-      { bookId: number; data: PrivacyUpdate },
+      SetPrivacyMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6693,7 +6969,7 @@ export const useSetPrivacy = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof setPrivacy>>,
   TError,
-  { bookId: number; data: PrivacyUpdate },
+  SetPrivacyMutationVariables,
   TContext
 > => {
   return useMutation(getSetPrivacyMutationOptions(options), queryClient);
@@ -6875,10 +7151,21 @@ export const addProgress = async (
   progressCreate: ProgressCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ProgressOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<ProgressOut>(getAddProgressUrl(bookId), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(progressCreate),
   });
 };
@@ -6890,14 +7177,14 @@ export const getAddProgressMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addProgress>>,
     TError,
-    { bookId: number; data: ProgressCreate },
+    AddProgressMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addProgress>>,
   TError,
-  { bookId: number; data: ProgressCreate },
+  AddProgressMutationVariables,
   TContext
 > => {
   const mutationKey = ["addProgress"];
@@ -6911,7 +7198,7 @@ export const getAddProgressMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addProgress>>,
-    { bookId: number; data: ProgressCreate }
+    AddProgressMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -6926,6 +7213,10 @@ export type AddProgressMutationResult = NonNullable<
 >;
 export type AddProgressMutationBody = ProgressCreate;
 export type AddProgressMutationError = HTTPValidationError;
+export type AddProgressMutationVariables = {
+  bookId: number;
+  data: ProgressCreate;
+};
 
 /**
  * @summary Add Progress
@@ -6938,7 +7229,7 @@ export const useAddProgress = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addProgress>>,
       TError,
-      { bookId: number; data: ProgressCreate },
+      AddProgressMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -6947,7 +7238,7 @@ export const useAddProgress = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof addProgress>>,
   TError,
-  { bookId: number; data: ProgressCreate },
+  AddProgressMutationVariables,
   TContext
 > => {
   return useMutation(getAddProgressMutationOptions(options), queryClient);
@@ -6988,14 +7279,14 @@ export const getDeleteProgressMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteProgress>>,
     TError,
-    { bookId: number; progressId: number },
+    DeleteProgressMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteProgress>>,
   TError,
-  { bookId: number; progressId: number },
+  DeleteProgressMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteProgress"];
@@ -7009,7 +7300,7 @@ export const getDeleteProgressMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteProgress>>,
-    { bookId: number; progressId: number }
+    DeleteProgressMutationVariables
   > = (props) => {
     const { bookId, progressId } = props ?? {};
 
@@ -7024,6 +7315,10 @@ export type DeleteProgressMutationResult = NonNullable<
 >;
 
 export type DeleteProgressMutationError = HTTPValidationError;
+export type DeleteProgressMutationVariables = {
+  bookId: number;
+  progressId: number;
+};
 
 /**
  * @summary Delete Progress
@@ -7036,7 +7331,7 @@ export const useDeleteProgress = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteProgress>>,
       TError,
-      { bookId: number; progressId: number },
+      DeleteProgressMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7045,7 +7340,7 @@ export const useDeleteProgress = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteProgress>>,
   TError,
-  { bookId: number; progressId: number },
+  DeleteProgressMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteProgressMutationOptions(options), queryClient);
@@ -7212,10 +7507,21 @@ export const addQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<QuoteOut>(getAddQuoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -7227,14 +7533,14 @@ export const getAddQuoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addQuote>>,
     TError,
-    { bookId: number; data: QuoteCreate },
+    AddQuoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addQuote>>,
   TError,
-  { bookId: number; data: QuoteCreate },
+  AddQuoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["addQuote"];
@@ -7248,7 +7554,7 @@ export const getAddQuoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addQuote>>,
-    { bookId: number; data: QuoteCreate }
+    AddQuoteMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -7263,6 +7569,7 @@ export type AddQuoteMutationResult = NonNullable<
 >;
 export type AddQuoteMutationBody = QuoteCreate;
 export type AddQuoteMutationError = HTTPValidationError;
+export type AddQuoteMutationVariables = { bookId: number; data: QuoteCreate };
 
 /**
  * @summary Add Quote
@@ -7272,7 +7579,7 @@ export const useAddQuote = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addQuote>>,
       TError,
-      { bookId: number; data: QuoteCreate },
+      AddQuoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7281,7 +7588,7 @@ export const useAddQuote = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof addQuote>>,
   TError,
-  { bookId: number; data: QuoteCreate },
+  AddQuoteMutationVariables,
   TContext
 > => {
   return useMutation(getAddQuoteMutationOptions(options), queryClient);
@@ -7311,14 +7618,14 @@ export const getDeleteQuoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteQuote>>,
     TError,
-    { bookId: number; quoteId: number },
+    DeleteQuoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteQuote>>,
   TError,
-  { bookId: number; quoteId: number },
+  DeleteQuoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteQuote"];
@@ -7332,7 +7639,7 @@ export const getDeleteQuoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteQuote>>,
-    { bookId: number; quoteId: number }
+    DeleteQuoteMutationVariables
   > = (props) => {
     const { bookId, quoteId } = props ?? {};
 
@@ -7347,6 +7654,7 @@ export type DeleteQuoteMutationResult = NonNullable<
 >;
 
 export type DeleteQuoteMutationError = HTTPValidationError;
+export type DeleteQuoteMutationVariables = { bookId: number; quoteId: number };
 
 /**
  * @summary Delete Quote
@@ -7359,7 +7667,7 @@ export const useDeleteQuote = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteQuote>>,
       TError,
-      { bookId: number; quoteId: number },
+      DeleteQuoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7368,7 +7676,7 @@ export const useDeleteQuote = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteQuote>>,
   TError,
-  { bookId: number; quoteId: number },
+  DeleteQuoteMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteQuoteMutationOptions(options), queryClient);
@@ -7386,10 +7694,21 @@ export const editQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<QuoteOut>(getEditQuoteUrl(bookId, quoteId), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -7401,14 +7720,14 @@ export const getEditQuoteMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof editQuote>>,
     TError,
-    { bookId: number; quoteId: number; data: QuoteCreate },
+    EditQuoteMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof editQuote>>,
   TError,
-  { bookId: number; quoteId: number; data: QuoteCreate },
+  EditQuoteMutationVariables,
   TContext
 > => {
   const mutationKey = ["editQuote"];
@@ -7422,7 +7741,7 @@ export const getEditQuoteMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof editQuote>>,
-    { bookId: number; quoteId: number; data: QuoteCreate }
+    EditQuoteMutationVariables
   > = (props) => {
     const { bookId, quoteId, data } = props ?? {};
 
@@ -7437,6 +7756,11 @@ export type EditQuoteMutationResult = NonNullable<
 >;
 export type EditQuoteMutationBody = QuoteCreate;
 export type EditQuoteMutationError = HTTPValidationError;
+export type EditQuoteMutationVariables = {
+  bookId: number;
+  quoteId: number;
+  data: QuoteCreate;
+};
 
 /**
  * @summary Edit Quote
@@ -7446,7 +7770,7 @@ export const useEditQuote = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof editQuote>>,
       TError,
-      { bookId: number; quoteId: number; data: QuoteCreate },
+      EditQuoteMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7455,7 +7779,7 @@ export const useEditQuote = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof editQuote>>,
   TError,
-  { bookId: number; quoteId: number; data: QuoteCreate },
+  EditQuoteMutationVariables,
   TContext
 > => {
   return useMutation(getEditQuoteMutationOptions(options), queryClient);
@@ -7478,10 +7802,21 @@ export const setRating = async (
   bookRatingUpdate: BookRatingUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getSetRatingUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookRatingUpdate),
   });
 };
@@ -7493,14 +7828,14 @@ export const getSetRatingMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setRating>>,
     TError,
-    { bookId: number; data: BookRatingUpdate },
+    SetRatingMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setRating>>,
   TError,
-  { bookId: number; data: BookRatingUpdate },
+  SetRatingMutationVariables,
   TContext
 > => {
   const mutationKey = ["setRating"];
@@ -7514,7 +7849,7 @@ export const getSetRatingMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setRating>>,
-    { bookId: number; data: BookRatingUpdate }
+    SetRatingMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -7529,6 +7864,10 @@ export type SetRatingMutationResult = NonNullable<
 >;
 export type SetRatingMutationBody = BookRatingUpdate;
 export type SetRatingMutationError = HTTPValidationError;
+export type SetRatingMutationVariables = {
+  bookId: number;
+  data: BookRatingUpdate;
+};
 
 /**
  * @summary Set Rating
@@ -7538,7 +7877,7 @@ export const useSetRating = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setRating>>,
       TError,
-      { bookId: number; data: BookRatingUpdate },
+      SetRatingMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7547,7 +7886,7 @@ export const useSetRating = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof setRating>>,
   TError,
-  { bookId: number; data: BookRatingUpdate },
+  SetRatingMutationVariables,
   TContext
 > => {
   return useMutation(getSetRatingMutationOptions(options), queryClient);
@@ -7576,14 +7915,14 @@ export const getRefreshMetadataMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof refreshMetadata>>,
     TError,
-    { bookId: number },
+    RefreshMetadataMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof refreshMetadata>>,
   TError,
-  { bookId: number },
+  RefreshMetadataMutationVariables,
   TContext
 > => {
   const mutationKey = ["refreshMetadata"];
@@ -7597,7 +7936,7 @@ export const getRefreshMetadataMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof refreshMetadata>>,
-    { bookId: number }
+    RefreshMetadataMutationVariables
   > = (props) => {
     const { bookId } = props ?? {};
 
@@ -7612,6 +7951,7 @@ export type RefreshMetadataMutationResult = NonNullable<
 >;
 
 export type RefreshMetadataMutationError = HTTPValidationError;
+export type RefreshMetadataMutationVariables = { bookId: number };
 
 /**
  * @summary Refresh Metadata
@@ -7624,7 +7964,7 @@ export const useRefreshMetadata = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof refreshMetadata>>,
       TError,
-      { bookId: number },
+      RefreshMetadataMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7633,7 +7973,7 @@ export const useRefreshMetadata = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof refreshMetadata>>,
   TError,
-  { bookId: number },
+  RefreshMetadataMutationVariables,
   TContext
 > => {
   return useMutation(getRefreshMetadataMutationOptions(options), queryClient);
@@ -7668,14 +8008,14 @@ export const getRestoreBookMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof restoreBook>>,
     TError,
-    { bookId: number },
+    RestoreBookMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof restoreBook>>,
   TError,
-  { bookId: number },
+  RestoreBookMutationVariables,
   TContext
 > => {
   const mutationKey = ["restoreBook"];
@@ -7689,7 +8029,7 @@ export const getRestoreBookMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof restoreBook>>,
-    { bookId: number }
+    RestoreBookMutationVariables
   > = (props) => {
     const { bookId } = props ?? {};
 
@@ -7704,6 +8044,7 @@ export type RestoreBookMutationResult = NonNullable<
 >;
 
 export type RestoreBookMutationError = HTTPValidationError;
+export type RestoreBookMutationVariables = { bookId: number };
 
 /**
  * @summary Restore Book
@@ -7716,7 +8057,7 @@ export const useRestoreBook = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof restoreBook>>,
       TError,
-      { bookId: number },
+      RestoreBookMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7725,7 +8066,7 @@ export const useRestoreBook = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof restoreBook>>,
   TError,
-  { bookId: number },
+  RestoreBookMutationVariables,
   TContext
 > => {
   return useMutation(getRestoreBookMutationOptions(options), queryClient);
@@ -7744,10 +8085,21 @@ export const updateStatus = async (
   bookStatusUpdate: BookStatusUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<BookOut>(getUpdateStatusUrl(bookId), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookStatusUpdate),
   });
 };
@@ -7759,14 +8111,14 @@ export const getUpdateStatusMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateStatus>>,
     TError,
-    { bookId: number; data: BookStatusUpdate },
+    UpdateStatusMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateStatus>>,
   TError,
-  { bookId: number; data: BookStatusUpdate },
+  UpdateStatusMutationVariables,
   TContext
 > => {
   const mutationKey = ["updateStatus"];
@@ -7780,7 +8132,7 @@ export const getUpdateStatusMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateStatus>>,
-    { bookId: number; data: BookStatusUpdate }
+    UpdateStatusMutationVariables
   > = (props) => {
     const { bookId, data } = props ?? {};
 
@@ -7795,6 +8147,10 @@ export type UpdateStatusMutationResult = NonNullable<
 >;
 export type UpdateStatusMutationBody = BookStatusUpdate;
 export type UpdateStatusMutationError = HTTPValidationError;
+export type UpdateStatusMutationVariables = {
+  bookId: number;
+  data: BookStatusUpdate;
+};
 
 /**
  * @summary Update Status
@@ -7807,7 +8163,7 @@ export const useUpdateStatus = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof updateStatus>>,
       TError,
-      { bookId: number; data: BookStatusUpdate },
+      UpdateStatusMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7816,7 +8172,7 @@ export const useUpdateStatus = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof updateStatus>>,
   TError,
-  { bookId: number; data: BookStatusUpdate },
+  UpdateStatusMutationVariables,
   TContext
 > => {
   return useMutation(getUpdateStatusMutationOptions(options), queryClient);
@@ -7846,14 +8202,14 @@ export const getRemoveBookTagMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof removeBookTag>>,
     TError,
-    { bookId: number; tagId: number },
+    RemoveBookTagMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof removeBookTag>>,
   TError,
-  { bookId: number; tagId: number },
+  RemoveBookTagMutationVariables,
   TContext
 > => {
   const mutationKey = ["removeBookTag"];
@@ -7867,7 +8223,7 @@ export const getRemoveBookTagMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof removeBookTag>>,
-    { bookId: number; tagId: number }
+    RemoveBookTagMutationVariables
   > = (props) => {
     const { bookId, tagId } = props ?? {};
 
@@ -7882,6 +8238,7 @@ export type RemoveBookTagMutationResult = NonNullable<
 >;
 
 export type RemoveBookTagMutationError = HTTPValidationError;
+export type RemoveBookTagMutationVariables = { bookId: number; tagId: number };
 
 /**
  * @summary Remove Book Tag
@@ -7894,7 +8251,7 @@ export const useRemoveBookTag = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof removeBookTag>>,
       TError,
-      { bookId: number; tagId: number },
+      RemoveBookTagMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7903,7 +8260,7 @@ export const useRemoveBookTag = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof removeBookTag>>,
   TError,
-  { bookId: number; tagId: number },
+  RemoveBookTagMutationVariables,
   TContext
 > => {
   return useMutation(getRemoveBookTagMutationOptions(options), queryClient);
@@ -7933,14 +8290,14 @@ export const getAddBookTagMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof addBookTag>>,
     TError,
-    { bookId: number; tagId: number },
+    AddBookTagMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof addBookTag>>,
   TError,
-  { bookId: number; tagId: number },
+  AddBookTagMutationVariables,
   TContext
 > => {
   const mutationKey = ["addBookTag"];
@@ -7954,7 +8311,7 @@ export const getAddBookTagMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof addBookTag>>,
-    { bookId: number; tagId: number }
+    AddBookTagMutationVariables
   > = (props) => {
     const { bookId, tagId } = props ?? {};
 
@@ -7969,6 +8326,7 @@ export type AddBookTagMutationResult = NonNullable<
 >;
 
 export type AddBookTagMutationError = HTTPValidationError;
+export type AddBookTagMutationVariables = { bookId: number; tagId: number };
 
 /**
  * @summary Add Book Tag
@@ -7978,7 +8336,7 @@ export const useAddBookTag = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof addBookTag>>,
       TError,
-      { bookId: number; tagId: number },
+      AddBookTagMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -7987,7 +8345,7 @@ export const useAddBookTag = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof addBookTag>>,
   TError,
-  { bookId: number; tagId: number },
+  AddBookTagMutationVariables,
   TContext
 > => {
   return useMutation(getAddBookTagMutationOptions(options), queryClient);

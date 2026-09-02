@@ -237,10 +237,21 @@ export const createLoan = async (
   loanCreate: LoanCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<LoanOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<LoanOut>(getCreateLoanUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(loanCreate),
   });
 };
@@ -252,14 +263,14 @@ export const getCreateLoanMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createLoan>>,
     TError,
-    { data: LoanCreate },
+    CreateLoanMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createLoan>>,
   TError,
-  { data: LoanCreate },
+  CreateLoanMutationVariables,
   TContext
 > => {
   const mutationKey = ["createLoan"];
@@ -273,7 +284,7 @@ export const getCreateLoanMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createLoan>>,
-    { data: LoanCreate }
+    CreateLoanMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -288,6 +299,7 @@ export type CreateLoanMutationResult = NonNullable<
 >;
 export type CreateLoanMutationBody = LoanCreate;
 export type CreateLoanMutationError = HTTPValidationError;
+export type CreateLoanMutationVariables = { data: LoanCreate };
 
 /**
  * @summary Create Loan
@@ -297,7 +309,7 @@ export const useCreateLoan = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createLoan>>,
       TError,
-      { data: LoanCreate },
+      CreateLoanMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -306,7 +318,7 @@ export const useCreateLoan = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof createLoan>>,
   TError,
-  { data: LoanCreate },
+  CreateLoanMutationVariables,
   TContext
 > => {
   return useMutation(getCreateLoanMutationOptions(options), queryClient);
@@ -781,14 +793,14 @@ export const getReturnLoanMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof returnLoan>>,
     TError,
-    { loanId: number },
+    ReturnLoanMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof returnLoan>>,
   TError,
-  { loanId: number },
+  ReturnLoanMutationVariables,
   TContext
 > => {
   const mutationKey = ["returnLoan"];
@@ -802,7 +814,7 @@ export const getReturnLoanMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof returnLoan>>,
-    { loanId: number }
+    ReturnLoanMutationVariables
   > = (props) => {
     const { loanId } = props ?? {};
 
@@ -817,6 +829,7 @@ export type ReturnLoanMutationResult = NonNullable<
 >;
 
 export type ReturnLoanMutationError = HTTPValidationError;
+export type ReturnLoanMutationVariables = { loanId: number };
 
 /**
  * @summary Return Loan
@@ -826,7 +839,7 @@ export const useReturnLoan = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof returnLoan>>,
       TError,
-      { loanId: number },
+      ReturnLoanMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -835,7 +848,7 @@ export const useReturnLoan = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof returnLoan>>,
   TError,
-  { loanId: number },
+  ReturnLoanMutationVariables,
   TContext
 > => {
   return useMutation(getReturnLoanMutationOptions(options), queryClient);

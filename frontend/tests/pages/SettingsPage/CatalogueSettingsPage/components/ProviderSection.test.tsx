@@ -54,6 +54,7 @@ function row(
     needs_a_key: false,
     has_key: true,
     ready: true,
+    serves_groups: [],
     ...over,
   };
 }
@@ -274,6 +275,135 @@ describe("ProviderSection", () => {
         "Answers title searches only, so its position does not affect scanning.",
       ),
     ).toHaveLength(2);
+  });
+
+  it("says when a source has no say in a title search", () => {
+    // **The mirror of the test above, missing until a source needed it.**
+    // `answers_search` was on the wire and read by nothing, so a lookup-only
+    // source rendered as "asked only when the ones above it find nothing", with
+    // nothing saying its position never affects a title search. One row, and
+    // the assertion is that it does not fall through to the ordering status.
+    // **Its own rows, not the shared roster.** Adding a row there moved the
+    // ordering assertions in four other tests, which is the shared-fixture trap:
+    // a row added for one behaviour changes every test that counts or positions.
+    draw([row("dnb"), row("nkp", { answers_search: false })]);
+    expect(
+      screen.getByText(
+        "Answers scans only, so its position does not affect a title search.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says a national catalogue is asked only for the ISBNs it could hold", () => {
+    // **Its own rows rather than the shared roster**, for the reason the test
+    // above states: a row added to `ROSTER` moves the ordering assertions in
+    // four other tests. Two rows, so the NLG is not in the leading pair.
+    draw([
+      row("dnb"),
+      row("k10plus"),
+      row("nlg", { serves_groups: ["978-618", "978-960"] }),
+    ]);
+    expect(
+      screen.getByText(
+        "Asked only when the ones above it find nothing, and only for ISBNs " +
+          "beginning 978-618 or 978-960.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("joins two groups with a disjunction rather than a comma", () => {
+    // "beginning 978-618, 978-960" reads as "and" where the rule is "or", and a
+    // reader checking a barcode against it would take it as needing both.
+    // `Intl.ListFormat` also gets German's "oder" without a second string.
+    draw([
+      row("dnb"),
+      row("k10plus"),
+      row("nlg", { serves_groups: ["978-618", "978-960"] }),
+    ]);
+    expect(screen.getByText(/978-618 or 978-960/)).toBeInTheDocument();
+    expect(screen.queryByText(/978-618, 978-960/)).not.toBeInTheDocument();
+  });
+
+  it("names a single group without a conjunction", () => {
+    // The arm that stops the formatter being swapped for a hard coded " or ".
+    draw([
+      row("dnb"),
+      row("k10plus"),
+      row("oenb", { serves_groups: ["978-3"] }),
+    ]);
+    expect(
+      screen.getByText(
+        "Asked only when the ones above it find nothing, and only for ISBNs " +
+          "beginning 978-3.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says a lookup only catalogue is regional as well", () => {
+    // **Both facts, where the screen used to show one.** `lookupOnly` returned
+    // before the regional branch, so a catalogue that answers scans only and
+    // collects one registration group rendered as though it were asked about
+    // every ISBN. The Czech National Library is that shape today, and the
+    // alternative fix, forbidding the combination in the backend constant,
+    // would have barred the next lookup only national catalogue from a remit.
+    draw([
+      row("dnb"),
+      row("k10plus"),
+      row("nkp", { answers_search: false, serves_groups: ["978-80"] }),
+    ]);
+    expect(
+      screen.getByText(
+        "Answers scans only, and only for ISBNs beginning 978-80, so its " +
+          "position does not affect a title search.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not claim a promoted lookup only catalogue is regional", () => {
+    // **The rendered half of the sweep in `tests/lib/providerStatus.test.ts`.**
+    // The combined line returned before `asked_first` was read, so a catalogue
+    // in the leading pair was told it answers only for Czech ISBNs while
+    // sitting in a tier nothing filters. Reachable: a plan of
+    // `nkp, k10plus, dnb` gives the NKP exactly this row.
+    draw([
+      row("nkp", {
+        answers_search: false,
+        asked_first: true,
+        serves_groups: ["978-80"],
+      }),
+      row("k10plus", { asked_first: true }),
+      row("dnb"),
+    ]);
+    expect(
+      screen.getByText(
+        "Answers scans only, so its position does not affect a title search.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/978-80/)).not.toBeInTheDocument();
+  });
+
+  it("leaves a lookup only catalogue with no remit alone", () => {
+    // The other half of the diagonal, or the branch above would swallow every
+    // lookup only source.
+    draw([row("dnb"), row("k10plus"), row("nkp", { answers_search: false })]);
+    expect(
+      screen.getByText(
+        "Answers scans only, so its position does not affect a title search.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says a promoted national catalogue is asked on every scan after all", () => {
+    // **The arm that stops the rule above overreaching.** The leading tier is
+    // never filtered by a remit, so a source a household has promoted into it
+    // is asked about every ISBN, and the regional line would be the screen
+    // promising something the server does not do.
+    draw([row("nlg", { asked_first: true, serves_groups: ["978-960"] })]);
+    expect(
+      screen.getByText(
+        "Asked on every scan, with the others at the top of this list.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("says which sources are asked on every scan", () => {

@@ -20,6 +20,7 @@ from tests.helpers import (
     items,
     selects_for,
     silence_covers,
+    silence_nkp,
     silence_nlg,
     silence_oenb,
     titles,
@@ -57,6 +58,7 @@ def open_library_hit():
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         silence_oenb(mock)
         silence_nlg(mock)
+        silence_nkp(mock)
         mock.get(OPEN_LIBRARY_ISBN).mock(
             return_value=httpx.Response(
                 200,
@@ -112,6 +114,7 @@ def open_library_miss():
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         silence_oenb(mock)
         silence_nlg(mock)
+        silence_nkp(mock)
         silence_covers(mock)
         yield mock
 
@@ -177,6 +180,7 @@ def dnb_hit():
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
         silence_oenb(mock)
         silence_nlg(mock)
+        silence_nkp(mock)
         mock.get(url__startswith=DNB).mock(
             return_value=httpx.Response(
                 200, text=DNB_RECORD, headers={"content-type": "text/xml"}
@@ -356,6 +360,27 @@ class TestIsbnLookup:
     def test_requires_authentication(self, client):
         assert client.get("/api/books/lookup", params={"isbn": "9780743273565"}).status_code == 401
 
+    def test_a_unicode_digit_isbn_is_rejected_rather_than_raising(
+        self, client, member
+    ):
+        """**A 500 out of the router, executed against the app.**
+
+        `978` and ten superscript twos is thirteen characters, so it passed the
+        length bound, and `str.isdigit()` is true of `U+00B2` while `int()`
+        refuses it. `isbn.parse` raised `ValueError` at
+        `routers/books.py`'s lookup, unguarded. Fixed in `isbn.is_valid_isbn13`
+        with an `isascii()`, so every caller inherits it rather than one route.
+
+        A **member** token rather than an admin one, because the point is that
+        any account could reach it.
+        """
+        res = client.get(
+            "/api/books/lookup",
+            params={"isbn": "978" + "\u00b2" * 10},
+            headers=member["headers"],
+        )
+        assert res.status_code == 422
+
 
 class TestAddBook:
     def test_creates_a_book(self, client, admin):
@@ -380,6 +405,29 @@ class TestAddBook:
             headers=admin["headers"],
         )
         assert res.status_code == 409
+
+    def test_a_unicode_digit_isbn_cannot_forge_a_second_copy(
+        self, client, admin, make_book
+    ):
+        """**The quiet half, and the worse one.**
+
+        `978316148410` and an Arabic-Indic zero is thirteen `isdigit()`
+        characters whose checksum `int()` computes happily, so this returned 201
+        and stored a string that is not the ISBN anybody typed.
+        `uq_books_isbn_single_copy` then saw a different book, which is the one
+        thing that column exists to prevent.
+
+        The ASCII spelling of the same ISBN is created first, so this asserts the
+        forgery is refused rather than that the route refuses everything.
+        """
+        make_book(admin["headers"], isbn="9783161484100")
+        res = client.post(
+            "/api/books",
+            json={"title": "Forged", "isbn": "978316148410\u0660"},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
+        assert len(items(client.get("/api/books", headers=admin["headers"]))) == 1
 
     def test_books_without_isbn_do_not_collide(self, client, admin, make_book):
         """A NULL isbn column is exempt from the unique constraint by design."""

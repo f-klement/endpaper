@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CatalogueSource,
@@ -8,6 +8,7 @@ import type {
 } from "../../../../api/generated/model";
 import { Button, Icon } from "../../../../components";
 import { useTranslation, type MessageKey } from "../../../../i18n";
+import { statusOf } from "../../../../lib/providerStatus";
 import { SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
 
@@ -48,7 +49,16 @@ export default function ProviderSection({
   settings,
   onSave,
 }: ProviderSectionProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
+  // **A disjunction, not a comma list.** Two groups rendered as
+  // "beginning 978-618, 978-960", which reads as "and" where the rule is "or".
+  // `Intl.ListFormat` also gets the German right, "oder" rather than a
+  // hard coded English word, and handles one, two and three or more without a
+  // branch here. Rebuilt only when the language changes.
+  const groups = useMemo(
+    () => new Intl.ListFormat(locale, { type: "disjunction" }),
+    [locale],
+  );
   // **A module level constant, not a fresh `[]`.** `catalogue_sources` is
   // optional on the generated type, so `?? []` builds a new array on every
   // render, the effect below depends on its identity, and the pair is an
@@ -183,7 +193,9 @@ export default function ProviderSection({
             <div className="min-w-0 flex-1">
               <ToggleField
                 label={t(sourceName(row.source))}
-                hint={t(statusOf(row))}
+                hint={t(statusOf(row), {
+                  groups: groups.format(row.serves_groups),
+                })}
                 checked={row.enabled}
                 disabled={false}
                 onChange={(checked) => setEnabled(index, checked)}
@@ -260,29 +272,4 @@ const NO_SOURCES: CatalogueSourceOut[] = [];
 /** The catalogue's name, which is a proper noun and is not translated. */
 function sourceName(source: CatalogueSource): MessageKey {
   return `providers.name.${source}` as MessageKey;
-}
-
-/**
- * The one line under a source: why it is not answering, or what it answers.
- *
- * **Ordered by what a reader can act on.** A missing key is the most likely
- * cause of "why is this not working", so it comes first even for a source that
- * is switched on and looks fine. Then whether it is in the pair asked on every
- * scan, which is what the order actually buys. Then the search only case,
- * which explains why moving it changes nothing about scanning a barcode.
- */
-function statusOf(row: CatalogueSourceOut): MessageKey {
-  // **Two causes, not one.** A source that needs a key and has none wants a
-  // key; one that has the key and still is not ready is switched off in its own
-  // card below, and telling that library to add a key it already has is the
-  // exact symptom this section exists to remove. `ready` alone conflated them.
-  if (row.needs_a_key && !row.ready) {
-    return row.has_key
-      ? "providers.status.switchedOffBelow"
-      : "providers.status.needsKey";
-  }
-  if (!row.answers_lookup) return "providers.status.searchOnly";
-  if (row.enabled && row.asked_first) return "providers.status.askedFirst";
-  if (row.enabled) return "providers.status.askedAfter";
-  return "providers.status.off";
 }

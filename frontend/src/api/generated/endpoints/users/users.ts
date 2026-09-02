@@ -512,10 +512,21 @@ export const setMyAppearance = async (
   appearanceUpdate: AppearanceUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AppearanceOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<AppearanceOut>(getSetMyAppearanceUrl(), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(appearanceUpdate),
   });
 };
@@ -527,14 +538,14 @@ export const getSetMyAppearanceMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setMyAppearance>>,
     TError,
-    { data: AppearanceUpdate },
+    SetMyAppearanceMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setMyAppearance>>,
   TError,
-  { data: AppearanceUpdate },
+  SetMyAppearanceMutationVariables,
   TContext
 > => {
   const mutationKey = ["setMyAppearance"];
@@ -548,7 +559,7 @@ export const getSetMyAppearanceMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setMyAppearance>>,
-    { data: AppearanceUpdate }
+    SetMyAppearanceMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -563,6 +574,7 @@ export type SetMyAppearanceMutationResult = NonNullable<
 >;
 export type SetMyAppearanceMutationBody = AppearanceUpdate;
 export type SetMyAppearanceMutationError = HTTPValidationError;
+export type SetMyAppearanceMutationVariables = { data: AppearanceUpdate };
 
 /**
  * @summary Set My Appearance
@@ -575,7 +587,7 @@ export const useSetMyAppearance = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setMyAppearance>>,
       TError,
-      { data: AppearanceUpdate },
+      SetMyAppearanceMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -584,7 +596,7 @@ export const useSetMyAppearance = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setMyAppearance>>,
   TError,
-  { data: AppearanceUpdate },
+  SetMyAppearanceMutationVariables,
   TContext
 > => {
   return useMutation(getSetMyAppearanceMutationOptions(options), queryClient);
@@ -741,10 +753,21 @@ export const setMyEmail = async (
   emailUpdate: EmailUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<MemberEmailOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<MemberEmailOut>(getSetMyEmailUrl(), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(emailUpdate),
   });
 };
@@ -756,14 +779,14 @@ export const getSetMyEmailMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setMyEmail>>,
     TError,
-    { data: EmailUpdate },
+    SetMyEmailMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setMyEmail>>,
   TError,
-  { data: EmailUpdate },
+  SetMyEmailMutationVariables,
   TContext
 > => {
   const mutationKey = ["setMyEmail"];
@@ -777,7 +800,7 @@ export const getSetMyEmailMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setMyEmail>>,
-    { data: EmailUpdate }
+    SetMyEmailMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -792,6 +815,7 @@ export type SetMyEmailMutationResult = NonNullable<
 >;
 export type SetMyEmailMutationBody = EmailUpdate;
 export type SetMyEmailMutationError = HTTPValidationError;
+export type SetMyEmailMutationVariables = { data: EmailUpdate };
 
 /**
  * @summary Set My Email
@@ -801,7 +825,7 @@ export const useSetMyEmail = <TError = HTTPValidationError, TContext = unknown>(
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setMyEmail>>,
       TError,
-      { data: EmailUpdate },
+      SetMyEmailMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -810,7 +834,7 @@ export const useSetMyEmail = <TError = HTTPValidationError, TContext = unknown>(
 ): UseMutationResult<
   Awaited<ReturnType<typeof setMyEmail>>,
   TError,
-  { data: EmailUpdate },
+  SetMyEmailMutationVariables,
   TContext
 > => {
   return useMutation(getSetMyEmailMutationOptions(options), queryClient);
@@ -999,10 +1023,21 @@ export const createTestAccount = async (
   userCreate: UserCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<UserOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<UserOut>(getCreateTestAccountUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(userCreate),
   });
 };
@@ -1014,14 +1049,14 @@ export const getCreateTestAccountMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createTestAccount>>,
     TError,
-    { data: UserCreate },
+    CreateTestAccountMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createTestAccount>>,
   TError,
-  { data: UserCreate },
+  CreateTestAccountMutationVariables,
   TContext
 > => {
   const mutationKey = ["createTestAccount"];
@@ -1035,7 +1070,7 @@ export const getCreateTestAccountMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createTestAccount>>,
-    { data: UserCreate }
+    CreateTestAccountMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -1050,6 +1085,7 @@ export type CreateTestAccountMutationResult = NonNullable<
 >;
 export type CreateTestAccountMutationBody = UserCreate;
 export type CreateTestAccountMutationError = HTTPValidationError;
+export type CreateTestAccountMutationVariables = { data: UserCreate };
 
 /**
  * @summary Create Test Account
@@ -1062,7 +1098,7 @@ export const useCreateTestAccount = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createTestAccount>>,
       TError,
-      { data: UserCreate },
+      CreateTestAccountMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1071,7 +1107,7 @@ export const useCreateTestAccount = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof createTestAccount>>,
   TError,
-  { data: UserCreate },
+  CreateTestAccountMutationVariables,
   TContext
 > => {
   return useMutation(getCreateTestAccountMutationOptions(options), queryClient);
@@ -1089,10 +1125,21 @@ export const setMemberEmail = async (
   emailUpdate: EmailUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<MemberEmailOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<MemberEmailOut>(getSetMemberEmailUrl(userId), {
     ...options,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(emailUpdate),
   });
 };
@@ -1104,14 +1151,14 @@ export const getSetMemberEmailMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof setMemberEmail>>,
     TError,
-    { userId: number; data: EmailUpdate },
+    SetMemberEmailMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof setMemberEmail>>,
   TError,
-  { userId: number; data: EmailUpdate },
+  SetMemberEmailMutationVariables,
   TContext
 > => {
   const mutationKey = ["setMemberEmail"];
@@ -1125,7 +1172,7 @@ export const getSetMemberEmailMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof setMemberEmail>>,
-    { userId: number; data: EmailUpdate }
+    SetMemberEmailMutationVariables
   > = (props) => {
     const { userId, data } = props ?? {};
 
@@ -1140,6 +1187,10 @@ export type SetMemberEmailMutationResult = NonNullable<
 >;
 export type SetMemberEmailMutationBody = EmailUpdate;
 export type SetMemberEmailMutationError = HTTPValidationError;
+export type SetMemberEmailMutationVariables = {
+  userId: number;
+  data: EmailUpdate;
+};
 
 /**
  * @summary Set Member Email
@@ -1152,7 +1203,7 @@ export const useSetMemberEmail = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof setMemberEmail>>,
       TError,
-      { userId: number; data: EmailUpdate },
+      SetMemberEmailMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -1161,7 +1212,7 @@ export const useSetMemberEmail = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof setMemberEmail>>,
   TError,
-  { userId: number; data: EmailUpdate },
+  SetMemberEmailMutationVariables,
   TContext
 > => {
   return useMutation(getSetMemberEmailMutationOptions(options), queryClient);

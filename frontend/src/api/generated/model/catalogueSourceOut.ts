@@ -28,5 +28,6 @@ export interface CatalogueSourceOut {
   has_key: boolean;
   needs_a_key: boolean;
   ready: boolean;
+  serves_groups: string[];
   source: CatalogueSource;
 }

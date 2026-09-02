@@ -20,9 +20,10 @@ cover, page count, language, categories, series name and index, format
 **Adding a book** by ISBN, by barcode scan in the browser, by free text search,
 or by hand. ISBN lookup chains several sources so a European or pre-ISBN book
 still resolves rather than failing at one provider, and English, German, French,
-Spanish, Portuguese and Greek titles all resolve. Greek is the newest and the
+Spanish, Portuguese, Greek and Czech titles all resolve. The two newest are the
 clearest case for chaining them: of 50 Greek ISBNs the other free sources answer
-8 between them, and the Greek national catalogue answers 37.
+8 between them and the Greek national catalogue answers 37, and of 50 Czech ISBNs
+they answer 10 and the Czech national catalogue answers 49.
 
 **Rapid mode** scans a whole shelf without stopping between books. The batch is
 reviewed before anything is written, so a misread barcode is caught before it

@@ -6,13 +6,17 @@ asking a catalogue this library switched off. That is the direction this file
 cares about, because the failure is silent in exactly one direction.
 """
 
+import contextlib
 import itertools
 import json
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 import sources
 from enums import CatalogueSource
+from isbn import registration_group
 
 #: The survey `sources.MEASURED` and `sources.TIER_UNION` were read off.
 #:
@@ -24,11 +28,32 @@ from enums import CatalogueSource
 SAMPLE = Path(__file__).parent / "fixtures" / "catalogue_survey_2026_08_31.json"
 
 #: The sources the sample covers, which is `LOOKUP_SOURCES` minus the metered one.
-SAMPLED = ("dnb", "k10plus", "oenb", "open_library", "nlg")
+#:
+#: **Derived from `MEASURED` rather than typed, because typing it left a source
+#: out.** The Czech catalogue was added to `MEASURED` and not to this tuple, and
+#: nothing failed: every guard in this file builds its candidate pool from here,
+#: so the tier rule that was changed *for* that source could not see it. The
+#: off-arm of `test_the_concentration_rule_is_what_holds_the_tier_at_two` then
+#: computed a third slot worth 12 while its own docstring said 10, and the two
+#: disagreeing was the only visible trace.
+#:
+#: A tuple that has to agree with `MEASURED` by hand is a fact stored twice. This
+#: is the same list, ordered the same way, and a new source joins both at once.
+SAMPLED = tuple(source.value for source in sources.MEASURED)
 
 
 def _sample() -> list[dict]:
     return json.loads(SAMPLE.read_text())
+
+
+def _concentration_of(rows: list[dict], name: str) -> float:
+    """What share of one source's answers sit in its single largest frame.
+
+    Computed from the sample rather than read off `MEASURED`, so the guards that
+    use it cannot agree with the table by construction.
+    """
+    per_frame = Counter(row["frame"] for row in rows if row[name] == "found")
+    return max(per_frame.values()) / sum(per_frame.values())
 
 
 def _p90(values: list[float]) -> float:
@@ -101,17 +126,16 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             measured = _p90([entry[f"seconds_{source.value}"] for entry in rows])
             assert row.p90_seconds == round(measured, 3), source
 
-    def test_each_frame_count_matches_the_table(self):
-        """`frames_answered` is what keeps a national catalogue out of the tier,
-        so it is recomputed rather than asserted like everything else here."""
+    def test_each_largest_frame_matches_the_table(self):
+        """`largest_frame` with `answered` is what keeps a national catalogue out
+        of the tier, so it is recomputed rather than asserted."""
         rows = _sample()
-        frames = {row["frame"] for row in rows}
         for source, row in sources.MEASURED.items():
-            answered_in = {
+            per_frame = Counter(
                 entry["frame"] for entry in rows if entry[source.value] == "found"
-            }
-            assert answered_in <= frames
-            assert row.frames_answered == len(answered_in), source
+            )
+            assert per_frame, source
+            assert row.largest_frame == max(per_frame.values()), source
 
     def test_the_marginal_table_matches_the_sample(self):
         """`TAIL_MARGINAL` counts books the leading tier missed, which is the
@@ -134,10 +158,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             for name in SAMPLED
             if _p90([entry[f"seconds_{name}"] for entry in rows])
             <= sources.FIRST_TIER_BUDGET_SECONDS
-            # The frame rule, applied here as well, or this table would price a
-            # tier `_tier_for` cannot build. See `TIER_FRAMES_MINIMUM`.
-            and len({entry["frame"] for entry in rows if entry[name] == "found"})
-            >= sources.TIER_FRAMES_MINIMUM
+            # The concentration rule, applied here too, or this table prices a
+            # tier `_tier_for` cannot build. See `TIER_MAX_CONCENTRATION`.
+            and _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION
         ]
         for size in range(1, len(within) + 1):
             best = max(
@@ -152,20 +175,22 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`DEFAULT_ORDER` orders the tail on 83, 34 and 1, which is the one
+        """`DEFAULT_ORDER` orders the tail on 82, 42, 34 and 1, which is the one
         figure in that docstring no per source table can hold.
 
-        **The pooled counts say the opposite about two of the three**, which is
-        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 37 and
-        55 would put the OeNB ahead of the NLG.
+        **The pooled counts say the opposite about three of the four**, which is
+        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 59, 37
+        and 55 would put the OeNB ahead of both national catalogues and the NKP
+        behind the NLG.
         """
         rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
         missed = [
             entry for entry in rows if not any(entry[name] == "found" for name in tier)
         ]
-        assert len(missed) == 279
-        assert sum(1 for entry in missed if entry["open_library"] == "found") == 83
+        assert len(missed) == 278
+        assert sum(1 for entry in missed if entry["open_library"] == "found") == 82
+        assert sum(1 for entry in missed if entry["nkp"] == "found") == 42
         assert sum(1 for entry in missed if entry["nlg"] == "found") == 34
         assert sum(1 for entry in missed if entry["oenb"] == "found") == 1
 
@@ -199,8 +224,8 @@ class TestTheOrderFollowsTheMeasurement:
       membership. The two agree on the sources a tier may hold: `dnb + k10plus`
       answers 221 of 500 against 215 for `k10plus + oenb` and 95 for
       `dnb + oenb`. **They stopped agreeing over the whole roster**, which is
-      what `TIER_FRAMES_MINIMUM` is for: `k10plus + nlg` answers 242, and all 34
-      of that difference is one frame of the ten.
+      what `TIER_MAX_CONCENTRATION` is for: `k10plus + nkp` answers 254, and 49
+      of the NKP's 59 answers are Czech.
     * **The tail rule is marginal, and the guard now measures the same thing.**
       It used to compare `answered / of`, which counts books the tier already
       had, and the disclosure here said the two "come apart on a roster where a
@@ -252,35 +277,44 @@ class TestTheOrderFollowsTheMeasurement:
         row = sources.MEASURED[source]
         return row.answered / row.of
 
+    @staticmethod
+    def _concentration(source: CatalogueSource) -> float:
+        """What share of a source's answers sit in its single largest frame."""
+        row = sources.MEASURED[source]
+        return row.largest_frame / row.answered
+
     @classmethod
     def _within(cls) -> list[CatalogueSource]:
         """The free lookup sources a tier may hold.
 
         Two conditions, not one: fast enough to be asked on every lookup, and
-        general enough to be worth asking on every lookup. See
-        `sources.TIER_FRAMES_MINIMUM` for the second, which the NLG is the first
-        source to fail.
+        **general** enough to be worth asking on every lookup. See
+        `sources.TIER_MAX_CONCENTRATION` for the second, which the NLG and the
+        NKP both fail, at 100% and 83% of their answers in one frame.
         """
         return [
             source
             for source in cls._free_lookup()
             if sources.MEASURED[source].p90_seconds
             <= sources.FIRST_TIER_BUDGET_SECONDS
-            and sources.MEASURED[source].frames_answered
-            >= sources.TIER_FRAMES_MINIMUM
+            and cls._concentration(source) < sources.TIER_MAX_CONCENTRATION
         ]
 
     @classmethod
     def _tier_for(
-        cls, budget: float, frames: int | None = None
+        cls, budget: float, concentration: float | None = None
     ) -> set[CatalogueSource]:
-        """The tier the stated rule produces for a given budget and frame floor."""
-        floor = sources.TIER_FRAMES_MINIMUM if frames is None else frames
+        """The tier the stated rule produces for a given budget and bound."""
+        bound = (
+            sources.TIER_MAX_CONCENTRATION
+            if concentration is None
+            else concentration
+        )
         within = [
             source
             for source in cls._free_lookup()
             if sources.MEASURED[source].p90_seconds <= budget
-            and sources.MEASURED[source].frames_answered >= floor
+            and cls._concentration(source) < bound
         ]
         within.sort(key=lambda source: (-cls._rate(source), source.value))
         return set(within[: sources.ALWAYS_ASKED])
@@ -294,10 +328,10 @@ class TestTheOrderFollowsTheMeasurement:
         for source, row in sources.MEASURED.items():
             assert 0 < row.answered <= row.of, source
             assert row.p90_seconds > 0, source
-            # A source answering in no frame answered nothing, which `answered`
-            # already refuses; a source answering in more frames than it has
-            # answers is a transcription error.
-            assert 0 < row.frames_answered <= row.answered, source
+            # A largest frame bigger than the source's own answer count is a
+            # transcription error; one of zero means it answered nothing, which
+            # `answered` already refuses.
+            assert 0 < row.largest_frame <= row.answered, source
 
     def test_the_tier_holds_the_sources_that_answer_most_inside_the_budget(self):
         assert set(sources.DEFAULT_PLAN.lookup_together) == self._tier_for(
@@ -352,8 +386,8 @@ class TestTheOrderFollowsTheMeasurement:
             for names in itertools.combinations(pool, size)
         )
 
-    def _within_names(self, *, frame_rule: bool) -> list[str]:
-        """The sources a tier may hold, with the frame rule on or off."""
+    def _within_names(self, *, general_only: bool) -> list[str]:
+        """The sources a tier may hold, with the concentration rule on or off."""
         rows = _sample()
         return [
             name
@@ -361,43 +395,115 @@ class TestTheOrderFollowsTheMeasurement:
             if _p90([row[f"seconds_{name}"] for row in rows])
             <= sources.FIRST_TIER_BUDGET_SECONDS
             and (
-                not frame_rule
-                or len({row["frame"] for row in rows if row[name] == "found"})
-                >= sources.TIER_FRAMES_MINIMUM
+                not general_only
+                or _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION
             )
         ]
 
-    def test_the_frame_rule_is_what_holds_the_tier_at_two(self):
-        """The decision `TIER_FRAMES_MINIMUM` actually makes, pinned.
+    def test_the_concentration_rule_is_what_holds_the_tier_at_two(self):
+        """The decision `TIER_MAX_CONCENTRATION` actually makes, pinned.
 
-        **Not the tier's membership**, which the rate rule decides on its own: a
-        critic executed `_tier_for` for every floor from 0 to 5 and got
-        `{dnb, k10plus}` each time, so a guard asserting the NLG is out of the
-        tier passes with the frame rule deleted and says nothing.
+        **Not the tier's membership**, which the rate rule decides on its own: no
+        national catalogue reaches the top two by pooled rate, so a guard
+        asserting one is out of the tier passes with this rule deleted and says
+        nothing. A critic established that against the frame count this replaced.
 
-        The size is the decision. `TIER_UNION` unions rather than ranks, so
-        without the frame rule the third slot earns 13 against `SLOT_MUST_EARN`
-        of 10 and `test_the_next_slot_would_not_have_earned_its_place` fails,
-        which is a measurement telling every install to make a third concurrent
-        request on every lookup. With the rule the third slot earns 1.
+        The size is the decision. `TIER_UNION` unions rather than ranks, so with
+        both national catalogues eligible the best pair is `k10plus + nkp` at 254
+        and the third slot earns **34** against a bar of **10**. With the rule the
+        pair is `dnb + k10plus` at 222 and the third slot earns **1**.
+
+        **Both numbers are computed here rather than quoted**, and an earlier
+        version of this docstring quoted a third figure that neither arm produces.
+        It said 10, which is what the off arm computes when the NKP alone is
+        admitted and the NLG is not, a bound this test never uses. The reason it
+        went unnoticed is worth more than the number: `SAMPLED` had been typed by
+        hand and omitted the NKP, so the off arm's pool was missing the very
+        source the rule was changed for and computed 12 while the prose said 10.
 
         Both arms are computed from the committed sample rather than from
         `TIER_UNION`, so neither can agree with the constant by construction.
         """
-        for frame_rule, expected in ((True, False), (False, True)):
-            pool = self._within_names(frame_rule=frame_rule)
-            assert len(pool) >= 3, (frame_rule, pool)
+        for general_only, expected in ((True, False), (False, True)):
+            pool = self._within_names(general_only=general_only)
+            assert len(pool) >= 3, (general_only, pool)
             earned = self._best_union(pool, 3) - self._best_union(pool, 2)
             assert (earned >= sources.SLOT_MUST_EARN) is expected, (
-                f"with the frame rule {'on' if frame_rule else 'off'} the third "
-                f"slot earns {earned} against a bar of {sources.SLOT_MUST_EARN}"
+                f"with the concentration rule {'on' if general_only else 'off'} "
+                f"the third slot earns {earned} against a bar of "
+                f"{sources.SLOT_MUST_EARN}"
             )
 
-    def test_the_frame_rule_changes_which_sources_a_tier_may_hold(self):
+    def test_the_concentration_rule_changes_which_sources_a_tier_may_hold(self):
         """Or the two arms above are the same arm twice."""
-        assert self._within_names(frame_rule=True) != self._within_names(
-            frame_rule=False
+        assert self._within_names(general_only=True) != self._within_names(
+            general_only=False
         )
+
+    def test_the_concentration_bound_is_not_fitted_to_this_roster(self):
+        """The third stated number, given the treatment the other two have.
+
+        The tier must be the same for every bound between the most concentrated
+        source it keeps and the least concentrated one it excludes, or the
+        constant is sitting on an edge and the next remeasurement moves it.
+        Measured: 55% kept, 83% excluded, and two thirds sits 42% into that.
+        """
+        kept = self._within()
+        # **Excluded by *this* rule, not by the budget.** Open Library is out of
+        # the tier because it is slow, and its concentration is the lowest of
+        # any source, so including it here made the gap run backwards and the
+        # first version of this test failed on the unmutated tree.
+        excluded = [
+            source
+            for source in self._free_lookup()
+            if source not in kept
+            and sources.MEASURED[source].p90_seconds
+            <= sources.FIRST_TIER_BUDGET_SECONDS
+        ]
+        assert kept and excluded
+        low = max(self._concentration(s) for s in kept)
+        high = min(self._concentration(s) for s in excluded)
+        assert low < sources.TIER_MAX_CONCENTRATION < high
+        where = (sources.TIER_MAX_CONCENTRATION - low) / (high - low)
+        assert 0.15 <= where <= 0.85, (
+            f"{sources.TIER_MAX_CONCENTRATION:.3f} sits {where:.1%} into the gap "
+            f"[{low:.3f}, {high:.3f}], which is near enough an edge to be a fit"
+        )
+        # **Sweeping the decision the rule makes, which is the tier's size.**
+        # This loop used to sweep `_tier_for`, and could not fail: membership is
+        # `{dnb, k10plus}` at every bound from 0.49 to 1.05, because the rate
+        # rule decides membership on its own. A critic executed it and found
+        # both endpoints producing the same input set. What moves with the bound
+        # is whether a third slot earns its place, so that is what is swept.
+        for bound in (low + 0.001, (low + high) / 2, high - 0.001):
+            pool = [
+                name
+                for name in SAMPLED
+                if _p90([row[f"seconds_{name}"] for row in _sample()])
+                <= sources.FIRST_TIER_BUDGET_SECONDS
+                and _concentration_of(_sample(), name) < bound
+            ]
+            earned = self._best_union(pool, 3) - self._best_union(pool, 2)
+            assert earned < sources.SLOT_MUST_EARN, (
+                f"at a bound of {bound:.3f} the third slot earns {earned}, so "
+                f"the tier's size is not the same across the gap"
+            )
+
+        # **And the margin ends at the gap, not beyond it.** Admitting the NKP
+        # takes the third slot's gain to 10, which meets the bar exactly. So the
+        # gap is the whole of the safety margin on the size decision, where the
+        # budget's gap leaves room on both sides. Recorded because the two read
+        # as the same kind of number and are not.
+        just_over = [
+            name
+            for name in SAMPLED
+            if _p90([row[f"seconds_{name}"] for row in _sample()])
+            <= sources.FIRST_TIER_BUDGET_SECONDS
+            and _concentration_of(_sample(), name) < high + 0.001
+        ]
+        assert (
+            self._best_union(just_over, 3) - self._best_union(just_over, 2)
+        ) >= sources.SLOT_MUST_EARN
 
     def test_the_union_table_agrees_with_the_per_source_one_where_they_touch(self):
         """The one point at which the two tables can check each other.
@@ -426,7 +532,7 @@ class TestTheOrderFollowsTheMeasurement:
         This is the one a critic got past. Deriving the tier from `MEASURED`
         slices with `ALWAYS_ASKED`, so `ALWAYS_ASKED = 3` with the OENB moved to
         position three produced a tier the derivation agreed with. Here every
-        slot the tier holds has to answer something: they answer 208 and 13.
+        slot the tier holds has to answer something: they answer 210 and 12.
 
         **This loop stops at `ALWAYS_ASKED`, so it never weighs a third slot.**
         `test_the_next_slot_would_not_have_earned_its_place` is the one that
@@ -461,7 +567,7 @@ class TestTheOrderFollowsTheMeasurement:
         measured what that let through: **3 survived and 35 survived**, both
         edges of the interval the roster had **then**, and only 36 failed. So the
         constant was fitted to the roster and this was the test claiming it was
-        not. The interval is [2, 13] now, so those two figures are a record of a
+        not. The interval is [2, 12] now, so those two figures are a record of a
         superseded roster rather than a bound anybody can check today. The budget
         beside it had already been given the proportion of interval treatment;
         this one had not, which is the whole defect.
@@ -490,10 +596,11 @@ class TestTheOrderFollowsTheMeasurement:
         metered source out of the pair asked together and says nothing about the
         order of the tail. With Google Books at position 1 of `DEFAULT_ORDER` the
         tier is untouched, because `lookup_together` filters `METERED` before it
-        slices, and `lookup_in_turn` becomes
-        `(google_books, open_library, nlg, oenb)`, so the metered source is asked
-        on every miss: 164 of the 500 sampled lookups today against 279, against
-        this module's own "Google Books is last of the six that answer an ISBN"
+        slices, and `lookup_in_turn(None)` becomes
+        `(google_books, open_library, nkp, nlg, oenb)`, so the metered source is
+        asked on every miss: 123 of the 500 sampled lookups today against 278,
+        against this module's own "Google Books is last of the seven that answer
+        an ISBN"
         and `docs/api.md`'s "an ordinary lookup therefore spends no quota at
         all".
 
@@ -501,7 +608,7 @@ class TestTheOrderFollowsTheMeasurement:
         `test_a_metered_source_promoted_is_still_asked_earlier_in_the_tier_below`
         pins that as deliberate. This is about the order nobody chose.
         """
-        chain = sources.DEFAULT_PLAN.lookup_in_turn
+        chain = sources.DEFAULT_PLAN.lookup_in_turn(None)
         free = [i for i, name in enumerate(chain) if name not in sources.METERED]
         metered = [i for i, name in enumerate(chain) if name in sources.METERED]
         # Both, or the inequality below is a statement about an empty set.
@@ -521,7 +628,7 @@ class TestTheOrderFollowsTheMeasurement:
         """
         measured = [
             source
-            for source in sources.DEFAULT_PLAN.lookup_in_turn
+            for source in sources.DEFAULT_PLAN.lookup_in_turn(None)
             if source in sources.TAIL_MARGINAL
         ]
         # Or the ordering assertion below is a statement about one element.
@@ -534,7 +641,7 @@ class TestTheOrderFollowsTheMeasurement:
         above cannot see, and it would sort wherever it was put."""
         tail = {
             source
-            for source in sources.DEFAULT_PLAN.lookup_in_turn
+            for source in sources.DEFAULT_PLAN.lookup_in_turn(None)
             if source in sources.MEASURED
         }
         assert tail == set(sources.TAIL_MARGINAL)
@@ -543,9 +650,16 @@ class TestTheOrderFollowsTheMeasurement:
         assert set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES
 
     def test_the_two_lookup_tiers_are_the_whole_lookup_roster(self):
-        """Nothing that can answer an ISBN is dropped between the tiers."""
+        """Nothing that can answer an ISBN is dropped between the tiers.
+
+        **Asked with no registration group**, which is what `SERVES_GROUPS` is
+        told when `isbn.registration_group` has no claim to make, and the case
+        in which nothing is filtered. Passing a real group here would make this
+        a statement about that group rather than about the roster.
+        """
         chain = (
-            sources.DEFAULT_PLAN.lookup_together + sources.DEFAULT_PLAN.lookup_in_turn
+            sources.DEFAULT_PLAN.lookup_together
+            + sources.DEFAULT_PLAN.lookup_in_turn(None)
         )
         assert set(chain) == sources.LOOKUP_SOURCES
         assert len(chain) == len(sources.LOOKUP_SOURCES)
@@ -751,14 +865,14 @@ class TestWhatTheOrderReaches:
     def test_a_metered_source_promoted_is_still_asked_earlier_in_the_tier_below(self):
         """Excluded from the first tier is not the same as ignored."""
         plan = self._ordered(CatalogueSource.GOOGLE_BOOKS)
-        assert plan.lookup_in_turn[0] is CatalogueSource.GOOGLE_BOOKS
+        assert plan.lookup_in_turn(None)[0] is CatalogueSource.GOOGLE_BOOKS
 
     def test_a_disabled_source_is_in_no_tier_at_all(self):
         plan = sources.parse(
             {"sources": [{"source": "dnb", "enabled": False}]}
         )
         assert CatalogueSource.DNB not in plan.lookup_together
-        assert CatalogueSource.DNB not in plan.lookup_in_turn
+        assert CatalogueSource.DNB not in plan.lookup_in_turn(None)
         assert CatalogueSource.DNB not in plan.searched
 
     def test_the_pair_asked_together_never_grows_past_the_stated_bound(self):
@@ -777,8 +891,11 @@ class TestASourceThatCannotAnswerIsNotAsked:
         assert CatalogueSource.GOOGLE_BOOKS not in plan.asked
 
     def test_dropping_it_leaves_every_other_source_alone(self):
+        """**Against the roster, not `SEARCH_SOURCES`.** Those were the same set
+        until a lookup only source joined, and this test then asserted that a
+        source answering no title search is not asked at all."""
         plan = sources.in_force(sources.DEFAULT_PLAN, self._ready_without_google())
-        assert set(plan.asked) == sources.SEARCH_SOURCES - {
+        assert set(plan.asked) == set(sources.DEFAULT_ORDER) - {
             CatalogueSource.GOOGLE_BOOKS
         }
 
@@ -860,3 +977,445 @@ class TestASourceThatCannotAnswerIsNotAsked:
                 credentials=everything if credentials is None else credentials,
             )
         }
+
+
+def _free_plan_names() -> tuple[list[str], list[str]]:
+    """The tier and tail a keyless install runs, as sample column names.
+
+    Google Books is dropped because the sample has no column for it: it needs a
+    key, a default install has none, and `MEASURED`'s own docstring says the
+    chain a default install runs is exactly the sampled five.
+    """
+    tier = [s.value for s in sources.DEFAULT_PLAN.lookup_together]
+    tail = [
+        s.value
+        for s in sources.DEFAULT_PLAN.lookup_in_turn(None)
+        if s in sources.MEASURED
+    ]
+    return tier, tail
+
+
+def _walk(row: dict, tier: list[str], tail: list[str]) -> tuple[float, bool]:
+    """One lookup's modelled cost and whether it found the book.
+
+    **`lookup`'s two phases, and a gathered tier costs that row's own maximum**,
+    never the maximum of per source means. A tier costs its slowest member on
+    that ISBN, which cannot be recovered from separate distributions: doing it
+    the other way overstated an earlier absolute by 11%.
+    """
+    cost = max(row[f"seconds_{name}"] for name in tier)
+    if any(row[name] == "found" for name in tier):
+        return cost, True
+    for name in tail:
+        cost += row[f"seconds_{name}"]
+        if row[name] == "found":
+            return cost, True
+    return cost, False
+
+
+@contextlib.contextmanager
+def _patched_remits(remits: dict[CatalogueSource, frozenset[str]]):
+    """Swap `SERVES_GROUPS` for the body, then put the real one back.
+
+    Restored in a `finally` and asserted identical afterwards, because a seat
+    that mutates a module and writes its own copy back has already cost this
+    repository a round.
+    """
+    original = sources.SERVES_GROUPS
+    sources.SERVES_GROUPS = remits  # type: ignore[misc]
+    try:
+        yield
+    finally:
+        sources.SERVES_GROUPS = original  # type: ignore[misc]
+    assert sources.SERVES_GROUPS is original
+
+
+def _served_tail(tail: list[str], row: dict) -> list[str]:
+    """`tail` as `SERVES_GROUPS` leaves it for this row's ISBN."""
+    group = registration_group(row["isbn"])
+    return [
+        name
+        for name in tail
+        if sources._serves(CatalogueSource(name), group)
+    ]
+
+
+class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
+    """`SERVES_GROUPS`, the rule under it, and the bound that keeps it honest.
+
+    **The failure this guards is silent in one direction only**, which is the
+    same shape as the rest of this file. A group set that is too **wide** costs a
+    round trip that was already being paid. A group set that is too **narrow**,
+    or a registration group decoded wrongly, takes a catalogue out of the chain
+    for a book it holds, and the reader is told the book does not exist. So
+    every test below is pointed at the second.
+    """
+
+    def test_every_declared_group_is_a_group_the_decoder_recognises(self):
+        """A group nobody can decode matches no ISBN, so the source it belongs
+        to is skipped on every lookup and nothing says so.
+
+        Checked by building an ISBN in each declared group and reading its group
+        back, rather than by eye: `978-96` and `978-9600` both look like
+        plausible spellings of the Greek group and neither is one.
+        """
+        for source, groups in sources.SERVES_GROUPS.items():
+            for group in groups:
+                prefix, element = group.split("-")
+                body = (prefix + element).ljust(12, "0")[:12]
+                total = sum(
+                    int(digit) * (1 if position % 2 == 0 else 3)
+                    for position, digit in enumerate(body)
+                )
+                isbn = body + str((10 - total % 10) % 10)
+                assert registration_group(isbn) == group, (source, group)
+
+    def test_a_group_set_only_belongs_to_a_source_that_answers_an_isbn(self):
+        """The rule applies on the lookup path, so a set on a search only source
+        would be a constant with no effect and a claim nobody checks.
+
+        **Deliberately not `LOOKUP_SOURCES & SEARCH_SOURCES`**, which was
+        proposed and passes today. It would forbid a lookup only source from
+        carrying a remit, which is a rule nobody decided and which this ticket's
+        own docstring argues against: the NKP is lookup only and is the source
+        that came closest to a row. The screen was the thing that could not draw
+        the combination, and the screen is where it was fixed, as
+        `providers.status.lookupOnlyRegional`.
+        """
+        assert set(sources.SERVES_GROUPS) <= sources.LOOKUP_SOURCES
+
+    def test_no_source_with_a_remit_uniquely_answers_outside_it(self):
+        """**The bound, and it is zero rather than a threshold.**
+
+        The objection this whole rule has to answer is that a catalogue stops
+        being asked about a book it holds, so the only tolerable number of books
+        the chain loses is none, and there is no gap to sweep a value across the
+        way `TIER_MAX_CONCENTRATION` and `SLOT_MUST_EARN` are swept.
+
+        Measured over the committed sample: the NLG answers nothing at all
+        outside its two groups, and the OeNB answers five, every one of which
+        the leading pair also holds.
+        """
+        rows = _sample()
+        for source, groups in sources.SERVES_GROUPS.items():
+            others = [name for name in SAMPLED if name != source.value]
+            lost = [
+                row
+                for row in rows
+                if row[source.value] == "found"
+                and registration_group(row["isbn"]) not in groups
+                and not any(row[name] == "found" for name in others)
+            ]
+            assert lost == [], (source, [row["isbn"] for row in lost])
+
+    def test_the_bound_is_what_keeps_the_czech_catalogue_out(self):
+        """**The arm that stops the test above being vacuous.** Every source in
+        the table passes it, so on its own it cannot show the rule refuses
+        anything, and a rule that has never refused anything is a rule nobody
+        has measured.
+
+        The NKP is the case: it would be the largest single saving here, and it
+        is the only source in the roster holding `9789727765584` (Portuguese)
+        and `9789878853932` (Argentinian). `TIER_MAX_CONCENTRATION` refused it
+        on a different measurement, so this is the second rule to and the
+        catalogue is not the worse for either: it answers 42 of the 278 the
+        leading pair misses.
+        """
+        rows = _sample()
+        others = [name for name in SAMPLED if name != CatalogueSource.NKP.value]
+        lost = [
+            row["isbn"]
+            for row in rows
+            if row["nkp"] == "found"
+            and registration_group(row["isbn"]) != "978-80"
+            and not any(row[name] == "found" for name in others)
+        ]
+        assert sorted(lost) == ["9789727765584", "9789878853932"]
+        assert CatalogueSource.NKP not in sources.SERVES_GROUPS
+
+    def test_the_rule_costs_the_sample_no_book_at_all(self):
+        """The bound above is per source. This is the same question asked of the
+        chain, which is what a reader actually loses: same 500 ISBNs, same
+        answer."""
+        rows = _sample()
+        tier, tail = _free_plan_names()
+        before = sum(_walk(row, tier, tail)[1] for row in rows)
+        after = sum(_walk(row, tier, _served_tail(tail, row))[1] for row in rows)
+        assert before == after == 377
+
+    def test_the_saving_the_constant_claims_recomputes(self):
+        """`SERVES_GROUPS` states 1.396s becoming 1.279s and 753 tail requests
+        becoming 518. A number written in prose stops being re-derived and starts
+        being copied."""
+        rows = _sample()
+        tier, tail = _free_plan_names()
+
+        def totals(served: bool) -> tuple[float, int]:
+            seconds = 0.0
+            requests = 0
+            for row in rows:
+                this = _served_tail(tail, row) if served else tail
+                seconds += _walk(row, tier, this)[0]
+                if not any(row[name] == "found" for name in tier):
+                    for name in this:
+                        requests += 1
+                        if row[name] == "found":
+                            break
+            return seconds / len(rows), requests
+
+        # Unpacked rather than compared as tuples: mypy reads
+        # `tuple[float, int] == tuple[ApproxBase, int]` as non overlapping and
+        # refuses it, which is correct about the types and wrong about the test.
+        plain_seconds, plain_requests = totals(False)
+        served_seconds, served_requests = totals(True)
+        assert plain_seconds == pytest.approx(1.396, abs=0.001)
+        assert plain_requests == 753
+        assert served_seconds == pytest.approx(1.279, abs=0.001)
+        assert served_requests == 518
+
+    def test_ordering_alone_saves_almost_nothing(self):
+        """**Why the rule skips rather than demotes**, which is the design this
+        constant was written against and is the one a reader will propose first
+        because it cannot lose a book.
+
+        Moving a source that cannot answer to the back of the tail models at
+        1.3959s against 1.3964s: half a millisecond. The tail stops at the first
+        hit, so a dead source ahead of the answerer is only paid when something
+        behind it answers, and on the rows where nothing answers every source is
+        asked whatever the order. The saving is the failed lookups, and ordering
+        cannot reach them.
+
+        **Three decimals are not enough here and that is the point of the
+        fourth.** Demotion measured 1.385s when it was first tried, which is a
+        small saving rather than none, and that run had the NKP in the table too.
+        Rounded to three places the two runs would both read 1.385 and 1.396 and
+        look like one measurement.
+        """
+        rows = _sample()
+        tier, tail = _free_plan_names()
+
+        def demoted(row: dict) -> list[str]:
+            served = _served_tail(tail, row)
+            return served + [name for name in tail if name not in served]
+
+        mean = sum(_walk(row, tier, demoted(row))[0] for row in rows) / len(rows)
+        plain = sum(_walk(row, tier, tail)[0] for row in rows) / len(rows)
+        assert mean == pytest.approx(1.3959, abs=0.0001)
+        assert plain == pytest.approx(1.3964, abs=0.0001)
+        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 377
+
+    def test_an_unrestricted_source_is_asked_about_every_isbn(self):
+        for group in ("978-3", "978-960", "978-80", None):
+            asked = sources.DEFAULT_PLAN.lookup_in_turn(group)
+            assert CatalogueSource.OPEN_LIBRARY in asked, group
+
+    def test_a_restricted_source_is_asked_inside_its_remit(self):
+        greek = sources.DEFAULT_PLAN.lookup_in_turn("978-960")
+        assert CatalogueSource.NLG in greek
+        assert CatalogueSource.OENB not in greek
+
+    def test_a_restricted_source_is_not_asked_outside_it(self):
+        spanish = sources.DEFAULT_PLAN.lookup_in_turn("978-84")
+        assert CatalogueSource.NLG not in spanish
+        assert CatalogueSource.OENB not in spanish
+
+    def test_a_second_group_reaches_the_same_source(self):
+        """The NLG carries two groups and both are Greek publishing. One of them
+        alone would silently halve it: 978-618 is 11 of the 50 sampled Greek
+        ISBNs."""
+        assert CatalogueSource.NLG in sources.DEFAULT_PLAN.lookup_in_turn("978-618")
+
+    def test_the_sample_is_one_bookland_prefix_and_the_bound_says_so(self):
+        """**What the zero book bound is measured over, pinned rather than
+        stated.**
+
+        Every row is `978` and every row decodes, so the bound above says nothing
+        about `979` and nothing about the undecodable case, and those are the two
+        paths the whole design's safety rests on. They are covered by tests
+        rather than by data, which is weaker, and this is here so that stays
+        visible: if a later sample gains a `979` row this fails and the bound
+        starts meaning more than it does today.
+        """
+        rows = _sample()
+        assert {row["isbn"][:3] for row in rows} == {"978"}
+        assert all(registration_group(row["isbn"]) is not None for row in rows)
+
+    def test_a_prefix_no_remit_mentions_reaches_every_source(self):
+        """**979 is a separate assignment space and a remit is silent about it.**
+
+        Before this arm every 979 ISBN lost both national catalogues: `979-8` is
+        a real group, it is in neither remit, and both were dropped with nothing
+        measuring it. A catalogue whose country has no 979 group yet cannot spell
+        "none", so silence has to read as no claim.
+        """
+        for group in ("979-8", "979-12"):
+            asked = sources.DEFAULT_PLAN.lookup_in_turn(group)
+            assert CatalogueSource.NLG in asked, group
+            assert CatalogueSource.OENB in asked, group
+
+    def test_a_remit_that_names_a_prefix_is_exhaustive_within_it(self):
+        """The other half, or the arm above would forgive every miss.
+
+        Once a remit names a prefix, a group inside it that the remit does not
+        list is a skip. That is the positive claim the saving comes from, and
+        both remits name `978`.
+        """
+        assert all(
+            group.startswith("978-")
+            for groups in sources.SERVES_GROUPS.values()
+            for group in groups
+        )
+        spanish = sources.DEFAULT_PLAN.lookup_in_turn("978-84")
+        assert CatalogueSource.NLG not in spanish
+        assert CatalogueSource.OENB not in spanish
+
+    def test_a_remit_naming_two_prefixes_filters_inside_both(self):
+        """The arm that shows the prefix rule is not a blanket exemption for 979.
+
+        The day a served country is assigned a 979 group and it is written into
+        the row, that prefix stops being silent and a **different** 979 group is
+        skipped again.
+        """
+        patched = {
+            **sources.SERVES_GROUPS,
+            CatalogueSource.NLG: frozenset({"978-960", "978-618", "979-15"}),
+        }
+        assert sources._serves(CatalogueSource.NLG, "979-15") is True
+        assert sources._serves(CatalogueSource.NLG, "979-8") is True
+        with _patched_remits(patched):
+            assert sources._serves(CatalogueSource.NLG, "979-15") is True
+            assert sources._serves(CatalogueSource.NLG, "979-8") is False
+            # The OeNB still names only 978, so 979 stays silent for it.
+            assert sources._serves(CatalogueSource.OENB, "979-8") is True
+
+    def test_a_group_nobody_can_parse_asks_everyone(self):
+        """`lookup_in_turn` is public and takes any string, so a group that is
+        not one has to fail open like a group that is None.
+
+        **Pinned because a mutation harness showed it was not.** The arm existed
+        and no test reached it, since the one caller in the tree passes
+        `isbn.registration_group`'s output, which is always decodable or None.
+        An arm nothing exercises is an arm somebody deletes.
+        """
+        for group in ("nonsense", "978", "978-", ""):
+            asked = sources.DEFAULT_PLAN.lookup_in_turn(group)
+            assert CatalogueSource.NLG in asked, group
+            assert CatalogueSource.OENB in asked, group
+
+    def test_a_malformed_remit_entry_asks_rather_than_skips(self):
+        """Every default in `_serves` is "ask", including a row it cannot parse.
+
+        `test_every_declared_group_is_a_group_the_decoder_recognises` is what
+        stops one being written; this is what stops one being expensive if it
+        ever is.
+        """
+        with _patched_remits({CatalogueSource.NLG: frozenset({"nonsense"})}):
+            assert sources._serves(CatalogueSource.NLG, "978-84") is True
+
+    def test_an_undecodable_group_asks_everyone(self):
+        """**Fail open, which is the whole reason `registration_group` returns
+        None rather than guessing.** An unassigned range, a group added to the
+        published list after this build, or an ISBN that is not one: every
+        source is asked, exactly as before this rule existed.
+        """
+        assert sources.DEFAULT_PLAN.lookup_in_turn(None) == tuple(
+            name
+            for name in sources.DEFAULT_PLAN.lookup_chain
+            if name not in sources.DEFAULT_PLAN.lookup_together
+        )
+
+    # **The tier being unfiltered is pinned in `test_metadata.py`, not here.**
+    # A version of it lived at this spot and was tautological: `lookup_together`
+    # takes no registration group, so asserting it is the same for every group
+    # is true by construction and no mutation of this module could fail it. The
+    # thing that can go wrong is `metadata.lookup` deciding to filter the tier at
+    # the call site, which only a call site test sees. See
+    # `TestACatalogueIsNotAskedAboutAForeignIsbn`.
+
+    def test_a_household_that_enabled_only_a_national_catalogue_still_has_one(self):
+        """**The case the ticket refused to create.** A library whose list is one
+        national catalogue is the library that most wants it, and this rule may
+        not make it unreachable: the catalogue is asked about every ISBN its
+        remit reaches, at the position it holds.
+
+        What that library does **not** get is the catalogue asked about a book it
+        could not answer, which is the point, and `lookup_chain` staying full is
+        what stops `metadata.lookup` reporting that as "nothing is switched on".
+
+        **`ALWAYS_ASKED + 1` sources rather than one**, because the leading tier
+        is never filtered and would swallow a smaller roster whole, so a one or
+        two source plan would pass whatever the rule did. Here the NLG is the
+        first source past the tier, which is where the rule reaches it.
+        """
+        kept = ("k10plus", "open_library", "nlg")
+        assert len(kept) == sources.ALWAYS_ASKED + 1
+        plan = sources.parse(
+            {
+                "sources": [
+                    {"source": source.value, "enabled": source.value in kept}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            }
+        )
+        assert plan.lookup_together == (
+            CatalogueSource.K10PLUS,
+            CatalogueSource.OPEN_LIBRARY,
+        )
+        assert plan.lookup_in_turn("978-960") == (CatalogueSource.NLG,)
+        assert plan.lookup_in_turn("978-618") == (CatalogueSource.NLG,)
+        # Outside its remit it is not asked, and the library still has a chain,
+        # which is what `metadata.lookup` reads to decide between "this book is
+        # in no catalogue" and "this library has switched every catalogue off".
+        assert plan.lookup_in_turn("978-84") == ()
+        assert len(plan.lookup_chain) == len(kept)
+
+    def test_the_screen_is_told_which_groups_a_source_is_asked_about(self):
+        """A source switched on, in position, and silent on nine scans in ten is
+        the sharpest form of "why is this not answering", and the screen cannot
+        derive it from `enabled` and `asked_first`."""
+        described = {
+            row.source: row
+            for row in sources.describe(
+                sources.DEFAULT_PLAN,
+                ready=frozenset(CatalogueSource),
+                credentials=frozenset(),
+            )
+        }
+        assert described[CatalogueSource.NLG].serves_groups == ("978-618", "978-960")
+        assert described[CatalogueSource.OENB].serves_groups == ("978-3",)
+        assert described[CatalogueSource.OPEN_LIBRARY].serves_groups == ()
+
+    def test_a_promoted_source_reports_its_remit_and_is_asked_about_everything(self):
+        """**The field is the remit declared, not the filter applied**, and the
+        two disagree on exactly this row.
+
+        A catalogue promoted into `lookup_together` is asked about every ISBN,
+        because that tier is never filtered, and it still reports the groups it
+        collects. So `serves_groups` alone cannot be read as "this source is
+        filtered": `asked_first` is the field that answers that, and a screen has
+        to read it first. Three documents said otherwise until two critics
+        measured this plan.
+        """
+        plan = sources.parse(
+            {
+                "sources": [
+                    {"source": source.value, "enabled": source.value in ("oenb", "nlg")}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            }
+        )
+        described = {
+            row.source: row
+            for row in sources.describe(
+                plan, ready=frozenset(CatalogueSource), credentials=frozenset()
+            )
+        }
+        for source in (CatalogueSource.OENB, CatalogueSource.NLG):
+            assert described[source].asked_first is True, source
+            assert described[source].serves_groups != (), source
+        # And they really are asked about a book neither collects. Compared as a
+        # set: `parse` orders by `DEFAULT_ORDER`, not by the order this fixture
+        # names its two sources in, which is a trap this file has now sprung
+        # twice.
+        assert set(plan.lookup_together) == {CatalogueSource.OENB, CatalogueSource.NLG}
+        assert plan.lookup_in_turn("978-84") == ()

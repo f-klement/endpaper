@@ -359,3 +359,56 @@ class TestTheCountsRespectPrivacy:
         tags = client.get("/api/books/tags", headers=admin["headers"]).json()
         counted = next(row for row in tags if row["id"] == tag["id"])
         assert counted["book_count"] == 1
+
+
+class TestTheTagFilterSurvivesADigitThatIsNotOne:
+    """`?tags=` and a Unicode digit was a 500, from the same defect as the ISBN.
+
+    `dependencies.row_ids` gated on `str.isdigit()` and then called `int()`.
+    A superscript two, `U+00B2`, satisfies the first and raises out of the
+    second, so a link with one in it left the route as an unhandled
+    `ValueError`. This is the second site of the pair that
+    `test_house_rules.py::TestADigitPredicateIsAlwaysNarrowedToAscii` now stops
+    coming back, and the one reachable without any body at all.
+
+    **The contract that decides the status code is `row_ids`'s own**, stated in
+    its docstring and pinned next door as "a link is not a form": a token it
+    cannot read is dropped rather than refused, because a filter that 422s turns
+    a stale bookmark into an error page. So the answer here is 200 with the
+    readable ids honoured, not 422.
+    """
+
+    SUPERSCRIPT_TWO = "²"
+
+    def test_an_unreadable_id_is_dropped_rather_than_raising(
+        self, client, admin, make_book
+    ):
+        tag = client.post(
+            "/api/books/tags", json={"name": "Holiday reads"}, headers=admin["headers"]
+        ).json()
+        book = make_book(admin["headers"], title="Tagged")
+        client.post(f"/api/books/{book['id']}/tags/{tag['id']}", headers=admin["headers"])
+        make_book(admin["headers"], title="Untagged")
+
+        res = client.get(
+            "/api/books",
+            params={"tags": f"{tag['id']},{self.SUPERSCRIPT_TWO}"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert [row["title"] for row in res.json()["items"]] == ["Tagged"]
+
+    def test_a_filter_of_nothing_readable_still_answers(self, client, admin, make_book):
+        """The arm that keeps the test above from passing on a `row_ids` that
+        ignores its argument entirely."""
+        make_book(admin["headers"], title="Untagged")
+
+        res = client.get(
+            "/api/books",
+            params={"tags": self.SUPERSCRIPT_TWO},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200
+        assert [row["title"] for row in res.json()["items"]] == ["Untagged"]

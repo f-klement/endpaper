@@ -564,12 +564,6 @@ def _call_number(entry: metadata._Subfields) -> str | None:
     return " ".join(parts) or None
 
 
-def _uncontrolled_source(entry: metadata._Subfields) -> str | None:
-    """The `$2` vocabulary name on a subject field, lower cased."""
-    value = entry.get("2")
-    return value.lower() if value else None
-
-
 def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Heading]:
     """The two schemes `metadata.py` has no MARC reader for.
 
@@ -585,6 +579,12 @@ def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Headin
       authorised string **is** the identifier for LCSH, which is
       `ClassificationScheme` saying so, so it goes in `number`.
 
+    **The `$2` reader is `metadata._subject_vocabulary` since #134**, where this
+    module used to hold a second copy called `_uncontrolled_source`. Both lower
+    cased and both existed to make one vocabulary one string; two copies of that
+    is one rule that can drift, and the case folding is exactly the half a
+    reader would quietly leave out of the second copy.
+
     Ordered call number first, which is `classifications.SCHEME_ORDER`
     saying the same thing: a shelf classification outranks a subject heading
     when a book runs out of room.
@@ -598,7 +598,7 @@ def _extra_headings(fields: dict[str, list[metadata._Subfields]]) -> list[Headin
     headings += [
         Heading(ClassificationScheme.LCSH, heading)
         for entry in fields.get("650", [])
-        if _uncontrolled_source(entry) == "lcsh"
+        if metadata._subject_vocabulary("650", entry) == "lcsh"
         and metadata._gnd_identifier(entry) is None
         for heading in [metadata._strip_marc_punctuation(entry.get("a", ""))]
         if heading

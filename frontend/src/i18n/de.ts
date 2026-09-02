@@ -1195,6 +1195,7 @@ export const de: Messages = {
   "providers.name.k10plus": "K10plus",
   "providers.name.oenb": "Österreichische Nationalbibliothek",
   "providers.name.nlg": "Griechische Nationalbibliothek",
+  "providers.name.nkp": "Tschechische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
@@ -1203,9 +1204,15 @@ export const de: Messages = {
     "Ein Schlüssel ist hinterlegt, dieser Katalog ist aber in seiner eigenen Karte weiter unten ausgeschaltet.",
   "providers.status.searchOnly":
     "Beantwortet nur Titelsuchen, die Position wirkt sich also nicht auf das Scannen aus.",
+  "providers.status.lookupOnly":
+    "Beantwortet nur Scans, die Position wirkt sich also nicht auf die Titelsuche aus.",
   "providers.status.askedFirst":
     "Wird bei jedem Scan gefragt, zusammen mit den anderen oben in dieser Liste.",
   "providers.status.askedAfter":
     "Wird nur gefragt, wenn die darüber nichts finden.",
+  "providers.status.regional":
+    "Wird nur gefragt, wenn die darüber nichts finden, und nur bei ISBNs, die mit {groups} beginnen.",
+  "providers.status.lookupOnlyRegional":
+    "Beantwortet nur Scans, und nur bei ISBNs, die mit {groups} beginnen, die Position wirkt sich also nicht auf die Titelsuche aus.",
   "providers.status.off": "Aus. Dieser Katalog wird nie gefragt.",
 };

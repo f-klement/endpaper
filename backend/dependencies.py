@@ -116,7 +116,13 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
     found = [
         number
         for token in raw.split(",")
-        if (stripped := token.strip()).isdigit()
+        # **`isascii()` or the `int()` beside it raises on a query string.**
+        # `?tag_ids=1,2,` and a superscript two came out of this comprehension
+        # as an unhandled `ValueError`: `str.isdigit()` is true of characters
+        # `int()` refuses. Executed against the running app. `isbn.py` carries
+        # the same fix and the fuller measurement.
+        if (stripped := token.strip()).isascii()
+        and stripped.isdigit()
         and 1 <= (number := int(stripped)) <= MAX_ROW_ID
     ]
     if len(found) > MAX_IDS_IN_A_FILTER:

@@ -108,6 +108,22 @@ class CatalogueSourceOut(BaseModel):
     #: a field that went false only once the source was already enabled could
     #: not say so first. See `sources.describe`.
     ready: bool
+    #: The ISBN registration groups this catalogue's collecting remit covers, as
+    #: `978-960`, and empty for a catalogue with no remit to state.
+    #:
+    #: **Non empty is the third thing a row can be**, beside on and off: asked,
+    #: at the position it holds, for some books and not others. Without it a
+    #: national catalogue reads as switched on and answers nothing on nine
+    #: scans in ten, which is the sharpest form of "why is this not working"
+    #: this screen exists to remove. `sources.SERVES_GROUPS` decides it and
+    #: carries the measurement.
+    #:
+    #: **The remit, not the filter, and a screen must not read it as the
+    #: filter.** The remit is applied only to the sources asked one at a time, so
+    #: a row can carry both `asked_first` and a populated `serves_groups`, and it
+    #: is then asked about every ISBN. `asked_first` is the field that answers
+    #: "is this filtered", and it has to be read first.
+    serves_groups: list[str]
 
 
 class LoginImageOut(BaseModel):

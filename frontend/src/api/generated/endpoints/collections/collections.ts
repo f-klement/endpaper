@@ -234,10 +234,21 @@ export const createCollection = async (
   collectionCreate: CollectionCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CollectionOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<CollectionOut>(getCreateCollectionUrl(), {
     ...options,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(collectionCreate),
   });
 };
@@ -249,14 +260,14 @@ export const getCreateCollectionMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof createCollection>>,
     TError,
-    { data: CollectionCreate },
+    CreateCollectionMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof createCollection>>,
   TError,
-  { data: CollectionCreate },
+  CreateCollectionMutationVariables,
   TContext
 > => {
   const mutationKey = ["createCollection"];
@@ -270,7 +281,7 @@ export const getCreateCollectionMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof createCollection>>,
-    { data: CollectionCreate }
+    CreateCollectionMutationVariables
   > = (props) => {
     const { data } = props ?? {};
 
@@ -285,6 +296,7 @@ export type CreateCollectionMutationResult = NonNullable<
 >;
 export type CreateCollectionMutationBody = CollectionCreate;
 export type CreateCollectionMutationError = HTTPValidationError;
+export type CreateCollectionMutationVariables = { data: CollectionCreate };
 
 /**
  * @summary Create Collection
@@ -297,7 +309,7 @@ export const useCreateCollection = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof createCollection>>,
       TError,
-      { data: CollectionCreate },
+      CreateCollectionMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -306,7 +318,7 @@ export const useCreateCollection = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof createCollection>>,
   TError,
-  { data: CollectionCreate },
+  CreateCollectionMutationVariables,
   TContext
 > => {
   return useMutation(getCreateCollectionMutationOptions(options), queryClient);
@@ -350,14 +362,14 @@ export const getDeleteCollectionMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteCollection>>,
     TError,
-    { collectionId: number },
+    DeleteCollectionMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteCollection>>,
   TError,
-  { collectionId: number },
+  DeleteCollectionMutationVariables,
   TContext
 > => {
   const mutationKey = ["deleteCollection"];
@@ -371,7 +383,7 @@ export const getDeleteCollectionMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteCollection>>,
-    { collectionId: number }
+    DeleteCollectionMutationVariables
   > = (props) => {
     const { collectionId } = props ?? {};
 
@@ -386,6 +398,7 @@ export type DeleteCollectionMutationResult = NonNullable<
 >;
 
 export type DeleteCollectionMutationError = HTTPValidationError;
+export type DeleteCollectionMutationVariables = { collectionId: number };
 
 /**
  * @summary Delete Collection
@@ -398,7 +411,7 @@ export const useDeleteCollection = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof deleteCollection>>,
       TError,
-      { collectionId: number },
+      DeleteCollectionMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -407,7 +420,7 @@ export const useDeleteCollection = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof deleteCollection>>,
   TError,
-  { collectionId: number },
+  DeleteCollectionMutationVariables,
   TContext
 > => {
   return useMutation(getDeleteCollectionMutationOptions(options), queryClient);
@@ -437,10 +450,21 @@ export const renameCollection = async (
   collectionUpdate: CollectionUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CollectionOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
   return customFetch<CollectionOut>(getRenameCollectionUrl(collectionId), {
     ...options,
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(collectionUpdate),
   });
 };
@@ -452,14 +476,14 @@ export const getRenameCollectionMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof renameCollection>>,
     TError,
-    { collectionId: number; data: CollectionUpdate },
+    RenameCollectionMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof renameCollection>>,
   TError,
-  { collectionId: number; data: CollectionUpdate },
+  RenameCollectionMutationVariables,
   TContext
 > => {
   const mutationKey = ["renameCollection"];
@@ -473,7 +497,7 @@ export const getRenameCollectionMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof renameCollection>>,
-    { collectionId: number; data: CollectionUpdate }
+    RenameCollectionMutationVariables
   > = (props) => {
     const { collectionId, data } = props ?? {};
 
@@ -488,6 +512,10 @@ export type RenameCollectionMutationResult = NonNullable<
 >;
 export type RenameCollectionMutationBody = CollectionUpdate;
 export type RenameCollectionMutationError = HTTPValidationError;
+export type RenameCollectionMutationVariables = {
+  collectionId: number;
+  data: CollectionUpdate;
+};
 
 /**
  * @summary Rename Collection
@@ -500,7 +528,7 @@ export const useRenameCollection = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof renameCollection>>,
       TError,
-      { collectionId: number; data: CollectionUpdate },
+      RenameCollectionMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -509,7 +537,7 @@ export const useRenameCollection = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof renameCollection>>,
   TError,
-  { collectionId: number; data: CollectionUpdate },
+  RenameCollectionMutationVariables,
   TContext
 > => {
   return useMutation(getRenameCollectionMutationOptions(options), queryClient);

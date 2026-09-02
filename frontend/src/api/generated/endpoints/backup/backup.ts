@@ -241,14 +241,14 @@ export const getRestoreBackupMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof restoreBackup>>,
     TError,
-    { data: BodyRestoreBackup; params?: RestoreBackupParams },
+    RestoreBackupMutationVariables,
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof restoreBackup>>,
   TError,
-  { data: BodyRestoreBackup; params?: RestoreBackupParams },
+  RestoreBackupMutationVariables,
   TContext
 > => {
   const mutationKey = ["restoreBackup"];
@@ -262,7 +262,7 @@ export const getRestoreBackupMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof restoreBackup>>,
-    { data: BodyRestoreBackup; params?: RestoreBackupParams }
+    RestoreBackupMutationVariables
   > = (props) => {
     const { data, params } = props ?? {};
 
@@ -277,6 +277,10 @@ export type RestoreBackupMutationResult = NonNullable<
 >;
 export type RestoreBackupMutationBody = BodyRestoreBackup;
 export type RestoreBackupMutationError = HTTPValidationError;
+export type RestoreBackupMutationVariables = {
+  data: BodyRestoreBackup;
+  params?: RestoreBackupParams;
+};
 
 /**
  * @summary Restore Backup
@@ -289,7 +293,7 @@ export const useRestoreBackup = <
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof restoreBackup>>,
       TError,
-      { data: BodyRestoreBackup; params?: RestoreBackupParams },
+      RestoreBackupMutationVariables,
       TContext
     >;
     request?: SecondParameter<typeof customFetch>;
@@ -298,7 +302,7 @@ export const useRestoreBackup = <
 ): UseMutationResult<
   Awaited<ReturnType<typeof restoreBackup>>,
   TError,
-  { data: BodyRestoreBackup; params?: RestoreBackupParams },
+  RestoreBackupMutationVariables,
   TContext
 > => {
   return useMutation(getRestoreBackupMutationOptions(options), queryClient);

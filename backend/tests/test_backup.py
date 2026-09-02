@@ -838,12 +838,31 @@ class TestADecompressionBomb:
     an OOMKill from a file that passes every other check.
     """
 
+    #: Written a megabyte at a time rather than as one `b"\0" * padding`.
+    #: `padding` is `MAX_UNCOMPRESSED_BYTES + 1`, a gigabyte, and that literal
+    #: was resident in the test process while it was compressed: measured at
+    #: +930 MB on the worker that runs this file, which is most of a CI job's
+    #: 2Gi and is what OOMKilled `test:backend` on every pipeline from
+    #: 2026-08-31. The test that proves a decompression bomb is refused was
+    #: itself the bomb. Peak is now the chunk plus the compressed output, both
+    #: about a megabyte.
+    #:
+    #: `archive.open(..., "w")` streams, and `_reject_a_bomb` reads `file_size`
+    #: from the central directory, which zipfile fills in from what was actually
+    #: written. So the archive this builds still declares the full gigabyte.
+    _CHUNK = 1024 * 1024
+
     def _bomb(self, manifest: dict, padding: int) -> bytes:
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(backup.MANIFEST_NAME, json.dumps(manifest))
             # Zeroes compress to almost nothing and expand to all of it.
-            archive.writestr("covers/1.jpg", b"\0" * padding)
+            zeroes = b"\0" * self._CHUNK
+            whole, rest = divmod(padding, self._CHUNK)
+            with archive.open("covers/1.jpg", "w") as entry:
+                for _ in range(whole):
+                    entry.write(zeroes)
+                entry.write(b"\0" * rest)
         return buffer.getvalue()
 
     def test_an_archive_that_expands_too_far_is_refused(

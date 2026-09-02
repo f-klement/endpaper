@@ -7,11 +7,12 @@ again".
 """
 
 import ast
+import copy
 import inspect
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import get_args
+from typing import Final, get_args
 
 import pytest
 from pydantic import BaseModel
@@ -2445,7 +2446,7 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Five exemptions over six names, each a deliberate table that something
+    Six exemptions over seven names, each a deliberate table that something
     else pins. The counts differ because one bullet covers the two dispatch
     tables together:
 
@@ -2461,6 +2462,16 @@ class TestNoModuleHardCodesASourceOrder:
       `test_the_marginal_table_covers_the_whole_measured_tail` and whose values
       are recomputed from the committed sample. It is what orders the tail, so
       it is data the order is derived **from** rather than a copy of the order.
+    * `sources.SERVES_GROUPS`, which registration groups a catalogue's collecting
+      remit covers. **A mapping consulted by key and never iterated**, which is
+      the narrower claim than `MEASURED`'s and is what makes the exemption safe
+      here: `sources._serves` and `sources.describe` both reach it with `.get`,
+      so its key order is not read anywhere and cannot be an order. Its
+      membership is pinned by
+      `test_a_group_set_only_belongs_to_a_source_that_answers_an_isbn`, its
+      spellings by `test_every_declared_group_is_a_group_the_decoder_recognises`,
+      and its values by `test_no_source_with_a_remit_uniquely_answers_outside_it`
+      against the committed sample.
     * `sources.MEASURED`, what each free lookup source was measured to do.
       **Justified by what is checkable rather than by what is obvious.** Nothing
       outside `backend/tests/` reads it, `TIER_UNION` or `SLOT_MUST_EARN` at all,
@@ -2502,7 +2513,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
-        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
+        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL", "SERVES_GROUPS"},
         "metadata.py": {"_MATCH_PRECEDENCE", "_SOURCES", "_FREE_SEARCHES"},
     }
 
@@ -2817,3 +2828,513 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
             parameter = signature.parameters["plan"]
             assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
             assert parameter.default is inspect.Parameter.empty, name
+
+
+#: The three predicates that answer "is this a digit" for far more than `0` to `9`.
+_DIGIT_PREDICATES: Final = frozenset({"isdigit", "isnumeric", "isdecimal"})
+
+
+def _receiver_key(node: ast.expr) -> str:
+    """A receiver's identity, with a walrus unwrapped to the name it binds.
+
+    **`(x := f()).isascii() and x.isdigit()` is the ordinary way to write this**
+    and the two receivers are the same object, so comparing raw `ast.dump` would
+    report the correct shape and push whoever hit it into writing something
+    worse. That is the guard flagging the door it exists to promote, and it
+    happened on the first run of this rule against `dependencies.row_ids`.
+    """
+    if isinstance(node, ast.NamedExpr):
+        node = node.target
+    # **Every `ctx` flattened to `Load`, or the walrus case still misses.** The
+    # target of `(x := ...)` is a `Name` with `ctx=Store()` and the later `x` is
+    # the same `Name` with `ctx=Load()`, so their raw dumps differ and the
+    # unwrapping above buys nothing on its own. Found by the fixture below
+    # rather than by reading this function.
+    node = copy.deepcopy(node)
+    for inner in ast.walk(node):
+        if hasattr(inner, "ctx"):
+            inner.ctx = ast.Load()
+    return ast.dump(node)
+
+
+def _isascii_receivers(node: ast.AST) -> set[str]:
+    """Every receiver `x` for which this subtree calls `x.isascii()`."""
+    return {
+        _receiver_key(inner.func.value)
+        for inner in ast.walk(node)
+        if isinstance(inner, ast.Call)
+        and isinstance(inner.func, ast.Attribute)
+        and inner.func.attr == "isascii"
+    }
+
+
+class TestADigitPredicateIsAlwaysNarrowedToAscii:
+    r"""`str.isdigit()` is not a guard for `int()`, and this is the rule that says so.
+
+    **Two live defects bought this test, and they failed in opposite
+    directions.** `isbn.is_valid_isbn13` gated on `isdigit()` alone. A superscript
+    two, `U+00B2`, is `isdigit()` and `int()` **raises** on it, so
+    `GET /api/books/lookup?isbn=978` and ten of them left the router as an
+    unhandled `ValueError`. An Arabic-Indic zero, `U+0660`, is `isdigit()` and
+    `int()` **accepts** it, so a checksum over it can pass and `POST /api/books`
+    stored a non ASCII string that `uq_books_isbn_single_copy` could not see as
+    the same book. `dependencies.row_ids` had the first shape on a query string.
+
+    **A helper was the obvious fix and is the weaker one.** A
+    `is_ascii_digits()` that four modules import is bypassed by anybody writing
+    `.isdigit()` directly, which is exactly what five call sites had already
+    done. Requiring the two calls together at every site is enforceable here and
+    cannot be bypassed by writing the ordinary thing.
+
+    **Receiver matched, not merely present.** `if a.isascii() and b.isdigit()`
+    would satisfy a rule that only asked whether an `isascii` call was nearby,
+    and that is the likeliest way to get this wrong rather than an evasion
+    somebody has to think of.
+
+    **Scoped to backend modules and not the test tree**, which is where a digit
+    predicate over committed fixture data is ordinary and carries no external
+    input. `_python_sources` already draws that line for four rules above.
+
+    **What it does not reach, said because the first version of this docstring
+    claimed it did.** It said "every digit predicate in every backend module"
+    while enumerating three `str` methods, and there is a fourth: **`re`'s
+    `\d`**, which is `isdecimal()` rather than `isdigit()`. Measured:
+    `re.fullmatch(r"\d{3}", "٣٣٠")` matches and `"²²²"` does not, so it admits
+    the quiet half of this defect and refuses the crashing half. There are
+    **16** string literals containing `\d` across **five** backend modules,
+    counted 2026-08-31 by walking the AST of everything `_python_sources`
+    returns and excluding docstrings; `ddc._NOTATION` is the one whose match is
+    **stored** rather than handed to `int()`.
+
+    **That count was 17 across six for as long as it took to check it.** The
+    first version was read off a `grep`, which counts lines rather than literals
+    and cannot tell a trailing comment from a pattern. Recount by walking the
+    tree, in a paragraph whose whole subject is a claim wider than its evidence.
+
+    **The instrument that would have caught this rule's own defect does not
+    exist here.** The paragraph above shipped with a bare `\d` in a non raw
+    docstring, which CPython warns about and this suite never sees, because
+    `pyproject.toml` configures no `filterwarnings`. Compiling every module under
+    `backend/` and catching `SyntaxWarning` finds it in one pass, and found
+    exactly one file. Nothing in this tree does that on its own, and the cost of
+    not doing it is not a stale comment: an invalid escape becomes a
+    `SyntaxError`, this module then fails to import, and every rule in it goes
+    with it. Worth a guard; not this ticket's to add.
+
+    **Not enforced here, deliberately.** `\d` is a different rule with a
+    different fix (`re.ASCII`, or `[0-9]`), a different blast radius, and its own
+    argument about which of those 16 want it. What belongs to this rule is that
+    its stated reach is its real one. That is the same defect class as
+    `metadata._nkp_query`'s rationale, corrected in the same round: code that is
+    defensible while the reason written beside it is not.
+    """
+
+    def _offenders(self, paths: list[Path] | None = None) -> list[str]:
+        found: list[str] = []
+        for path in paths if paths is not None else _python_sources():
+            tree = ast.parse(path.read_text())
+            parents: dict[ast.AST, ast.AST] = {}
+            for node in ast.walk(tree):
+                for child in ast.iter_child_nodes(node):
+                    parents[child] = node
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in _DIGIT_PREDICATES
+                ):
+                    continue
+                receiver = _receiver_key(node.func.value)
+                # Climb to every enclosing `and`, and ask whether any operand
+                # other than this call's own subtree narrows the same receiver.
+                narrowed = False
+                current: ast.AST | None = node
+                while current is not None and not narrowed:
+                    parent = parents.get(current)
+                    if isinstance(parent, ast.BoolOp) and isinstance(
+                        parent.op, ast.And
+                    ):
+                        narrowed = any(
+                            operand is not current
+                            and receiver in _isascii_receivers(operand)
+                            for operand in parent.values
+                        )
+                    current = parent
+                if not narrowed:
+                    # `path.name` rather than a path relative to `BACKEND`: the
+                    # fixture files the mutation tests below hand to `paths` sit
+                    # under pytest's `tmp_path` and `relative_to` raises for
+                    # them, which turned every one of those tests red for a
+                    # reason that had nothing to do with the rule.
+                    found.append(f"{path.name}:{node.lineno} .{node.func.attr}()")
+        return found
+
+    def test_no_backend_module_trusts_a_digit_predicate_on_its_own(self):
+        assert self._offenders() == []
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("a bare call", "def f(s):\n    return s.isdigit()"),
+            ("negated, no conjunction", "def f(s):\n    if not s.isdigit():\n        return 0"),
+            ("isnumeric", "def f(s):\n    return s.isnumeric()"),
+            ("isdecimal", "def f(s):\n    return s.isdecimal()"),
+            (
+                "isascii on a different receiver",
+                "def f(a, b):\n    return a.isascii() and b.isdigit()",
+            ),
+            (
+                "isascii joined by or rather than and",
+                "def f(s):\n    return s.isascii() or s.isdigit()",
+            ),
+            (
+                "a subscript receiver narrowed on a different slice",
+                "def f(s):\n    return s[:4].isascii() and s[:5].isdigit()",
+            ),
+            (
+                "a walrus narrowed on a different name",
+                "def f(a, b):\n    return (x := a).isascii() and (y := b).isdigit()",
+            ),
+        ],
+    )
+    def test_the_rule_sees_every_way_of_getting_it_wrong(
+        self, tmp_path: Path, shape: str, source: str
+    ):
+        """One shape per case, so a shape that stops being reported names itself."""
+        fixture = tmp_path / "offender.py"
+        fixture.write_text(source + "\n")
+        assert self._offenders([fixture]) != [], f"{shape} is invisible to the rule"
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("the shape this rule wants", "def f(s):\n    return s.isascii() and s.isdigit()"),
+            (
+                "narrowed once, negated as a whole",
+                "def f(s):\n    if not (s.isascii() and s.isdigit()):\n        return 0",
+            ),
+            (
+                "the digit test nested inside the narrowed conjunction",
+                'def f(s):\n    return s.isascii() and (s.isdigit() or s == "X")',
+            ),
+            (
+                "a matching subscript receiver",
+                "def f(s):\n    return s[:4].isascii() and s[:4].isdigit()",
+            ),
+            ("no digit predicate at all", "def f(s):\n    return s.isascii()"),
+            (
+                "a walrus narrowed and then reused by name",
+                "def f(t):\n    return (x := t.strip()).isascii() and x.isdigit()",
+            ),
+        ],
+    )
+    def test_the_rule_leaves_the_correct_shape_alone(
+        self, tmp_path: Path, shape: str, source: str
+    ):
+        """The other half of the diagonal: it must not report everything."""
+        fixture = tmp_path / "innocent.py"
+        fixture.write_text(source + "\n")
+        assert self._offenders([fixture]) == [], f"{shape} is reported and should not be"
+class TestOneReaderPerAmbiguousSubfield:
+    """`$2` means a vocabulary on a subject field and a Dewey edition on `082`.
+
+    So the same two characters are a subject vocabulary in one field and the
+    edition of a schedule in another, and the second is what this repository's
+    own fixtures carry: `23sdnb` on the DNB record, `22/ger` on the OENB's and
+    `21` on the National Library of Greece's, all three on `082`. A reader that
+    took `$2` off whatever field it had in hand would record a vocabulary called
+    "21", and nothing would fail: the value is a string, the column is a string,
+    and the mistake surfaces as a subject labelled with an edition number months
+    later.
+
+    **This class no longer guards which field is passed, and that is the
+    correction rather than a narrowing.** Its first version counted **readers of
+    the subfield** while its docstring claimed to enforce "a subject field
+    only", so `_subject_vocabulary(fields["082"][0])` was legal, was the exact
+    failure described, and left this green. That half is now the signature:
+    `metadata._subject_vocabulary` takes the tag and raises outside
+    `_DNB_SUBJECT_TAGS`, which no source scan can be evaded past. What is left
+    here is the half a scan can do, which is that nothing else reads the
+    subfield at all.
+
+    **It matches the constant, not a list of spellings.** The first version
+    enumerated `get`, `all` and a subscript, "three spellings because
+    `_Subfields` offers three". `_Subfields` subclasses `dict`, so it offers
+    every dict reader: measured against that version, **8 of 10** shapes
+    carrying a literal `"2"` went unreported, including `e.pop("2", None)`,
+    `e.setdefault("2", None)`, `dict.get(e, "2")`, `getattr(e, "get")("2")`,
+    `e.get(*("2",))` and an `items()` loop testing `c == "2"`. A fourth arm
+    would have been a fourth guess. The denominator is what makes the structural
+    rule affordable: the whole backend carries **two** `"2"` string constants
+    outside docstrings, and both are named in `SITES`.
+
+    ## What the constant rule accepts that the spelling rule refused
+
+    Asking that, rather than "is the new rule better", is what this class exists
+    to record, because the answer was **yes, once**, and it took a second seat to
+    find it. The replacement collected its sites into a **set** and compared
+    `found == set(SITES)`, where the version it replaced accumulated a list. A
+    set cannot see a second site that reports the same qualified name, and a
+    method sharing a module level function's name is the ordinary shape of that,
+    not a contrived one. Measured by appending a `class _Reader` with its own
+    `_subject_vocabulary` to `metadata.py` in memory: the set form compared equal
+    to `SITES` with the second reader present, and the list form reported
+    `metadata._subject_vocabulary` twice. So the count is load bearing and the
+    comparison is on sorted **lists**.
+
+    **Identity is the path, not `path.stem`.** That is the same defect one level
+    down and it came through the rewrite untouched from the first version.
+    `_python_sources()` already holds **seven** colliding stems, `auth`,
+    `backup`, `covers`, `imports`, `public`, `settings` and `stats`, each a
+    module at the root and one under `routers/` or `schemas/`. Neither
+    `metadata` nor `marc` collides today, which is why nothing failed; a reader
+    added to `routers/metadata.py` would have been indistinguishable from the
+    allowlisted one.
+
+    Everything else the audit compared came out stronger rather than weaker, and
+    the cases are worth naming because two of them were blind spots the first
+    version admitted to and this one closes: a code **bound to a name** first
+    (`CODE = "2"` then `e.get(CODE)`), a code as a **default argument**, and a
+    code in a **class body** outside every function are all reported here and
+    were all invisible before. An `f"2"` and a `"\x32"` are reported too,
+    checked by parsing rather than assumed, because both hold a `Constant` whose
+    value is the code.
+
+    **Blind spots, listed rather than left to be found.** A code assembled at
+    run time dodges it: `chr(50)`, or `"12"[1]`, carry no `"2"` constant, and
+    they are the honest floor of any rule that reads source rather than running
+    it. A function whose entire docstring is `"2"` is exempt and harmless, since
+    a docstring reads nothing. The test tree is not scanned, which is what lets
+    the checks below build offending source at all.
+    """
+
+    #: The only two places in the backend that may spell the subfield code.
+    #:
+    #: One reader and one writer, as `(path below backend/, function)`. A path
+    #: rather than a module name: see the docstring on the seven colliding
+    #: stems.
+    SITES = (
+        ("marc.py", "_subject_fields"),
+        ("metadata.py", "_subject_vocabulary"),
+    )
+
+    #: The subfield whose meaning depends on the field it sits in.
+    #:
+    #: Spelled plainly, and needing no dodge: `_python_sources` excludes the
+    #: test tree, so this class cannot trip its own rule. That is worth saying
+    #: rather than splitting the constant defensively, because a defence with no
+    #: threat behind it is the kind of comment this file exists to stop.
+    CODE = "2"
+
+    @classmethod
+    def _spells_the_code(cls, node: ast.AST) -> bool:
+        return isinstance(node, ast.Constant) and node.value == cls.CODE
+
+    @classmethod
+    def _sites_in(cls, source: str, where: str) -> list[tuple[str, str]]:
+        """Every `(where, function)` in this source spelling the subfield code.
+
+        A **list**, and repeats are kept: two functions of one name in one file
+        are two sites, and collapsing them is what let a second reader through.
+
+        A constant at module level, or in a class body outside every function,
+        is reported as `<module>`: the walk below descends into functions, so it
+        would otherwise be invisible.
+        """
+        tree = ast.parse(source)
+        docstrings = _docstring_nodes(tree)
+        found: list[tuple[str, str]] = []
+        in_a_function: set[ast.AST] = set()
+        for parent in ast.walk(tree):
+            if not isinstance(parent, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            owned = set(ast.walk(parent))
+            in_a_function |= owned
+            if any(
+                cls._spells_the_code(node)
+                for node in owned
+                if node not in docstrings
+            ):
+                found.append((where, parent.name))
+        if any(
+            cls._spells_the_code(node)
+            for node in ast.walk(tree)
+            if node not in in_a_function and node not in docstrings
+        ):
+            found.append((where, "<module>"))
+        return found
+
+    def test_only_the_two_named_sites_spell_the_subfield_code(self):
+        found: list[tuple[str, str]] = []
+        for path in _python_sources():
+            found += self._sites_in(
+                path.read_text(), str(path.relative_to(BACKEND))
+            )
+
+        assert sorted(found) == sorted(self.SITES), sorted(found)
+
+    def test_a_second_site_of_the_same_name_is_not_swallowed(self):
+        """The defect the set form had, as a test rather than as a paragraph.
+
+        A class method sharing the module level function's name reports the same
+        pair twice. Under `==` on sorted lists that is a failure; under set
+        equality it was invisible.
+        """
+        source = (
+            'def _subject_vocabulary(e):\n    return e.get("2")\n\n\n'
+            'class _Reader:\n    def _subject_vocabulary(self, e):\n'
+            '        return e.get("2")\n'
+        )
+        found = self._sites_in(source, "metadata.py")
+
+        assert found == [
+            ("metadata.py", "_subject_vocabulary"),
+            ("metadata.py", "_subject_vocabulary"),
+        ]
+        assert set(found) == {("metadata.py", "_subject_vocabulary")}
+
+    def test_two_files_of_one_stem_are_two_sites(self):
+        """`path.stem` was the identity and seven stems already collide.
+
+        `metadata` is not one of them today, so nothing failed; a reader added
+        to `routers/metadata.py` would have been indistinguishable from the
+        allowlisted one. Asserted on the collision this file would actually see.
+        """
+        reader = 'def _subject_vocabulary(e):\n    return e.get("2")\n'
+
+        assert self._sites_in(reader, "metadata.py") != self._sites_in(
+            reader, "routers/metadata.py"
+        )
+
+    def test_the_stems_that_already_collide_are_still_only_these(self):
+        """A count in prose does not recount itself, so this recounts it.
+
+        The docstring names seven. If an eighth appears the number above is
+        stale, and this says so at the rule rather than leaving the next reader
+        to trust it.
+        """
+        stems: dict[str, list[str]] = {}
+        for path in _python_sources():
+            stems.setdefault(path.stem, []).append(str(path.relative_to(BACKEND)))
+        colliding = {stem for stem, paths in stems.items() if len(paths) > 1}
+
+        assert colliding == {
+            "auth",
+            "backup",
+            "covers",
+            "imports",
+            "public",
+            "settings",
+            "stats",
+        }
+        assert not colliding & {"marc", "metadata"}
+
+    def test_both_named_sites_still_spell_it_exactly_once(self):
+        """A rule whose subject was deleted passes by having nothing to find.
+
+        Twice in this repository a guard went green with its own subject gone,
+        so each allowlisted site is asserted to be a real function that really
+        spells the code. **Exactly once**, not merely present: an `in` test
+        would accept a second spelling inside the same file, which is the same
+        multiplicity hole the set form had, one scope down.
+        """
+        for where, function in self.SITES:
+            found = self._sites_in((BACKEND / where).read_text(), where)
+
+            assert found.count((where, function)) == 1, (where, found)
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            'def _sneak(e):\n    return e.get("2")\n',
+            'def _sneak(e):\n    return e.get("2", "")\n',
+            'def _sneak(e):\n    return e.all("2")\n',
+            'def _sneak(e):\n    return e["2"]\n',
+            'def _sneak(e):\n    return e.pop("2", None)\n',
+            'def _sneak(e):\n    return e.setdefault("2", None)\n',
+            'def _sneak(e):\n    return dict.get(e, "2")\n',
+            'def _sneak(e):\n    return getattr(e, "get")("2")\n',
+            'def _sneak(e):\n    return e.get(*("2",))\n',
+            'def _sneak(e):\n    return e.get(f"2")\n',
+            'def _sneak(e):\n    return e.get("\\x32")\n',
+            'def _sneak(e):\n    code = "2"\n    return e.get(code)\n',
+            'def _sneak(e, code="2"):\n    return e.get(code)\n',
+            'def _sneak(e):\n    for c, v in e.items():\n        if c == "2":\n            return v\n',
+            'def _sneak(e):\n    return next(v for c, v in e.items() if c == "2")\n',
+            'async def _sneak(e):\n    return e.get("2")\n',
+        ],
+    )
+    def test_every_shape_that_spells_the_code_is_caught(self, spelling):
+        """Sixteen shapes, twelve of which the enumerating version missed.
+
+        The point of the list is not that it is complete, which no list is. It
+        is that every one of them has to write the code down, and the rule is
+        about writing it down rather than about how it is then used. The last
+        two added are the two blind spots the enumerating version admitted to
+        and this one closes: a name bound first, and a default argument.
+        """
+        assert self._sites_in(spelling, "elsewhere.py") == [
+            ("elsewhere.py", "_sneak")
+        ]
+
+    def test_a_constant_outside_every_function_is_caught(self):
+        """Both shapes: module level, and a class body with no function in it."""
+        assert self._sites_in('X = ENTRY.get("2")\n', "elsewhere.py") == [
+            ("elsewhere.py", "<module>")
+        ]
+        assert self._sites_in('class C:\n    CODE = "2"\n', "elsewhere.py") == [
+            ("elsewhere.py", "<module>")
+        ]
+
+    def test_prose_naming_the_subfield_is_not_a_site(self):
+        """A rule that cannot be written down without tripping itself gets
+        deleted rather than obeyed, so a docstring is not a site. This is the
+        diagonal for the exemption: the same text as an expression **is**."""
+        assert (
+            self._sites_in('def _fine(e):\n    """$2 and e.get("2")."""\n', "x.py")
+            == []
+        )
+        assert self._sites_in('def _bad(e):\n    """d"""\n    "2"\n', "x.py") == [
+            ("x.py", "_bad")
+        ]
+
+    def test_another_subfield_is_not_reported(self):
+        """The diagonal: the rule is about this code and not about subfield
+        reads. Without it, a guard matching any `get` would pass its own
+        fixtures while reporting every parser in the file."""
+        assert self._sites_in('def _fine(e):\n    return e.get("a")\n', "x.py") == []
+        assert self._sites_in('def _fine(e):\n    return e.all("0")\n', "x.py") == []
+        assert self._sites_in('def _fine(e):\n    return e["b"]\n', "x.py") == []
+
+
+class TestTheVocabularyReaderRefusesTheWrongField:
+    """The half a source scan cannot do, asserted on the function itself.
+
+    `TestOneReaderPerAmbiguousSubfield` used to claim this and could not deliver
+    it. `metadata._subject_vocabulary` takes the tag, so the check runs on every
+    call and no spelling gets past it.
+    """
+
+    ENTRY = metadata._Subfields((("a", "Ancient history"), ("2", "21")))
+
+    def test_a_subject_tag_is_read(self):
+        assert metadata._subject_vocabulary("650", self.ENTRY) == "21"
+
+    def test_a_dewey_field_raises_rather_than_answering(self):
+        """`082 $2` is the Dewey edition. This is the call the old docstring
+        described as impossible while nothing stopped it."""
+        with pytest.raises(ValueError, match="082"):
+            metadata._subject_vocabulary("082", self.ENTRY)
+
+    def test_every_subject_tag_this_app_reads_is_accepted(self):
+        """Membership is `_DNB_SUBJECT_TAGS` rather than a second list, so a tag
+        added there is admitted here in the same edit. Asserted over the whole
+        tuple, so a divergence cannot hide in the one tag nobody tried."""
+        for tag in metadata._DNB_SUBJECT_TAGS:
+            assert metadata._subject_vocabulary(tag, self.ENTRY) == "21", tag
+
+    def test_the_two_other_callers_pass_a_tag_this_accepts(self):
+        """`_k10plus_record` and `marc._extra_headings` both pass `650` as a
+        literal. If that stops being a member, both raise on every record, and
+        this says so at the rule rather than in a traceback."""
+        assert "650" in metadata._DNB_SUBJECT_TAGS

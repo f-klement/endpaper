@@ -1060,9 +1060,12 @@ against `lx2.loc.gov`, 20 records each, 2026-08-24, 900 MODS records:
 | `valueURI` on any `<subject>` element | 0 of 2,280 |
 
 **The Library of Congress does not join `_SOURCES`, and that is the decision rather than the
-next step.** It is the one catalogue here reached over plaintext HTTP, which this file
-already records as accepted precisely because it is not on the scan path, and putting it
-there would add an outbound call to every scan. It would also buy nothing for this
+next step.** It is reached over plaintext HTTP, which this file already records as
+accepted precisely because it is not on the scan path, and putting it there would add an
+outbound call to every scan. It was the only plaintext catalogue when this was written;
+the National Library of Greece and the Czech national library have joined it since, and
+both **are** on the scan path, which is why each needed its own entry rather than this
+one being widened. It would also buy nothing for this
 library's main case: of eight ISBNs measured, the Library of Congress held a record for
 five and all five were English, the misses being both German ISBNs and one English title it
 does not hold. So LCSH appears on a search row and reaches a book the way any other picked
@@ -8337,10 +8340,15 @@ of fifty by country, so pooling weights ten national publishing outputs equally,
 household's shelf is one tenth Greek. What the tier costs is paid by one library on every
 scan; what a national catalogue answers is concentrated in the country it serves.
 
-`TIER_FRAMES_MINIMUM` states that measurably: a source asked on every lookup must answer
+`TIER_FRAMES_MINIMUM` stated that measurably: a source asked on every lookup must answer
 in at least two of the ten frames. Measured 2026-08-30, K10plus and Open Library answer in
 10, the DNB in 5, the OeNB in 4 and the NLG in **1**, so every floor from 2 to 4 picks the
 same tier and the constant sits in a gap rather than on an edge.
+
+> **Superseded by #112**, and by a source that passed this rule while being the exact shape
+> it was written to exclude. See "The tier rule counts concentration, not frames" below. The
+> numbers in this section are the 2026-08-30 survey and are kept as the reasoning of the
+> day; the current survey is the fixture named in that entry.
 
 **A Greek library can still promote it**, which is what the provider list is for. The
 default is what nobody chose.
@@ -8469,5 +8477,569 @@ The implementer had already fixed four of the count's fifteen sites and believed
 done, which is the mechanism this register keeps recording: **a number stops being
 re-derived and starts being copied, and the person copying it is usually the one who
 corrected it last.**
+
+## The Czech National Library, and a server that renders one record a page
+
+### The search path is refused because the server renders one record per response
+
+**#112.** This target pads a page with `zs:record` elements that carry a packing and
+a position and no `recordData` at all, and populates exactly one, always the last.
+Measured 2026-08-31 across three queries and four page sizes: data at position 2 of 2, 3
+of 3, 5 of 5 and 20 of 20, every time. Over eight title searches at fifty records, **391
+of 400 records came back empty**. Asked one at a time, positions 1 to 12 all carry data,
+12 of 12. No parameter changes it: `recordSchema=dc`, `marcxml` and `usmarc` are all
+refused with "Unknown schema for retrieval".
+
+So a title search showing ten candidates would be **ten sequential requests** to somebody
+else's free catalogue inside a 4.0s shared deadline. An ISBN lookup wants one record and
+gets one: 20 of 20 on ISBNs harvested from this catalogue's own records and put back
+through `@attr 1=7`, p90 0.137s.
+
+**The source goes in as lookup only**, which the roster already expresses: `LOOKUP_SOURCES`
+and `SEARCH_SOURCES` are separate sets and the BnF and the Library of Congress are already
+search only. This is the first of the mirror kind.
+
+**`SEARCH_SOURCES` stops being `frozenset(DEFAULT_ORDER)`.** Its comment said every source
+answers a title search and that is now false, so it is written out and
+`TestTheProviderRosterIsOneList` compares it against `metadata`'s own dispatch tables.
+
+**This is a narrowing of the ticket and it is not silent**, which is the rule: the ticket
+asked for an adapter, a parser and a provider entry, and it could not have anticipated the
+record rendering, because nothing had asked this target for a page of records before.
+
+### The ticket named the shape correctly, and the first fix dismissed it
+
+**#112.** The ticket said `_CQL_UNSAFE` does not contain `@` and that `@1=1016 harry`
+survives `_search_terms`. Both true, and **both were the danger**, which this entry
+originally denied. It was headed "the injection is in PQF's booleans, not in the shape the
+ticket named" and argued that only `@and`, `@or`, `@set` and their siblings mattered,
+because `_CQL_UNSAFE` strips `=` so `@attr 1=4` cannot be reassembled out of a term.
+
+The stripped `=` part is right. The conclusion drawn from it is wrong, and the measurement
+refuting it was already in this repository, three days old: `z3950.pqf_term` records that
+YAZ tests for an escape character followed by a digit **before** the quoted run is read, so
+`@1=1016` needs no `=` reassembly and no space-preceded operator keyword. It survives
+quoting and repins the use attribute from inside the literal. The live measurement offered
+as proof here used `@attr 1=1016`, the spaced form, which **is** inert once quoted. The
+sharp form was never fired.
+
+**So the first fix was a second PQF rule that disagreed with the first.** `metadata`
+carried a local `_pqf_literal` removing the double quote and nothing else, on the stated
+ground that a quote is the only character able to end a PQF literal. `z3950.pqf_term`
+escapes `"`, a trailing `\` and `@`, each for a measured reason. Two rules, one measured
+and one reasoned, differing on two shapes of three.
+
+**The rule now lives once.** `z3950.pqf_term` is public and `_nkp_query` calls it;
+`_pqf_literal` is deleted, and a test asserts it stays deleted rather than asserting the
+two agree. `z3950.py` imports only the standard library, so there was never a cycle to
+justify the copy.
+
+**What generalises is not "check for a duplicate".** The local rule was argued for at
+length as a deliberate refusal to reuse `_CQL_UNSAFE`, which is a CQL constant and
+genuinely wrong for PQF. That refusal is correct and is kept:
+`test_the_cql_sanitiser_leaves_every_pqf_operator_intact` still asserts the coincidence is
+not leaned on. The error was treating a correct refusal to reuse the **wrong** rule as
+licence to write a new one without looking for the **right** one. The tell is a docstring
+that justifies a fresh guard by naming what it declined to depend on and never naming what
+it searched for.
+
+### The tier rule counts concentration, not frames
+
+**#112.** `TIER_FRAMES_MINIMUM` asked a source to answer in at least two of the ten frames
+before it could be asked on every lookup. It is retired, and `TIER_MAX_CONCENTRATION`
+replaces it: **at most two thirds of a source's answers may sit in its single largest
+frame.**
+
+**The rule was changed rather than the constant raised, because the Czech catalogue passed
+the old rule while being the exact shape it was written to exclude.** Measured over the
+committed 500 ISBN survey: the NKP answers in **six** frames of ten, so a two frame floor
+admits it comfortably, and **49 of its 59 answers are Czech**. The NLG, whose 37 answers
+are all Greek, failed the old rule on one frame. Two sources with the same defect, and the
+old metric caught one of them.
+
+Counting frames answers "how many places did it appear". What the tier needs to know is
+"how much of it is one place", and those come apart precisely on a national catalogue with
+a thin international tail, which is what every national catalogue is.
+
+**What the bound decides is the tier's size, not its membership**, and that is worth
+stating because a guard asserting membership would pass with the rule deleted. The rate
+rule already puts K10plus and the DNB in the top two at every bound from 0.49 to 1.05. What
+moves is whether a third concurrent slot earns its place: with the rule on the third slot
+answers **1** book of 500, and with it off it answers **34**, against a bar of 10.
+
+**The bound sits at two thirds, 42% into the gap** between the most concentrated source it
+keeps (the OeNB at 55%) and the least concentrated it excludes (the NKP at 83%). The margin
+on the *size* decision ends at that upper edge rather than running to 1.0, which is a
+narrower safety margin than `FIRST_TIER_BUDGET_SECONDS` has and is recorded because the two
+read like the same kind of number and are not.
+
+**A library in any of those countries can still promote its own national catalogue**, which
+is what the provider list is for. The default is what nobody chose.
+
+### An internal document declares itself, and the publish gate checks both directions
+
+**#112.** The publish gate strips a deny list, and a deny entry is configuration:
+delete the line and the file publishes with nothing failing anywhere. That has
+happened once already, to a document whose entry was removed in `346094a`.
+
+So every internal document now opens with this line, verbatim:
+
+> **This file is internal.**
+
+**That quotation is deliberate and this paragraph is the bound's regression case.** It is
+written in the exact form a declaration takes, at the start of its line, so the detector's
+pattern matches it. What stops this published register from failing the build is only that
+the check is bounded to each file's header, and this sits thousands of lines down. Remove
+the bound and the gate rejects the very document explaining why the bound exists.
+
+The gate enforces a **two way contract** over that line:
+
+* before the strip, every denied document must carry the declaration in its header
+* after the strip, no published file may carry one
+
+A deleted deny line fails the second. A new internal document written without the
+sentence fails the first. **Rewording the sentence fails the first for every document at
+once**, loudly, rather than silently disarming the second, which is what a guard keyed on
+prose in one direction only would do.
+
+**Why the requirement and the detector have different scopes.** The requirement is on
+Markdown documents, because demanding an English sentence inside a shell script or a JSON config
+would be a rule about the wrong thing. The detector is on **every** file, because a Python
+module whose docstring declares itself internal is exactly as much of a leak and was
+measured publishing in silence when the detector was briefly narrowed to Markdown too.
+
+**Why it is bounded to the file's header.** A published document may legitimately *quote*
+this sentence while explaining the convention, and this entry is where that would happen.
+Unbounded, writing this paragraph would fail the build, and the failure text would invite
+its reader to deny the decision register itself, which would strip it from the mirror.
+Bounding both halves to the first thirty lines states one rule, that a declaration is a
+property of a header, and lets a register discuss it in the body. Measured slack: of the 23
+declaring documents, 22 declare by line 8 and the latest is at line 24.
+
+**What that leaves open, stated rather than discovered.** A document that is never denied
+and declares itself below line thirty is not detected. The first half closes this for
+anything actually on the list, by requiring the declaration inside the same window, so
+a listed document cannot satisfy the rule with the sentence at line 900.
+
+**Three guards in this one change turned on the same distinction, and it is worth naming
+once rather than re-deriving a fourth time.** A document may **use** a phrase or merely
+**mention** it, and every guard over prose has to tell those apart or it forbids writing
+about itself:
+
+| the guard | a use | a mention |
+|---|---|---|
+| the retired plaintext claim | the sentence asserted in the document's own voice | the same words quoted, so preceded by a quote mark |
+| this declaration | the line in a file's header, saying what the file is | the line quoted in a body, explaining the convention |
+| a pointer to a stripped path | a Markdown link, which resolves to nothing | the filename in prose, telling a reader it exists |
+
+Each is spelled differently because the material differs: a preceding character, a header
+window, link syntax. **What must not differ is the question**, and a fourth guard over
+prose should start by asking it rather than by discovering it. Two of these three were
+first written without the distinction and had to be fixed after a real false positive.
+
+**A guard that exits non-zero is not thereby a guard that ran**, and this cost the most
+dangerous defect of the change. Written as `check && report` inside a command substitution
+under `set -e`, the second half aborted the whole script on the first file that did not
+match, which was almost the first file it looked at. Three later checks never executed,
+including **the scan for secrets and internal hostnames**. The gate still exited 1, so it
+read as a working rejection: it was dying rather than failing, and printing nothing.
+
+Two seats found it independently, which is the strongest signal this process produces. The
+test that catches the class is **counting the checks that executed**, not reading the exit
+code, and a planted token is what proves it: with the defect present the token published in
+silence, and with it fixed the scan names the file and line. That is the same rule as
+recording a failing test's name beside a mutation count rather than trusting the count.
+
+**The gate reads the committed ref, not the working tree**, and both halves must read the
+same one. An earlier version had the first half reading the checkout: with a path removed
+from the list, its files published and **neither half printed a failure**, because the
+declaration existed only in the working tree. A declaration added and not committed does
+not count, and the failure text says so.
+
+### The Czech catalogue is plaintext, and it is on the scan path
+
+**#112.** `aleph.nkp.cz` answers on port 9991 with no TLS endpoint, so it joins the Library
+of Congress and the National Library of Greece. Accepted on the same terms as Greece, and
+the terms are worth restating because this one is **asked on every scan** where the Library
+of Congress is not: `fetch` walks redirects itself and refuses any hop that changes scheme,
+host or port, so an on path attacker cannot turn one plaintext request into a request
+somewhere else. Substituting a record is still open to them, and the identity check is what
+bounds the damage: a returned record is used only when it claims the ISBN that was asked
+for.
+
+**The count of plaintext sources is now recomputed rather than written down.** This entry
+exists because the previous two each stated a total in prose, and both went stale when this
+source landed: `docs/legend.md` said two, `docs/security.md` named two, and a `metadata.py`
+docstring said "the one catalogue here reached over plaintext HTTP" while three were
+configured. `TestThePlaintextSourcesAreCounted` derives the set from `metadata`'s own
+module level endpoint values, every one of which is a plaintext URL, and
+fails when a doc disagrees, which is the standing house move of turning a claim that has
+gone stale twice into a test.
+
+### A refusal written in two languages was refusing in two languages
+
+**#112.** `metadata._NOT_A_BOOK` keeps a digitised copy off a shelf by matching
+`online[- ]?(?:ressource|resource)` and `elektronische ressource`. The Czech is **`online
+zdroj`**, which matches none of it and which appeared in the first record ever probed from
+this catalogue. So the refusal was scoped to German and English without saying so, and
+silently, for every catalogue that is neither.
+
+**Fixed for this source only, deliberately.** Widening the shared pattern is the tempting
+move and it changes what six other sources refuse on the strength of a phrase measured
+in one catalogue. `_NKP_ONLINE` states this source's own and a test pins that the shared
+rule is untouched. **Whether the rule should be per source everywhere is a real question
+and a larger one than this ticket**, and it is on the tracker rather than answered here.
+
+---
+
+## The committed client is generated only by the pinned toolchain, and the script enforces it
+
+Owner's decision, 2026-08-31: the development host's bun is upgraded to match the pin
+rather than the generation being moved to CI.
+
+**The generated API client is a committed artefact and CI diffs it against a fresh
+generation**, so the toolchain that writes it has to be the toolchain that checks it.
+Until this date the client generation script ran whatever `bun` was on the machine. Here that was
+**1.3.14 against the 1.4.0 the build pipeline and the `Dockerfile` pin**, and the
+consequence was not a failure but a wrong artefact: the older bun rewrote
+`frontend/bun.lock` down to lockfileVersion 1. Nothing errored. A session following this
+repository's own instruction to regenerate after a schema change would have committed the
+downgraded lockfile.
+
+**The 806 line diff that arrived with it was blamed on the same cause by three seats in a
+row, including this entry, and that was wrong.** It reproduces on bun 1.4.0, from a
+`--frozen-lockfile` install, with `frontend/openapi.json` byte identical and `bun.lock`
+unmoved: 846 insertions and 330 deletions across eight endpoint files, 806 of them in
+`books.ts`. **The committed client was generated by orval 8.24.0 and `bun.lock` pins
+8.26.0**, so it has been stale against its own generator since before any of this, and the
+number is a real difference rather than corruption.
+
+**The first attempt at this guard could not see that, and the false negative is the lesson.**
+Generating on the correct bun produced no diff and was quoted as proof the tree was clean.
+It was proof of nothing: the run used a `node_modules` holding the same stale orval that
+wrote the committed client, so the artefact was being compared against itself. **A version
+check on the interpreter says nothing about the generator it loads**, which is why the
+script now installs `--frozen-lockfile` before generating rather than trusting whatever is
+on disk.
+
+**Three drifts, not one, and only the first was known when this guard was written**: the
+interpreter against its pin, the installed tree against the lockfile, and the committed
+client against the generator that would write it today. The third is not this script's to
+fix and is on the tracker.
+
+**The first is the mirror image of a drift the test harness already refuses, and the
+pair is the reason the guard is worth its lines.** There, the old bun could not *read* a
+lockfile the new one wrote, so the harness broke loudly while CI stayed green. Here the
+old bun happily *wrote* one, so the harness stayed green and the artefact broke. **A
+version check that catches only the loud direction is half a check.**
+
+**Refusing rather than warning**, for the same reason that file gives: the whole value of
+the script is that what it writes is what CI will accept, and on a mismatch it guarantees
+nothing.
+
+**The guard is pinned by its diagnoses, not by its exit status, and that was measured
+rather than assumed.** Three of its arms are shadowed by the version comparison: an
+unreadable pin and a missing bun both leave a variable empty, and empty never equals the
+pinned version, so with any one of those arms deleted the run still refuses. A diagonal
+mutation run found exactly that, three arms surviving against tests named for them, which
+is this repository's recorded shape of a fixture named for what it tests being no evidence
+that it tests it. The tests now assert the message, which is what those arms exist to
+produce: without them the shadowing arm reports `runs bun , the pipeline runs bun 1.4.0`.
+Six mutations, six caught, each by the test named for it.
+
+**Why the upgrade rather than generating in CI.** There is no container runtime on the
+development host, and the suite runner deletes its container on exit, so a command that
+*writes* has no effect on the tree and reports success anyway. That left no correct way to
+run `api:generate` at all, which is a worse state than a slow one.
+
+---
+
+## A national catalogue is asked only about the registration groups it collects
+
+**#122.** The second phase of a lookup asks one source at a time and stops at the first
+hit, so a catalogue that cannot answer this ISBN is a round trip spent in front of
+whatever would have. Two of the four sources in that phase are national.
+
+**What was refused, and it is the design a reader proposes first.** Demoting a non serving
+source to the back of the phase, and skipping it but sweeping the skipped ones when nothing
+was found, are the same design and both save nothing: 1.3959s against 1.3964s. The reason
+is structural. A phase that stops at the first hit only pays a dead source when something
+behind it answers, and on the rows where nothing answers every source is asked whatever the
+order. **The whole saving is on the lookups that fail**, 123 of the 500 sampled, and
+ordering cannot reach them.
+
+So the saving and the risk are one mechanism: making a failed lookup cheap is what risks
+turning a successful one into a failed one. The trade is bounded rather than avoided.
+
+**The bound is zero and is not a threshold.** A catalogue may declare a remit only where
+there is no book it alone answers outside it. There is no gap to place a value in, because
+the objection the whole rule has to answer is that a catalogue quietly stops being asked
+about a book it holds. Measured on the committed sample: the NLG answers nothing at all
+outside its two groups, the OeNB answers five and the leading pair holds every one of them,
+and the NKP answers two that nothing else in the roster holds. The NKP is therefore refused,
+and it would have been the largest single saving.
+
+**Where the groups live: a per source constant, not a per install setting.** Which groups
+the National Library of Greece collects is a fact about its statutory remit and is the same
+in every household. The provider list's vocabulary is position and on or off, both of which
+are household facts. The third state is derived for display, not stored for editing.
+
+**Four fail open paths, each deliberate.** A source with no declared remit is asked about
+everything. An ISBN whose registration group this build cannot decode is offered to every
+source, which is why `isbn.registration_group` returns None rather than guessing, and why
+its range table is deliberately narrow: a narrow range makes an answer unknown, a wide one
+makes it wrong. So is an ISBN in a Bookland prefix no remit mentions. And the leading pair
+is never filtered, so a library that promotes a national catalogue there has it asked about
+every ISBN.
+
+**The prefix arm is the one both critics found and it was a real hole.** `978` and `979`
+are separate assignment spaces. A remit listing only `978` groups is **silent** about `979`
+rather than negative about it, because a catalogue whose country has no `979` group yet has
+no way to spell "none". Without that arm every `979` ISBN lost both national catalogues,
+and nothing measured it: all 500 rows of the committed sample are `978` and every one of
+them decodes, so the zero book bound was measured over one prefix and the two fail open
+paths the design rests on were exercised by no sample row at all.
+
+**The two tables fail in opposite directions and that is the thing to carry away.**
+`isbn._GROUP_RANGES` is narrow because an unknown range there decodes to None and every
+caller reads None as "ask", so narrow makes an answer unknown rather than wrong. Inside a
+prefix `SERVES_GROUPS` names, a group it does not list is a **skip**. "Widen it late rather
+than early" is right for the ranges and exactly wrong for the remits: a group missing from
+a remit costs books, and dropping `978-618` from the National Library of Greece loses seven
+of the fifty sampled Greek ISBNs.
+
+**`serves_groups` on the wire is the remit declared, not the filter applied.** A catalogue
+promoted into the leading pair reports its remit and is asked about every ISBN anyway, so
+`asked_first` is the field that answers "is this filtered" and has to be read first. Three
+documents said otherwise before two critics measured the plan that shows it.
+
+**A registration group is variable length and cannot be read off a string prefix.** `978-6`
+is not a group: Greek `978-618` and Brazilian `978-65` both begin with a 6. A survey script
+written while measuring this ticket made exactly that mistake, filed 23 of 500 ISBNs under a
+group that does not exist, and produced a plausible table with nothing failing.
+
+**What this changes about an older claim.** `sources.DEFAULT_ORDER` says no order of the
+roster finds more books than another. That is still true and is now conditional on the
+remit rather than absolute: a national catalogue below the leading pair genuinely is
+unreachable for a foreign ISBN. The condition costs zero books by the bound above, and
+`backend/tests/test_metadata.py::TestNoOrderOfTheRosterFindsMoreBooks` now asks each holder
+about a book in its own group rather than one English ISBN for all of them.
+
+## An `isdigit()` guard does not make an `int()` safe
+
+**Found while reviewing #122, unrelated to it, and fixed with the ticket per CLAUDE.md.**
+`str.isdigit()` is true for every Unicode digit, and the two halves of that fail in
+opposite directions: `int()` **raises** on a superscript two and **accepts** an
+Arabic-Indic zero. So the same predicate produced a 500 on `GET /api/books/lookup` and a
+silently stored non ASCII ISBN on `POST /api/books` that `uq_books_isbn_single_copy` could
+not match. `dependencies.row_ids` had the crashing shape on a query string.
+
+**The helper was the obvious fix and is the weaker one.** An `is_ascii_digits()` that four
+modules import is bypassed by anybody writing `.isdigit()` directly, which is what five
+call sites had already done.
+`test_house_rules.py::TestADigitPredicateIsAlwaysNarrowedToAscii` requires an `isascii()`
+call on the **same receiver** in an enclosing `and` at every digit predicate in every
+backend module, which cannot be bypassed by writing the ordinary thing.
+
+---
+
+## A subject carries the vocabulary a record declared, and the store is a separate question
+
+`catalogue.Subject` replaces the bare string a `Record` used to carry, with the `$2` code
+the record declared and the `$0` value it gave. Nothing is stored: a subject still reaches
+the database as words, in `books.categories`.
+
+**Why the store is not here, when the ticket named one.** `classifications` cannot hold it:
+`scheme` is a closed four member enum and everything that sorts, filters and orders a
+heading reads it, where a declared vocabulary is an open set. Twelve distinct codes turned
+up in one day's sampling of four catalogues (`bellobv`, `bisacsh`, `DLC`, `fhv`, `gatbeg`,
+`gnd`, `gnd-carrier`, `gnd-content`, `local`, `nlgaf`, `nlggf`, `VLK`), against a MARC
+source code list holding hundreds, and a table from those onto the enum is the crosswalk
+#134 refuses in as many words.
+
+A new `book_subjects` table cannot hold it either, not without retiring `books.categories`
+first: both would hold the same labels, and two stores for one fact is the objection that
+decides it. Retiring that column reaches 10 backend modules, 12 frontend files, both
+importers, both exporters, `backup` and the public shelf schema, counted 2026-08-31.
+
+**So this ticket writes no migration**, against the wave plan's forecast of one, and
+nothing here changes a column, a constraint or a table. Growing `ClassificationScheme`
+would not need one either: `b8e2f4c7a913` leaves `classifications.scheme` deliberately
+unconstrained for exactly that reason.
+
+The tracker had already split the store out. #143 (identifier and scheme types as rows
+rather than closed enums) and #140 (a vocabulary declaration format) are the store, #147 is
+the filter and the link, #135 is the enforcement. All four name this as their precondition,
+and the owner's own comment on #134 says it: "this ticket is about the sources, not the
+column".
+
+## `$2` is read on a subject field only, and the signature is what says so
+
+`metadata._subject_vocabulary` takes the MARC tag and raises outside
+`_DNB_SUBJECT_TAGS`. `$2` is a subject vocabulary on `600`, `650`, `651`, `655` and `689`
+and the **Dewey edition** on `082`, where this repository's own fixtures spell it `23sdnb`,
+`22/ger` and `21`, so a caller handing the reader an `082` records a vocabulary named `21`
+and nothing fails: the value is a string, the column is a string, and it surfaces months
+later as a subject labelled with an edition number.
+
+**A comment said this and a house rule was cited as the pin, and neither enforced it.** The
+rule counted readers of the subfield and never saw which field was passed, so the call it
+described as impossible was legal and left the rule green. A test in the same wave asserted
+that call returns `"21"`.
+
+Two rules now, doing two different jobs, which is the correction rather than a widening:
+
+* **which field**, enforced by the signature, because no source scan can be evaded past a
+  parameter;
+* **who may read it**, enforced by `test_house_rules.py::TestOneReaderPerAmbiguousSubfield`,
+  which matches the `"2"` **constant** with a two entry allowlist rather than a list of
+  spellings.
+
+The spelling list was the wrong shape and measurably so. It enumerated `get`, `all` and a
+subscript, "three spellings because `_Subfields` offers three"; `_Subfields` subclasses
+`dict`, so it offers every dict reader, and 8 of 10 shapes carrying a literal `"2"` went
+unreported, `e.pop`, `e.setdefault`, `dict.get(e, "2")`, `getattr(e, "get")("2")`,
+`e.get(*("2",))` and an `items()` loop among them. The denominator that makes the
+structural rule affordable is that the whole backend carries **two** `"2"` constants
+outside docstrings, one reader and one writer.
+
+## The vocabulary code is lower cased for `marc._extra_headings`, not for the catalogues
+
+`metadata._subject_vocabulary` folds case, and the first version of that comment said two
+catalogues motivated it. They do not: 0 of the twelve `$2` codes measured appeared in two
+cases, and the two upper case ones are each written by one catalogue only, `VLK` by the
+OENB and `DLC` by K10plus. **The dependency that actually breaks is
+`marc._extra_headings`**, which decides an LCSH heading by `== "lcsh"`, so an uploaded file
+writing `$2 LCSH` loses every one of them silently with the record otherwise whole. That is
+now pinned by a test rather than by a comment, and a cataloguer's own export is exactly
+where the shouted spelling lives.
+
+## An undeclared repeat folds away only when it adds nothing
+
+`catalogue._restates` decides it, and the identifier clause is the whole rule. Over the 169
+live (record, label) pairs carrying a declared and an undeclared occurrence together, the
+undeclared entry the rule is handed carries the identical identifier 147 times, none at all
+20 times, and a **different** one 2 times, which sums to the 169 and is stated so that it
+can be checked. The rows are per pair and not per occurrence: the fold collapses every
+undeclared occurrence of a label into one entry before `_restates` runs. Both of those two are the OENB writing
+`650 $a Osterreich $2 VLK $0 (AT-VLB)LA01044691` and, on the same record,
+`689 $a Osterreich $0 (DE-588)4043271-3`.
+
+**Filling the identifier across the fold is the obvious repair and is refused**: writing
+the GND number onto the `VLK` entry asserts that it identifies a heading in the Vorarlberg
+list, which is a crosswalk between two vocabularies. The two stay side by side instead.
+
+## A subject label keeps the place of its first occurrence
+
+`categories` is joined from these labels and is **stored on the Book**, so a person reads
+the order. The first fold emitted surviving entries in key order, so dropping an undeclared
+entry that came first moved its label to wherever the declared one sat, and
+`Roman; Informatik` became `Informatik; Roman`. Grouping by label fixes it and stays
+linear, because a dict preserves insertion order and a label's first key is inserted at its
+first occurrence.
+
+The comment that let this through said "nothing reads the order", listing `as_match` as a
+consumer in the same sentence. A human reading a joined string is reading the order.
+
+## The first `$0` is the authority file's number, and `_gnd_identifier` asks a different question
+
+`_subject_identifier` takes a field's **first** `$0`, whole. Measured 2026-08-31 over 718
+live subject fields carrying one: where a field carries a `(DE-588)` at all it is the first
+of that field's values, 691 of 691, with the `d-nb.info` URL and the `(DE-101)`, `(DE-627)`
+and `(DE-576)` house numbers always following; the other 27 carry exactly one `$0` each and
+no `(DE-588)`. So no prefix list is needed, and an enumerating guard is what one would be.
+
+**It takes the first `$0` that has a value, and the measurement is not the reason for that
+clause.** 691 of 691 counts values as served and says nothing about an element with no text
+standing in front of them, because an empty `$0` is not something a catalogue writes: it is
+what `_marc_text` makes of `<subfield code="0"/>`. Recounted for this, 0 of the 718 fields
+carry an empty `$0` anywhere, so the sample could not have shown it. Reading
+`values[0] or None` answered None where `_gnd_identifier`, which scans every value, found
+the number and wrote a classification row, so one field produced a heading with an
+identifier and a subject without one.
+
+**`_gnd_identifier` is unchanged and still searches every `$0` for a `(DE-588)`.** The two
+are different questions rather than one rule spelled twice. That one decides whether a
+`classifications` row is written, and that row's `scheme` is a closed set, so a `(DE-101)`
+number filed under `gnd` would be an identifier resolving to nothing. This one asks what
+the record gave, whatever file it names.
+
+**The identifier keeps its prefix where `Classification.number` drops it**, and that is the
+opposite rule on purpose. There the prefix duplicates a scheme column. Here there is no
+scheme column and the prefix is the only thing saying which file the number is in: `$2
+gatbeg` arrives with `$0 (DE-101)1010008188`, which is the DNB's genre list and the DNB's
+own file, two different answers.
+
+## A label under two vocabularies is two subjects; a label restated undeclared is one
+
+Measured over 765 distinct (record, label) pairs from live DNB, OENB, NLG and K10plus
+records on 2026-08-31.
+
+* 15 pairs carry one label under two declared vocabularies. `Wörterbuch` is a `gnd` subject
+  and a `gnd-content` form type on one record. Folding them asserts one vocabulary's
+  heading is the other's.
+* 169 pairs carry one label both declared and undeclared. That is the `689` restatement,
+  and folding them apart puts one word on the wire twice.
+
+So identity is (label, vocabulary), and an undeclared occurrence of a declared label folds
+away. That is not inference: it gives no undeclared value a vocabulary, it drops a second
+copy of a string the record already wrote, which is what the plain string deduplication it
+replaced did for every case.
+
+`Record.subject_labels` deduplicates a second time for the two consumers, because neither
+`categories` nor the tag suggestion can use the distinction and the first would show one
+word twice.
+
+## `$2` means a vocabulary on a subject field and a Dewey edition on `082`
+
+`metadata._subject_vocabulary` is the only place in the backend that reads a `$2`, and
+`test_house_rules.py::TestOneReaderPerAmbiguousSubfield` counts rather than trusting the
+comment saying so. A second reader taking `$2` off whatever field it had in hand would
+record a vocabulary called `21`, which is what this repository's own NLG fixture writes on
+its `082`: the value is a string, the column is a string, and the mistake surfaces months
+later as a subject labelled with an edition number. `marc.py` held a second copy of the
+lower casing rule and now calls the one reader.
+```
+
+## `backend/tests/COVERAGE.md`
+
+**Recount rather than take these as a delta**, which is that register's own rule.
+Measured with `pytest --collect-only -q` on this branch, 2026-08-31:
+
+| file | collected |
+|---|---|
+| headline | **4065** in 70 files |
+| `test_metadata.py` | 313 |
+| `test_house_rules.py` | 151 |
+| `test_marc.py` | 61 |
+| `test_catalogue.py` | 56 |
+
+Recounted with `pytest --collect-only -q` on the final commit, and the suite run on that
+same commit reports `4065 passed`, so the headline and the run agree.
+
+**This table has now been wrong twice, in the register whose own rule is that these are
+recounted rather than derived.** It first said 4039 and 51, written before the last test of
+the first round landed. It then said 4060 and 146, written before the second fix round
+added five more to `test_house_rules.py`. Both times the number was correct when written
+and stale when read, which is the mechanism this register already describes and which this
+branch hit three separate times tonight. The register's headline currently reads 3999 with
+rows 288, 123, 60 and 44.
+
+Row prose to fold in:
+
+* `test_catalogue.py`: add that a subject carries the vocabulary and identifier the record
+  declared, that a label under two vocabularies stays two subjects and one restated
+  undeclared folds into the declared one, that an identifier is filled in from whichever
+  occurrence has one, and that the joined `categories` string still carries each word once.
+* `test_metadata.py`: add that the `$2` and `$0` on a subject field are read and lower
+  cased, that the identifier is the first `$0` kept whole, that a Dewey edition number on
+  `082` is never read as a vocabulary, that a classification row is still written for the
+  GND alone, and what each of the six reader shapes can supply (MODS the vocabulary and
+  never an identifier, both Dublin Core dialects neither).
+* `test_house_rules.py`: add that only the two named sites in the backend spell the `$2`
+  subfield code, one reader and one writer, keyed on the path rather than the module stem
+  because seven stems already collide; that a second site of the same qualified name is
+  reported rather than collapsed; and that `metadata._subject_vocabulary` refuses a tag
+  outside `_DNB_SUBJECT_TAGS`, which is the half a source scan cannot do.
 
 ---

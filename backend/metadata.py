@@ -51,9 +51,11 @@ import ddc
 import fetch
 import google_books
 import sources
-from catalogue import AuthorityAssertion, Heading, Record
+import z3950
+from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
 from isbn import parse as parse_isbn
+from isbn import registration_group
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
@@ -506,7 +508,7 @@ async def _open_library(isbn: str, api_key: str) -> Lookup:
             # scores and `_merge` had nothing to fill them from.
             page_count=_open_library_pages(data.get("number_of_pages")),
             language=_open_library_language(data.get("languages")),
-            subjects=tuple(_open_library_subjects(data, work)),
+            subjects=uncontrolled(_open_library_subjects(data, work)),
             # The edition record's own, not the cluster's. 24 of 129 live
             # sibling editions carry a Dewey number where the edition asked
             # for carries none, so harvesting the cluster here would find
@@ -579,7 +581,7 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
         google_books_id=fields.get("google_books_id"),
         series_name=fields.get("series_name"),
         series_index=fields.get("series_index"),
-        subjects=tuple(google_books.split_categories(fields.get("categories"))),
+        subjects=uncontrolled(google_books.split_categories(fields.get("categories"))),
     )
 
 
@@ -605,7 +607,7 @@ def _parsed(body: str) -> ElementTree.Element:
     substituted response `docs/decisions.md` records the Library of Congress as
     reachable for, over plaintext HTTP.
 
-    Raised as `ParseError` because all eight callers already catch it: a catalogue
+    Raised as `ParseError` because all eleven callers already catch it: a catalogue
     that starts sending a doctype degrades to "this source is unavailable"
     rather than to a 500.
 
@@ -753,11 +755,108 @@ def _gnd_identifier(entry: _Subfields) -> str | None:
     A record without one is ordinary rather than broken: 33 of 70 live 655
     fields and 21 of 73 live 100 fields carry no `(DE-588)` at all, measured
     over 85 records on 2026-08-24.
+
+    **This searches every `$0` where `_subject_identifier` takes the first, and
+    the two are different questions rather than one rule spelled twice.** This
+    one asks whether the field names a record in the GND, because the answer
+    decides whether a `classifications` row is written and that row's `scheme`
+    column is a closed four member set: a `(DE-101)` number filed under `gnd`
+    would be an identifier that resolves to nothing. That one asks what the
+    record gave as this heading's identifier, whatever file it is in, and takes
+    the first because that is where every catalogue measured puts the authority
+    file's own number.
+
+    **It no longer discards what it refuses.** Before #134 a `$0` this returned
+    None for was the end of that identifier: measured 2026-08-31, 27 of the 718
+    live subject fields carrying a `$0` have no `(DE-588)`, and **11 of 11** on
+    the National Library of Greece, whose every identifier is a
+    `urn:nbn:gr:nlg:`. Those now reach `Subject.identifier` and only the
+    classification row is still GND only.
     """
     for value in entry.all("0"):
         if value.startswith(_GND_PREFIX):
             return value[len(_GND_PREFIX) :].strip() or None
     return None
+
+
+def _subject_vocabulary(tag: str, entry: _Subfields) -> str | None:
+    """The vocabulary a subject field's `$2` names, lower cased, or None.
+
+    **`tag` is taken and checked, and that is the rule rather than a
+    parameter.** `$2` does not mean the same thing on every field: on `082` it
+    is the Dewey **edition**, which the three MARC fixtures in
+    `tests/test_metadata.py` spell `23sdnb`, `22/ger` and `21`, so a caller
+    handing this an `082` would record a vocabulary called "21". Nothing about
+    the subfield says which it is; only the field does.
+
+    **This used to be enforced by a comment and it was not enforced.** The
+    docstring said "read on a subject field only" and cited a house rule as the
+    pin, but that rule counted **readers of the subfield** and never saw which
+    field was passed, so `_subject_vocabulary(fields["082"][0])` was legal, was
+    exactly the failure described, and left the guard green. The check is now
+    the signature, which no source scan can be evaded past, and the house rule
+    is left the one job it can actually do: see
+    `test_house_rules.py::TestOneReaderPerAmbiguousSubfield`.
+
+    `_DNB_SUBJECT_TAGS` is the membership test rather than a second list, so
+    adding a tag there admits it here in the same edit. A tag outside it raises,
+    because no live path can reach that: `_dnb_subjects` iterates that tuple and
+    the other two callers pass `"650"` as a literal. It is a guard against the
+    next edit, not against a record.
+
+    **Lower cased, and the reason is `marc._extra_headings` rather than the
+    catalogues.** That function tests `== "lcsh"` to decide whether an uploaded
+    `650` becomes an LCSH heading, so an uploaded file writing `$2 LCSH` loses
+    every one of them, silently, with the record otherwise intact. The
+    catalogues measured do **not** motivate it: 0 of the twelve codes seen on
+    2026-08-31 appeared in two cases, and the two upper case ones are each
+    written by one catalogue only, `VLK` by the OENB and `DLC` by K10plus. So
+    the folding is protecting an equality comparison in this repository, not
+    reconciling two spellings anybody has served.
+    """
+    if tag not in _DNB_SUBJECT_TAGS:
+        raise ValueError(f"$2 is not a subject vocabulary on MARC {tag}")
+    value = entry.get("2")
+    return value.lower() if value else None
+
+
+def _subject_identifier(entry: _Subfields) -> str | None:
+    """The identifier a subject field's `$0` carries, whole, or None.
+
+    **The first `$0` that has a value**, which is a measurement plus one shape
+    the measurement could not see. Measured 2026-08-31 over 718 live subject
+    fields carrying a `$0`, across the DNB, the OENB, the NLG and K10plus.
+
+    Where a field carries a `(DE-588)` at all, it is the **first** of that
+    field's `$0` values, **691 of 691**: the DNB writes `(DE-588)`, then a
+    `d-nb.info` URL, then its own `(DE-101)` house number, and K10plus writes
+    `(DE-588)`, then `(DE-627)`, then `(DE-576)`. The house numbers and the URL
+    always follow, so taking the first never takes a duplicate standing in front
+    of the authority number. The other **27** fields carry exactly one `$0` each
+    and no `(DE-588)`: `(DE-101)` beside `$2 gatbeg` on the DNB, `(AT-FHV)` and
+    `(AT-VLB)` on the OENB, `urn:nbn:gr:nlg:` on the NLG, `(OCoLC)fst` on
+    K10plus. So a prefix list has nothing to do here, and it would be the
+    enumerating guard this repository keeps paying for.
+
+    **An empty value is skipped, and "691 of 691" is not the reason.** That
+    figure counts values **as served**, and says nothing about an element with
+    no text standing in front of them, because an empty `$0` is not something a
+    catalogue writes: it is what `_marc_text` makes of `<subfield code="0"/>`,
+    turning a childless element into `""`. Recounted on the same sample for
+    this: **0 of the 718** fields carry an empty `$0` anywhere, so the
+    measurement could not have shown the trap and did not.
+
+    `values[0] or None` therefore answered None on a field whose second `$0`
+    held the number, where `_gnd_identifier` scanned past the empty one and
+    found it. Two readers of one subfield disagreeing about whether the field
+    has an identifier at all is worse than either answer alone.
+
+    **Whole, prefix included, where `_gnd_identifier` strips it.** The prefix is
+    not a duplicate of `$2`: `$2 gatbeg` arrives with `$0 (DE-101)1010008188`,
+    naming the DNB's genre list and the DNB's own file, which are two answers.
+    Strip it and the number resolves to nothing.
+    """
+    return next((value for value in entry.all("0") if value), None)
 
 
 # ── Deutsche Nationalbibliothek ───────────────────────────────────────────────
@@ -884,7 +983,7 @@ def _pages_from_extent(raw: str | None) -> int | None:
     CPython refuses an int/str conversion of more than
     `sys.get_int_max_str_digits()` digits, 4,300 by default, and raises
     **`ValueError`**, which is neither `httpx.HTTPError` nor
-    `ElementTree.ParseError`, so none of the eight SRU handlers caught it: one
+    `ElementTree.ParseError`, so none of the eleven SRU handlers caught it: one
     record with 4,301 digits in its `300 $a` turned `GET /api/books/search` and
     `GET /api/books/lookup` into a 500 for every MARC source at once.
 
@@ -909,10 +1008,26 @@ def _pages_from_extent(raw: str | None) -> int | None:
     always applied to the same field from the other source. This was the only
     `int()` on catalogue text in this module with no bound on its digits; every
     other one reads `\d{4}`.
+
+    **`stran` is Czech for pages and was added when that catalogue joined.** The
+    unit list had been German and English, so `96 stran ;` carried no page count
+    at all. **Widening it here is safe in a way that widening `_NOT_A_BOOK` is
+    not**, and the difference is the direction each rule runs: this one
+    **extracts**, so a unit nobody writes matches nothing and a new token can
+    only add a page count where there was none. `_NOT_A_BOOK` **refuses**, so a
+    new phrase there changes what all seven sources reading it reject. That is
+    why the Czech online resource phrasing is a per source constant and this is
+    not. See `_NKP_ONLINE`.
+
+    Only the spelling actually measured is here. Czech also writes `s.` and
+    `str.` for pages and neither was seen in the sample, so neither is guessed
+    at.
     """
     if not raw:
         return None
-    match = re.search(r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.)", raw)
+    match = re.search(
+        r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)", raw
+    )
     if not match:
         return None
     pages = int(match.group(1))
@@ -959,27 +1074,63 @@ def _is_placeholder_title(title: str) -> bool:
 #: than its subject ("Fiktionale Darstellung"), and it is kept because a genre
 #: is what a library would look for.
 #:
-#: **`$2` is not read, and these are not all one vocabulary.** Measured over 85
-#: live records on 2026-08-24, the five fields supply 363 values: 188 declare
-#: `gnd`, 37 `gnd-content`, 18 the DNB's own genre list `gatbeg`, 11 `local`,
-#: and 689 declares nothing at all on 152. The uncontrolled share is accepted
-#: where 653's is refused, and the difference is measurable rather than a
-#: preference: 29 values against 1,403, and they are genre and local subject
-#: terms rather than ONIX product codes. **That 29 counts only the fields that
-#: name another vocabulary.** 689 names none, and while most of its 152 restate
-#: a heading 600, 650 or 651 already carried with a GND number, some are free
-#: strings such as `Geschichte 1889-1894`, so the uncontrolled share is 29 plus
-#: an unmeasured part of 689 rather than 29 exactly. A value with no `(DE-588)`
-#: also cannot become a classification row: `_dnb_subjects` writes one only when
-#: `_gnd_identifier` answers, so the uncontrolled half reaches `subjects` alone,
-#: which is the field documented as weak evidence. Filter on `$2` if that stops
-#: being true.
+#: **`$2` is read since #134, and these are not all one vocabulary.** This note
+#: used to end "filter on `$2` if that stops being true", and what stopped being
+#: true is not the filtering: it is that the roster grew from one German
+#: catalogue to nine across six countries, so one bag of strings stopped being
+#: one vocabulary plus a measured handful of exceptions. `_dnb_subjects` now
+#: records the code each field declared and the identifier it gave. **Nothing is
+#: filtered and nothing is mapped**: a subject with a `$2` this app has never
+#: heard of is kept, labelled with that code.
+#:
+#: **Re-derived on 2026-08-31**, over 85 responses, 93 records and 453 fields
+#: with an `$a`: `gnd` 208, none 199, `gnd-content` 34, `gatbeg` 7, `local` 4,
+#: and one `gnd-carrier` the earlier sample never saw. Those sum to 453, which
+#: is the check.
+#:
+#: **The original figures do not reconcile and are kept as a retraction rather
+#: than as evidence.** They read "363 values: 188 `gnd`, 37 `gnd-content`, 18
+#: `gatbeg`, 11 `local`, and 689 declares nothing on 152", and 188 + 37 + 18 +
+#: 11 + 152 is **406**, not 363. Dropping the 152 gives 254, which is not 363
+#: either. The same paragraph then said the uncontrolled share was "29 values"
+#: where its own shares give 37 + 18 + 11 = **66**. The sample is gone and
+#: nothing can say which number was the typo, so no arithmetic here is derived
+#: from any of them. The old text hid this across clauses; restating it as a
+#: partition is what made it visible, which is the argument for stating one.
+#:
+#: **689 declares nothing on 199 of 199, and that is this catalogue rather than
+#: the tag.** The evidence is inside this one function: its `650` declares `gnd`
+#: on 130 of 134 while the OENB, through this same parser, declares nothing on
+#: 17 of its 29. Two catalogues, one reader, opposite habits on one tag. **The
+#: K10plus mirror is deliberately not the evidence**, though it is the sharper
+#: shape: its `689` declares `gnd` on all 113 and its `650` on 3 of 133, and
+#: `_k10plus_record` reads `650` alone and never reaches this function, so those
+#: 113 fields are read by nothing here. A headline resting on data no reader
+#: reads is the thing this comment exists to stop.
+#:
+#: The uncontrolled share is accepted where 653's is refused, and the difference
+#: is one of kind rather than of count: these are genre and local subject terms
+#: where 653 carries ONIX product codes. 689 names no vocabulary, and while most
+#: of its values restate a heading 600, 650 or 651 already carried with a GND
+#: number, some are free strings such as `Geschichte 1889-1894`.
+#:
+#: A value with no `(DE-588)` still cannot become a classification row:
+#: `_dnb_subjects` writes one only when `_gnd_identifier` answers, so the
+#: uncontrolled half reaches `subjects` alone, which is the field documented as
+#: weak evidence. **Which of the three GND vocabularies belongs in a `scheme`
+#: column called `gnd` is now an answerable question and is deliberately not
+#: answered here**: `gnd-content` and `gnd-carrier` fields carry `(DE-588)`
+#: numbers and become `gnd` rows today, 34 of 34 and 1 of 1 on the DNB, and
+#: their captions are `Hochschulschrift`, `Konferenzschrift` and, for the
+#: carrier, `CD-ROM`. Refusing them outright would also drop `Fiktionale
+#: Darstellung`, which is exactly the genre 655 is on this list to keep. It
+#: needs the store question (#143) settled first.
 _DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
 
 
 def _dnb_subjects(
     fields: dict[str, list[_Subfields]],
-) -> tuple[list[str], list[Heading]]:
+) -> tuple[list[Subject], list[Heading]]:
     """The controlled subject headings, as plain subjects and as GND rows.
 
     **A subject heading never enters the DDC path**, and that is load bearing
@@ -1003,15 +1154,49 @@ def _dnb_subjects(
     first of each, which is what this function used to do with two dictionaries
     of its own. Deleting them is the point of the seam being typed: the rule has
     one owner, and the next source added inherits it rather than copying it.
+
+    **`$2` and `$0` are read since #134, and the classification path is
+    unchanged.** A subject now carries the vocabulary the record declared and
+    the identifier it gave, whatever file that identifier is in. What still
+    decides a `classifications` row is `_gnd_identifier` alone, because that
+    table's `scheme` is a closed four member set and a `$2` naming the Greek
+    national authority file is not one of its members. So the Greek `651` that
+    prompted the ticket keeps its label **and** its `urn:nbn:gr:nlg:`
+    identifier, and still writes no heading. Storing it is #143.
+
+    **Which is why nothing here maps a `$2` onto a scheme.** Twelve distinct
+    codes turned up in one day's sampling of four catalogues and the MARC source
+    code list holds hundreds; a table from those to `ClassificationScheme` is a
+    crosswalk, and #134 refuses one in as many words. `catalogue.Subject` lists
+    the twelve.
+
+    **Two catalogues through this one parser disagree about which tag
+    declares.** Measured 2026-08-31: the DNB's `650` declares `gnd` on 130 of
+    134 while the OENB's declares nothing on 17 of 29, and both arrive here
+    through `_dnb_record`. That is the whole argument for reading the subfield
+    rather than inferring from the tag, and it is made entirely of fields this
+    function actually sees.
+
+    **K10plus is the sharper illustration and is not the evidence.** Its `689`
+    declares `gnd` on all 113 and its `650` on 3 of 133, an exact mirror of the
+    DNB. But `_k10plus_record` reads `650` alone and never calls this, so those
+    113 fields reach no reader in this app: quoting them here would rest a rule
+    on data nothing reads.
     """
-    subjects: list[str] = []
+    subjects: list[Subject] = []
     headings: list[Heading] = []
     for tag in _DNB_SUBJECT_TAGS:
         for entry in fields.get(tag, []):
             heading = _strip_marc_punctuation(entry.get("a", ""))
             if not heading:
                 continue
-            subjects.append(heading)
+            subjects.append(
+                Subject(
+                    heading,
+                    _subject_vocabulary(tag, entry),
+                    _subject_identifier(entry),
+                )
+            )
             number = _gnd_identifier(entry)
             if number is not None:
                 headings.append(Heading(ClassificationScheme.GND, number, heading))
@@ -1080,11 +1265,12 @@ def _dnb_record(
     is not what makes it survive the per book ceiling: `routers/books._headings`
     sorts by scheme before it slices, because by the time a list reaches there
     a merge has concatenated up to six catalogues and no parser can order that.
-    **Six of the eight**, counted from the record builders rather than from the
-    roster: the BnF and Google Books construct no `Heading` at all, and this
-    parser is three of the remaining six because the DNB, the ÖNB and the NLG
-    share it. Measured over 85 live records on 2026-08-24: one produced 13 entries
-    and every other produced 8 or fewer.
+    **Six of the nine**, counted from the record builders rather than from the
+    roster: the BnF, Google Books and the NKP construct no `Heading` at all, and
+    this builder is **three** of the remaining six, because the DNB, the ÖNB and
+    the NLG share it. K10plus also reaches `_marc_ddc`, through its own
+    `_k10plus_record`, not through this one. Measured over 85 live records on
+    2026-08-24: one produced 13 entries and every other produced 8 or fewer.
     """
     title_entry = (fields.get("245") or [_Subfields(())])[0]
     title, subtitle, series_name, series_index = _marc_title(title_entry)
@@ -1700,8 +1886,21 @@ def _k10plus_record(
     title_entry = (fields.get("245") or [_Subfields(())])[0]
     title, subtitle, series_name, series_index = _marc_title(title_entry)
 
+    # `$2` and `$0` off the same field, which this catalogue fills in far less
+    # often than the DNB does: measured 2026-08-31 over 133 live `650` fields
+    # with an `$a`, 3 carry a `$2` (all `DLC`) and the same 3 carry a `$0` (all
+    # `(OCoLC)fst`). Read anyway, because the alternative is a reader that is
+    # correct only while a catalogue's habits hold.
+    #
+    # **The vocabulary belongs to the whole heading, subdivisions included.**
+    # `$x` is a subdivision of the `$a` above it rather than a heading of its
+    # own, so the joined string is one subject and takes the field's one `$2`.
     subjects = [
-        " ".join(part for part in (entry.get("a"), entry.get("x")) if part)
+        Subject(
+            " ".join(part for part in (entry.get("a"), entry.get("x")) if part),
+            _subject_vocabulary("650", entry),
+            _subject_identifier(entry),
+        )
         for entry in fields.get("650", [])
         if entry.get("a")
     ]
@@ -2156,6 +2355,266 @@ async def _nlg_search(query: str, limit: int) -> list[Record]:
     return results
 
 
+# ── The Czech National Library ────────────────────────────────────────────────
+
+#: The Czech legal deposit catalogue, over SRU with a PQF query.
+#:
+#: **Plaintext HTTP, the third source here that is**, for the same reason as the
+#: other two: port 9991 offers no TLS. `_NLG_URL` carries the reasoning in full
+#: and it applies unchanged, with one difference in this source's favour. It
+#: answers **only** an ISBN lookup, so every record it returns is checked against
+#: the ISBN that was asked for by `_nkp_claims_isbn`. There is no search path
+#: here for a forged body to reach.
+#:
+#: **The database path is load bearing and the ticket did not have it.**
+#: `aleph.nkp.cz:9991` alone, and `/biblios`, both answer SRU diagnostic 1/235,
+#: "database does not exist". Measured 2026-08-31.
+_NKP_URL: Final = "http://aleph.nkp.cz:9991/NKC"
+
+#: The parameter this target takes a query in, and it is not `query`.
+#:
+#: Measured 2026-08-31: `query=` with CQL answers diagnostic **1/11**,
+#: unsupported query type, and `queryType=x-pquery` answers **1/8**, unsupported
+#: parameter, so the SRU 2.0 spelling does not reach it either. The query goes in
+#: its own `x-pquery` parameter, which is YAZ's SRU 1.1 extension.
+_NKP_QUERY_PARAM: Final = "x-pquery"
+
+#: One record, because this target renders exactly one whatever is asked for.
+#:
+#: **The other four SRU sources ask for five and rank the fullest.** That would
+#: be four empty stubs and a wasted page here: measured 2026-08-31 across three
+#: queries and four page sizes, a response carries data at position 2 of 2, 3 of
+#: 3, 5 of 5 and 20 of 20, and nowhere else. Over eight title searches at fifty
+#: records, 391 of 400 records were empty. Asking for one is the only size at
+#: which what arrives is what was requested.
+_NKP_RECORDS: Final = 1
+
+
+def _nkp_query(isbn: str) -> str:
+    """The PQF for one ISBN lookup, built by `z3950`.
+
+    **Established by round trip, not by reading the attribute set.** An identifier
+    read off a live record, `978-3-319-52267-8`, put back through `@attr 1=7`
+    returns exactly that record, and so does its normalised form
+    `9783319522678`: the target folds the hyphens itself. Twenty ISBNs harvested
+    from this catalogue's own records and put back through it returned a populated
+    record **20 of 20** on 2026-08-31.
+
+    **Neither half of that query is spelled here, and the reason is the bug this
+    adapter already shipped once.** It first carried a local `_pqf_literal` that
+    removed the double quote and stopped there, on the stated ground that a quote
+    is the only character able to end a PQF literal. That is false, and
+    `z3950.pqf_term` had said so since 2026-08-28 from live `p_query_rpn`
+    renderings: an `@` followed by a digit is read **before** the quoted run, so
+    `@1=1016 praha` survives quoting and repins the use attribute, and a trailing
+    backslash escapes the closing quote. So it was a guard being wrong rather
+    than a leak being open, and `z3950.pqf_term` is the whole reason that is
+    true.
+
+    **The second reason this paragraph used to give was itself false.** It said
+    the shape was "not reachable through `parse_isbn`, which yields thirteen
+    ASCII digits or nothing". `parse_isbn` gated on `str.isdigit()` alone, which
+    is true of every Unicode digit, so it yielded thirteen characters that were
+    not all ASCII: `POST /api/books` stored an ISBN ending in an Arabic-Indic
+    zero. The sentence is true now, since `isbn.is_valid_isbn13` narrows to
+    ASCII, and it is written down this way because the code was defensible while
+    one of the two reasons for it was not.
+
+    The attribute was then the same defect one level up: a local `@attr 1=7`
+    beside `z3950.USE_ISBN`, in a module whose `isbn_query` already names this
+    catalogue by name in its own measurement. So the whole query comes from
+    there, and what stays here is the round trip above, which is this adapter's
+    measurement rather than PQF's rule.
+
+    `z3950.isbn_query` refuses an empty, over-long or control-bearing term with
+    `BadQuery`. A canonical ISBN reaches none of those; a future caller can, and
+    `_nkp` turns it into an unavailable answer rather than a 500.
+    """
+    return z3950.isbn_query(isbn)
+
+
+#: The Dublin Core element names this reader wants, un-namespaced.
+#:
+#: **The BnF's selector cannot see these records and that is not a fixable
+#: oversight.** It looks for `{http://purl.org/dc/elements/1.1/}title`; this
+#: target writes `<record-list><dc-record><title>` with no namespace at all, so
+#: the same query returns zero. Measured against a live body.
+_NKP_RECORD: Final = "dc-record"
+
+
+def _nkp_records(root: ElementTree.Element) -> list[ElementTree.Element]:
+    """Every Dublin Core record element in an NKP response.
+
+    **A record with no `recordData` is ordinary here rather than broken**, which
+    is the single most surprising thing about this source: 391 of 400 records
+    measured on 2026-08-31 carried none.
+
+    **This filters nothing, and an earlier version of this docstring said it
+    did.** It searches the whole tree for `dc-record` elements, and an empty
+    `<record>` simply holds none, so the empty ones fall out of the search rather
+    than being rejected by a test here. The distinction matters to whoever adds a
+    filter: there is no "populated" predicate to extend, and a record that
+    carried a `dc-record` with no useful children would be returned.
+    """
+    return list(root.iter(_NKP_RECORD))
+
+
+def _nkp_text(record: ElementTree.Element, tag: str) -> list[str]:
+    """Every non empty value of one un-namespaced element."""
+    return [
+        element.text.strip()
+        for element in record.findall(tag)
+        if element.text and element.text.strip()
+    ]
+
+
+def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
+    """Whether this record names the ISBN that was asked for.
+
+    The same defence `_marc_claims_isbn` is for the MARC sources, in the one
+    shape Dublin Core offers: `identifier` carries the ISBN, hyphenated as the
+    catalogue prints it, and `isbn.parse` folds both sides to one form. A
+    plaintext connection is the reason it is here even though this target
+    diagnoses a wrong attribute rather than answering with the catalogue.
+    """
+    return any(
+        parse_isbn(value) == isbn for value in _nkp_text(record, "identifier")
+    )
+
+
+#: What this catalogue calls an online resource.
+#:
+#: **`_NOT_A_BOOK` is written in German and English and does not reach Czech.**
+#: `online[- ]?(?:ressource|resource)` and `elektronische ressource` match
+#: nothing in `1 online zdroj (106 pages) :`, which is what this catalogue writes
+#: and which appeared in the first record ever probed from it. So the refusal
+#: that keeps a digitised copy off a shelf was language scoped, and silently, for
+#: every catalogue that is not German or English.
+#:
+#: **Added here rather than to `_ONLINE_FORMS`, deliberately.** Widening the
+#: shared pattern is the tempting move and it changes what every other source
+#: refuses, on a phrase measured in one catalogue. This source states its own
+#: and `test_metadata.py` pins that the shared rule is unchanged. Whether the
+#: rule should be per source everywhere is a real question and a bigger one than
+#: this ticket.
+_NKP_ONLINE: Final = re.compile(r"online\s+zdroj|elektronick\w*\s+zdroj", re.IGNORECASE)
+
+
+def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
+    """One Czech Dublin Core record as book fields, or None if it is not a book.
+
+    **Contributors rather than creators, because this catalogue writes no
+    creator at all.** Measured 2026-08-31 over the **9 records that carried
+    data**, out of 400 fetched: `creator` appears **0** times and `contributor`
+    appears on 8 of the 9. So a reader that looked for `creator`, as the BnF's
+    does, would give every Czech book no author rather than a wrong one.
+
+    **The denominator is 9 and not 400, and both numbers matter for different
+    reasons.** 400 is what it cost to see 9, which is `_NKP_RECORDS`' whole
+    argument. 9 is what the rules below rest on, and it is a thin sample: an
+    earlier version of this docstring quoted the 400 as though `creator` had been
+    looked for that many times.
+
+    **And the first contributor only.** Those 9 carry up to three per record, and
+    the trailing ones are the publisher's supply chain rather than the book's
+    authors: `ProQuest (firma)` sits beside the translator and the author on the
+    record this was read off. `firma` is Czech for a company.
+
+    **Nothing was observed with the firm first**, so nothing tests it, and
+    positional selection is not the same rule as filtering firms. Recorded rather
+    than guarded because a filter guessed from one example is the shape this
+    repository keeps paying for: `_NOT_A_BOOK` widened on an unmeasured phrase is
+    the same mistake with a different constant. A real contributor role reader
+    belongs to whichever ticket gives this source a second measurement.
+    """
+    titles = _nkp_text(record, "title")
+    if not titles:
+        return None
+
+    # Printed books only, the same rule and the same constant the BnF uses:
+    # this catalogue writes `text`, which `_BNF_PRINTED` already holds.
+    kinds = " ".join(_nkp_text(record, "type")).casefold()
+    if kinds and not any(kind in kinds for kind in _BNF_PRINTED):
+        return None
+
+    # `Ostře sledované vlaky /` is how this catalogue writes it: the ISBD slash
+    # introduces a statement of responsibility that is not in this record at
+    # all, so `_dc_title_statement` has nothing to split off and leaves it.
+    title, subtitle = _dc_title_statement(titles[0])
+    title = _strip_marc_punctuation(title)
+    if _is_placeholder_title(title):
+        return None
+
+    extent = next(iter(_nkp_text(record, "format")), None)
+    # Two refusals rather than one: the shared rule for the forms every source
+    # writes, and this catalogue's own Czech phrasing, which the shared one
+    # cannot see. See `_NKP_ONLINE`.
+    if not _is_physical_book(extent, title) or (
+        extent is not None and _NKP_ONLINE.search(extent)
+    ):
+        return None
+
+    contributors = _nkp_text(record, "contributor")
+    year_match = re.search(r"\d{4}", " ".join(_nkp_text(record, "date")))
+    publisher = next(iter(_nkp_text(record, "publisher")), None)
+
+    return Record(
+        source="nkp",
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_flip_catalogue_name(contributors[0]) if contributors else None,
+        publisher=_strip_marc_punctuation(publisher) if publisher else None,
+        year=int(year_match.group()) if year_match else None,
+        language=_LANGUAGES.get((_nkp_text(record, "language") or [""])[0].lower()),
+        page_count=_pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn),
+        # The un-namespaced dialect, and it has no more room for a stamp than
+        # the namespaced one: see `catalogue.uncontrolled`.
+        subjects=uncontrolled(_nkp_text(record, "subject")),
+    )
+
+
+async def _nkp(isbn: str, api_key: str) -> Lookup:
+    del api_key  # A public endpoint with no registration behind it.
+
+    try:
+        # **Built inside the `try`, because `z3950.pqf_term` raises.** Outside it
+        # the `BadQuery` arm below is unreachable, which is what it was when the
+        # arm was first added.
+        params = {
+            "version": "1.1",
+            "operation": "searchRetrieve",
+            _NKP_QUERY_PARAM: _nkp_query(isbn),
+            "maximumRecords": str(_NKP_RECORDS),
+        }
+        response = await fetch.get_once(_NKP_URL, params=params)
+        if response.status_code == 429:
+            return Lookup(Outcome.RATE_LIMITED, source="nkp")
+        if response.status_code != 200:
+            return Lookup(Outcome.UNAVAILABLE, source="nkp")
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError, z3950.BadQuery):
+        logger.warning("NKP lookup failed for %s", isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source="nkp")
+
+    parsed = [
+        record
+        for node in _nkp_records(root)
+        if _nkp_claims_isbn(node, isbn)
+        for record in [_nkp_record(node, isbn)]
+        if record is not None
+    ]
+    if not parsed:
+        return Lookup(Outcome.NOT_FOUND, source="nkp")
+
+    return Lookup(
+        Outcome.FOUND,
+        source="nkp",
+        record=max(parsed, key=lambda record: record.completeness),
+    )
+
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2206,10 +2665,10 @@ async def _nlg_search(query: str, limit: int) -> list[Record]:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Google Books needs one (`sources.NEEDS_A_KEY`) and most
 # installations have none, so the chain most deployments actually run is the
-# five free sources. Measured over 500 domestic ISBNs across ten frames, re-run
-# 2026-08-31: the free five answer 336 and miss 164, and outside German language
-# publishing they miss 160 of 400. The same run under the previous roster and
-# the previous `020` rule answered 300. So a sentence anywhere in this module saying
+# six free sources. Measured over 500 domestic ISBNs across ten frames, re-run
+# 2026-08-31: the free six answer 377 and miss 123, and outside German language
+# publishing they miss 119 of 400. The same 500 books under the roster of two
+# releases ago, and the previous `020` rule, answered 300. So a sentence anywhere in this module saying
 # the chain covers a country is a statement about a **keyed** install. #91
 # measured the size of that on the same books, Italy 36% missed keyless against
 # 0% with a key and Greece 86% against 54%; **that keyed half is #91's
@@ -2230,9 +2689,20 @@ _SOURCES: Final[dict[CatalogueSource, Callable[[str, str], Awaitable[Lookup]]]] 
     CatalogueSource.K10PLUS: _k10plus,
     CatalogueSource.OENB: _oenb,
     CatalogueSource.NLG: _nlg,
+    CatalogueSource.NKP: _nkp,
 }
 
 #: Bookland registration group for German-language publishing.
+#:
+#: **Not converted to `isbn.registration_group(isbn) == "978-3"`, deliberately.**
+#: The two denote exactly the same set, because 3 is a single digit group, so it
+#: would be a rename rather than a fix. And the tidier looking version is worse
+#: here: `covers.py` keeps its own `_GERMAN_PREFIX = "9783"` for a different
+#: question, so converting one of the two leaves the repository with two
+#: **different** spellings of one registration group instead of two identical
+#: ones. Converting both is a change to a subsystem #122 had no reason to touch.
+#: Recorded here rather than in a session note, which is deleted when the wave
+#: ships.
 _GERMAN_PREFIX: Final = "9783"
 
 #: Which of the fast pair to believe when both answer and they disagree.
@@ -2399,7 +2869,8 @@ def _search_terms(query: str) -> list[str]:
 
 #: Extents that mean the record is not a physical book. A digitised copy of a
 #: novel is a real catalogue record and a wrong answer to "which book am I
-#: holding", and it is the single largest source of noise in both SRU sources.
+#: holding", and it is the single largest source of noise in the SRU sources.
+#: It said "both" when there were two; there are seven now, so it names none.
 #:
 #: **Written as two halves on 2026-08-24, because the DNB lookup treats them
 #: differently.** An online resource is this book in another form, and the DNB
@@ -2408,6 +2879,14 @@ def _search_terms(query: str) -> list[str]:
 #: A disc is a different object, so `_dnb_record` refuses it outright. Both
 #: halves are still one refusal everywhere else, `_is_physical_book` being what
 #: the search paths and K10plus ask.
+#:
+#: **This is a shared rule and a per source one sits beside it.** `_is_physical_book`
+#: is reached from seven sources: the DNB, the OENB, the NLG, the NKP, K10plus,
+#: the BnF and the Library of Congress, five of them only through a search
+#: function: K10plus, the NLG, the OENB, the BnF and the Library of Congress.
+#: So a phrase added here changes what all seven refuse, which is why the Czech
+#: online resource wording is `_NKP_ONLINE` and not another entry in this set.
+#: A reader adding a language belongs at that constant, not this one.
 _ONLINE_FORMS: Final = (
     r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 )
@@ -2656,7 +3135,9 @@ def _bnf_record(record: ElementTree.Element) -> Record | None:
         language=_LANGUAGES.get((texts("language") or [""])[0].lower()),
         page_count=_pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
-        subjects=tuple(texts("subject")),
+        # Dublin Core names no vocabulary and carries no identifier, in either
+        # dialect: see `catalogue.uncontrolled`.
+        subjects=uncontrolled(texts("subject")),
     )
 
 
@@ -2812,11 +3293,7 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
         language=language,
         page_count=_pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
-        subjects=tuple(
-            element.text.strip()
-            for element in record.findall(f"{_MODS}subject/{_MODS}topic")
-            if element.text
-        ),
+        subjects=_loc_subjects(record),
         # The shelf classifications first and the subject headings after,
         # which is load bearing rather than tidy. `Record.match_headings`
         # slices to `MAX_CLASSIFICATIONS_PER_BOOK` and
@@ -2828,6 +3305,51 @@ def _loc_record(record: ElementTree.Element) -> Record | None:
         # the chain supplies together.
         headings=tuple(_loc_classifications(record) + _loc_subject_headings(record)),
     )
+
+
+def _loc_subjects(record: ElementTree.Element) -> tuple[Subject, ...]:
+    """Every `<topic>`, carrying the authority its `<subject>` declares.
+
+    **MODS supplies the vocabulary and never the identifier**, which is the
+    opposite half of what Dublin Core supplies and the reason this reader is not
+    `catalogue.uncontrolled`. Measured 2026-08-31 over 432 `<subject>` elements
+    in 200 live MODS records: `authority` names `lcsh` 372 times, `fast` 19,
+    `lctgm` 4, `lcshac` 3 and `rvm` once, is absent 33 times, and **`valueURI`
+    appears on 0 of the 432**. That reproduces the 0 of 2,280 already recorded
+    in `ClassificationScheme`, on a fresh sample, and it is why an LCSH row
+    stores the heading string as its own identifier.
+
+    **Every authority, not only `lcsh`.** `_loc_subject_headings` reads `lcsh`
+    alone, because a `classifications` row needs a scheme this app has a reading
+    for. A subject is the field with no such requirement: the whole point of
+    #134 is that a vocabulary is recorded as declared and never mapped, so
+    `fast` and `rvm` arrive labelled with their own names rather than dropped or
+    folded into `lcsh`. This is the same record and costs no request.
+
+    **The topic, not the whole chain.** `_loc_subject_headings` joins an
+    element's parts into `Computer software -- Development` because that is the
+    heading LCSH authorises. Here each `<topic>` stays its own word, which is
+    what the tag suggestion and the `categories` string want, and is what this
+    reader did before.
+
+    Lower cased here, which is `catalogue.Subject`'s rule and the same one
+    `_subject_vocabulary` applies to a `$2`. **Case is the whole of the tidying
+    and punctuation is not**: `_LOC_SUBJECT_AUTHORITY` records a stray
+    `bisacsh.` beside `bisacsh` over 900 records, and the trailing full stop is
+    left on, because guessing at punctuation inside somebody else's code is how
+    one vocabulary quietly becomes two under a name nobody chose.
+
+    **An empty `<topic>` is not a subject**, where it used to be an empty
+    string. `catalogue.Subject` has no bound and no validation, by design, so
+    nothing downstream would have refused it.
+    """
+    found: list[Subject] = []
+    for element in record.findall(f"{_MODS}subject"):
+        authority = (element.get("authority") or "").lower() or None
+        for topic in element.findall(f"{_MODS}topic"):
+            if topic.text and topic.text.strip():
+                found.append(Subject(topic.text.strip(), authority))
+    return tuple(found)
 
 
 #: MODS names the scheme in an attribute, so the two are told apart by the
@@ -2908,9 +3430,12 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
     **A parser extension rather than a new source.** The record this reads is
     the one `_loc_record` already has in hand, so LCSH costs no outbound
     request and the Library of Congress does not join `_SOURCES`. It stays off
-    the lookup path for the reason `docs/decisions.md` records: it is the one
-    catalogue here reached over plaintext HTTP, and it held nothing for either
-    German ISBN measured, which is this library's main case.
+    the lookup path for the reason `docs/decisions.md` records: it is reached
+    over plaintext HTTP, and it held nothing for either German ISBN measured,
+    which is this library's main case. **It was the only plaintext catalogue
+    when that was written and is now one of three**, with the National Library
+    of Greece and the Czech national library; the count moved twice without
+    this sentence moving, so it no longer states one.
 
     **No `<subject>` element ever reaches `ddc`.** `ddc.parse_heading` accepts
     any three digit token, so a heading opening with one would be stored as a
@@ -3061,7 +3586,16 @@ _LANGUAGE_WEIGHT: Final = 3
 #: only they found is worth having; a row they merely duplicate is not worth
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg"})
+#:
+#: **The NKP entry is inert and is here so it stays correct if that changes.**
+#: This set is read only from `_relevance`, which scores **search** rows, and the
+#: NKP answers no title search: `sources.SEARCH_SOURCES` leaves it out because
+#: its server renders one populated record per response whatever page size is
+#: asked. So it can never reach this comparison today. Listing it costs nothing
+#: and omitting it would put a wrong default in place the day it does, which is
+#: the same reasoning `_MATCH_PRECEDENCE` records for the same source. A reader
+#: meeting this line should not conclude the NKP appears in search results.
+_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp"})
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a row pickable rather than a stub. Scored **separately**
@@ -3423,18 +3957,24 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
-    # Last two, and named rather than left to the default so that a reader can
+    # Last three, and named rather than left to the default so that a reader can
     # see it was decided. They are the newest and the least compared of the
-    # eight, and the field either would win is a field the DNB or K10plus has
+    # nine, and the field any of them would win is a field the DNB or K10plus has
     # already filled for any book all three hold. Where one is the only
     # catalogue with a row, precedence never runs.
     #
-    # **The NLG is behind the ÖNB and the order between those two is arbitrary**,
-    # which is worth saying rather than implying a comparison nobody made. They
-    # collect different countries, so a book both hold is a book the primary
+    # **The order among the three national catalogues is arbitrary**, which is
+    # worth saying rather than implying a comparison nobody made. They collect
+    # different countries, so a book two of them hold is a book the primary
     # three hold as well, and the tie this would break has not been observed.
+    #
+    # The NKP is here rather than absent because a source missing from this
+    # tuple sorts last by default and silently, which is the thing
+    # `test_precedence_names_every_source_and_nothing_else` exists to catch. It
+    # caught this one.
     "oenb",
     "nlg",
+    "nkp",
 )
 
 
@@ -3635,7 +4175,7 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
             if isbn13
             else None
         ),
-        subjects=tuple(_open_library_subjects(entry)),
+        subjects=uncontrolled(_open_library_subjects(entry)),
         headings=tuple(_open_library_classifications(entry)),
     )
 
@@ -3977,7 +4517,12 @@ async def lookup(
         logger.info("Resolved %s from %s", isbn, merged.source)
         return found
 
-    for name in plan.lookup_in_turn:
+    # **The tail this ISBN gets, which is not the whole tail.** A catalogue whose
+    # remit is one registration group is not asked about a book from another
+    # one: it is a round trip that cannot answer, and the tail stops at the first
+    # hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
+    # carries the measurement and the bound that keeps it from losing a book.
+    for name in plan.lookup_in_turn(registration_group(isbn)):
         result = await _SOURCES[name](isbn, api_key)
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
@@ -3999,7 +4544,24 @@ async def lookup(
     # Asked nothing, so `_worst` has nothing to weigh: an empty `attempts` would
     # answer NOT_FOUND, which is a statement about the book rather than about
     # this library's settings.
-    outcome = Outcome.NO_SOURCES if not attempts else _worst(attempts)
+    #
+    # **Read off the roster and not off `attempts`.** The question `NO_SOURCES`
+    # answers is whether this library has a catalogue that can answer an ISBN at
+    # all, and its 409 tells a household to go and switch one back on. Since the
+    # group rule arrived, an empty `attempts` can also mean the list is full and
+    # this book's registration group is outside every remit in it, which is a
+    # fact about the book and gets that same wrong sentence.
+    #
+    # **The two spellings agree on today's roster and this is not a bug fix**,
+    # which is worth saying because the paragraph above reads like one. The
+    # leading tier is never filtered and holds a non metered chain member
+    # whenever one exists, and every metered source is unrestricted, so an empty
+    # `attempts` today implies an empty chain. They come apart the moment one
+    # source is both metered and in `SERVES_GROUPS`, which is one row away and is
+    # what `test_a_metered_source_with_a_remit_is_still_not_no_sources` pins.
+    # The chain is the thing actually being asked about; `attempts` getting the
+    # right answer is a coincidence of two rules that live elsewhere.
+    outcome = Outcome.NO_SOURCES if not plan.lookup_chain else _worst(attempts)
     missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
         _remember(isbn, missed)
