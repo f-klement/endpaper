@@ -9,6 +9,12 @@ import { VitePWA } from "vite-plugin-pwa";
 // run outright: vitest could not resolve `vitest/dist/workers/forks.js` and
 // rolldown panicked with "Failed to get current dir". A docblock cannot do that,
 // because it changes one file's environment rather than how workers are spawned.
+//
+// **`isolate: false` was then measured properly and refused**, so do not reach for
+// it again without reading why: it is worth 43.59s to 19.12s and it makes `vi.mock`
+// lose to whichever file evaluated the module first. `docs/decisions.md`, "`isolate:
+// false` is refused, and the reason is the module registry rather than the leaks",
+// names the one pair in this suite and the three reasons one pair is enough.
 
 import { execSync } from "node:child_process";
 

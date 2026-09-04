@@ -10469,3 +10469,48 @@ Three more, each a class rather than an instance:
   function: widening a copy of it let a formal address pass both.
 * **The set phrase list was interpolated into a `RegExp` unescaped.** A future
   phrase with a metacharacter throws at module load, or silently stops matching.
+
+### `isolate: false` is refused, and the reason is the module registry rather than the leaks
+
+Sharing one environment between test files takes the frontend suite from 43.59s to 19.12s,
+both on the builder worker and on the same tree, which is the only way two durations here
+compare at all. The prize is real. It is refused anyway.
+
+Two genuine leaks were found and fixed on the way, and both are worth keeping whatever
+happens to this switch: three files replace `window.location` wholesale with
+`defineProperty`, which no vitest restore undoes, and several navigate and leave the
+document's URL behind, after which a relative image source cannot resolve at all. Both are
+restored in `tests/setup.ts`.
+
+**What disqualifies it is the shared module registry.** `vi.mock` cannot replace a module
+another file has already evaluated, so the mock is silently ignored and the real module is
+what the test gets. There is exactly one such pair here: `tests/app/App.test.tsx` renders
+the route table, `src/app/routes.tsx` imports `ScanPage` eagerly, that evaluates the real
+`@zxing/library`, and `BarcodeScanner.test.tsx`'s mock of it is then dead. Measured across
+eight shuffled seeds of the full suite: one fails, always that file, always all fifteen
+camera tests, with the real `BrowserCodeReader` in the traceback.
+
+Three reasons that pair settles the question rather than being one more thing to fix.
+
+**The failure is order dependent**, which is the property the flakiness work had just
+finished removing from this suite. Trading isolation for twenty seconds and buying back
+order dependence is moving backwards.
+
+**The loud form is the lucky one.** A mocked module quietly becoming the real one is a test
+that passes while asserting on the wrong subject, and nothing distinguishes that from a
+test that passes. Here it happens to throw, because there is no camera.
+
+**And the hazard is open ended.** Nothing enumerates which modules one file evaluates and
+another mocks, and a future test that renders the app shell adds a pair without anybody
+noticing. A guard would have to walk each test file's real import graph against every
+other's mock list, which is more machinery than the twenty seconds is worth.
+
+Two suspects from the first pass are recorded as **not** the reason, because a wrong name
+in a register sends the next reader hunting the wrong thing: the module level
+`reloadRequested` flag in `api/mutator.ts` and the depth of the history stack were both
+observed drifting between files under instrumentation, and neither produced a failure in
+any of the eight seeds. Drift is not a defect until something reads it.
+
+One measurement from the same pass, so it does not get taken on trust later: loading the
+real `@zxing/library` costs 117ms, against 43s of parallel suite, so mocking it in
+`App.test.tsx` for speed alone is below this machine's noise floor and was not done.
