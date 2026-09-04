@@ -1,40 +1,22 @@
 /**
  * Tests for src/pages/ScanPage.
  *
- * BarcodeScanner is replaced with a button that emits a fixed ISBN, so the
- * scan → lookup → confirm flow is covered without a camera. The scanner has
- * its own tests.
+ * **The real scanner is rendered, with the camera and the decoder replaced by
+ * the shared doubles** rather than the component replaced by a stub. The stub
+ * was a `vi.mock` of `BarcodeScanner`, which under `isolate: false` is dropped
+ * whenever another file has already evaluated that module, and two do. Driving
+ * the real one costs a `waitFor` on the camera opening and nothing else: the
+ * scanner's own file runs thirty-three tests this way in 93ms to 159ms across
+ * runs on the builder worker. The scanner still has its own tests; this file
+ * covers scan, lookup and confirm.
  */
 
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-const navigate = vi.fn();
-vi.mock("react-router-dom", async () => {
-  const actual =
-    await vi.importActual<typeof import("react-router-dom")>(
-      "react-router-dom",
-    );
-  return { ...actual, useNavigate: () => navigate };
-});
-
-vi.mock("../../../src/pages/ScanPage/components/BarcodeScanner", () => ({
-  default: ({
-    onDetected,
-    onRejected,
-  }: {
-    onDetected: (isbn: string) => void;
-    onRejected?: (code: string) => void;
-  }) => (
-    <>
-      <button onClick={() => onDetected("9780441013593")}>simulate scan</button>
-      <button onClick={() => onRejected?.("4001234567890")}>
-        simulate non-book
-      </button>
-    </>
-  ),
-}));
+import { installCamera } from "../../doubles/camera";
+import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
@@ -57,7 +39,7 @@ let api: MockApi;
 
 beforeEach(() => {
   resetIds();
-  navigate.mockReset();
+  installCamera();
   api = mockApi();
   api.on("/api/books/tags", { body: [] });
 });
@@ -68,10 +50,22 @@ beforeEach(() => {
  * The camera is behind an explicit button now: the page used to open it on
  * arrival and hold it until the tab was left.
  */
-async function scan() {
+async function openCamera() {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Start scanning" }));
-  await user.click(screen.getByRole("button", { name: "simulate scan" }));
+  // The stream is opened asynchronously, and a barcode delivered before the
+  // decoder has been handed its callback goes nowhere.
+  await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+  return user;
+}
+
+async function scan(code = "9780441013593") {
+  const user = await openCamera();
+  // ZXing calls back outside React, so the state this sets has no act() of its
+  // own the way a click does.
+  await act(async () => {
+    emitBarcode(code);
+  });
   return user;
 }
 
@@ -89,7 +83,7 @@ describe("ScanPage", () => {
     it("does not open the camera on arrival", () => {
       renderWithProviders(<ScanPage />);
       expect(
-        screen.queryByRole("button", { name: "simulate scan" }),
+        screen.queryByRole("button", { name: "Stop scanning" }),
       ).not.toBeInTheDocument();
     });
 
@@ -105,7 +99,7 @@ describe("ScanPage", () => {
       await user.click(screen.getByRole("button", { name: "Start scanning" }));
 
       expect(
-        screen.getByRole("button", { name: "simulate scan" }),
+        screen.getByRole("button", { name: "Stop scanning" }),
       ).toBeInTheDocument();
     });
 
@@ -117,7 +111,7 @@ describe("ScanPage", () => {
       await user.click(screen.getByRole("button", { name: "Stop scanning" }));
 
       expect(
-        screen.queryByRole("button", { name: "simulate scan" }),
+        screen.queryByRole("button", { name: "Stop scanning" }),
       ).not.toBeInTheDocument();
     });
 
@@ -132,7 +126,7 @@ describe("ScanPage", () => {
 
       await waitFor(() =>
         expect(
-          screen.queryByRole("button", { name: "simulate scan" }),
+          screen.queryByRole("button", { name: "Stop scanning" }),
         ).not.toBeInTheDocument(),
       );
     });
@@ -142,25 +136,17 @@ describe("ScanPage", () => {
     it("says what it read instead of going quiet", async () => {
       // Silence here reads as a broken scanner, when what happened is that the
       // price code beside the ISBN was read.
-      const user = userEvent.setup();
       renderWithProviders(<ScanPage />);
 
-      await user.click(screen.getByRole("button", { name: "Start scanning" }));
-      await user.click(
-        screen.getByRole("button", { name: "simulate non-book" }),
-      );
+      await scan("4001234567890");
 
       expect(screen.getByRole("status")).toHaveTextContent("4001234567890");
     });
 
     it("clears the notice when scanning starts again", async () => {
-      const user = userEvent.setup();
       renderWithProviders(<ScanPage />);
 
-      await user.click(screen.getByRole("button", { name: "Start scanning" }));
-      await user.click(
-        screen.getByRole("button", { name: "simulate non-book" }),
-      );
+      const user = await scan("4001234567890");
       await user.click(screen.getByRole("button", { name: "Stop scanning" }));
 
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -313,14 +299,16 @@ describe("ScanPage", () => {
 
     it("navigates to the new book", async () => {
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage />);
 
       const user = await scan();
       await user.click(
         await screen.findByRole("button", { name: "Add to Library" }),
       );
 
-      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/book/12"));
+      // Where the router ended up, not that `useNavigate` was called: see
+      // `PathProbe` in tests/utils.tsx for why this suite owns no router mock.
+      await waitFor(() => expect(path()).toBe("/book/12"));
     });
 
     it("marks the book private when the box is ticked", async () => {
@@ -367,7 +355,7 @@ describe("ScanPage", () => {
         status: 404,
         body: { detail: "Tag not found" },
       });
-      renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage />);
 
       const user = await scan();
       // The tag categories start closed: the curated vocabulary is 105 tags.
@@ -375,7 +363,7 @@ describe("ScanPage", () => {
       await user.click(await screen.findByRole("button", { name: "Fantasy" }));
       await user.click(screen.getByRole("button", { name: "Add to Library" }));
 
-      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/book/12"));
+      await waitFor(() => expect(path()).toBe("/book/12"));
     });
 
     it("reports a duplicate ISBN and stays put", async () => {
@@ -383,7 +371,7 @@ describe("ScanPage", () => {
         status: 409,
         body: { detail: "Book with this ISBN already in catalog" },
       });
-      renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage />);
 
       const user = await scan();
       await user.click(
@@ -393,7 +381,7 @@ describe("ScanPage", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "Book with this ISBN already in catalog",
       );
-      expect(navigate).not.toHaveBeenCalled();
+      expect(path()).toBe("/");
     });
 
     it("offers to open the copy already on the shelf", async () => {

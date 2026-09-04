@@ -105,7 +105,21 @@ real and the suite works offline.
 
 ## Frontend
 
-Vitest in jsdom, with Testing Library.
+Vitest in happy-dom, with Testing Library. **Three environments, not one**, chosen per
+file by a docblock:
+
+* **happy-dom** by default, because it builds a DOM substantially faster than jsdom for
+  the API surface this suite uses, and that cost is paid once per file.
+* **`@vitest-environment node`** for the 18 files that touch no DOM at all, because
+  building one costs more than they spend running.
+* **`@vitest-environment jsdom`** for 3 files, pinned deliberately: happy-dom does not
+  inherit CSS custom properties down the tree, and those files solve colours against a
+  palette that has to reach a child. Each says so in its own docblock, and
+  `docs/decisions.md` records that the pin comes off if happy-dom fixes it.
+
+The suite runs with `isolate: false`, so the files in a worker share one environment. That
+is worth roughly half the wall clock and it is what the module rule below exists to pay
+for.
 
 Tests drive the **real generated hooks and the real mutator**, stubbing only `fetch`. That
 keeps them honest about query keys, cache invalidation and request shapes, all of which a
@@ -162,12 +176,32 @@ exactly what a keystroke produces there, so nothing is lost.
 
 Everywhere else use `user-event`, which models real interaction far better.
 
-### Mocking modules
+### Replacing a module
 
-Two are mocked wholesale: **`@zxing/library`**, because jsdom has no camera, and
-**`BarcodeScanner`** itself in `ScanPage.test.tsx`, replaced by a button that emits a fixed
-ISBN: that test is about the scan, lookup and confirm flow, not the camera. `useNavigate`
-is mocked where a test asserts navigation.
+**Not with `vi.mock`, which fails the build.** The suite shares one module registry
+between the files in a worker, so a `vi.mock` is a claim one file makes about a module
+another file may already have evaluated: it is then dropped, silently, and the real module
+is what the test gets. Measured in both directions before the rule existed, on a suite
+that was otherwise green.
+
+A module that must not run for real is replaced once, for every file, by a double in
+`frontend/tests/doubles/` and an entry in `test.alias`. `@zxing/library` is the one there
+today, because no test environment has a camera. `frontend/tests/doubles/README.md` is the
+argument and the recipe, including the one thing the recipe cannot do.
+
+Two consequences worth knowing before reaching for a double:
+
+* **A double is suite-wide**, so a module that has its own test file cannot be one. Pass
+  the dependency in as a prop instead.
+* **A global is the other half.** `navigator.mediaDevices` is installed per test by
+  `tests/doubles/camera.ts` and put back by `tests/setup.ts`, along with
+  `window.location` and the document URL. `Object.defineProperty` is not something vitest
+  undoes, so anything installed that way leaks into every later file until something
+  restores it.
+
+Navigation is asserted on where the router ended up, through the `path()` that
+`renderWithProviders` returns, rather than on a spy standing in for `useNavigate`. That is
+the better assertion regardless: it says the reader arrived at the book.
 
 ## Conventions
 

@@ -18,8 +18,9 @@ import {
   type RenderOptions,
   type RenderResult,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { expect, vi, type Mock } from "vitest";
+import { useEffect } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { Locale } from "../src/api/generated/model";
@@ -217,6 +218,39 @@ interface ProvidersOptions extends Omit<RenderOptions, "wrapper"> {
   appearance?: Appearance;
 }
 
+/**
+ * Reports the router's current path without putting anything on the page.
+ *
+ * **This is what a page's navigation is asserted against, rather than a spy on
+ * `useNavigate`.** Replacing that hook means `vi.mock("react-router-dom")`,
+ * which under `isolate: false` is dropped whenever another file has already
+ * evaluated the router: measured, `App.test.tsx` before
+ * `BookDetail.test.tsx` and the spy is simply never called. Asserting on where
+ * the router ended up has no such failure mode, and it is the better assertion
+ * anyway: it says the reader arrived at the book rather than that a function
+ * was called with a string.
+ *
+ * Renders `null`, so no test's queries can see it.
+ *
+ * **Reports from an effect, not from the render body.** Writing during render
+ * is safe only while nothing double invokes or discards a render, and this
+ * suite happens to satisfy that today: no wrapper here uses `StrictMode`,
+ * `Suspense`, `useTransition` or `useDeferredValue`. That is a property of the
+ * tests rather than of this helper, and the first page under test to use one
+ * would let `path()` hold a value from a render React threw away, silently,
+ * because a probe that renders `null` is invisible to everything else.
+ *
+ * Every reader in the suite already sits behind `waitFor` or follows an awaited
+ * interaction, so an effect costs nothing here.
+ */
+function PathProbe({ onPath }: { onPath: (path: string) => void }) {
+  const { pathname, search } = useLocation();
+  useEffect(() => {
+    onPath(`${pathname}${search}`);
+  }, [onPath, pathname, search]);
+  return null;
+}
+
 export function renderWithProviders(
   ui: ReactElement,
   {
@@ -226,8 +260,9 @@ export function renderWithProviders(
     appearance = LIGHT_APPEARANCE,
     ...options
   }: ProvidersOptions = {},
-): RenderResult & { queryClient: QueryClient } {
+): RenderResult & { queryClient: QueryClient; path: () => string } {
   const client = queryClient ?? createTestQueryClient();
+  let path = route;
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -237,7 +272,14 @@ export function renderWithProviders(
           initialPattern={PATTERNS[0]}
         >
           <LocaleProvider initialLocale={locale}>
-            <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+            <MemoryRouter initialEntries={[route]}>
+              <PathProbe
+                onPath={(next) => {
+                  path = next;
+                }}
+              />
+              {children}
+            </MemoryRouter>
           </LocaleProvider>
         </ThemeProvider>
       </QueryClientProvider>
@@ -247,6 +289,7 @@ export function renderWithProviders(
   return {
     ...render(ui, { wrapper: Wrapper, ...options }),
     queryClient: client,
+    path: () => path,
   };
 }
 

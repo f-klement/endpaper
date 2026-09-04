@@ -5,15 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const navigate = vi.fn();
-vi.mock("react-router-dom", async () => {
-  const actual =
-    await vi.importActual<typeof import("react-router-dom")>(
-      "react-router-dom",
-    );
-  return { ...actual, useNavigate: () => navigate };
-});
-
 import {
   OwnershipStatus,
   ReadStatus,
@@ -55,7 +46,6 @@ let api: MockApi;
 
 beforeEach(() => {
   resetIds();
-  navigate.mockReset();
   api = mockApi();
 });
 
@@ -770,13 +760,15 @@ describe("BookDetail", () => {
     it("deletes and returns to the library", async () => {
       stubLoad();
       api.on(/\/api\/books\/1$/, { status: 204 }, "DELETE");
-      renderDetail();
+      const { path } = renderDetail();
 
       await userEvent
         .setup()
         .click(await screen.findByRole("button", { name: "Move to Trash" }));
 
-      await waitFor(() => expect(navigate).toHaveBeenCalledWith("/"));
+      // Where the router ended up, not that `useNavigate` was called: see
+      // `PathProbe` in tests/utils.tsx for why this suite owns no router mock.
+      await waitFor(() => expect(path()).toBe("/"));
     });
 
     it("does not ask for confirmation, because it can be taken back", async () => {

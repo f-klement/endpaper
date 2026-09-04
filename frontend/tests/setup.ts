@@ -3,6 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 
+import { resetZxingDouble } from "./doubles/zxing";
+
 // jsdom has no layout engine; some libraries measure on mount.
 //
 // Guarded on `window` existing at all, not just on the method. This file is the
@@ -127,7 +129,87 @@ function paletteTokensOnce(): Record<string, string> {
   return store[PALETTE_CACHE_KEY] as Record<string, string>;
 }
 
+/**
+ * Storage that a finished test left broken.
+ *
+ * **A behaviour check, after three attempts to detect this by introspection.**
+ * The failure it exists for is real and cost a review round to attribute:
+ * `vi.spyOn(window.sessionStorage, "setItem")` mocked to throw is **not** put
+ * back by `vi.restoreAllMocks()`, and under `isolate: false` the throwing stub
+ * then reaches every later file. It surfaced as four failures in
+ * `tests/app/App.test.tsx`, a file that did not cause it, on one shuffled seed
+ * in nine, and the first diagnosis blamed an unrelated module level flag.
+ *
+ * Why not look for the spy itself. Three versions tried and each was wrong in
+ * its own way, which is the argument for asking the object what it does rather
+ * than what it is made of:
+ *
+ * * the prototype's own descriptors do not hold it, because a spy on an
+ *   inherited method is installed against the instance;
+ * * the instance's own properties do not either, because happy-dom implements
+ *   `Storage` as a **Proxy** whose `hasOwnProperty` answers false for a key
+ *   whose `get` hands back the spy;
+ * * and `.mock` is present on a spy that has already been **restored**, so
+ *   looking for it reports a file that did the right thing.
+ *
+ * Reading every key to get past the first two throws, because prototype
+ * accessors are invoked by reading them and happy-dom's event handler getters
+ * fail on a bare receiver.
+ *
+ * A round trip has none of those problems and tests the property that actually
+ * matters: a `setItem` that throws, a `getItem` that lies and a `removeItem`
+ * that does nothing are all caught, whatever installed them.
+ *
+ * **What it does not catch, stated because the message must not over claim.** A
+ * pass through spy left installed on an instance is invisible here: storage
+ * still works, so the round trip is clean, and the probe's own writes are
+ * recorded as calls on it. That is a real leak with a harmless payload. The
+ * rule enforced is "storage still works", not "no spy remains", which is why
+ * the message says broken rather than mocked.
+ *
+ * On the `removeItem` arm the probe key is left in the store, because the thing
+ * that would clear it is the thing that is broken. Contained: the test is
+ * failing anyway and `beforeEach` clears both stores before the next one.
+ *
+ * Why `vi.spyOn(Storage.prototype, ...)` is fine while the instance is not:
+ * the prototype is a plain object, so the suite wide restore does reach it.
+ * **Eight files spy that way and none of them leaks; exactly one spied on an
+ * instance, and that is the one that did.** Counted excluding this file, which
+ * matches only because this comment names the call.
+ */
+function storageLeftBroken(): string | null {
+  if (typeof window === "undefined") return null;
+  const key = "__endpaper_storage_probe__";
+  for (const [name, store] of [
+    ["sessionStorage", window.sessionStorage],
+    ["localStorage", window.localStorage],
+  ] as const) {
+    try {
+      store.setItem(key, "1");
+      if (store.getItem(key) !== "1") return `${name}.getItem`;
+      store.removeItem(key);
+      if (store.getItem(key) !== null) return `${name}.removeItem`;
+    } catch {
+      return `${name}.setItem`;
+    }
+  }
+  return null;
+}
+
 beforeEach(() => {
+  // **Centrally, so that no file can forget it.** The ZXing double is aliased in
+  // for the whole suite, so its spies are reachable from any file that renders a
+  // scanner, whether or not that file knows the double exists. Left to each file
+  // there was an asymmetry that had already cost something: `ScanPage.test.tsx`
+  // waits for `decodeFromStream` to have been called before delivering a
+  // barcode, and with calls left over from an earlier test that barrier was true
+  // on arrival and could never fail.
+  //
+  // The camera is deliberately not reset here. It is a global rather than a
+  // module, it is absent unless a file asks for it, and `installCamera()` resets
+  // its spies as part of installing it: a file that never opens a camera should
+  // not have one.
+  resetZxingDouble();
   // Same guard as the matchMedia shim above, and for the same reason: this hook
   // runs for the `@vitest-environment node` files too, which have neither a
   // localStorage nor a document. The network stub below is installed either way,
@@ -206,17 +288,30 @@ const REAL_LOCATION =
 const REAL_HREF =
   typeof window === "undefined" ? undefined : window.location.href;
 
+//: Whether this environment came with a camera, so `tests/doubles/camera.ts`
+//: can be uninstalled rather than left on `navigator` for the next file.
+//:
+//: happy-dom defines no `mediaDevices`, so the honest restore is to delete the
+//: property again rather than to write `undefined` over it: a test asking
+//: `"mediaDevices" in navigator` would otherwise get the wrong answer from a
+//: camera nobody installed.
+const REAL_MEDIA_DEVICES =
+  typeof navigator === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+
 afterEach(() => {
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
   if (typeof document !== "undefined") cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  if (
-    REAL_LOCATION &&
-    Object.getOwnPropertyDescriptor(window, "location") !== REAL_LOCATION
-  ) {
-    Object.defineProperty(window, "location", REAL_LOCATION);
-  }
+  // Unconditionally, and the conditional this replaced is worth a sentence
+  // because it read as a cheap guard and was not one:
+  // `Object.getOwnPropertyDescriptor` builds a fresh object every call, so
+  // comparing one against the captured descriptor with `!==` is always true and
+  // the branch always fired. Writing the same descriptor back is idempotent, so
+  // the behaviour is unchanged and only the claim is.
+  if (REAL_LOCATION) Object.defineProperty(window, "location", REAL_LOCATION);
   // **And the URL itself.** Measured under a shared environment: the download
   // tests leave it at `blob:mock-url`, after which a relative `src` on an image
   // cannot resolve at all, happy-dom fires `error` instead of loading, and the
@@ -229,5 +324,36 @@ afterEach(() => {
   // failed the very file that had navigated. Setting `href` has no such rule.
   if (REAL_HREF && window.location.href !== REAL_HREF) {
     window.location.href = REAL_HREF;
+  }
+  // **And the camera.** Installed with `defineProperty` by every file that
+  // renders the scanner, so nothing vitest owns takes it off again.
+  // Put it back, or take it off if this environment never had one. happy-dom
+  // defines no `mediaDevices` at all, so the delete is the live branch here and
+  // it is a no-op when nothing installed a camera.
+  //
+  // **Not the same case as the location above, though it was described as one
+  // for a round.** There the comparison was between two freshly built
+  // descriptor objects and so always fired; here, with no camera installed,
+  // both sides are `undefined` and the old conditional correctly did nothing.
+  // Only the location branch was ever dead. Unconditional here is a
+  // simplification rather than a fix.
+  if (typeof navigator !== "undefined") {
+    if (REAL_MEDIA_DEVICES) {
+      Object.defineProperty(navigator, "mediaDevices", REAL_MEDIA_DEVICES);
+    } else {
+      delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+  }
+
+  // **Last, after every restore above has had its chance.** Storage still
+  // broken here is broken for every later file under `isolate: false`.
+  const broken = storageLeftBroken();
+  if (broken) {
+    throw new Error(
+      `This test left ${broken} broken. vi.restoreAllMocks() does not put ` +
+        "back a spy installed on a storage instance, so it reaches every " +
+        "later file. Spy on Storage.prototype instead, or keep the handle " +
+        "vi.spyOn() returns and call mockRestore() on it.",
+    );
   }
 });

@@ -8,16 +8,23 @@
 /**
  * Rules that hold across the whole tree, asserted rather than trusted.
  *
- * Neither has any other enforcement, and both are the kind of thing that looks
- * fine in a diff and is only wrong when read against the rest of the tree,
- * which is exactly what a reviewer does not do.
+ * None of them has any other enforcement, and every one is the kind of thing
+ * that looks fine in a diff and is only wrong when read against the rest of the
+ * tree, which is exactly what a reviewer does not do. (This said "neither" and
+ * "both" while the file held eleven rules, which is what a count written in
+ * prose does: it does not recount itself when a rule is added beside it. There
+ * is deliberately no number here now.)
  *
  * The sources are read with `import.meta.glob` rather than `node:fs` so this
  * needs no `@types/node`, which the project does not otherwise want: a guard
  * test is a poor reason to add a dependency and widen the global types.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Imported through the specifier the application uses, so this is the double
+// only if the alias is in force.
+import * as zxingDouble from "@zxing/library";
 
 const SOURCES = import.meta.glob("../src/**/*.{ts,tsx}", {
   query: "?raw",
@@ -610,5 +617,258 @@ describe("no fixture or string carries an address outside reserved space", () =>
       ..."write to kim.jones@gmail.com or sam@example.org".matchAll(ADDRESS),
     ].map((match) => match[0]);
     expect(found).toEqual(["kim.jones@gmail.com", "sam@example.org"]);
+  });
+});
+
+/**
+ * Source with every whole line comment removed.
+ *
+ * **Every way this is wrong is a false positive, which is the direction a rule
+ * has to be wrong in.** Measured, not reasoned about, after the first version
+ * of this paragraph stated the bias backwards: three shapes are reported that
+ * are not calls, and they are a call in a string literal, a call after code on
+ * a line that ends in a trailing comment, and a call inside a block comment
+ * whose own line carries no leading `//`, `*` or `/*`. Each fails loudly and is
+ * reworded in a minute.
+ *
+ * The only shape this misses is a call on a line that begins with one of those
+ * three, and no line beginning that way is executed. So there is no false
+ * negative here to trade against, which is not what the first draft claimed.
+ *
+ * **What it does not attempt is a receiver.** It matches the literal `vi.`, so
+ * `v.mock(` after `import { vi as v }`, a destructured `mock`, `vi["mock"]` and
+ * a call through a saved reference all pass. Adding an arm for each is the
+ * enumeration this file argues against elsewhere, and none of them is a
+ * spelling anybody reaches for by accident: the rule is a tripwire on the
+ * idiomatic form, not a type checker.
+ *
+ * A general comment stripper would be a second parser to get wrong, and this
+ * project has none to borrow: both were checked rather than assumed.
+ * `typescript` is at 7.x, which is the native compiler and exposes no
+ * `createSourceFile` (it is `undefined` at runtime), and rolldown re-exports no
+ * parser either.
+ *
+ * Line anchoring was the other candidate and is strictly weaker: it sees only a
+ * call that begins its own line, so anything at all before it hides it.
+ *
+ * **The pattern requires the opening parenthesis, so prose naming the bare API
+ * is invisible to it either way.** That is why this stripping is load bearing
+ * for exactly one file in the tree, `tests/utils.tsx`, and not for the four
+ * that mention the name: the other three write it bare. Attacking it is what
+ * established that, and the first attempt at the check asserted the wrong
+ * thing, that every file mentioning the API must be reported without the
+ * stripping. Mentioning it is not spelling a call.
+ */
+function codeOnly(source: string): string {
+  return source
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+}
+
+/**
+ * Its own separate glob, because the one in the address rule above is scoped
+ * inside that describe block.
+ */
+const TEST_SOURCES = import.meta.glob("./**/*.{ts,tsx}", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+/**
+ * The forbidden spellings, assembled rather than written out.
+ *
+ * **This file would otherwise be the only offender in the suite**: the
+ * fixtures below have to spell what the rule forbids, they sit in string
+ * literals on ordinary code lines, and `codeOnly` keeps those by design. An
+ * exception for this one path would be the obvious fix and is the worse one,
+ * because it also stops the rule ever applying here. Assembling the spelling
+ * keeps this file inside the rule it states.
+ *
+ * The pattern itself is safe unassembled: its source carries a backslash and
+ * an alternation, so it does not contain the literal it matches.
+ */
+// **`\s*` on both sides of the dot, because prettier puts them there.** When
+// the call heads an assignment chain it splits the receiver onto its own line:
+// `const setItem = vi\n  .spyOn(...)`. That shape occurs three times in this
+// tree, so `vi\n  .mock("./x")` is a spelling the formatter produces rather
+// than one an evader would have to invent, and the tighter pattern walked past
+// it. Found by attacking the rule after a first pass dismissed the same
+// evasion as contrived.
+const CALLS = /\bvi\s*\.\s*(mock|doMock|importMock)\s*\(/;
+const MOCK = "vi." + "mock";
+const DO_MOCK = "vi." + "doMock";
+
+describe("a module is replaced by an alias, never by a module mock", () => {
+  /**
+   * **This is what makes `isolate: false` sound rather than merely lucky.**
+   * The files in a worker share one module registry, so a module mock is a
+   * claim one file makes about a module another file may already have
+   * evaluated, and the loser is silent: the mock is dropped and the real
+   * module is what the test gets.
+   *
+   * Measured before this rule existed, in both directions, with the whole
+   * suite otherwise green. `App.test.tsx` ahead of `BarcodeScanner.test.tsx`
+   * gave the scanner the real ZXing and failed fifteen of its tests at once.
+   * `App.test.tsx` ahead of `BookDetail.test.tsx` gave it the real
+   * `useNavigate` and failed the one test asserting on that spy. Both files
+   * pass alone and pass in the other order, which is what makes this worth a
+   * guard rather than a note.
+   *
+   * The replacement is `test.alias` in `vite.config.ts` pointing into
+   * `tests/doubles/`: one implementation for the whole suite, so there is no
+   * real module left to lose to and no ordering to get wrong.
+   * `tests/doubles/README.md` is the argument in full.
+   */
+  it("is not called anywhere in the suite", () => {
+    const offenders = Object.entries(TEST_SOURCES)
+      .filter(([, source]) => CALLS.test(codeOnly(source)))
+      .map(([path]) => path.replace("./", "tests/"));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("reads the test tree at all", () => {
+    // A glob that matched nothing would make the rule above pass for ever.
+    expect(Object.keys(TEST_SOURCES).length).toBeGreaterThan(100);
+  });
+
+  it("tells a call apart from prose about one", () => {
+    // Every live mention in this suite is prose: in `tests/utils.tsx`, in both
+    // ScanPage test files, and in `tests/doubles/zxing.ts`. A rule matching the
+    // spelling would report all of them and would have to be switched off, so
+    // the two cases are pinned apart rather than left to a reader's judgement.
+    const prose = [
+      `// ${MOCK}("react-router-dom") is refused: see the rule above.`,
+      ` * with a ${MOCK}("@zxing/library") the scanner gets the real decoder.`,
+      `  /* ${MOCK}("./thing"); */`,
+    ].join("\n");
+    expect(CALLS.test(codeOnly(prose))).toBe(false);
+
+    for (const code of [
+      `${MOCK}("@zxing/library", () => ({}));`,
+      `  ${DO_MOCK}("./thing");`,
+      // Not anchored to the start of a line: that was the cheaper rule and it
+      // is blind to anything sharing the line with the call.
+      `const a = 1; ${MOCK}("./thing");`,
+      // The receiver split onto its own line, which is what prettier does to a
+      // call that heads an assignment chain, and which three real call sites in
+      // this tree are already written as.
+      `const m = vi\n  .${"mock"}("./thing");`,
+    ]) {
+      expect(CALLS.test(codeOnly(code))).toBe(true);
+    }
+  });
+
+  /**
+   * **The one mistake here with a production consequence, so it is the one
+   * checked against the running config rather than against its text.**
+   *
+   * `test.alias` is scoped to the suite. `resolve.alias` is not: the same entry
+   * one level up would put a decoder that never decodes into the shipped
+   * bundle, and no test could tell, because from inside the suite the two are
+   * indistinguishable by construction. That is exactly the shape a guard has to
+   * cover from outside.
+   *
+   * Asking vite what the **build** resolves is the only assertion that cannot
+   * be satisfied by a config that merely looks right. A text check would pass
+   * on a `resolve.alias` added in a shape it did not anticipate.
+   *
+   * This test exists because a docstring in `tests/doubles/zxing.ts` said it
+   * did, for a round, while nothing read the config at all.
+   */
+  it("keeps the doubles out of the application build", async () => {
+    const { resolveConfig } = await import("vite");
+    // No root passed: vite falls back to the working directory and finds the
+    // config the way a build does, which is the thing under test.
+    for (const command of ["build", "serve"] as const) {
+      const resolved = await resolveConfig({}, command);
+
+      // **Assert a config was found, or this passes by reading nothing.**
+      // Measured from a different working directory: `configFile` comes back
+      // `undefined` and `resolve.alias` is byte identical, because the project
+      // contributes nothing to it, which is the correct state and is also
+      // exactly what never opening the file looks like. Same shape as a script
+      // that takes a ref and reads whichever repository the shell is in.
+      expect(resolved.configFile).toMatch(/vite\.config\.ts$/);
+
+      // **The directory, not the two names in use.** A `find` that is a RegExp
+      // serialises to `{}`, so the discriminating half of an entry is erased
+      // before this sees it, and vite's own defaults already contain two such
+      // entries. Naming the words `zxing` and `doubles` would therefore pass on
+      // a double keyed by a pattern, and it would be an inclusion list one test
+      // after this file removed one for being an inclusion list. Measured
+      // absent from the resolved default.
+      expect(JSON.stringify(resolved.resolve.alias)).not.toContain("/tests/");
+    }
+  });
+
+  it("still aliases them for the suite", () => {
+    // The other half, and it is what stops the test above passing because
+    // somebody deleted the alias rather than because it is correctly scoped.
+    // Read off the running suite rather than off the config text: this
+    // specifier is the one the application uses, so whatever it resolves to
+    // here is what the code under test got.
+    //
+    // The real `BarcodeFormat` is a numeric enum and the double's is strings,
+    // so the value alone says which one answered.
+    //
+    // **`tsc` disagrees with the runtime here, and that is the point.** It
+    // resolves this import to the real library's types, because the alias is
+    // vitest's and not tsconfig's. So the application keeps the real types
+    // while the suite gets the double, which is the arrangement the test above
+    // checks from the other side. It also means only the shape the real
+    // library declares can be read through this import: reaching for one of
+    // the double's spies here is a type error, and they are imported from
+    // `tests/doubles/zxing` by the files that assert on them.
+    expect(zxingDouble.BarcodeFormat.EAN_13).toBe("EAN_13");
+  });
+
+  it("covers every vitest api that replaces a module", () => {
+    // **Derived from vitest, and stated as an exclusion.** The first version of
+    // the rule named two of the three and missed `importMock`, which takes a
+    // specifier and replaces the module exactly as the other two do. The second
+    // version derived the set with `/^(do|import)?[Mm]ock$/`, which is an
+    // inclusion list wearing a pattern's clothes: it would have gone on passing
+    // against a `mockModule` or a `mockRequire`, because a name of a shape it
+    // did not anticipate simply is not selected.
+    //
+    // So: everything vitest spells with "mock", minus the ones classified below
+    // as not replacing a module. A new API containing that word then fails here
+    // until somebody decides which side it is on, which is the whole point.
+    const NOT_A_REPLACEMENT = new Set([
+      // Reads or asserts on a mock that already exists.
+      "mocked",
+      "isMockFunction",
+      // Replaces an object's methods, never a module specifier.
+      "mockObject",
+      // Undoes a replacement rather than making one. These two do take a module
+      // specifier, which is why this test is named for replacing rather than
+      // for the argument: the argument is not what makes one dangerous.
+      "unmock",
+      "doUnmock",
+      // Act on every spy at once, and take no specifier.
+      "clearAllMocks",
+      "resetAllMocks",
+      "restoreAllMocks",
+      // Fake timers.
+      "getMockedSystemTime",
+    ]);
+    const replacers = Object.keys(vi).filter(
+      (name) => /mock/i.test(name) && !NOT_A_REPLACEMENT.has(name),
+    );
+
+    // Not a stated count. A floor, so an API that has been enumerated away, or
+    // one this filter can no longer see, fails here rather than passing quietly
+    // on an empty set.
+    expect(replacers.length).toBeGreaterThanOrEqual(3);
+
+    // Driven through the rule rather than compared against its source text: a
+    // substring check would pass on a pattern that happens to mention the name
+    // without matching a call.
+    for (const name of replacers) {
+      expect(CALLS.test(codeOnly(`vi.${name}("./x");`))).toBe(true);
+    }
   });
 });

@@ -406,12 +406,22 @@ describe("the reload an edge sign-out triggers is counted", () => {
     const mutator = await freshPageLoad();
     const ended = vi.fn();
     const stop = mutator.onSessionEnded(ended);
-    vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
-      throw new DOMException("QuotaExceededError");
-    });
+    const setItem = vi
+      .spyOn(window.sessionStorage, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError");
+      });
 
     await expiredAtTheEdge(mutator.customFetch);
 
+    // **Restored here rather than left to `vi.restoreAllMocks()`.** `setItem`
+    // is inherited, so the spy is installed on `Storage.prototype`, which is
+    // shared by every file in the worker under `isolate: false`. Measured: the
+    // suite-wide restore does not take it off, and a throwing `setItem` then
+    // makes every later `recordReload()` fail, so the next file expecting a
+    // reload never gets one. That failed four tests in `tests/app/App.test.tsx`
+    // whenever the shuffle put this file first.
+    setItem.mockRestore();
     stop();
     expect(window.location.reload).not.toHaveBeenCalled();
     expect(ended).toHaveBeenCalledTimes(1);

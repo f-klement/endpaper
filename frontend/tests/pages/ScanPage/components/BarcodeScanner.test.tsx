@@ -15,35 +15,23 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderLocalised } from "../../../utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const decodeFromStream = vi.fn();
-const reset = vi.fn();
-const readerArgs = vi.fn();
-
-vi.mock("@zxing/library", () => {
-  class NotFoundException extends Error {}
-  class BrowserMultiFormatReader {
-    decodeFromStream = decodeFromStream;
-    reset = reset;
-    constructor(hints?: unknown, interval?: number) {
-      readerArgs(hints, interval);
-    }
-  }
-  return {
-    BrowserMultiFormatReader,
-    NotFoundException,
-    BarcodeFormat: {
-      EAN_13: "EAN_13",
-      EAN_8: "EAN_8",
-      UPC_A: "UPC_A",
-      UPC_E: "UPC_E",
-      QR_CODE: "QR_CODE",
-    },
-    DecodeHintType: {
-      POSSIBLE_FORMATS: "POSSIBLE_FORMATS",
-      TRY_HARDER: "TRY_HARDER",
-    },
-  };
-});
+// The library is replaced for the whole suite by an alias in `vite.config.ts`,
+// so these are the spies the component under test really calls, and importing
+// `@zxing/library` below reaches the same double. There is no `vi.mock` here on
+// purpose: see `tests/doubles/README.md`.
+import {
+  fakeStream,
+  getUserMedia,
+  installCamera,
+  stopTrack,
+} from "../../../doubles/camera";
+import {
+  decodeFromStream,
+  emitBarcode,
+  emitScannerError,
+  readerArgs,
+  reset,
+} from "../../../doubles/zxing";
 
 import { NotFoundException } from "@zxing/library";
 
@@ -51,54 +39,14 @@ import BarcodeScanner, {
   readIsbnBarcode,
 } from "../../../../src/pages/ScanPage/components/BarcodeScanner";
 
-const stopTrack = vi.fn();
-const getUserMedia = vi.fn();
-
-function fakeStream(capabilities: Record<string, unknown> = {}) {
-  const track = {
-    stop: stopTrack,
-    getCapabilities: () => capabilities,
-    applyConstraints: vi.fn().mockResolvedValue(undefined),
-  };
-  return {
-    getTracks: () => [track],
-    getVideoTracks: () => [track],
-  } as unknown as MediaStream;
-}
-
 beforeEach(() => {
-  decodeFromStream.mockReset().mockResolvedValue(undefined);
-  reset.mockReset();
-  readerArgs.mockReset();
-  stopTrack.mockReset();
-  getUserMedia.mockReset().mockResolvedValue(fakeStream());
-
-  Object.defineProperty(navigator, "mediaDevices", {
-    configurable: true,
-    value: { getUserMedia },
-  });
+  // The ZXing double is reset by tests/setup.ts, for every file.
+  installCamera();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-/** Hand the component a decoded barcode through ZXing's callback. */
-function emitBarcode(text: string) {
-  const callback = decodeFromStream.mock.calls[0]?.[2] as (
-    result: { getText: () => string } | null,
-    error: Error | null,
-  ) => void;
-  callback({ getText: () => text }, null);
-}
-
-function emitError(error: Error) {
-  const callback = decodeFromStream.mock.calls[0]?.[2] as (
-    result: null,
-    error: Error,
-  ) => void;
-  callback(null, error);
-}
 
 describe("readIsbnBarcode", () => {
   it.each(["9780441013593", "9791234567896", "0441013597"])(
@@ -257,7 +205,7 @@ describe("BarcodeScanner", () => {
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
     await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
-    emitError(new NotFoundException("no barcode in frame"));
+    emitScannerError(new NotFoundException("no barcode in frame"));
 
     expect(warn).not.toHaveBeenCalled();
   });
@@ -267,7 +215,7 @@ describe("BarcodeScanner", () => {
     renderLocalised(<BarcodeScanner active onDetected={vi.fn()} />);
     await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
 
-    emitError(new Error("device lost"));
+    emitScannerError(new Error("device lost"));
 
     expect(warn).toHaveBeenCalled();
   });

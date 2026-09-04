@@ -10,13 +10,16 @@ import { VitePWA } from "vite-plugin-pwa";
 // rolldown panicked with "Failed to get current dir". A docblock cannot do that,
 // because it changes one file's environment rather than how workers are spawned.
 //
-// **`isolate: false` was then measured properly and refused**, so do not reach for
-// it again without reading why: it is worth 43.59s to 19.12s and it makes `vi.mock`
-// lose to whichever file evaluated the module first. `docs/decisions.md`, "`isolate:
-// false` is refused, and the reason is the module registry rather than the leaks",
-// names the one pair in this suite and the three reasons one pair is enough.
+// **`isolate: false` is below, and what pays for it is `tests/doubles/`.** It is
+// worth 22.79s against 50.19s, both on the same worker and the same tree. It was
+// refused once, and correctly: sharing the module registry makes a `vi.mock` lose
+// to whichever file evaluated that module first, silently, in both directions
+// measured. The setting became sound when the last module mock left the suite,
+// not before. `tests/houseRules.test.ts` fails the build on a new one, and
+// `docs/decisions.md` carries the argument.
 
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 /**
  * The version the app shows, derived rather than declared.
@@ -218,6 +221,23 @@ export default defineConfig({
     // suite passing in full is the evidence; if a future test fails for a
     // reason that makes no sense, this line is the first thing to suspect.
     environment: "happy-dom",
+    // **Replacing a module is an alias here, never a `vi.mock`.** Under
+    // `isolate: false` the module registry is shared between files, and a
+    // `vi.mock` is a claim one file makes about a module that another file may
+    // already have evaluated: the mock is then dropped and the real module is
+    // what the test gets. Measured on this suite, both directions, one file
+    // each way. An alias has no ordering, because there is no real module left
+    // to lose to. `tests/houseRules.test.ts` fails the build on a `vi.mock`,
+    // and `tests/doubles/README.md` is the whole argument.
+    //
+    // `test.alias` and not `resolve.alias`: the application build resolves the
+    // real library, and only the suite sees the double.
+    alias: {
+      "@zxing/library": fileURLToPath(
+        new URL("./tests/doubles/zxing.ts", import.meta.url),
+      ),
+    },
+    isolate: false,
     globals: true,
     // Bounded, not one per core. vitest left alone forks per CPU: measured on a
     // four core CI host it sustained 3.2 of them for the whole run, which is

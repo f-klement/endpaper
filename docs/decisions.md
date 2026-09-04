@@ -10470,47 +10470,133 @@ Three more, each a class rather than an instance:
 * **The set phrase list was interpolated into a `RegExp` unescaped.** A future
   phrase with a metacharacter throws at module load, or silently stops matching.
 
-### `isolate: false` is refused, and the reason is the module registry rather than the leaks
+### The frontend suite shares one environment, and `tests/doubles/` is what pays for it
 
-Sharing one environment between test files takes the frontend suite from 43.59s to 19.12s,
-both on the builder worker and on the same tree, which is the only way two durations here
-compare at all. The prize is real. It is refused anyway.
+`isolate: false` takes the frontend suite from 50.19s to 22.79s, both on the builder
+worker and on the same tree, which is the only way two durations here compare at all. It
+was refused earlier the same day, and that refusal was right at the time: the setting is
+unsound while the suite contains a single module mock, and it became sound when the last
+one left, not before.
 
-Two genuine leaks were found and fixed on the way, and both are worth keeping whatever
-happens to this switch: three files replace `window.location` wholesale with
-`defineProperty`, which no vitest restore undoes, and several navigate and leave the
-document's URL behind, after which a relative image source cannot resolve at all. Both are
-restored in `tests/setup.ts`.
+**Sharing one environment means sharing one module registry, and `vi.mock` loses to
+whichever file evaluated the module first.** The mock is dropped and the real module is
+what the test gets. Measured in both directions, on a suite that was otherwise green:
 
-**What disqualifies it is the shared module registry.** `vi.mock` cannot replace a module
-another file has already evaluated, so the mock is silently ignored and the real module is
-what the test gets. There is exactly one such pair here: `tests/app/App.test.tsx` renders
-the route table, `src/app/routes.tsx` imports `ScanPage` eagerly, that evaluates the real
-`@zxing/library`, and `BarcodeScanner.test.tsx`'s mock of it is then dead. Measured across
-eight shuffled seeds of the full suite: one fails, always that file, always all fifteen
-camera tests, with the real `BrowserCodeReader` in the traceback.
+| Order | What the second file got | Result |
+| --- | --- | --- |
+| `App.test.tsx`, then `BarcodeScanner.test.tsx` | the real ZXing decoder | 15 of 33 tests failed |
+| `App.test.tsx`, then `BookDetail.test.tsx` | the real `useNavigate` | the one test asserting on that spy failed |
 
-Three reasons that pair settles the question rather than being one more thing to fix.
+Both files pass alone and pass in the other order. `src/app/routes.tsx` imports every page
+eagerly, so rendering the route table evaluates the scanner and the router for real, and
+the file shuffle decides the rest: one seed in eight failed the whole suite this way.
 
-**The failure is order dependent**, which is the property the flakiness work had just
-finished removing from this suite. Trading isolation for twenty seconds and buying back
-order dependence is moving backwards.
+**The fix is structural rather than an exemption, because the alternative was an
+enumeration that goes stale on its own.** A module needing replacement is now aliased once
+for the whole suite, through `test.alias` and `tests/doubles/`, so there is no real module
+left to lose to and no ordering to get wrong. All four module mocks were removed:
 
-**The loud form is the lucky one.** A mocked module quietly becoming the real one is a test
-that passes while asserting on the wrong subject, and nothing distinguishes that from a
-test that passes. Here it happens to throw, because there is no camera.
+* `@zxing/library` and `navigator.mediaDevices` became shared doubles.
+* Two `useNavigate` spies became assertions on where the router ended up, through a
+  `PathProbe` that renders `null`. That is the better assertion anyway: it says the reader
+  arrived at the book rather than that a function was called with a string.
+* The `BarcodeScanner` stub went away entirely and `ScanPage` renders the real scanner
+  over those doubles. It costs one `waitFor` on the camera opening: the scanner's own file
+  runs 33 tests that way in 93ms to 159ms across runs on the builder worker, so the stub
+  was buying very little
+  and paying an ordering hazard for it.
 
-**And the hazard is open ended.** Nothing enumerates which modules one file evaluates and
-another mocks, and a future test that renders the app shell adds a pair without anybody
-noticing. A guard would have to walk each test file's real import graph against every
-other's mock list, which is more machinery than the twenty seconds is worth.
+`tests/houseRules.test.ts` fails the build on a new module mock, which is what makes this
+sustainable rather than a state somebody restores by accident. **`typescript` is at 7.x
+and exposes no `createSourceFile`, and rolldown re-exports no parser**, both checked rather
+than assumed, so the rule drops whole line comments and then matches the call form. The
+bias is deliberate and, measured, it is one sided: **every way the rule is wrong is a
+false positive.** A call in a string literal, a call after code on a line ending in a
+trailing comment, and a call inside a block comment whose own line carries no leading
+marker are all reported, each loud and reworded in a minute. The only shape it misses is a
+call on a line beginning with `//`, `*` or `/*`, and no such line is executed. An earlier
+draft of this paragraph and of the guard's own docstring had that backwards, from reasoning
+rather than from running it.
 
-Two suspects from the first pass are recorded as **not** the reason, because a wrong name
-in a register sends the next reader hunting the wrong thing: the module level
-`reloadRequested` flag in `api/mutator.ts` and the depth of the history stack were both
-observed drifting between files under instrumentation, and neither produced a failure in
-any of the eight seeds. Drift is not a defect until something reads it.
+**Two guards, because the rule and its escape hatch fail differently.** The one above stops
+a module mock coming back. The other asks vite what the **application** build resolves, and
+fails if a double reaches it: `test.alias` is scoped to the suite and `resolve.alias` is
+not, so the same entry one level up would ship a decoder that never decodes, and from
+inside the suite the two are indistinguishable by construction. That second one was
+described in a docstring for a round before it existed, which is the more useful half of
+the story: a stated guard reads exactly like a real one.
 
-One measurement from the same pass, so it does not get taken on trust later: loading the
-real `@zxing/library` costs 117ms, against 43s of parallel suite, so mocking it in
-`App.test.tsx` for speed alone is below this machine's noise floor and was not done.
+**Two things the attack on that rule found, neither by reading it.** The rule requires the
+opening parenthesis, so prose naming the bare API is invisible to it and the comment
+stripping is load bearing for exactly one file in the tree today, not four. And the first
+version of the diagonal testing that was itself wrong: it asserted every file mentioning
+the API must be dirty without the stripping, when three of the four spell the bare name and
+only one spells a call. Mentioning is not spelling a call, which is the unit the claim
+needed.
+
+Verified across thirteen shuffled seeds of the full suite plus both hazardous pairs pinned
+directly, and the guard driven with a planted call in two shapes, each failing exactly one
+test and that test named.
+
+**A fifth leak, found by the fix round and worth more than the setting is.** A shuffled
+seed failed four tests in `tests/app/App.test.tsx`, all of them "the reload never happened".
+The obvious suspect was `api/mutator.ts`'s module level `reloadRequested` flag, which had
+been sitting in this entry as a known drifter, so it was blamed, a reset was exported from
+production code, and it was wired into `tests/setup.ts`. **Measured with the reset in and
+out, the pair failed identically: the fix did nothing and was reverted.** The flag still has
+not produced a failure.
+
+The real cause was `vi.spyOn(window.sessionStorage, "setItem")` in `tests/api/mutator.test.ts`,
+mocked to throw so the app's "cannot record a reload" branch can be tested.
+**`vi.restoreAllMocks()` does not take it off.** `setItem` is inherited, so the spy lands on
+`Storage.prototype`, which every file in the worker shares; probed from `setup.ts`, it was
+still a mock and still throwing long after the suite wide restore had run. A throwing
+`setItem` makes `recordReload()` return false, so every later reload takes the dead end
+branch instead. The file now calls `mockRestore()` on its own handle, which does work.
+
+**That defect predates this change and `isolate: false` only widened it.** Measured across
+the two file pair: 33 of 66 tests ran with a throwing `setItem`, which is more than the
+second file holds, so the spy was already leaking through the rest of its own file before it
+ever reached another one. Per file isolation hid it at the file boundary and never inside it.
+
+**Loud is not attributed, and attribution is what costs the rounds.** That leak failed in a
+file that did not cause it, one seed in nine, and the first diagnosis was wrong. So the rule
+it produced is not written down and trusted: `tests/setup.ts` round trips both storages after
+every test and throws naming the method, which turns "four failures in an unrelated file
+under one seed" into "the test that installed it fails, every run, in any order". Measured
+both ways: with the spy restored the file passes 48, without it 16 fail and the first is the
+test that installed it.
+
+**Three attempts to detect it by introspection failed first, and each was wrong differently.**
+The prototype's own descriptors do not hold the spy, because a spy on an inherited method is
+installed against the instance. The instance's own properties do not either, because
+happy-dom implements `Storage` as a **Proxy** whose `hasOwnProperty` answers false for a key
+whose `get` returns the spy. Reading every key to get past both throws, because prototype
+accessors are invoked by reading them. And `.mock` survives `mockRestore()`, so looking for
+it reports a file that did the right thing: that version failed 171 tests across five files
+on a tree with no leak in it. A round trip has none of those problems and tests the property
+that actually matters.
+
+**The rule is narrower than it first looked.** `vi.spyOn(Storage.prototype, ...)` is fine,
+because the prototype is a plain object and the suite wide restore reaches it: eight files
+spy that way and none leaks. Exactly one spied on an **instance**, and that is the one that
+did.
+
+**What is still not fixed.** Module level state in `src/` crosses files: the history stack
+cannot be reset and the `reloadRequested` flag remains reachable in principle, though neither
+has produced a failure. Anything installed on a global belongs in `tests/setup.ts` beside
+`window.location`, the document URL and `navigator.mediaDevices`.
+
+**The honest cost, stated once.** Order dependence is what this setting buys back, and this
+suite had just been cleaned of it. The trade taken is that the two mechanisms which produced
+every failure so far are now impossible rather than discouraged: a module mock fails the
+build, and broken storage fails the test that broke it. What is left is ordinary test
+hygiene, and the next leak of a new shape will cost a round to attribute, the way this one
+did.
+
+**And it costs that round once, which is the half worth stating.** The pattern is
+established twice here: a shared double reset centrally for the module mocks, a behaviour
+check in `afterEach` for storage. A third mechanism gets a third self reporting check in
+`tests/setup.ts` and then stops costing anything. Without that clause this reads as a
+recurring per incident cost with no ceiling, which is a different and worse bargain than
+the one actually taken.
