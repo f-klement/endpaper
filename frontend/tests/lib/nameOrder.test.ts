@@ -6,6 +6,8 @@
  * be pinning node's ICU build: what the app promises is that an accented name
  * files with its base letter, not that a particular ten names come out in a
  * particular order on a particular runtime.
+ *
+ * @vitest-environment node
  */
 
 import { describe, expect, it } from "vitest";

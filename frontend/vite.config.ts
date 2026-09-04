@@ -182,7 +182,7 @@ export default defineConfig({
     // happy-dom, not jsdom. Measured on this suite: `environment` was 160s of a
     // 322s run, paid once per test file to build a DOM, and happy-dom
     // constructs one substantially faster for the same API surface this suite
-    // uses. The eleven DOM-free files opt out entirely with a
+    // uses. The eighteen DOM-free files opt out entirely with a
     // `@vitest-environment node` docblock and are unaffected either way.
     //
     // **Recount that eleven with the docblock ANCHORED, or it comes out one too
@@ -196,9 +196,15 @@ export default defineConfig({
     // ticket, in both directions, which is why the command is written down
     // rather than left to whoever edits next.
     //
-    // Eleven describes the tree from 2026-08-30 onward. A checkout from earlier
-    // that day counts twelve and is not stale: `tests/lib/recordStatus.test.ts`
-    // existed for one round and was deleted with the rule it guarded.
+    // Eleven described the tree from 2026-08-30, and it was thirteen by
+    // 2026-09-04 without this comment moving: two files arrived carrying the
+    // docblock and nothing recounts this sentence. Eighteen is 2026-09-04, after
+    // five more DOM-free files were marked. **The effect of those five is below
+    // this machine's noise floor** and is not claimed as a speedup: repeated
+    // whole-suite runs on the same tree spread over roughly eight seconds, so a
+    // change worth about one cannot be seen. They are marked because a file that
+    // needs no DOM should not build one, which is the same reason the other
+    // thirteen are.
     //
     // The risk is real and is why this is worth a note rather than a swap:
     // happy-dom is not jsdom, and a test relying on a corner jsdom implements

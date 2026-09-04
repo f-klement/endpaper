@@ -52,6 +52,8 @@
  * "Suche den Code" is an instruction and "Suche läuft" is a noun. Nothing short
  * of parsing German separates them, so a new string added in the imperative
  * still has to be caught by a reader.
+ *
+ * @vitest-environment node
  */
 
 import { describe, expect, it } from "vitest";

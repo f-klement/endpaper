@@ -5,6 +5,8 @@
  * against the generated union), so it is not re-tested here. What is tested is
  * everything the type system cannot see: which name a given tag prints, and
  * whether the German words are usable ones.
+ *
+ * @vitest-environment node
  */
 
 import { describe, expect, it } from "vitest";

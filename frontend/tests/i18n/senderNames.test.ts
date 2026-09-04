@@ -1,4 +1,8 @@
-/** Tests for src/i18n/senderNames.ts. */
+/**
+ * Tests for src/i18n/senderNames.ts.
+ *
+ * @vitest-environment node
+ */
 
 import { describe, expect, it } from "vitest";
 

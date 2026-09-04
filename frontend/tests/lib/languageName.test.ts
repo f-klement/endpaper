@@ -1,4 +1,8 @@
-/** Tests for src/lib/languageName. */
+/**
+ * Tests for src/lib/languageName.
+ *
+ * @vitest-environment node
+ */
 
 import { describe, expect, it } from "vitest";
 
