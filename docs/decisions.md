@@ -10600,3 +10600,46 @@ check in `afterEach` for storage. A third mechanism gets a third self reporting 
 `tests/setup.ts` and then stops costing anything. Without that clause this reads as a
 recurring per incident cost with no ceiling, which is a different and worse bargain than
 the one actually taken.
+
+### The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it
+
+Measured on one node, with the suite pod shaped to match the CI job pod exactly: two CPUs,
+2Gi, the same Alpine `uv` image family, `-n 2` both ways.
+
+| Where | pytest |
+| --- | --- |
+| CI job | 315.54s to 319.73s across three runs |
+| An isolated pod of the same shape | 153.18s, 154.11s |
+
+**Three candidates were measured and eliminated, and they are written down so nobody spends
+the runner time again.**
+
+**Stage contention is not it.** The runner allows four job pods at once, each permitted two
+CPUs, on a six core box, so the test stage can demand eight cores' worth of limits on six.
+That is real, and it costs about three seconds: the suite was run as the only job in its
+pipeline and came in at 315.54s against 318.75s with the full stage beside it.
+
+**More pytest workers is not it, and it is actively worse.** In a two CPU pod, `-n 4` took
+387.08s and 391.29s against `-n 2` at 153.18s and 154.11s. Both arms repeat within one
+percent. Four workers in a two core cgroup is the shape this repository already warns about,
+now measured on it: the `-n 2` in `addopts` is not a conservative guess, it matches
+`cpu_limit = "2"` exactly. **Do not raise it without raising the pod's CPU limit first**, and
+that limit has an incident behind it.
+
+**The tmpfs fallback is not it.** `conftest._fastest_scratch()` puts the databases on
+`/dev/shm` and falls back to disk **silently**, which made it the best remaining candidate: a
+run that lost tmpfs still passes and differs only in duration. CI reports
+`endpaper scratch: /dev/shm (tmpfs)`, the same as the fast pod. Eliminated by measurement
+rather than by reading the code.
+
+**What is still open**, and neither has been measured: the two images are different digests
+of the same base, and the tree and virtualenv sit on a hostPath in the suite pod against the
+container overlay in CI.
+
+**The diagnostic that settled the third one is now permanent**, because a silent fallback is
+worth a line in every run. Getting that line to appear took three attempts and the reason
+generalises: `addopts` carries `-q`, which drops `pytest_report_header` outright, and a
+`write_line` from `pytest_configure` lands before the reporter starts writing. Only
+`pytest_terminal_summary` prints under this project's own settings. **A diagnostic that is
+invisible under the settings it ships with is the same defect it exists to report**, which is
+why `backend/tests/test_scratch_report.py` pins the hook name as well as the text.

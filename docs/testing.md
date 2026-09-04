@@ -98,6 +98,22 @@ The configured production values are pinned separately in `TestLimitsAreSane`.
   it aborts before checking anything at all. These two make it derive module names from the
   path instead.
 
+### Where the databases live, and how you know
+
+Every test drops and recreates the schema, so the run is tens of thousands of writes that are
+deleted immediately. They go to `/dev/shm`, which is memory, and `conftest` **falls back to
+disk silently** when that is missing or unwritable: the suite still passes, and the only
+difference is how long it takes.
+
+So every run prints one line saying which it got:
+
+```
+endpaper scratch: /dev/shm (tmpfs)
+endpaper scratch: /tmp (DISK, /dev/shm unavailable)
+```
+
+Read it before concluding a machine is slow.
+
 ### The network is stubbed
 
 `respx` intercepts outbound HTTP, so Open Library and Google Books are never called for

@@ -68,6 +68,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DATA_DIR / 'test.db'}"
 # Durability is meaningless for a database dropped after every test, and the
 # fsync it buys was most of this suite's runtime. See database._synchronous.
 os.environ["SQLITE_SYNCHRONOUS"] = "OFF"
+
 os.environ["SECRET_KEY"] = "test-secret-key-at-least-32-characters-long"
 os.environ.setdefault("ALLOW_REGISTRATION", "true")
 # The suite exercises the startup secret guard explicitly in test_config.py;
@@ -126,6 +127,28 @@ from ratelimit import (  # noqa: E402
     public_catalogue_limiter,
     register_limiter,
 )
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    """Say which filesystem the databases went to.
+
+    **`_fastest_scratch()` falls back silently, and silent is the whole
+    problem.** A run that cannot use `/dev/shm` still passes, still reports
+    nothing, and differs only in how long it takes, which is the one signal
+    nobody reads off a green pipeline. So one line per run, which turns "this
+    suite is slow here" from something somebody has to go and measure into
+    something the log already says.
+
+    **Not `pytest_report_header`, and not a `write_line` from
+    `pytest_configure`.** Both were tried and neither reaches a CI log here:
+    `addopts` carries `-q`, which drops the header outright, and at configure
+    time the reporter has not started writing. The summary hook is the one
+    place that prints under this project's own settings. A diagnostic invisible
+    under the settings it ships with is the same defect it exists to report.
+    """
+    where = _TMP_DATA_DIR.parent
+    kind = "tmpfs" if str(where) == "/dev/shm" else "DISK, /dev/shm unavailable"
+    terminalreporter.write_line(f"endpaper scratch: {where} ({kind})")
 
 
 @pytest.fixture(scope="session")
