@@ -177,9 +177,57 @@ beforeAll(() => {
   }
 });
 
+//: The real `window.location`, captured before any test can replace it.
+//
+// **Three test files replace it wholesale** with `Object.defineProperty`,
+// because a real navigation is not a thing a test environment can do. Neither
+// `vi.unstubAllGlobals()` nor `vi.restoreAllMocks()` undoes that: they know
+// about stubs vitest installed, and a direct `defineProperty` is not one.
+//
+// That costs nothing while every file gets its own window and is a leak the
+// moment they share one. Measured under `isolate: false`, one worker, file
+// order seeded: `tests/api/mutator.test.ts` leaves a location of
+// `{href: "/", pathname: "/"}` behind, with no origin, and the next file that
+// renders an `<img src="/covers/1.jpg">` gets an error event instead of a
+// load, because a relative URL cannot resolve against it. Three of
+// `CoverImage.test.tsx`'s eight tests then found the placeholder where they
+// expected the cover, with nothing in either file wrong on its own.
+//
+// Restored here rather than in the three files, because the next file to
+// replace it should not have to know this.
+const REAL_LOCATION =
+  typeof window === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(window, "location");
+
+//: The URL the environment starts at, so a test that navigates cannot decide
+//: where the next one begins. Replacing the location object does not restore
+//: this: a navigation changes the real one, and `document.baseURI` follows it.
+const REAL_HREF =
+  typeof window === "undefined" ? undefined : window.location.href;
+
 afterEach(() => {
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
   if (typeof document !== "undefined") cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  if (
+    REAL_LOCATION &&
+    Object.getOwnPropertyDescriptor(window, "location") !== REAL_LOCATION
+  ) {
+    Object.defineProperty(window, "location", REAL_LOCATION);
+  }
+  // **And the URL itself.** Measured under a shared environment: the download
+  // tests leave it at `blob:mock-url`, after which a relative `src` on an image
+  // cannot resolve at all, happy-dom fires `error` instead of loading, and the
+  // next file's cover tests find the placeholder they were checking against.
+  // Several files navigate less dramatically and leave a path behind.
+  //
+  // **Assigned rather than pushed.** `history.pushState` refuses to cross an
+  // origin, and the download tests leave the document on `blob:mock-url`, whose
+  // origin is null: measured, the reset itself then threw a SecurityError and
+  // failed the very file that had navigated. Setting `href` has no such rule.
+  if (REAL_HREF && window.location.href !== REAL_HREF) {
+    window.location.href = REAL_HREF;
+  }
 });
