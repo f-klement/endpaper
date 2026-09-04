@@ -618,9 +618,19 @@ def bounded_fields(record: Record) -> dict[str, Any]:
     `identity_key`, `holds`, `would_refuse`, `remember` and the column all see
     one string.
 
-    `isbn` rides along unbounded because it is bounded already:
+    **Since 2026-09-03 it has already happened one layer further up**, in
+    `catalogue.Record.from_upload`, so `within_bounds` finds nothing left to cut
+    here. Every sentence above still holds: what it describes is where the cut
+    is **observed**, which is still this function, and the property that matters
+    is that matching and storage see the same string. Verified across the move:
+    `within_bounds("title", <501 characters>)` and
+    `bounded_fields(Record.from_upload(title=<501 characters>))["title"]` give
+    equal identity keys, both 500 characters.
+
+    `isbn` rides along unbounded by this function because it is bounded already:
     `metadata._marc_isbn` returns `isbn.parse`'s output or None, which is
-    thirteen digits.
+    thirteen digits. `catalogue.Record` deliberately does **not** bound it, for
+    a reason that has nothing to do with this path: see `catalogue._UNBOUNDED`.
 
     **What matching on a truncated key costs, since it is the obvious
     objection.** Two records whose titles differ only past character 500, by the
@@ -786,15 +796,22 @@ def within_bounds(attribute: str, value: Any) -> Any:
       and `title` is selected on every listing page, every search, the CSV
       export and the backup. On an engine that does enforce it the flush raises
       mid batch and the whole transfer is lost with a 500.
-    * `series_index` is `ge=0, le=1000` on every API path.
-      `metadata._marc_title` reads the first digit run of `245 $n` and calls
-      `float()` on it, so a ten character `$n` stores `1e9`.
-      `routers/books.list_series` then computes `set(range(1, max(held) + 1))`,
-      which at a measured **70.5 bytes and 0.624 seconds per million elements**
-      is roughly **70 GB and ten minutes**: the container is OOM killed, again
-      on the next request, for every member, until somebody finds that row.
-      `year` has the same shape, `le=2200` against a four digit `264 $c`, and
-      `9999` is MARC's own open ended date for a continuing resource.
+    * `series_index` is bounded at `models.MAX_SERIES_INDEX` on the three request
+      bodies that carry it, and not on every API path: `PUT /api/books/{id}/refresh`
+      writes the column through no model at all. `metadata._marc_title` reads the
+      first digit run of `245 $n` and calls `float()` on it, so a ten character
+      `$n` stores `1e9`. `routers/books.list_series` computed
+      `set(range(1, max(held) + 1))` over that column, which at a measured
+      **70.5 bytes and 0.624 seconds per million elements** is roughly **70 GB and
+      ten minutes**: the container was OOM killed, again on the next request, for
+      every member, until somebody found that row. Since 2026-09-03 that handler
+      truncates the range at the same constant, so a row this importer or a restore
+      writes past the ceiling costs the gaps above it and nothing else. **That is
+      the reader's guard and not this one's**: bounding here is still what keeps
+      the row itself sane, and the two are deliberately separate, because a
+      restore validates nothing and a released version cannot be gone back and
+      fixed. `year` has the same shape, `le=2200` against a four digit `264 $c`,
+      and `9999` is MARC's own open ended date for a continuing resource.
 
     **The bounds are read off the declarations, never retyped.**
     `BookCreate.model_fields` carries the `Ge`, `Le` and `MaxLen` the API
@@ -803,15 +820,45 @@ def within_bounds(attribute: str, value: Any) -> Any:
     repository records as wrong on every first attempt: a field added to the
     importer later inherits this without anybody remembering.
 
-    **Both widths are consulted and the smaller wins.** They disagree today:
-    `language` is `max_length=16` on `BookCreate` and `String(10)` in the
-    column. SQLite enforces neither, so the disagreement is invisible until a
-    database that does.
+    **Both widths are consulted and the smaller wins.** Nothing disagrees
+    today: `BookCreate.language` said 16 against a `String(10)` column until
+    2026-09-02, and reading both is what kept this importer right about it
+    while the API was not.
+
+    **Reading both is now a second opinion rather than a safety net**, and the
+    difference is worth stating because the first draft of this paragraph got
+    it backwards. It said the pair going out of step is invisible under SQLite
+    *and* that a test now notices, which cannot both be true. What is true:
+    `tests/schemas/test_book.py` refuses a schema ceiling wider than its
+    column, so for all ten fields in `_MARC_RECORD_FIELDS` the schema is now
+    the smaller and the column read cannot change an outcome. It is kept
+    because it costs nothing and does not depend on that guard continuing to
+    exist.
 
     **Strings truncate, numbers are dropped.** Truncating a title keeps the
     record, which is what a batch wants. Clamping a year of `9999` to 2200 would
     assert a date nobody supplied, so an out of range number is stored as
     absent.
+
+    **Both halves now happen above this function as well, and it is kept.**
+    Since 2026-09-03 every `catalogue.Record` is held to the same declarations at
+    construction, because `PUT /api/books/{id}/refresh` wrote nine columns off
+    one through no model at all. That bound **drops** an over-wide string, which
+    is right for a catalogue asserting something about a book already on the
+    shelf and wrong here, so `marc._record` builds through
+    `catalogue.Record.from_upload`, which cuts the readable strings first. By
+    the time a value reaches this function it is therefore already inside its
+    column and this truncation finds nothing to do.
+
+    **One divergence, and it is deliberate.** That door drops rather than cuts
+    the strings a truncation would rename: a URL, a Google volume id and a
+    language code. Only `language` is in `_MARC_RECORD_FIELDS`, so only
+    `language` changes here, from a ten character prefix of whatever `041 $a`
+    held to nothing. `metadata._marc_language` reads a three letter code, so no
+    real file reaches it. It stays because the guard is cheap,
+    because it is what a value arriving from anywhere but that reader would
+    still meet, and because the two read their widths from the same
+    declarations rather than from each other.
 
     **Every field the importer writes derives a bound, and one did not.**
     `description` is a `Text` column, which reports no length, and

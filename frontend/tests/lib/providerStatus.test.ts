@@ -62,6 +62,10 @@ function everyRow(): CatalogueSourceOut[] {
       const row = {
         source: "nlg",
         serves_groups,
+        // Not one of `FLAGS`, deliberately: it is a second axis rather than
+        // another bit of this one, and the test below sweeps it separately by
+        // flipping it over every row here.
+        slow: false,
       } as unknown as CatalogueSourceOut;
       FLAGS.forEach((flag, index) => {
         (row as unknown as Record<string, boolean>)[flag] =
@@ -148,6 +152,30 @@ describe("the line under a catalogue", () => {
       "providers.status.off",
     );
   });
+
+  /**
+   * **`slow` is a second axis and this chain has one.** It can co-occur with
+   * every value here except the two lookup only ones and `off`, so an arm for
+   * it would have to sit above five arms and swallow what they say, or below
+   * them and never fire for a promoted, regional or keyless slow catalogue.
+   * That is the `lookupOnlyRegional` defect this module's docstring records,
+   * one orthogonality later.
+   *
+   * So it is drawn as its own line and this holds the chain to ignoring it.
+   * Over the whole field space rather than an example, because the failure
+   * would be one arm reading it, not the shape of the chain.
+   */
+  it("says nothing different about a catalogue because it is slow", () => {
+    const differing = everyRow().filter(
+      (line) =>
+        statusOf({ ...line, slow: true }) !==
+        statusOf({ ...line, slow: false }),
+    );
+
+    expect(differing).toEqual([]);
+    // Anti vacuity: the sweep has to have had something to compare.
+    expect(everyRow().length).toBeGreaterThan(0);
+  });
 });
 
 function row(over: Partial<CatalogueSourceOut>): CatalogueSourceOut {
@@ -156,6 +184,7 @@ function row(over: Partial<CatalogueSourceOut>): CatalogueSourceOut {
     enabled: true,
     answers_lookup: true,
     answers_search: true,
+    slow: false,
     asked_first: false,
     needs_a_key: false,
     has_key: true,

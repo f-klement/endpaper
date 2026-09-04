@@ -402,7 +402,7 @@ def update_settings(
 
     if payload.catalogue_sources is not None:
         # Merged against what is stored rather than taken whole: a payload that
-        # names one source must not be read as switching the other six on. See
+        # names one source must not be read as switching the other eight on. See
         # `sources.from_wire`.
         _store(
             db,

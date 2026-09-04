@@ -43,8 +43,12 @@ Four schemes are stored: Dewey and Library of Congress shelf numbers, the
 subject headings the German National Library assigns, each with the identifier
 that names it in the national authority file, and Library of Congress Subject
 Headings, which the record supplies as a phrase rather than a number. A book shows
-the headings it carries, any of them can be filtered on, and a shelf can be ordered
-by its Dewey numbers.
+the headings it carries and any of them can be filtered on. Each scheme also names a
+**filing rule**, which is how its call numbers sort: a Dewey number files as its own
+text, a Library of Congress one files by class letters then class number, so that
+`BF75` stands before `BF575` as it does on a shelf, and a scheme with no rule of its
+own files as text and offers no shelf order at all. A shelf can be ordered by either
+of the two schemes that place a book on one.
 
 **A provider list.** Every catalogue this build can ask is listed in Settings, with a
 switch and a position. Off means not asked, not deprioritised. The order is the order they
@@ -175,7 +179,11 @@ whose volume vanished reports unhealthy rather than staying green.
 Ten palettes, light and dark, decorated papers, and a per account choice.
 English and German throughout, the seeded tag vocabulary included: a predefined
 tag reads in the language you chose, while a tag you invented or renamed is
-shown exactly as you typed it. Installable as a PWA. Keyboard reachable, and
+shown exactly as you typed it. The German is written so that the app
+addresses the reader in neither `du` nor `Sie`, so the same catalogue reads
+correctly in a household and in a library without either being told which it
+is. One button says "Überrasch mich", which is the reader addressing the app
+and not the other way round. Installable as a PWA. Keyboard reachable, and
 tested for it.
 
 The book page folds into sections whose defaults follow the book: a loan section
@@ -216,7 +224,9 @@ lending willingness and reading status out. Which columns the table draws is
 chosen from that set and remembered separately for each mode, so turning the
 mode on and off does not rearrange a household's catalogue. The call number is
 Dewey and Library of Congress, the two schemes that place a book on a shelf, and
-it sorts by the Dewey number rather than by the text in the cell. It publishes
+it sorts by neither the text in the cell nor by one scheme's rule applied to
+both: each scheme declares how its own numbers file, and pressing the header
+cycles the shelf orders and names the one it is reading. It publishes
 nothing. The publish switch is a
 second, separate decision, and a library running library mode internally without
 publishing is the common case rather than an edge one. Publishing is refused by

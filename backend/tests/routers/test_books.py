@@ -11,7 +11,15 @@ import httpx
 import pytest
 import respx
 
-from models import Tag
+import catalogue
+from models import (
+    DESCRIPTION_MAX,
+    MAX_PAGE_NUMBER_IN_A_BOOK,
+    PUBLISHER_MAX,
+    SUBTITLE_MAX,
+    TITLE_MAX,
+    Tag,
+)
 from tests.helpers import (
     JPEG_BYTES,
     NOT_AN_IMAGE,
@@ -813,6 +821,42 @@ class TestCoverUpload:
         assert res.status_code == 404
 
 
+@pytest.fixture
+def open_library_oversized():
+    """Open Library answers with values no column on the Book can hold.
+
+    A broken or compromised upstream rather than a hostile Member: this is the
+    only way values of this shape reach the refresh route, which writes nine
+    columns straight off the record.
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
+        mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
+        silence_oenb(mock)
+        silence_nlg(mock)
+        silence_nkp(mock)
+        mock.get(OPEN_LIBRARY_ISBN).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "title": "T" * (TITLE_MAX + 1),
+                    "subtitle": "S" * (SUBTITLE_MAX + 1),
+                    "publishers": ["P" * (PUBLISHER_MAX + 1)],
+                    "publish_date": "April 10, 1925",
+                    "description": {"value": "D" * (DESCRIPTION_MAX + 1)},
+                    "number_of_pages": MAX_PAGE_NUMBER_IN_A_BOOK + 1,
+                },
+            )
+        )
+        mock.get(url__startswith="https://covers.openlibrary.org/").mock(
+            return_value=httpx.Response(
+                200, content=JPEG_BYTES, headers={"content-type": "image/jpeg"}
+            )
+        )
+        silence_covers(mock)
+        yield mock
+
+
 class TestRefreshMetadata:
     def test_overwrites_fields_from_the_source(self, client, admin, make_book, open_library_hit):
         book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
@@ -847,6 +891,54 @@ class TestRefreshMetadata:
 
     def test_unknown_book_is_404(self, client, admin):
         assert client.put("/api/books/9999/refresh", headers=admin["headers"]).status_code == 404
+
+    def test_a_value_no_column_can_hold_costs_that_field_and_not_the_refresh(
+        self, client, admin, make_book, open_library_oversized
+    ):
+        """The ticket, end to end. Nine columns are written straight off the
+        record here and eight had no ceiling in the schema, in the model or in
+        SQLite, which does not enforce a `VARCHAR` length."""
+        book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
+
+        res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert res.status_code == 200
+        body = res.json()
+        assert body["subtitle"] is None
+        assert body["publisher"] is None
+        assert body["description"] is None
+        assert body["page_count"] is None
+
+    def test_a_title_the_column_cannot_hold_leaves_the_stored_one_alone(
+        self, client, admin, make_book, open_library_oversized
+    ):
+        """`title` is the Book's one `NOT NULL` text column, and the handler
+        writes `record.title or book.title`, so an unusable title costs nothing
+        rather than emptying the row."""
+        book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
+
+        res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert res.json()["title"] == "Stale"
+
+    def test_nothing_the_refresh_stores_is_wider_than_its_column(
+        self, client, admin, make_book, open_library_oversized
+    ):
+        """Asserted over the whole ceiling table rather than over the fields
+        this fixture happens to oversize, so a column added to it is covered
+        without this test being edited."""
+        book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
+
+        body = client.put(
+            f"/api/books/{book['id']}/refresh", headers=admin["headers"]
+        ).json()
+
+        too_wide = {
+            name: len(body[name])
+            for name, ceiling in catalogue._TEXT_CEILINGS.items()
+            if isinstance(body.get(name), str) and len(body[name]) > ceiling
+        }
+        assert too_wide == {}
 
 
 class TestNotes:

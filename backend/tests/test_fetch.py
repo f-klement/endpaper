@@ -74,7 +74,8 @@ def _concurrent_search_sources() -> int:
     this pins against a 512Mi pod. A count taken from whatever happened to be
     enabled would make the memory bound depend on a settings row.
 
-    What keeps the two in step is `test_house_rules.TestTheProviderRosterIsOneList`,
+    What keeps the two in step is
+    `test_house_rules.TestEveryTargetResolvesToADoorAndAReader`,
     which pins the fan out's own table of search adapters equal to
     `sources.SEARCH_SOURCES`. Without it a source could be added to one and not
     the other, and this count would follow the wrong one.
@@ -360,12 +361,12 @@ class TestTheCapIsTheWholePoint:
         """The header is half the fix, and it is the half a reader cannot see.
 
         `aiter_raw` alone would leave every honest body arriving gzipped and
-        unparseable. Measured live, all eight catalogues answer 200 under
+        unparseable. Measured live, all nine catalogues answer 200 under
         `identity`; four of them gzip when it is not sent. The names and the
         byte counts are in `fetch._IDENTITY`, which is where they belong:
         restating them here is what left this sentence saying six and three
-        after a seventh source was added, and it went stale again at the
-        eighth.
+        after a seventh source was added, then again at the eighth, and again
+        at the ninth, where `test_roster_counts.py` caught it.
         """
         with respx.mock:
             route = respx.get(URL).mock(return_value=httpx.Response(200))
@@ -678,7 +679,8 @@ class TestTheRedirectPolicy:
     async def test_a_redirect_off_the_host_is_refused(self, location):
         """The SSRF this module has, and the only one.
 
-        `_LOC_URL` is plaintext `http://lx2.loc.gov:210`, so forging this needs
+        `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext
+        `http://lx2.loc.gov:210`, so forging this needs
         no compromised catalogue: anyone on the path, or anyone answering DNS
         for the pod, can send back a 302.
         """
@@ -758,7 +760,8 @@ class TestTheRedirectPolicy:
         caught it**, so one hostile source 500s `GET /api/books/search` instead
         of being dropped. The unit is the block rather than the call, and
         `fetch._walk_hops` carries the count and how it was taken. Both
-        spellings here are plain ASCII on the wire, and `_LOC_URL` is plaintext
+        spellings here are plain ASCII on the wire, and
+        `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext
         HTTP, so forging it needs no TLS.
         """
         with respx.mock:

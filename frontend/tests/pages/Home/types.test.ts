@@ -63,13 +63,14 @@ describe("hasActiveFilters", () => {
 });
 
 describe("the sort options", () => {
-  it("offers Dewey, and offers it as its own value rather than a general one", () => {
-    // Named for the scheme because only Dewey sorts: a Library of Congress
-    // call number does not sort as text. `docs/decisions.md` carries the
-    // measurement.
+  it("offers each shelf order as its own value rather than one general one", () => {
+    // Named for the scheme because a scheme decides how its numbers sort. An
+    // LCC call number does not sort as text, so it files under its own rule in
+    // `backend/filing.py` rather than under Dewey's.
     const values = SORT_OPTIONS.map((option) => option.value);
 
     expect(values).toContain(BookSort.ddc);
+    expect(values).toContain(BookSort.lcc);
   });
 
   it("offers every sort the API accepts", () => {

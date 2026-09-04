@@ -7,7 +7,8 @@ import type {
   SettingsUpdate,
 } from "../../../../api/generated/model";
 import { Button, Icon } from "../../../../components";
-import { useTranslation, type MessageKey } from "../../../../i18n";
+import { useTranslation } from "../../../../i18n";
+import { catalogueName } from "../../../../lib/catalogueName";
 import { statusOf } from "../../../../lib/providerStatus";
 import { SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
@@ -157,7 +158,7 @@ export default function ProviderSection({
     }
     setAnnouncement(
       t("providers.moved", {
-        name: t(sourceName(moving.source)),
+        name: t(catalogueName(moving.source)),
         position: String(to + 1),
         total: String(next.length),
       }),
@@ -179,6 +180,14 @@ export default function ProviderSection({
       <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("providers.costHint")}
       </p>
+      {/* **Only when a row carries it.** The marking is empty on the shipped
+          roster, and a paragraph explaining a group this install has nobody in
+          reads as a setting somebody has lost. */}
+      {rows.some((row) => row.slow) && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("providers.slowLegend")}
+        </p>
+      )}
 
       <ul className="space-y-3">
         {rows.map((row, index) => (
@@ -192,7 +201,7 @@ export default function ProviderSection({
           >
             <div className="min-w-0 flex-1">
               <ToggleField
-                label={t(sourceName(row.source))}
+                label={t(catalogueName(row.source))}
                 hint={t(statusOf(row), {
                   groups: groups.format(row.serves_groups),
                 })}
@@ -200,6 +209,21 @@ export default function ProviderSection({
                 disabled={false}
                 onChange={(checked) => setEnabled(index, checked)}
               />
+              {/* **A second line rather than an eighth arm in `statusOf`.**
+                  Slow co-occurs with almost every value that chain returns: a
+                  slow catalogue can also need a key, sit in the leading pair, or
+                  carry a regional remit. One line per row would have to swallow
+                  one of those or never fire for it, which is the defect
+                  `lib/providerStatus.ts` records having shipped once already.
+
+                  It also says the thing the ticket asked this section for: off
+                  because it is slow reads differently from off because it is
+                  broken, and only if the screen says which. */}
+              {row.slow && (
+                <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+                  {t("providers.slow")}
+                </p>
+              )}
             </div>
             <div className="flex shrink-0 gap-1">
               {/* **Not disabled while a save is in flight.** The local list is
@@ -215,7 +239,7 @@ export default function ProviderSection({
                 }}
                 disabled={index === 0}
                 aria-label={t("providers.moveUp", {
-                  name: t(sourceName(row.source)),
+                  name: t(catalogueName(row.source)),
                 })}
                 onClick={() => move(index, -1)}
               >
@@ -229,7 +253,7 @@ export default function ProviderSection({
                 }}
                 disabled={index === rows.length - 1}
                 aria-label={t("providers.moveDown", {
-                  name: t(sourceName(row.source)),
+                  name: t(catalogueName(row.source)),
                 })}
                 onClick={() => move(index, 1)}
               >
@@ -268,8 +292,3 @@ const SAVE_DELAY_MS = 600;
 
 /** Stable, so an absent list cannot make a new array on every render. */
 const NO_SOURCES: CatalogueSourceOut[] = [];
-
-/** The catalogue's name, which is a proper noun and is not translated. */
-function sourceName(source: CatalogueSource): MessageKey {
-  return `providers.name.${source}` as MessageKey;
-}

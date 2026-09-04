@@ -29,5 +29,6 @@ export interface CatalogueSourceOut {
   needs_a_key: boolean;
   ready: boolean;
   serves_groups: string[];
+  slow: boolean;
   source: CatalogueSource;
 }

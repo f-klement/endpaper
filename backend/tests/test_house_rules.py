@@ -8,8 +8,10 @@ again".
 
 import ast
 import copy
+import dataclasses
 import inspect
 import re
+import warnings
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, get_args
@@ -20,6 +22,7 @@ from sqlalchemy import CheckConstraint
 
 import metadata
 import sources
+import targets
 from enums import CatalogueSource
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -39,10 +42,22 @@ BACKEND = Path(__file__).resolve().parent.parent
 #: `.venv`, `.uv-cache`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache` and whatever is
 #: next without an edit here. `__pycache__` and `node_modules` are the two that carry no
 #: dot and so still have to be named.
-def _is_vendored(path: Path) -> bool:
+#:
+#: **`root` exists because the same lesson was learned twice.** This rule was written
+#: here, and `test_roster_counts.py` was written later with a name list of its own that
+#: did not include `.uv-cache`. It went red on ten of twenty pushes to `main` and never
+#: locally, on third party prose inside the cache: a Pygments lexer and a charset detector
+#: each carry a small number beside a word the census reads as a roster noun, and it had no
+#: verdict for either. Same environment difference, same enumeration, a different file.
+#: **The first draft of this comment quoted both phrases and the census then reported the
+#: comment**, which is the same recursion the dash table at the root records: a note about
+#: a count contains the count. It takes a root so one rule can serve a walk from
+#: `backend/` and a walk from the repository, rather than being stated twice and drifting
+#: twice.
+def _is_vendored(path: Path, root: Path = BACKEND) -> bool:
     return any(
         part.startswith(".") or part in {"__pycache__", "node_modules"}
-        for part in path.relative_to(BACKEND).parts
+        for part in path.relative_to(root).parts
     )
 
 
@@ -60,6 +75,40 @@ def _python_sources() -> list[Path]:
 def _test_sources() -> list[Path]:
     """Every file in the test tree. `_python_sources` deliberately excludes it."""
     return [path for path in (BACKEND / "tests").rglob("*.py") if not _is_vendored(path)]
+
+
+def _every_python_file() -> list[Path]:
+    """Every Python file under `backend/`, wider than both walks above.
+
+    The two above drop the tests, and `_python_sources` drops the migrations
+    too, because the rules that walk them are about application semantics and a
+    fixture or a generated revision has no share in those. The compile rule at
+    the foot of this file is the one exception, and the reason is that its
+    failure is at import: a file that will not compile takes whatever imports
+    it, so a migration stops `upgrade_to_head()` and a test module takes every
+    guard in it. Which walk returned the file changes nothing about that.
+
+    One walk and one exclusion, rather than `_python_sources() +
+    _test_sources() + something for the migrations`, which is a list of three
+    directory names whose fourth member nobody would remember to add.
+
+    **The boundary is `backend/` rather than the repository.** Eleven tracked
+    `.py` files live outside it, one under `frontend/scripts/` and ten under
+    tooling directories this suite does not own. All eleven compile clean,
+    measured 2026-09-02 on CPython 3.14.0, so the gap is worth knowing about
+    rather than urgent. It is deliberately not closed from here: `BACKEND`
+    anchors every walk in this file, and a rule reaching out of its own tree
+    would report against code this suite has no claim on, in a checkout that may
+    not even contain it.
+
+    **`rglob`, so this is the working tree and not what git tracks.** An
+    untracked file under `backend/` is compiled and reported, which is wanted:
+    the suite runner ships the working tree, so a defect is seen before it is
+    committed, where `git archive HEAD` cannot see it at all. The publishing
+    tooling uses "ships" for that opposite sense, which is why the name here says
+    `backend/` and the word is left to it.
+    """
+    return [path for path in BACKEND.rglob("*.py") if not _is_vendored(path)]
 
 
 def _docstring_nodes(tree: ast.Module) -> set[ast.AST]:
@@ -158,7 +207,7 @@ def _is_route_handler(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 class TestTheSourceWalkSeesOnlyThisProject:
-    """Every rule in this file walks `_python_sources()`, so its reach is a rule too.
+    """Every rule in this file walks one of the source lists, so their reach is a rule too.
 
     Written after `.uv-cache/` cost two red pipelines against a green local suite. Every
     guard here reports a module by path, so a walk that reaches vendored code reports
@@ -171,7 +220,7 @@ class TestTheSourceWalkSeesOnlyThisProject:
         # `cyclonedx/model/contact.py` were reported for reading a member's address.
         outside = [
             str(path.relative_to(BACKEND))
-            for path in _python_sources() + _test_sources()
+            for path in _python_sources() + _test_sources() + _every_python_file()
             if path.suffix == ".py"
             and any(
                 part.startswith(".") or part in {"__pycache__", "node_modules"}
@@ -196,6 +245,22 @@ class TestTheSourceWalkSeesOnlyThisProject:
         assert _is_vendored(BACKEND / "__pycache__" / "mod.py")
         assert not _is_vendored(BACKEND / "shelf.py")
         assert not _is_vendored(BACKEND / "routers" / "loans.py")
+
+    def test_the_rule_holds_from_a_different_root(self) -> None:
+        """`root` is what lets the census reuse this instead of restating it.
+
+        The census walks from the repository, so it sees `backend/.uv-cache/...`
+        with the dotted part one level deeper than this file's own walk does.
+        Passing the wrong root is not a silent miss, it raises `ValueError`, so
+        the failure of a future caller is loud rather than vacuous.
+        """
+        repo = BACKEND.parent
+
+        assert _is_vendored(BACKEND / ".uv-cache" / "pygments" / "lexers.py", repo)
+        assert not _is_vendored(BACKEND / "shelf.py", repo)
+        assert not _is_vendored(repo / "frontend" / "src" / "main.tsx", repo)
+        with pytest.raises(ValueError):
+            _is_vendored(repo / "frontend" / "src" / "main.tsx")
 
 
 class TestEveryNumericQueryParamIsBoundedBothWays:
@@ -557,7 +622,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **90** models under `schemas/`, **31** of
+    Measured on the tree as it stands: **91** models under `schemas/`, **31** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -1622,11 +1687,23 @@ class TestNoFixtureLooksLikeACredential:
     into a URL path. The fixture was never a live credential and that did not
     matter, because nobody triaging an alert can tell from the outside.
 
-    Both test trees are published, so this is a rule about what ships rather
+    Everything published is published, so this is a rule about what ships rather
     than about what is true.
 
-    **This arm walks one of those two trees**, `backend/tests/`, because
-    `_test_sources()` is what it has. The frontend half is
+    **These arms walk every Python file under `backend/`.** They walked
+    `backend/tests/` alone until 2026-09-02, and the sentence here justified that
+    by saying `_test_sources()` was what they had. `_every_python_file()` landed
+    with the compile rule at the foot of this file and made that false, so the
+    scope moved rather than the excuse: the application modules and the
+    migrations ship to the mirror exactly as the fixtures do, and `models.py` is
+    as public as a fixture is. The widening was free, **99 further files and 0
+    offenders on both arms, measured 2026-09-02** with a planted token and a
+    planted address confirming the scan still sees one. That is the guard's own
+    argument three paragraphs down, applied to itself.
+
+    The class is still named for the shape it forbids rather than the tree it
+    walks, which is why the name did not move with the scope. The frontend half
+    is
     `frontend/tests/houseRules.test.ts`, "no fixture or string carries an
     address outside reserved space", and it walks `src/` as well as `tests/`
     because `src/i18n/en.ts` ships a placeholder address in published source. A
@@ -1684,20 +1761,38 @@ class TestNoFixtureLooksLikeACredential:
             domain == base or domain.endswith("." + base) for base in self.RESERVED
         )
 
-    def test_no_test_file_contains_a_realistic_bot_token(self):
+    def test_no_published_file_contains_a_realistic_bot_token(self):
         pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
         offenders: list[str] = []
-        for path in _test_sources():
+        paths = _every_python_file()
+        # **The scope is asserted on the list this loop iterates**, not on a
+        # fresh call, which would pin the helper's reach rather than this arm's
+        # use of it. Both walks report zero today, so reverting this line to
+        # `_test_sources()` changes no verdict and silently drops the
+        # application modules and the migrations. That is the same guard, and
+        # the same reasoning, as `test_every_python_file_under_backend_compiles_clean`.
+        assert any("migrations" in path.parts for path in paths)
+        assert any(path.name == "models.py" for path in paths)
+        for path in paths:
             relative = str(path.relative_to(BACKEND))
             if relative in self.ALLOWED:
                 continue
-            for number, line in enumerate(path.read_text().splitlines(), 1):
+            # **Decoded explicitly, not through the locale.** `_offences` reads
+            # bytes for this reason and this arm now walks the same 173 files:
+            # `read_text()` uses `locale.getencoding()` and raises
+            # `UnicodeDecodeError` on a latin-1 cookied file that compiles
+            # perfectly well, which is the scan failing rather than the file.
+            # `errors="replace"` because this is looking for a shape, so a
+            # replacement character in an undecodable byte costs nothing and a
+            # traceback costs the whole run.
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for number, line in enumerate(text.splitlines(), 1):
                 if pattern.search(line):
                     offenders.append(f"{relative}:{number}")
 
         assert not offenders, (
-            "These carry a string shaped like a live Telegram bot token, and both "
-            f"test trees are published. Use {FAKE_BOT_ID!r} as the bot id: it "
+            "These carry a string shaped like a live Telegram bot token, and this "
+            f"tree is published. Use {FAKE_BOT_ID!r} as the bot id: it "
             "satisfies the validator and cannot be mistaken for a credential. "
             f"{sorted(offenders)}"
         )
@@ -1711,13 +1806,19 @@ class TestNoFixtureLooksLikeACredential:
         """
         return re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
 
-    def test_no_test_file_carries_an_address_outside_reserved_space(self):
+    def test_no_published_file_carries_an_address_outside_reserved_space(self):
         offenders: list[str] = []
-        for path in _test_sources():
+        paths = _every_python_file()
+        # Pinned the same way and for the same reason as the arm above.
+        assert any("migrations" in path.parts for path in paths)
+        assert any(path.name == "models.py" for path in paths)
+        for path in paths:
             relative = str(path.relative_to(BACKEND))
             if relative in self.ALLOWED:
                 continue
-            for number, line in enumerate(path.read_text().splitlines(), 1):
+            # Decoded the same way and for the same reason as the arm above.
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for number, line in enumerate(text.splitlines(), 1):
                 for address in self._addresses(line):
                     domain = address.rsplit("@", 1)[1].lower()
                     if not self._is_reserved(domain):
@@ -1725,7 +1826,7 @@ class TestNoFixtureLooksLikeACredential:
 
         assert not offenders, (
             "These carry an address outside the domains reserved for documentation, "
-            "and both test trees are published, so a stranger cannot tell them from "
+            "and this tree is published, so a stranger cannot tell them from "
             "somebody's real mailbox. Use example.org, example.com, example.net or "
             f"a .test / .invalid name: {sorted(offenders)}"
         )
@@ -2340,41 +2441,73 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
 
 
 
-class TestTheProviderRosterIsOneList:
-    """One roster, and every table that dispatches on a source agrees with it.
+class TestEveryTargetResolvesToADoorAndAReader:
+    """One roster, and every row in it names something this application implements.
 
-    **The rule the provider list rests on.** `sources.parse` guarantees a plan
-    holds only members of `CatalogueSource`, and `metadata` then subscripts two
-    tables with those members. If either table and the roster drift apart the
-    failure is a `KeyError` on the path that adds a book, which is the worst
-    place in this application to discover a typo.
+    **The successor to `TestTheProviderRosterIsOneList`, and the shape of the
+    question changed with it.** That test compared `metadata`'s two dispatch
+    tables, keyed on `CatalogueSource`, against the sets in `sources`. Both
+    tables are keyed on `targets.Reader` now and one reader serves three sources,
+    so the comparison cannot be restated: which sources answer what is a field on
+    a row, and `sources.LOOKUP_SOURCES` and `SEARCH_SOURCES` are derived from
+    those fields rather than written beside them, so there is nothing left for
+    two lists to disagree about.
 
-    Compared at **runtime** rather than by reading the source with `ast`, and
-    that is the lesson rather than a preference: the guard in `test_fetch.py`
-    that counted the search fan out read a list literal out of `metadata.search`
-    and stopped being able to when the fan out became a comprehension over the
-    library's own list. A dictionary a test can import cannot go stale that way.
+    What is left to check is what the old test was really asking underneath:
+    **is there code that can serve what this row claims.** `metadata.resolve` is
+    that question and it is a function rather than only a test, because
+    `main.seed_catalogue_targets` calls it on every row before writing it, so a
+    reader nothing implements fails the boot rather than a member's scan.
+
+    Compared at **runtime** rather than by reading the source with `ast`, which
+    is the lesson the old test carried and this one keeps: the guard in
+    `test_fetch.py` that counted the search fan out read a list literal out of
+    `metadata.search` and stopped being able to when the fan out became a
+    comprehension. A table a test can import cannot go stale that way.
     """
 
-    def test_every_source_that_answers_an_isbn_has_a_lookup_adapter(self):
-        assert set(metadata._SOURCES) == sources.LOOKUP_SOURCES
+    def test_every_seeded_row_resolves(self):
+        for target in targets.SEEDED.values():
+            metadata.resolve(target)
 
-    def test_every_source_that_answers_a_title_has_a_search_adapter(self):
-        """The two dispatch tables together are the whole search roster.
+    def test_a_capability_with_no_reader_behind_it_is_refused(self):
+        """The diagonal: `resolve` must report, not merely not raise.
 
-        **Against the tables, not against `sources.METERED`**, and that was a
-        correction. Comparing `set(_FREE_SEARCHES) | METERED` was satisfied by a
-        metered source with **no adapter anywhere**, which the dispatch would
-        then have sent to the free table and raised a `KeyError` on.
+        Both arms, because a version that checked only the lookup passed with
+        the search arm deleted. The row is otherwise valid, so what fails is the
+        pairing of a capability with a reader, which is the only thing this
+        function knows.
         """
-        assert set(metadata._FREE_SEARCHES) | set(
-            metadata._METERED_SEARCHES
-        ) == sources.SEARCH_SOURCES
+        readable = targets.SEEDED[CatalogueSource.LOC]
+        with pytest.raises(ValueError):
+            metadata.resolve(
+                dataclasses.replace(readable, reader=targets.Reader.OPEN_LIBRARY)
+            )
+        bespoke = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
+        with pytest.raises(ValueError):
+            metadata.resolve(
+                dataclasses.replace(bespoke, reader=targets.Reader.MARC_GND)
+            )
 
-    def test_the_metered_table_holds_exactly_the_metered_sources(self):
-        assert set(metadata._METERED_SEARCHES) == sources.METERED
+    def test_the_derived_sets_are_the_rows(self):
+        """Not a restatement of the derivation: it names the roster's answer.
 
-    def test_no_source_is_in_both_search_tables(self):
+        A derivation compared against itself is vacuous, so this writes out what
+        the nine rows actually say. A row whose capability changes has to change
+        this line too, which is the argument the old test made for writing
+        `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
+        it still costs nothing.
+        """
+        assert {source.value for source in sources.LOOKUP_SOURCES} == {
+            "dnb", "k10plus", "oenb", "nlg", "nkp", "open_library", "google_books",
+        }
+        assert {source.value for source in sources.SEARCH_SOURCES} == {
+            "dnb", "k10plus", "oenb", "nlg", "open_library", "google_books",
+            "bnf", "loc",
+        }
+        assert {source.value for source in sources.METERED} == {"google_books"}
+
+    def test_no_reader_is_in_both_search_tables(self):
         """Or a key-needing source would be asked through the keyless path."""
         assert not set(metadata._FREE_SEARCHES) & set(metadata._METERED_SEARCHES)
 
@@ -2453,9 +2586,24 @@ class TestNoModuleHardCodesASourceOrder:
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
       field. Deliberately not reachable from the settings list.
-    * `metadata._SOURCES` and `metadata._FREE_SEARCHES`, the dispatch tables.
-      They are mappings rather than orders, and `TestTheProviderRosterIsOneList`
-      is what keeps them equal to the roster.
+    * `targets.SEEDED`, the nine catalogue rows. **A mapping consulted by key**,
+      the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
+      `SEEDED[name]`, and the four derivations in `sources.py` build
+      `frozenset`s, which have no order to read. The order a household gets is
+      still `DEFAULT_ORDER`'s, and the copy of it that lives on the rows is
+      `Target.rank`, a field on the value rather than the key order, pinned
+      against `DEFAULT_ORDER` by
+      `test_targets.py::TestTheSeededRosterSaysWhatTheRulesSay::test_rank_is_the_default_order`.
+      So the literal's key order is decoration and the guard cannot see that, which
+      is what an exemption is for.
+
+      **Two exemptions left when this one arrived**, and their disappearance is
+      the thing to notice rather than this one's arrival: `metadata._lookup_one` and
+      `metadata._FREE_SEARCHES` were dispatch tables keyed on a source, and there
+      is no such table any more. Both are keyed on `targets.Reader` now, one
+      reader serves three sources, and a dict of four readers is not an order of
+      sources in any spelling, so the guard no longer reports them and an
+      exemption for them would have no subject.
     * `sources.TAIL_MARGINAL`, how many books the leading tier missed that each
       source asked in turn answers. `MEASURED`'s case exactly: a table of
       measurements keyed on a source, whose completeness is pinned by
@@ -2514,7 +2662,8 @@ class TestNoModuleHardCodesASourceOrder:
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
         "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL", "SERVES_GROUPS"},
-        "metadata.py": {"_MATCH_PRECEDENCE", "_SOURCES", "_FREE_SEARCHES"},
+        "metadata.py": {"_MATCH_PRECEDENCE", "_BESPOKE_LOOKUPS"},
+        "targets.py": {"SEEDED"},
     }
 
     def _offenders(self, paths: list[Path] | None = None) -> dict[str, set[str]]:
@@ -2658,7 +2807,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     def test_every_exemption_still_exists_to_be_exempted(self):
         """An allowlist entry for a deleted constant guards nothing."""
-        owners = {"sources.py": sources, "metadata.py": metadata}
+        owners = {"sources.py": sources, "metadata.py": metadata, "targets.py": targets}
         for module, allowed in self.ALLOWED.items():
             for name in allowed:
                 assert hasattr(owners[module], name), (
@@ -2675,8 +2824,18 @@ class TestNoModuleHardCodesASourceOrder:
         first version asserted `module in offenders`, so the name promised more
         than it checked: four exemptions could all have surfaced the same
         literal and it would have passed. Now each drop must produce exactly one
-        literal for its module, and the four must be distinct, which is what
-        "only its own" says.
+        literal for its module, and they must be distinct, which is what "only
+        its own" says.
+
+        **Distinct as a module and a literal together, not as a literal**, and
+        that correction was bought by an exemption arriving in a third module.
+        `sources.DEFAULT_ORDER` and `targets.SEEDED` both name the whole roster,
+        so they surface the identical joined string while sitting in different
+        files and pinning different constants. Comparing the strings alone read
+        that as neither being pinned. The offenders map is keyed by module, so
+        the identity of a surfaced literal is the pair; the old spelling was a
+        unit that had never had two modules producing one literal to be wrong
+        about.
         """
         surfaced: dict[str, frozenset[str]] = {}
         for module, allowed in self.ALLOWED.items():
@@ -2691,7 +2850,9 @@ class TestNoModuleHardCodesASourceOrder:
                     f"{module}:{name} surfaced {sorted(reported)}; dropping one "
                     "exemption should surface exactly that constant's literal"
                 )
-                surfaced[f"{module}:{name}"] = frozenset(reported)
+                surfaced[f"{module}:{name}"] = frozenset(
+                    f"{module}:{literal}" for literal in reported
+                )
 
         assert len(set(surfaced.values())) == len(surfaced), (
             "two exemptions surface the same literal, so neither is pinned by "
@@ -2712,14 +2873,19 @@ def _source_named(
     both were invisible. The first is the aliased-import shape this repository
     has already been caught by once.
 
-    **The cost is a false positive and it is stated rather than glossed.** Any
-    attribute whose name is a member counts, so an unrelated enum with a
-    colliding member is reported: `(Region.LOC, Region.BNF)` is reported today,
-    measured. `LOC`, `DNB` and `BNF` are short enough to collide with a
-    location, a line count or a bank. No enum in `enums.py` collides now, so it
-    is latent. It is still the right trade, because the alternative is resolving
-    aliases by following imports, and because a false positive fails loudly and
-    is cleared in a minute where a miss is silent and permanent.
+    **The cost is a false positive, and it stopped being latent.** Any attribute
+    whose name is a member counts, so an unrelated enum with a colliding member
+    is reported. This paragraph used to say no enum collided and that the cost
+    was therefore hypothetical; `targets.Reader` collides on `OPEN_LIBRARY` and
+    `GOOGLE_BOOKS`, because a reader is named after the one catalogue it reads,
+    and `metadata._BESPOKE_LOOKUPS` is reported for it. That is the exemption in
+    `ALLOWED` and it is a false positive rather than an order.
+
+    It is still the right trade, because the alternative is resolving aliases by
+    following imports, and because a false positive fails loudly and is cleared
+    in a minute where a miss is silent and permanent. What it costs is stated
+    rather than glossed: the guard cannot see a real source order written inside
+    that one table, and nothing else can either.
 
     **It recurses one level into a tuple or list**, because an order carrying a
     weight per source, `(("dnb", 1.0), ("k10plus", 0.9))`, is exactly how a
@@ -2780,7 +2946,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     it against.
 
     **Public, deliberately.** The private helpers each source is fetched with
-    (`_dnb_search`, `_open_library`) take no plan and must not: they are called
+    (the DNB title search, `_open_library`) take no plan and must not: they are called
     only from the two functions that have already filtered, and requiring one of
     them too would put the same decision in two places.
     """
@@ -2788,7 +2954,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     #: The entry points as they stand. Named so that a **removed** door fails
     #: this too: a rule that only checks what it finds passes happily on a file
     #: whose subject has been deleted, which has happened twice in this suite.
-    DOORS = {"lookup", "search", "editions", "candidates"}
+    DOORS = {"lookup", "search", "title_search", "editions", "candidates"}
 
     def _public_coroutines(self) -> dict[str, set[str]]:
         tree = ast.parse((BACKEND / "metadata.py").read_text())
@@ -2911,21 +3077,18 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
     and cannot tell a trailing comment from a pattern. Recount by walking the
     tree, in a paragraph whose whole subject is a claim wider than its evidence.
 
-    **The instrument that would have caught this rule's own defect does not
-    exist here.** The paragraph above shipped with a bare `\d` in a non raw
-    docstring, which CPython warns about and this suite never sees, because
-    `pyproject.toml` configures no `filterwarnings`. Compiling every module under
-    `backend/` and catching `SyntaxWarning` finds it in one pass, and found
-    exactly one file. Nothing in this tree does that on its own, and the cost of
-    not doing it is not a stale comment: an invalid escape becomes a
-    `SyntaxError`, this module then fails to import, and every rule in it goes
-    with it. Worth a guard; not this ticket's to add.
+    **The instrument that would have caught this rule's own defect now exists.**
+    The paragraph above shipped with a bare `\d` in a non raw docstring, which
+    CPython warns about and nothing in this tree read.
+    `TestEveryPythonFileCompilesWithoutAWarning` at the foot of this file
+    compiles every non vendored Python file under `backend/` with warnings
+    recorded, which is why that paragraph is raw today.
 
     **Not enforced here, deliberately.** `\d` is a different rule with a
     different fix (`re.ASCII`, or `[0-9]`), a different blast radius, and its own
     argument about which of those 16 want it. What belongs to this rule is that
     its stated reach is its real one. That is the same defect class as
-    `metadata._nkp_query`'s rationale, corrected in the same round: code that is
+    `targets.Target.isbn_query`'s rationale, corrected in the same round: code that is
     defensible while the reason written beside it is not.
     """
 
@@ -3338,3 +3501,353 @@ class TestTheVocabularyReaderRefusesTheWrongField:
         literal. If that stops being a member, both raise on every record, and
         this says so at the rule rather than in a traceback."""
         assert "650" in metadata._DNB_SUBJECT_TAGS
+
+
+class TestEveryPythonFileCompilesWithoutAWarning:
+    r"""A `SyntaxWarning` is a `SyntaxError` on a schedule, and nothing was reading one.
+
+    CPython has an invalid escape sequence scheduled to become a `SyntaxError`.
+    Until then a bare `\d` in a non raw string was a warning nobody saw:
+    `pyproject.toml` configured no `filterwarnings` and the suite stayed green.
+    When it lands the file stops importing. **The blast radius is this file**,
+    which carries the shelf guard, the source order guard and the digit rule, so
+    one escape in one docstring here retires every house rule at once, and
+    `backend/tests/` is published to the mirror.
+
+    **The tests and the migrations are in scope, and that is the whole scope
+    question.** This rule is about a file loading at all, and that failure does
+    not care which walk returned it. The defect that bought the test was a `\d`
+    in a **docstring in this file**, which `_python_sources()` does not return,
+    so a guard scoped to it could not have caught its own subject.
+    `_every_python_file` states the rest of the reasoning.
+
+    **Recorded, not raised, and the difference is not cosmetic.**
+    `simplefilter("error", SyntaxWarning)` never surfaces a `SyntaxWarning`: the
+    compiler converts it and raises `SyntaxError` instead, so `except
+    SyntaxWarning` catches nothing, and compilation stops at the **first**
+    warning in the file. Recording reports all of them, so one fix round clears
+    a file rather than peeling it, and
+    `test_two_warnings_in_one_file_are_both_reported` is what holds that rather
+    than the sentence: the same fixture reports 2 recorded against 1 raised. The
+    `except SyntaxError` arm is for a file that does not parse at all, which is
+    the state this rule anticipates, and it also carries `IndentationError` and
+    `TabError`, each with a fixture below asserting the category and not only
+    the line, because `type(...)` is what names a subclass and a literal would
+    not. **A null byte in the source is the
+    one offence that names no line**, because CPython raises that `SyntaxError`
+    with `lineno` unset, and it is reported as `None` rather than dropped.
+
+    **`ruff` is the fast path and this is the backstop.** `W605` reports an
+    invalid escape with a column and an autofix, in a CI job that runs before
+    the suite, and `pyproject.toml` selects it for exactly that. It does not
+    make this redundant, and the reason is a shape rather than an overlap:
+    ruff's `select` is an enumeration, so it covers the compile time warnings
+    somebody has written a rule for, today `W605`, `F631`, `F632` and `B012`,
+    and no others. This asks the compiler, so a category CPython adds next
+    release is caught the day the interpreter moves, with no rule to select and
+    no ruff release to wait for.
+
+    **Not a `filterwarnings` line in `pyproject.toml`, because import time
+    cannot see this.** Measured 2026-09-02: importing a module holding a bare
+    `\d` warns once and is **silent** on every import afterwards, because the
+    second one loads a `.pyc` and never compiles the source. An ini setting
+    therefore passes or fails on whether a `__pycache__` happens to exist, which
+    is the environment deciding the verdict rather than the tree. Compiling the
+    source explicitly has no such hole, and it is also the only form that can
+    report a file nothing imports.
+
+    **Measured 2026-09-02 on this branch**: **173** non vendored `.py` files
+    under `backend/`, of which **0** emit a warning and **0** fail to compile.
+    Those 173 partition as 67 from `_python_sources()`, 74 from
+    `_test_sources()` and 32 under `migrations/`, with no remainder. An earlier
+    sweep on 2026-08-31 read 171 files with exactly one warning; two files have
+    been added since and the one that warned has been made raw.
+
+    This docstring is raw for the reason it exists.
+    """
+
+    def _offences(self, paths: list[Path]) -> list[str]:
+        # `paths` is required, where the scanners above default it to their own
+        # walk. A default here would be a scope no test can see: every file in
+        # this tree compiles clean, so narrowing the walk changes no verdict.
+        # Naming the list at the call site is what lets the test assert it.
+        found: list[str] = []
+        for path in paths:
+            failure: SyntaxError | None = None
+            # Read outside the block below, so that block holds one statement and
+            # every warning it records belongs to the file being compiled. This
+            # is not fastidiousness: the filter is set to every category, so an
+            # `open(path).read()` in there attributes its own `ResourceWarning`
+            # to every file in the walk. Measured while checking something else.
+            #
+            # Bytes, not `read_text()`. `compile` applies PEP 263, so a coding
+            # cookie is honoured and the locale is never consulted. `read_text()`
+            # decodes with the locale encoding and raises `UnicodeDecodeError` on
+            # a file that compiles perfectly well, which is this guard failing on
+            # itself.
+            source = path.read_bytes()
+            with warnings.catch_warnings(record=True) as caught:
+                # Every category, not `SyntaxWarning` alone, because a list of
+                # categories is an open set that goes stale silently. **Stated,
+                # not tested**: 3.14 has no compile time warning outside
+                # `SyntaxWarning` to pin it with, so narrowing this to
+                # `("always", SyntaxWarning)` passes the whole file today. The
+                # rung is the reason it is written down rather than assumed.
+                # `"default"` is likewise indistinguishable here, measured over
+                # three shapes: two warnings on two lines, the same warning twice
+                # on one line, and one warning in each of two files, all reported
+                # identically under both. Only `"once"` collapses them. So the
+                # word is the intent rather than a load bearing choice.
+                warnings.simplefilter("always")
+                try:
+                    compile(source, str(path), "exec")
+                except SyntaxError as exc:
+                    failure = exc
+            found += [
+                f"{_label(path)}:{entry.lineno}: {entry.category.__name__}: {entry.message}"
+                for entry in caught
+            ]
+            if failure is not None:
+                # `type(...)` rather than a literal, so a subclass names itself.
+                found.append(
+                    f"{_label(path)}:{failure.lineno}: {type(failure).__name__}: {failure.msg}"
+                )
+        return found
+
+    def test_every_python_file_under_backend_compiles_clean(self) -> None:
+        walked = _every_python_file()
+        # Not a duplicate of the reach test below, which says the walk is wide.
+        # These two say **this run** used the wide one. Narrowing the line above
+        # to `_python_sources()` passes on a clean tree while silently dropping
+        # the tests and the migrations, which is the scope the rule turns on.
+        assert any("migrations" in path.parts for path in walked)
+        assert any(path.name == "test_house_rules.py" for path in walked)
+        offences = self._offences(walked)
+        assert not offences, (
+            "These warn at compile time, and CPython has this class of warning "
+            "scheduled to become a SyntaxError, at which point the file stops "
+            "importing:\n  " + "\n  ".join(offences)
+        )
+
+    def test_the_walk_reaches_every_group_and_leaves_no_remainder(self) -> None:
+        """Vacuity, plus the one hole the two narrower walks have between them.
+
+        `_python_sources` drops any path with `tests` among its parts and
+        `_test_sources` only descends `backend/tests`, so a file at
+        `backend/routers/tests/x.py` would be in neither. There is none today,
+        and the equality below is what would say so.
+        """
+        walked = set(_every_python_file())
+        assert set(_python_sources()) <= walked
+        assert set(_test_sources()) <= walked
+        migrations = {path for path in walked if "migrations" in path.parts}
+        assert migrations, "the migrations are why this walk is wider than the two above"
+        assert walked == set(_python_sources()) | set(_test_sources()) | migrations
+        # A floor, because every assertion above holds over an empty tree.
+        # Measured 2026-09-02: 173 files, as 67 + 74 + 32.
+        assert len(walked) > 100, f"only {len(walked)} files walked"
+
+    @pytest.mark.parametrize(
+        ("shape", "source", "line", "category"),
+        [
+            ("a bare escape in a plain string", 'PATTERN = "\\d+"\n', 1, "SyntaxWarning"),
+            (
+                "a bare escape in a docstring, the shape that bought this",
+                '"""Matches \\d."""\n',
+                1,
+                "SyntaxWarning",
+            ),
+            ("a bare escape in an f-string", 'x = 1\ny = f"{x}\\d"\n', 2, "SyntaxWarning"),
+            ("a bare escape in a bytes literal", 'PATTERN = b"\\d+"\n', 1, "SyntaxWarning"),
+            (
+                "an assert on a tuple, always true",
+                'def f(x):\n    assert (x, "x is unset")\n',
+                2,
+                "SyntaxWarning",
+            ),
+            (
+                "identity against a literal",
+                'def f(x):\n    return x is "book"\n',
+                2,
+                "SyntaxWarning",
+            ),
+            ("a file that does not parse at all", "def f(:\n", 1, "SyntaxError"),
+            ("an indentation error", "def f():\nreturn 1\n", 2, "IndentationError"),
+            (
+                "a tab where the block used spaces",
+                "def f():\n    if 1:\n        pass\n\tpass\n",
+                4,
+                "TabError",
+            ),
+        ],
+    )
+    def test_the_rule_sees_every_way_of_getting_it_wrong(
+        self, tmp_path: Path, shape: str, source: str, line: int, category: str
+    ) -> None:
+        """One shape per case, so a shape that stops being reported names itself.
+
+        **The report is read, not merely counted.** The rule this satisfies is
+        that it fails naming the file and the line, and asserting `!= []` leaves
+        that at the stated rung: replacing both f-strings in `_offences` with one
+        fixed sentence passed the whole file.
+
+        **The category is asserted too, and stopping before it was this test's
+        own first draft.** `IndentationError` and `TabError` are subclasses that
+        `type(...)` names and a `"SyntaxError"` literal would not, and the same
+        field carries `SyntaxWarning` for the recorded half. Asserting through
+        `f"...{line}: "` and no further left both spellings free: hard coding the
+        literal, and dropping the category from the warning report, each passed
+        the whole file.
+        """
+        fixture = tmp_path / "offender.py"
+        fixture.write_text(source)
+        offences = self._offences([fixture])
+        assert len(offences) == 1, f"{shape} gave {offences}"
+        assert offences[0].startswith(f"offender.py:{line}: {category}: "), (
+            f"{shape} gave {offences[0]}"
+        )
+
+    @pytest.mark.parametrize(
+        ("shape", "source"),
+        [
+            ("a raw string", 'PATTERN = r"\\d+"\n'),
+            ("a raw docstring, which is how this tree fixes it", 'r"""Matches \\d."""\n'),
+            ("a doubled backslash", 'PATTERN = "\\\\d+"\n'),
+            ("a valid escape", 'X = "a\\nb"\n'),
+            ("a tuple compared rather than asserted", "def f(x, y, z):\n    assert (x, y) == z\n"),
+            ("equality against a literal", 'def f(x):\n    return x == "book"\n'),
+        ],
+    )
+    def test_the_rule_leaves_the_correct_shape_alone(
+        self, tmp_path: Path, shape: str, source: str
+    ) -> None:
+        """The other half of the diagonal: it must not report everything. A rule
+        that grepped for a backslash would pass the cases above and fail here."""
+        fixture = tmp_path / "innocent.py"
+        fixture.write_text(source)
+        assert self._offences([fixture]) == [], f"{shape} is reported and should not be"
+
+    def test_two_warnings_in_one_file_are_both_reported(self, tmp_path: Path) -> None:
+        """What recording buys over raising, which no single warning fixture can
+        show. Under `simplefilter("error", SyntaxWarning)` this same file reports
+        one offence and stops, because the compiler raises at the first."""
+        fixture = tmp_path / "offender.py"
+        fixture.write_text('P = "\\d"\nQ = "\\p"\n')
+        offences = self._offences([fixture])
+        assert len(offences) == 2, offences
+        assert offences[0].startswith("offender.py:1: SyntaxWarning: ")
+        assert offences[1].startswith("offender.py:2: SyntaxWarning: ")
+
+    def test_a_null_byte_is_reported_with_no_line_rather_than_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        """The one offence that names no line, pinned so the docstring's
+        exception stays true. CPython raises this `SyntaxError` with `lineno`
+        unset, and `None` in the report is better than a file nobody checked."""
+        fixture = tmp_path / "offender.py"
+        fixture.write_bytes(b"X = 1\x00\n")
+        offences = self._offences([fixture])
+        assert len(offences) == 1, offences
+        # The message text is CPython's and `requires-python` is `>=3.14`, so the
+        # claim pinned here is the `None`, not the wording.
+        assert offences[0].startswith("offender.py:None: SyntaxError: "), offences[0]
+
+    def test_a_file_is_read_as_bytes_rather_than_through_the_locale(self, tmp_path: Path) -> None:
+        """Why `read_bytes` is not decoration. `compile` honours the coding
+        cookie; `read_text` decodes with the locale encoding first and would
+        raise on this file, reporting a failure that is not one."""
+        fixture = tmp_path / "cookie.py"
+        fixture.write_bytes(b"# -*- coding: latin-1 -*-\nAUTHOR = '\xe9mile'\n")
+        assert self._offences([fixture]) == []
+        with pytest.raises(UnicodeDecodeError):
+            fixture.read_text(encoding="utf-8")
+
+
+#: The Markdown a reader of the mirror opens: the root documents plus `docs/*.md`.
+#:
+#: **`docs/*.md` and not `docs/**/*.md`**, which is the same boundary
+#: `test_roster_counts.scope()` draws and for the same reason: every subdirectory
+#: under `docs/` is stripped from the public mirror.
+#:
+#: A file declaring itself internal is **not** dropped here, unlike in that
+#: census. An unbalanced fence in `CLAUDE.md` renders the rest of it as one code
+#: block for the next session that opens it, which is the defect either way.
+def _published_markdown() -> list[Path]:
+    repo = BACKEND.parent
+    return sorted(repo.glob("*.md")) + sorted(repo.glob("docs/*.md"))
+
+
+def _fence_lines(text: str) -> list[int]:
+    """Line numbers of every fence, indented by up to three spaces as CommonMark
+    allows. Counting only column zero reports a false odd on a fence inside a
+    list."""
+    fences = []
+    for n, line in enumerate(text.splitlines(), start=1):
+        body = line.lstrip(" ")
+        # Four spaces is an indented code block, so the backticks there are
+        # content. `line[:4].lstrip()` looks equivalent and is not: at an indent
+        # of three it leaves one backtick and matches nothing.
+        if len(line) - len(body) <= 3 and body.startswith("```"):
+            fences.append(n)
+    return fences
+
+
+class TestEveryPublishedMarkdownFileHasBalancedCodeFences:
+    """An odd number of fences renders everything after the last one as code.
+
+    Two published registers carried one on 2026-09-03, both left by a previous
+    wave folding a working draft in with its own scaffolding: `CHANGELOG.md`
+    swallowed everything below its third entry, and `docs/decisions.md`
+    everything below a `$2` decision, along with 42 lines of draft instructions
+    addressed to a main session. Nothing failed. The register that records how
+    this project makes decisions was unreadable on GitHub and the suite was
+    green, because no test read a Markdown file for its shape.
+
+    Parity is the whole check and it is deliberately not a parser. What it
+    cannot see is a fence closed in the wrong place, which renders wrongly with
+    an even count; what it catches is the one a fold leaves behind.
+    """
+
+    def test_no_published_markdown_file_has_an_odd_number_of_fences(self) -> None:
+        odd = {
+            str(path.relative_to(BACKEND.parent)): len(_fence_lines(path.read_text(encoding="utf-8")))
+            for path in _published_markdown()
+            if len(_fence_lines(path.read_text(encoding="utf-8"))) % 2
+        }
+        assert odd == {}, odd
+
+    def test_the_walk_reaches_the_registers_a_fold_writes_into(self) -> None:
+        """Anti vacuity, and it names the two files a wave actually edits. A
+        glob that returned nothing would pass the rule above silently, which is
+        the shape this repository calls an instrument that cannot see the
+        failure reporting its absence."""
+        found = {str(p.relative_to(BACKEND.parent)) for p in _published_markdown()}
+        assert "CHANGELOG.md" in found
+        assert "docs/decisions.md" in found
+        assert len(found) > 10, found
+
+    def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
+        fixture = tmp_path / "broken.md"
+        fixture.write_text("# Title\n\n```\nsome code\n```\n\nprose\n```\n")
+        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 3
+
+    def test_a_balanced_pair_is_not_reported(self, tmp_path: Path) -> None:
+        fixture = tmp_path / "fine.md"
+        fixture.write_text("# Title\n\n```bash\nls\n```\n\nprose\n")
+        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 2
+
+    def test_a_fence_indented_inside_a_list_is_counted(self, tmp_path: Path) -> None:
+        """Why the count tolerates indentation. At column zero only, this file
+        reads as one fence and fails a rule it satisfies."""
+        fixture = tmp_path / "listed.md"
+        fixture.write_text("- item\n\n   ```\n   ls\n   ```\n\n```\nx\n```\n")
+        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 4
+
+    def test_four_spaces_is_an_indented_code_block_rather_than_a_fence(
+        self, tmp_path: Path
+    ) -> None:
+        """The other edge of the same rule: at four spaces the backticks are
+        content, so counting them would report a false odd."""
+        fixture = tmp_path / "indented.md"
+        fixture.write_text("prose\n\n    ```\n\n```\nx\n```\n")
+        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 2

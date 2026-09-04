@@ -20,6 +20,11 @@ one implementation and no flag on it.
 rows to it; `bounded_headings` takes a parser's output and touches no session
 at all. The privacy rule is `shelf.py`'s and is applied before a Book reaches
 either.
+
+**How a scheme's numbers sort is not one of the three, and lives in
+`filing.py`.** `SCHEME_ORDER` below decides which heading a full Book keeps, so
+it reads like the place a shelf order would go, and it is not: it ranks whole
+schemes against each other and a filing rule ranks numbers within one.
 """
 
 import logging

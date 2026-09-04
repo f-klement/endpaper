@@ -493,7 +493,21 @@ def query(use: int, value: str) -> str:
     No `@attrset`: BIB-1 is PQF's default and every target measured accepts the bare
     form. Callers use `isbn_query` and `title_query` rather than this, which exists so a
     new access point is one constant rather than a new string format.
+
+    **The use attribute is checked, because `pqf_term` guards the other half of this
+    string and nothing guarded this one.** Every caller in this module passes a module
+    constant, so the check is dead here. It is not dead for `targets.Target.isbn_query`,
+    which passes a field that a database row can supply: SQLite's INTEGER affinity is a
+    preference rather than a constraint, and a critic measured
+    `'7 @and @attr 1=4 anything'` storing in an INTEGER column as text, which renders
+    here as a two term `@and`. That is the structure injection `pqf_term`'s own table
+    describes, reached around it rather than through it.
+
+    `bool` is refused with everything else: it is an `int` in Python, and `@attr 1=True`
+    is not a query.
     """
+    if type(use) is not int:
+        raise BadQuery(f"not a use attribute: {use!r}")
     return f"@attr 1={use} {pqf_term(value)}"
 
 

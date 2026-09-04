@@ -68,6 +68,84 @@ class TestTagging:
         assert bulk(client, admin["headers"], [book["id"]], "add_tag").status_code == 422
 
 
+class TestATagIdPastTheDatabasesRangeIsRefused:
+    """`BulkRequest.value` is deliberately untyped, so this is the only bound.
+
+    A Python int has no ceiling. `int(str(value))` accepted `2**63`, `db.get`
+    raised `OverflowError` from inside the driver, and the member got a
+    **500** for a number they typed. The comment on `BulkRequest.value` named
+    this handler and `_checked_collection` as both doing the range check;
+    only the second one did.
+
+    404 is the answer an id no row can carry deserves, and is what an id that
+    merely does not exist already gets: the test above pins 9999.
+    """
+
+    #: One past the largest value SQLite stores in an INTEGER column.
+    TOO_BIG = 9_223_372_036_854_775_808
+
+    @pytest.mark.parametrize("action", ["add_tag", "remove_tag"])
+    def test_a_tag_id_past_the_range_is_a_404_not_a_500(
+        self, client, admin, make_book, action: str
+    ):
+        """Both verbs reach `_require_tag`, so both had the defect."""
+        book = make_book(admin["headers"])
+
+        res = bulk(client, admin["headers"], [book["id"]], action, self.TOO_BIG)
+
+        assert res.status_code == 404, res.text
+
+    def test_a_tag_at_the_largest_id_the_column_holds_is_still_applied(
+        self, client, admin, make_book, db
+    ):
+        """The boundary itself, and it needs a row to be worth anything.
+
+        The first version of this asserted a 404 for `MAX_ROW_ID` with no such
+        tag, which cannot see the bound at all: `<= MAX_ROW_ID` mutated to
+        `< MAX_ROW_ID` passed every test in this file, because a refusal and a
+        lookup that finds nothing answer with the identical body. A design
+        critic caught it. Only a row that exists at the boundary tells the two
+        apart, so this inserts one, through the session rather than the API
+        because no route lets a caller choose an id.
+        """
+        from enums import TagCategory
+        from models import Tag
+        from schemas.common import MAX_ROW_ID
+
+        book = make_book(admin["headers"])
+        # `key` stays null: this is a tag the library invented, not a seeded one.
+        db.add(Tag(id=MAX_ROW_ID, name="Edge", category=TagCategory.CUSTOM))
+        db.commit()
+
+        res = bulk(client, admin["headers"], [book["id"]], "add_tag", MAX_ROW_ID)
+
+        assert res.status_code == 200, res.text
+        assert res.json()["updated"] == 1
+
+    def test_an_unused_id_at_the_boundary_is_the_ordinary_404(
+        self, client, admin, make_book
+    ):
+        """The other side of it: the bound refuses what the column cannot hold
+        and nothing else, so the largest id it can hold reaches the lookup and
+        gets the answer an unused id gets."""
+        from schemas.common import MAX_ROW_ID
+
+        book = make_book(admin["headers"])
+
+        res = bulk(client, admin["headers"], [book["id"]], "add_tag", MAX_ROW_ID)
+
+        assert res.status_code == 404, res.text
+
+    def test_a_real_tag_id_still_works(self, client, admin, make_book, fiction_id):
+        """The diagonal: the refusal must not be the only thing the guard does."""
+        book = make_book(admin["headers"])
+
+        res = bulk(client, admin["headers"], [book["id"]], "add_tag", fiction_id)
+
+        assert res.status_code == 200, res.text
+        assert res.json()["updated"] == 1
+
+
 class TestStatus:
     def test_marks_several_as_read(self, client, admin, make_book):
         first = make_book(admin["headers"], title="A")

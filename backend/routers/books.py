@@ -66,6 +66,7 @@ from enums import (
 from importing import identity_key
 from models import (
     AUTHOR_KEY_MAX,
+    MAX_SERIES_INDEX,
     AuthorIdentifier,
     Book,
     Classification,
@@ -101,6 +102,7 @@ from schemas import (
     BookMatch,
     BookOut,
     BookRatingUpdate,
+    BookSearchOut,
     BookStatusUpdate,
     BulkRequest,
     BulkResult,
@@ -441,15 +443,82 @@ def _match_rows(
 ) -> list[BookMatch]:
     """Catalogue records as search rows, dropping any the schema refuses.
 
-    **The only place a `BookMatch` is built from third party data**, and that
-    is the point of the function rather than a description of it. The two
-    endpoints that answer with one diverged: this guard lived inside the search
-    handler, and `GET /{book_id}/enrich/candidates` built the model in a bare
-    list comprehension off the same `metadata.search`. There is no
-    `ValidationError` handler in `main.py`, so one record the schema refused
+    **The only place a page of `BookMatch` rows is built from third party
+    data**, and that is the point of the function rather than a description of
+    it. The two endpoints that answer with one diverged: this guard lived
+    inside the search handler, and `GET /{book_id}/enrich/candidates` built the
+    model in a bare list comprehension off the same `metadata.search`. There is
+    no `ValidationError` handler in `main.py`, so one record the schema refused
     answered **500 for the whole response** there, where the same record cost
     one row here. A third endpoint answering with matches now inherits the
     guard instead of the hole.
+
+    `_bounded_match` below builds the other one, from a single record rather
+    than a page, and drops the field instead of the row.
+
+    **The asymmetry those two used to have is gone, and it was closed one layer
+    below both of them.** This paragraph read, until 2026-09-03: measured on one
+    volume with a 10,001 character description, this endpoint answers with **0**
+    candidates while `POST /{book_id}/enrich` fills the rest of the record from
+    it, so the unattended route stores a record the picker will not show. That
+    is no longer reachable. `catalogue.Record` now clears a scalar the column
+    cannot hold at construction, so the same volume reaches both endpoints with
+    its description absent and its other fields intact: the candidate count is
+    **1**, not 0, and the two routes agree about the book.
+
+    **`title` is the one field where a record is still lost whole, and it is
+    lost before it gets here.** `metadata._merge_matches` skips a row with no
+    title, because a search result nobody can read is not a result, so a title
+    the column cannot hold costs the row on both of these endpoints: 0
+    candidates and `found=False`, measured together in
+    `tests/routers/test_books_google.py::TestTheTwoRoutesAgreeAboutOneVolume`.
+    They still agree, which is the property that matters, and the rule doing it
+    has nothing to do with a ceiling. The refresh route is unaffected: it writes
+    `record.title or book.title`.
+
+    **Deliberately no count of the fields the other route fills**, and the
+    reason outlived the asymmetry that prompted it: that count is a property of
+    the Book it starts from rather than of the record, and an earlier draft
+    quoted one of three such numbers and then explained it with a configuration
+    that does not produce it. The starting Book was never recorded beside the
+    measurement, so the explanation was reconstructed, and a reconstructed
+    input is a guess wearing a measurement's clothes.
+
+    **What is left here is narrower than it looks, and naming it is the point.**
+    Every scalar `as_match()` fills is bounded before it arrives, and
+    `match_headings` plus `bounded_headings` bound the classifications by count
+    and by width. Three fields can still cost a whole row and two of them are
+    reachable:
+
+    * `isbn13`, held to 20, and it is the one that matters.
+      `google_books._volume_to_fields` takes `industryIdentifiers[].identifier`
+      straight out of somebody else's JSON: measured, one record with a 40
+      character ISBN answers **0** rows here against **1** for the same record
+      with a valid one. It is deliberately not bounded on the record, and
+      `catalogue._UNBOUNDED` carries the measurement showing that bounding it
+      today 500s the scan route instead, through the same adapter, so one lost
+      row is the cheaper of the two.
+    * `categories`, held to `CATEGORIES_MAX`, which is built here from the
+      record's subject list rather than carried on it, so no ceiling at
+      construction sees the value this model refuses.
+    * `source`, held to `SOURCE_LABEL_MAX`, which is unbounded on the record
+      because every producer sets it from a literal. Joining every source name
+      this tree has, the MARC upload's included, comes to **63** characters
+      against 120, so nothing reaches it without a new source whose own name is
+      57 characters long. Deliberately no count beside that, because a roster
+      sized number in prose is a number that rots.
+
+    An earlier version of this paragraph said `categories` was the only one, and
+    a later one said `isbn13` had stopped mattering. A design critic seat found
+    both, by reading what `as_match` fills rather than what the ceilings table
+    covers, which is the check worth copying: **this docstring is downstream of
+    two tables and agrees with neither by construction.**
+
+    Dropping the row rather than the field is a deliberate difference rather
+    than an oversight: a page is several answers and losing one of them is
+    honest, where a single record is the answer. Making the two one policy means
+    building these rows through `_bounded_match` too, which changes three
+    endpoints and is still filed rather than done here.
 
     **One bad record costs one result, not the response.** `BookMatch` is a
     bounded model built straight from third party data, and a single record
@@ -505,6 +574,95 @@ def _match_rows(
     return rows
 
 
+def _bounded_match(fields: dict[str, Any]) -> BookMatch:
+    """One catalogue record as a bounded match, dropping what the columns cannot hold.
+
+    The door `POST /{book_id}/enrich` goes through. It used to hand
+    `google_books.merge_into` the raw `Record.as_match()` dictionary, so every
+    ceiling on `BookMatch` applied to `enrich/apply` and to neither half of
+    this route: same book, same column, one route apart, a 422 against a stored
+    value. `merge_into` now takes the model, so this is the only way to reach
+    it from a catalogue.
+
+    **The field rather than the record, which is the opposite of `_match_rows`
+    above.** A search answers with a page,
+    so a row the schema refuses costs one result out of several and dropping it
+    whole is honest. Enrichment answers with the one record the catalogues
+    returned, so refusing it whole would report `found=False` about a book a
+    catalogue did find and lose eleven good fields to one bad one. Eleven
+    because `merge_into` writes twelve columns, derived from its eleven loop
+    names plus the `cover_url` assigned below them, and one of the twelve is
+    the refused one.
+
+    Driven by pydantic's own error locations rather than by a list of field
+    names here, so a bound added to `BookMatch` later is enforced on this path
+    with nothing to remember and nothing to keep in step.
+
+    **`catalogue.Record` now bounds the scalars before they get here, and that
+    narrows this rather than retiring it.** Every field `as_match()` carries off
+    the record has already met its column, **except the two `_UNBOUNDED` names**,
+    so what still reaches this loop is `isbn13`, `source`, `categories`, which
+    is built from the record's subject list rather than carried on it, and any
+    bound a later `BookMatch` grows that the record has no field for. That is
+    the reason it stays driven by the error locations: the set it has to cover
+    is not the set anybody would write down today, and an earlier version of
+    this paragraph proved that by writing down a set that was missing `isbn13`.
+
+    **Three things make it total, and the first two are about a `BookMatch`
+    this tree does not have yet.** The intersection with `kept` is what keeps
+    `del` on a key the record holds: pydantic reports a **missing** required
+    field at a `loc` naming a key the record never supplied, and deleting that
+    raises. Measured on the stub the test uses, with the intersection removed:
+    `KeyError: 'name'`, not a slow pass and not a loop that repeats. Every
+    refused set either meets `kept`, in which case the record shrinks, or does
+    not, in which case the old code raised: **there is no stalling shape**, and
+    saying there was is the wrong reason this docstring carried for one round.
+
+    The fallback builds the empty match **without validating**, because a
+    required field also makes `BookMatch()` itself raise, which would turn the
+    safe answer into a 500 on the one path that exists to avoid one. On today's
+    model the two are the same object, measured:
+    `BookMatch.model_construct() == BookMatch()`.
+
+    The third is the loop bound, and it is about the guards rather than about
+    the model. Every pass returns or deletes at least one of the record's keys,
+    so `len(kept) + 1` passes is a ceiling nothing can legitimately reach. It
+    is written as a bound rather than as `while True` because a later edit
+    breaking that invariant then fails an assertion instead of hanging, and a
+    hang is the one failure a test cannot see: measured, two mutations of this
+    function that a bounded loop reports by name were a suite that never
+    finished.
+
+    All three are unreachable as the tree stands and are written rather than
+    assumed, which is the difference between a defence and a comment.
+    `tests/routers/test_books_google.py::TestBoundingOneRecord` drives each of
+    them, two through a stub model with the shape `BookMatch` does not have.
+    """
+    kept = dict(fields)
+    for _ in range(len(kept) + 1):
+        try:
+            return BookMatch(**kept)
+        except ValidationError as exc:
+            refused = {
+                str(error["loc"][0]) for error in exc.errors() if error["loc"]
+            } & kept.keys()
+            if not refused:
+                break
+            logger.info(
+                "Dropped %s from a record from %s: the column cannot hold it",
+                ", ".join(sorted(refused)),
+                clipped(fields.get("source")),
+            )
+            for name in refused:
+                del kept[name]
+
+    logger.info(
+        "Discarded a record from %s the schema refused whole",
+        clipped(fields.get("source")),
+    )
+    return BookMatch.model_construct()
+
+
 def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
     """Turn a failed lookup into the status and wording it deserves.
 
@@ -542,7 +700,7 @@ def _lookup_failure(result: metadata.Lookup) -> dict[str, Any]:
     }
 
 
-def _no_sources() -> dict[str, Any]:
+def _no_sources(what: str = "look up an ISBN") -> dict[str, Any]:
     """Nothing was asked, because nothing capable is switched on.
 
     **409 rather than 404**, and it is the one refusal here that is about this
@@ -555,17 +713,24 @@ def _no_sources() -> dict[str, Any]:
     reaches it through `_lookup_failure`, which has a `Lookup` to read the
     outcome off; the two search paths have no `Lookup` and decide on the plan
     before they call out, so they call this directly.
+
+    **`what` exists because the shared sentence was true on one of the three.**
+    It read "can look up an ISBN" and was raised from two title searches, which
+    is reachable with no slow catalogue involved: switch on the Czech National
+    Library alone, which answers an ISBN and answers no title search, and a
+    title search refuses by naming the one path that still works. The default is
+    the ISBN wording so the lookup path is unchanged.
     """
     return {
         "status_code": status.HTTP_409_CONFLICT,
         "detail": (
-            "No catalogue is switched on that can look up an ISBN. Turn one "
+            f"No catalogue is switched on that can {what}. Turn one "
             "back on under Settings, Catalogue sources."
         ),
     }
 
 
-@router.get("/search", response_model=list[BookMatch])
+@router.get("/search", response_model=BookSearchOut)
 async def search_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -575,7 +740,16 @@ async def search_books(
         Locale | None,
         Query(description="Prefer editions in this language when ranking"),
     ] = None,
-) -> list[BookMatch]:
+    harder: Annotated[
+        bool,
+        Query(
+            description=(
+                "Also ask the catalogues too slow for the ordinary deadline. "
+                "Ignored when there are none to ask."
+            )
+        ),
+    ] = False,
+) -> BookSearchOut:
     """Free-text search, for adding a book nobody can scan.
 
     The barcode path covers a book that is physically to hand. This covers the
@@ -593,6 +767,13 @@ async def search_books(
     Two segments (`/google/search`) used to guard against this being confused
     with `/{book_id}`; a single one is safe for the same reason `/export` is,
     which is that it is declared first.
+
+    **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+    It is a request rather than an instruction: the server runs the ordinary
+    search when this library has no such catalogue enabled, and when the one
+    long fan out allowed at a time is already in flight. `asked` and `unasked`
+    on the response say what actually happened, so a client never has to infer
+    it from what it sent.
     """
     api_key = ""
     if settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
@@ -609,14 +790,30 @@ async def search_books(
     # A library that has switched every catalogue off is told so, rather than
     # handed an empty result page that reads as "no such book". Same refusal a
     # lookup gets, decided here because a search has no `Lookup` to carry it.
-    if not plan.searched:
-        raise HTTPException(**_no_sources())
+    #
+    # **Keyed on the harder roster, not the default one**, and the difference is
+    # a library whose every enabled search catalogue is a slow one. Nothing is
+    # switched off there, so "turn one back on" would name the wrong cause; what
+    # that library gets is an empty page whose `unasked` lists what a second,
+    # longer search would reach.
+    if not plan.searched_harder:
+        raise HTTPException(**_no_sources("answer a title search"))
 
-    matches = await metadata.search(
-        q, api_key, limit=limit, prefer_language=lang, plan=plan
+    found = await metadata.title_search(
+        q, api_key, limit=limit, prefer_language=lang, plan=plan, harder=harder
     )
 
-    return _match_rows(matches, db.query(Tag).all())
+    # Both read off what the fan out did rather than off `harder`, which is only
+    # what the reader wanted: a harder search runs the ordinary one when the two
+    # rosters are equal and when the long slot is taken. `unasked` is computed in
+    # `metadata` rather than here, because a query with no usable terms asked
+    # nothing and has nothing left to ask, and subtracting `asked` from the
+    # roster here cannot tell that from a library whose catalogues are all slow.
+    return BookSearchOut(
+        matches=_match_rows(found.matches, db.query(Tag).all()),
+        asked=list(found.asked),
+        unasked=list(found.unasked),
+    )
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
@@ -1304,10 +1501,25 @@ def _bulk_delete(
 
 
 def _require_tag(db: Session, value: str | int | None) -> Tag:
+    """The Tag a bulk verb names, or a refusal.
+
+    The range check is not redundant, for the reason `_checked_collection`
+    states above and by the same door: `BulkRequest.value` is deliberately
+    loose, so this is where an id arrives having been validated by nothing. A
+    Python int has no ceiling, so `{"value": 2**63}` passed `int()`, reached
+    `db.get` and raised `OverflowError` from inside the driver, which is a
+    **500** to a number a member typed. See `MAX_ROW_ID`.
+
+    404 rather than a third answer, because an id the column cannot hold is an
+    id no row can carry: the caller learns exactly what they learn from an id
+    that is merely unused, which is also all there is to tell them.
+    """
     try:
         tag_id = int(str(value))
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="A tag id is required") from None
+    if not 1 <= tag_id <= MAX_ROW_ID:
+        raise HTTPException(status_code=404, detail="Tag not found")
     tag = db.get(Tag, tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")
@@ -1367,7 +1579,29 @@ def list_series(db: DbSession, current_user: CurrentUser) -> list[SeriesOut]:
         # Only gaps *below* the highest number held. A series with no known
         # length has no meaningful "missing" past the end, and reporting one
         # would invent a book nobody has said exists.
-        missing = sorted(set(range(1, max(held) + 1)) - held) if held else []
+        #
+        # **And never above `MAX_SERIES_INDEX`, which is what stops one row
+        # costing every member the request.** Unclamped this would build a set
+        # and a sorted list of every integer below the highest number held, so
+        # the cost would be linear in a value read out of the database rather
+        # than in the number of books. Measured that way on one row at
+        # 2,000,000: 14,888,944 bytes and 1,999,999 entries, from a library of
+        # one book, with an eight character series name, which the response
+        # carries and the figure therefore counts.
+        #
+        # Bounding the three request bodies is not enough on its own and that
+        # is the reason this line exists rather than trusting them.
+        # `backup.restore` inserts through Core, where neither pydantic nor a
+        # `@validates` runs, and an instance upgraded from a release before
+        # 2026-09-03 carries whatever its enrichment route stored before that
+        # route was bounded. Truncating rather than refusing keeps the gaps a
+        # member can act on and drops only the part of the range no API path
+        # could have produced.
+        #
+        # One test for "nothing numbered" rather than two: a ceiling of 0 makes
+        # the range empty, which is the answer the second arm used to return.
+        ceiling = min(max(held), MAX_SERIES_INDEX) if held else 0
+        missing = sorted(set(range(1, ceiling + 1)) - held)
         result.append(
             SeriesOut(name=name, book_count=counts[name], missing_indexes=missing)
         )
@@ -3285,6 +3519,28 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
     assert result.record is not None
     record = result.record
 
+    # Nine columns written straight off the record, and the ceiling on all of
+    # them is `catalogue.Record.__post_init__`, which clears a scalar the column
+    # cannot hold before the record ever leaves `metadata.lookup`. Bounding it
+    # here instead would be a fourth door: this handler, `as_lookup`,
+    # `_match_rows` and `_bounded_match` all write from the same record, and
+    # three of them had a bound while this one had none.
+    #
+    # So a value too wide arrives as `None`, and the three rules below read it
+    # the way they already read a catalogue that carries no such field:
+    # `title`, `language` and `page_count` keep what the Book had; `subtitle`,
+    # `author`, `publisher`, `year` and `description` are cleared, which is what
+    # a refresh does with anything the source no longer asserts; and `cover_url`
+    # is cleared only where the Book is not carrying a locally uploaded cover.
+    #
+    # **A dropped `author` also costs this record's authority assertions**, and
+    # that is worth knowing because nothing reports it. The write at the bottom
+    # of this handler passes `credited=book.author`, and
+    # `record_catalogue_assertions` keeps only the names in that credit line, so
+    # an absent one keeps none. It takes the "not credited on this book" arm,
+    # which logs and deliberately leaves `refused` empty, so the response says
+    # nothing either. The alternative is worse: writing a person into the
+    # authority store off a credit line this Library never saw.
     book.title = record.title or book.title
     book.subtitle = record.subtitle
     book.author = record.author
@@ -3514,9 +3770,11 @@ async def enrich_book(
     Matched by ISBN when there is one, which runs the full merged chain, and by
     title and author otherwise, which runs the ranked search. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings; a new install asks the DNB and K10plus together, then the
-    Austrian National Library, then Open Library, then Google, and searches all
-    seven. A source switched off is not asked on either path.
+    in Settings: the roster holds seven lookup sources that answer an ISBN and
+    eight search sources that answer a title, the leading pair is asked together
+    and the rest one at a time, and a source switched off is not asked on either
+    path. Google Books answers only when its own section is on and a key is in
+    force, so a library missing either asks one fewer on each path.
 
     **No API key is required.** This was Google-only and refused outright
     without a key, which made it useless for exactly the books the German and
@@ -3589,7 +3847,9 @@ async def enrich_book(
             found=False,
         )
 
-    updated = google_books.merge_into(book, fields, overwrite=overwrite)
+    # Bounded here rather than trusted: `fields` is whatever a catalogue
+    # answered, and `merge_into` writes twelve columns from it.
+    updated = google_books.merge_into(book, _bounded_match(fields), overwrite=overwrite)
     # This route chooses no Catalogue record. Its classification evidence must
     # not reach the Book or be reported as an updated field.
     if updated:
@@ -3646,11 +3906,12 @@ def apply_enrichment(
     Selecting the row also confirms its Classifications. Automatic enrichment
     and refresh do not have that confirmation.
     """
-    updated = google_books.merge_into(
-        book,
-        payload.model_dump(exclude={"source", "suggested_tag_ids", "classifications"}),
-        overwrite=overwrite,
-    )
+    # The body goes in whole. `merge_into` takes a `BookMatch` and reads the
+    # twelve names it writes off it, so the three fields this used to exclude
+    # by hand (`source`, `suggested_tag_ids`, `classifications`) are excluded
+    # by it never naming them, and a field added to the schema cannot be
+    # written here by forgetting to list it.
+    updated = google_books.merge_into(book, payload, overwrite=overwrite)
     # Already validated and already bounded by `BookMatch`, so the payload's
     # own models go in rather than a second pass through `classifications.bounded_headings`.
     if add_headings(book, payload.classifications, db):
@@ -3691,8 +3952,22 @@ async def enrichment_candidates(
     query = " ".join(part for part in (book.title, book.author) if part)
 
     plan = settings_store.catalogue_sources(db)
-    if not plan.searched:
-        raise HTTPException(**_no_sources())
+    # **The same two corrections the title search route took, applied here
+    # because this route runs a title search too.** `metadata.candidates` calls
+    # `search` internally, so it reaches the catalogues by the query above and
+    # not by an ISBN.
+    #
+    # `what`, because the shared sentence defaults to the ISBN wording and this
+    # path cannot look one up: refusing a title search by naming the ISBN route
+    # is the defect that argument was added for, fixed at one of its two sites.
+    #
+    # `searched_harder`, because `plan.searched` narrowed when the slow sources
+    # became opt in. A library whose every enabled search catalogue is slow has
+    # switched nothing off, so "turn one back on" names the wrong cause. It gets
+    # an empty candidate list instead, which is what a search that asked nobody
+    # honestly is.
+    if not plan.searched_harder:
+        raise HTTPException(**_no_sources("answer a title search"))
 
     matches = await metadata.candidates(
         query,

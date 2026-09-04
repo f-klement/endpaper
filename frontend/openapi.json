@@ -687,7 +687,7 @@
           "language": {
             "anyOf": [
               {
-                "maxLength": 16,
+                "maxLength": 10,
                 "type": "string"
               },
               {
@@ -1193,11 +1193,12 @@
         "type": "object"
       },
       "BookMatch": {
-        "description": "One candidate from a free-text search, for picking the right edition.\n\nNamed for what it is rather than where it came from: search asks Open\nLibrary always and Google Books when a key is configured, and merges what\nthey agree on into one row. `source` says which of them supplied it.",
+        "description": "One candidate from a free-text search, for picking the right edition.\n\nNamed for what it is rather than where it came from: search asks Open\nLibrary always and Google Books when a key is configured, and merges what\nthey agree on into one row. `source` says which of them supplied it.\n\n**Every field is bounded, because this is a request body and not only a\nresponse.** `POST /api/books/{id}/enrich/apply` accepts one, so each field\nis a value a member chose rather than one a catalogue supplied.\n\n**And since 2026-09-03 it is the only way a catalogue value reaches a Book\ncolumn through `merge_into`**, which is a second reason for the same\nbounds rather than a second rule. `google_books.merge_into` takes this\nmodel rather than a dictionary, so `POST /api/books/{id}/enrich` builds one\nthrough `routers/books._bounded_match` instead of handing over whatever\n`Record.as_match()` assembled. Before that the ceilings applied on one\nroute and not on its neighbour: the same oversized value was a 422 on\napply and a stored row on enrich, same book, one route apart.\n\n**Through `merge_into` was the whole of the claim, because a third route\ndid not go through it, and that closed on 2026-09-03 one layer below all\nthree.** `PUT /api/books/{id}/refresh` assigns nine columns straight off the\nsame `catalogue.Record` and builds no model at all, so a 9999 year and a\n40,000 character description were stored there and refused on both of the\nother two. Measured, one volume, three routes. Both critic seats found it\nseparately while checking an earlier version of this paragraph that claimed\nthe whole family was closed, which is why the sentence says which door it\nmeans.\n\n`catalogue.Record` now clears every scalar its column cannot hold at\nconstruction, so no producer hands any of the three an unusable value and\nthe refresh route needed no model of its own. What these bounds still do\nalone is the two fields a record does not carry: `categories`, which\n`as_match` assembles from the record's subject list, and `suggested_tag_ids`.",
         "properties": {
           "author": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -1209,6 +1210,7 @@
           "categories": {
             "anyOf": [
               {
+                "maxLength": 3902,
                 "type": "string"
               },
               {
@@ -1229,6 +1231,7 @@
           "cover_url": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -1252,6 +1255,7 @@
           "google_books_id": {
             "anyOf": [
               {
+                "maxLength": 50,
                 "type": "string"
               },
               {
@@ -1263,6 +1267,7 @@
           "isbn13": {
             "anyOf": [
               {
+                "maxLength": 20,
                 "type": "string"
               },
               {
@@ -1274,6 +1279,7 @@
           "language": {
             "anyOf": [
               {
+                "maxLength": 10,
                 "type": "string"
               },
               {
@@ -1298,6 +1304,7 @@
           "publisher": {
             "anyOf": [
               {
+                "maxLength": 255,
                 "type": "string"
               },
               {
@@ -1309,6 +1316,8 @@
           "series_index": {
             "anyOf": [
               {
+                "maximum": 1000.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -1320,6 +1329,7 @@
           "series_name": {
             "anyOf": [
               {
+                "maxLength": 255,
                 "type": "string"
               },
               {
@@ -1330,12 +1340,14 @@
           },
           "source": {
             "default": "",
+            "maxLength": 120,
             "title": "Source",
             "type": "string"
           },
           "subtitle": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -1351,12 +1363,14 @@
               "minimum": 1.0,
               "type": "integer"
             },
+            "maxItems": 500,
             "title": "Suggested Tag Ids",
             "type": "array"
           },
           "title": {
             "anyOf": [
               {
+                "maxLength": 500,
                 "type": "string"
               },
               {
@@ -1844,6 +1858,39 @@
         "title": "BookRatingUpdate",
         "type": "object"
       },
+      "BookSearchOut": {
+        "description": "A page of search results, and which catalogues produced it.\n\n**The roster travels with the answer rather than sitting on a feature\nflag**, for two reasons that both bite. It is per request: the same library\nasks a different set depending on whether the reader asked to search harder,\nand a deployment level flag cannot say which of the two this page is. And\n`FeatureFlagsOut` is served without a token, so a bit about which catalogues\na household runs would be readable by anyone who can reach the door.\n\n**Names and not booleans, which cost a round to arrive at.** The first draft\nsent `slow_available` and `asked_slow`, and their fourth quadrant was\nundefined for exactly the case every install reaches today: a harder request\non a library with no slow catalogue, where the response includes no slow\nsource and it is unclear whether that means \"none contributed\" or \"not run\nharder\". Two lists have no such quadrant, they partition the roster by\nconstruction, and they let the screen name the catalogue it is offering\nrather than describing the machine's effort.",
+        "properties": {
+          "asked": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSource"
+            },
+            "title": "Asked",
+            "type": "array"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/BookMatch"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "unasked": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSource"
+            },
+            "title": "Unasked",
+            "type": "array"
+          }
+        },
+        "required": [
+          "matches",
+          "asked",
+          "unasked"
+        ],
+        "title": "BookSearchOut",
+        "type": "object"
+      },
       "BookSort": {
         "description": "Accepted values for `GET /api/books?sort=`.\n\nTITLE_ASC is the default and is spelled out rather than left implicit, so\nthe client can round-trip the current sort without a special empty case.",
         "enum": [
@@ -1854,7 +1901,8 @@
           "year_desc",
           "newest",
           "series",
-          "ddc"
+          "ddc",
+          "lcc"
         ],
         "title": "BookSort",
         "type": "string"
@@ -1952,7 +2000,7 @@
         "type": "object"
       },
       "CatalogueSource": {
-        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `metadata._SOURCES` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP is the other way round, **lookup only**, and for\na reason that is the server's rather than ours: it renders one populated\nrecord per response whatever page size is asked for, so a search for ten\ncandidates would be ten requests. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.",
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP is the other way round, **lookup only**, and for\na reason that is the server's rather than ours: it renders one populated\nrecord per response whatever page size is asked for, so a search for ten\ncandidates would be ten requests. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.",
         "enum": [
           "open_library",
           "google_books",
@@ -2005,6 +2053,10 @@
             "title": "Serves Groups",
             "type": "array"
           },
+          "slow": {
+            "title": "Slow",
+            "type": "boolean"
+          },
           "source": {
             "$ref": "#/components/schemas/CatalogueSource"
           }
@@ -2014,6 +2066,7 @@
           "enabled",
           "answers_lookup",
           "answers_search",
+          "slow",
           "asked_first",
           "needs_a_key",
           "has_key",
@@ -2127,7 +2180,7 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` orders a shelf by Dewey and there is deliberately no\ncounterpart for the other three, because two of them have no order and the\nthird does not sort as text.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable and sortable as well as filterable.",
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that\nplace a book on one, each under its own rule in `filing.py`, and there is\ndeliberately no counterpart for GND or LCSH because a subject vocabulary\nhas no order to offer.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable as well as filterable. **Sortable is no\nlonger one of the things it has alone**: every scheme names a filing rule\nin `filing.py`, and LCC's orders a shelf too.",
         "enum": [
           "ddc",
           "lcc",
@@ -6895,7 +6948,7 @@
     },
     "/api/books/search": {
       "get": {
-        "description": "Free-text search, for adding a book nobody can scan.\n\nThe barcode path covers a book that is physically to hand. This covers the\nrest: a book with no barcode, a damaged one, one printed before ISBNs\nexisted, or one being added from a list rather than from the shelf. The\ncaller picks a result and the client prefills the form from it, so nothing\nis written until a person confirms.\n\n**No API key is required.** This used to be Google Books only and was\nhidden entirely from a library that had not configured one, which left\nthem with no way at all to add a book by title. Open Library answers\nwithout a key; Google is merged in on top when one is set, for the blurb\nand the categories its search index carries and Open Library's does not.\n\nTwo segments (`/google/search`) used to guard against this being confused\nwith `/{book_id}`; a single one is safe for the same reason `/export` is,\nwhich is that it is declared first.",
+        "description": "Free-text search, for adding a book nobody can scan.\n\nThe barcode path covers a book that is physically to hand. This covers the\nrest: a book with no barcode, a damaged one, one printed before ISBNs\nexisted, or one being added from a list rather than from the shelf. The\ncaller picks a result and the client prefills the form from it, so nothing\nis written until a person confirms.\n\n**No API key is required.** This used to be Google Books only and was\nhidden entirely from a library that had not configured one, which left\nthem with no way at all to add a book by title. Open Library answers\nwithout a key; Google is merged in on top when one is set, for the blurb\nand the categories its search index carries and Open Library's does not.\n\nTwo segments (`/google/search`) used to guard against this being confused\nwith `/{book_id}`; a single one is safe for the same reason `/export` is,\nwhich is that it is declared first.\n\n**`harder` also asks the catalogues the ordinary deadline cannot wait for.**\nIt is a request rather than an instruction: the server runs the ordinary\nsearch when this library has no such catalogue enabled, and when the one\nlong fan out allowed at a time is already in flight. `asked` and `unasked`\non the response say what actually happened, so a client never has to infer\nit from what it sent.",
         "operationId": "search_books",
         "parameters": [
           {
@@ -6940,6 +6993,18 @@
               "description": "Prefer editions in this language when ranking",
               "title": "Lang"
             }
+          },
+          {
+            "description": "Also ask the catalogues too slow for the ordinary deadline. Ignored when there are none to ask.",
+            "in": "query",
+            "name": "harder",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also ask the catalogues too slow for the ordinary deadline. Ignored when there are none to ask.",
+              "title": "Harder",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -6947,11 +7012,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/BookMatch"
-                  },
-                  "title": "Response Search Books",
-                  "type": "array"
+                  "$ref": "#/components/schemas/BookSearchOut"
                 }
               }
             },
@@ -7791,7 +7852,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings; a new install asks the DNB and K10plus together, then the\nAustrian National Library, then Open Library, then Google, and searches all\nseven. A source switched off is not asked on either path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds seven lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {

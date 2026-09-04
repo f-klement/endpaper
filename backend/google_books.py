@@ -13,15 +13,29 @@ everyone is throttled together.
 
 import logging
 import re
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import covers
 import fetch
+import targets
+from enums import CatalogueSource
 from isbn import parse as parse_isbn
+
+if TYPE_CHECKING:
+    # Under `TYPE_CHECKING` because the dependency is genuinely mutual:
+    # `schemas/book.py` imports `split_categories` from this module, so a
+    # runtime import here is a cycle and fails on the first import of either.
+    # `merge_into` only ever calls methods on the value, never the class, so
+    # the name is needed for the annotation and nowhere else, and PEP 649
+    # leaves an annotation unevaluated. Removing the guard is an ImportError
+    # rather than a subtle failure.
+    from schemas.book import BookMatch
 
 logger = logging.getLogger("endpaper.google_books")
 
-_VOLUMES_URL: Final = "https://www.googleapis.com/books/v1/volumes"
+#: The volumes endpoint, read off Google Books' row rather than written twice.
+#: See `metadata._OPEN_LIBRARY` for why an address may not be a second literal.
+_VOLUMES_URL: Final = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].base_url
 
 
 class GoogleBooksError(Exception):
@@ -205,13 +219,31 @@ async def search(query: str, api_key: str, limit: int = 5) -> list[dict[str, Any
     return [_volume_to_fields(item) for item in items[:limit]]
 
 
-def merge_into(book: object, fields: dict[str, Any], *, overwrite: bool) -> list[str]:
-    """Copy fields onto a book, returning the names actually changed.
+def merge_into(book: object, match: BookMatch, *, overwrite: bool) -> list[str]:
+    """Copy a validated match onto a book, returning the names actually changed.
 
     By default only empty fields are filled. Enrichment is meant to add what is
     missing, not to overrule what someone typed by hand: a member who corrected
     a title should not have Google quietly undo it. `overwrite` is offered for
     the case where the stored record is known to be wrong.
+
+    **A `BookMatch` rather than a dictionary, and that is the bound rather than
+    a tidier signature.** Every value written here came from outside the
+    library, on both of the two routes that reach this function, and until
+    2026-09-03 one of them validated its dictionary and the other did not:
+    `POST /{id}/enrich/apply` refused an oversized value with a 422 and
+    `POST /{id}/enrich` stored whatever a catalogue answered with a 200, one
+    route apart on the same book. `series_index` was the sharp one, and it is a
+    stored denial of service rather than an untidy row: `routers/books.list_series`
+    computes `set(range(1, max(held) + 1))` over the column under
+    `Shelf.seen_by`, so a stored `1e9` is roughly 70 GB and ten minutes on
+    every request by every member until somebody finds the row.
+
+    The type is what keeps that closed. A caller cannot hand this an unbounded
+    dictionary without failing mypy, and at runtime a dictionary raises on the
+    first `getattr` rather than writing twelve unchecked columns, so a third
+    call site inherits the bound instead of having to remember it. Twelve, not
+    eleven: the loop names eleven and `cover_url` is assigned below it.
     """
     changed: list[str] = []
 
@@ -228,7 +260,7 @@ def merge_into(book: object, fields: dict[str, Any], *, overwrite: bool) -> list
         "series_name",
         "series_index",
     ):
-        incoming = fields.get(name)
+        incoming = getattr(match, name)
         if incoming in (None, "", []):
             continue
 
@@ -243,7 +275,7 @@ def merge_into(book: object, fields: dict[str, Any], *, overwrite: bool) -> list
 
     # A cover the member uploaded lives under /covers/ and always outranks a
     # remote one, exactly as in the metadata refresh.
-    incoming_cover = fields.get("cover_url")
+    incoming_cover = match.cover_url
     current_cover = getattr(book, "cover_url", None)
     keeps_local_cover = (current_cover or "").startswith("/covers/")
     replaceable = not current_cover or overwrite

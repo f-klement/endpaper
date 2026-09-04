@@ -620,7 +620,7 @@ export function useBookEnrichment(bookId: number): UseBookEnrichmentResult {
 
   const candidates = useEnrichmentCandidates(bookId, {
     query: {
-      // Only once the picker is open. Fetching on mount would put six
+      // Only once the picker is open. Fetching on mount would put eight
       // catalogue requests behind every book anybody looks at.
       enabled: isPickerOpen,
       retry: false,

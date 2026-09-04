@@ -48,7 +48,9 @@ beforeEach(() => {
       default_locale: "en",
     },
   });
-  api.on("/api/books/search", { body: [match()] });
+  api.on("/api/books/search", {
+    body: { matches: [match()], asked: ["open_library"], unasked: [] },
+  });
   api.on("/api/books/locations", {
     body: [{ name: "Living room shelf 3", book_count: 40 }],
   });
@@ -143,7 +145,9 @@ describe("useBookSearch", () => {
   });
 
   it("reports an empty result as empty rather than as a failure", async () => {
-    api.on("/api/books/search", { body: [] });
+    api.on("/api/books/search", {
+      body: { matches: [], asked: ["open_library"], unasked: [] },
+    });
     const { result } = renderHookWithProviders(() => useBookSearch());
     act(() => result.current.setQuery("zzzz"));
     act(() => result.current.submit());
@@ -174,6 +178,165 @@ describe("useBookSearch", () => {
 
     await waitFor(() => expect(result.current.matches).toEqual([]));
     expect(result.current.query).toBe("");
+  });
+
+  it("reports what the answer says was left unasked", async () => {
+    api.on("/api/books/search", {
+      body: { matches: [match()], asked: ["open_library"], unasked: ["oenb"] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.unasked).toEqual(["oenb"]));
+    // **The other half of `askedNothing`, on the fixture that already has it.**
+    // It is `asked` empty **and** something left to ask, and only the second
+    // half was pinned: dropping the first survived the whole gate, and under
+    // that mutant this very fixture, one catalogue asked and one left, reports
+    // that nothing was searched above a full page of results. Same lie as the
+    // one the field exists to prevent, from the other direction.
+    expect(result.current.askedNothing).toBe(false);
+  });
+
+  it("asks again for the slow catalogues when told to", async () => {
+    api.on("/api/books/search", {
+      body: { matches: [match()], asked: ["open_library"], unasked: ["oenb"] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() => expect(result.current.unasked).toEqual(["oenb"]));
+
+    api.on("/api/books/search", {
+      body: {
+        matches: [match()],
+        asked: ["open_library", "oenb"],
+        unasked: [],
+      },
+    });
+    act(() => result.current.searchHarder());
+
+    await waitFor(() =>
+      expect(
+        new URL(
+          api.lastCall("/api/books/search")!.url,
+          "http://localhost",
+        ).searchParams.get("harder"),
+      ).toBe("true"),
+    );
+    await waitFor(() => expect(result.current.hasSearchedHarder).toBe(true));
+    expect(result.current.unasked).toEqual([]);
+  });
+
+  it("does not ask harder for a query that has not been asked at all", async () => {
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() => expect(result.current.matches).toHaveLength(1));
+
+    act(() => result.current.searchHarder());
+    act(() => result.current.setQuery("zauberberg"));
+    act(() => result.current.submit());
+
+    await waitFor(() =>
+      expect(
+        new URL(
+          api.lastCall("/api/books/search")!.url,
+          "http://localhost",
+        ).searchParams.get("q"),
+      ).toBe("zauberberg"),
+    );
+    const query = new URL(
+      api.lastCall("/api/books/search")!.url,
+      "http://localhost",
+    ).searchParams;
+    // A new question has not been asked harder yet, whatever the last one was.
+    expect(query.get("harder")).toBe("false");
+    expect(result.current.hasSearchedHarder).toBe(false);
+  });
+
+  it("keeps the rows on screen while the longer search runs", async () => {
+    // Otherwise the list blanks for the whole of the longer deadline and takes
+    // with it the candidate the reader was about to click.
+    api.on("/api/books/search", {
+      body: { matches: [match()], asked: ["open_library"], unasked: ["oenb"] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() => expect(result.current.matches).toHaveLength(1));
+
+    act(() => result.current.searchHarder());
+
+    expect(result.current.isSearchingHarder).toBe(true);
+    expect(result.current.matches).toHaveLength(1);
+  });
+
+  const searchCalls = () =>
+    api.calls.filter((call) => call.url.includes("/api/books/search")).length;
+
+  it("retries a harder search that was refused its slot", async () => {
+    // The server allows one long fan out at a time and answers the rest as
+    // ordinary searches, so a refused answer comes back cached under
+    // `harder: true` with `unasked` still populated and the offer still on
+    // screen. Pressing it again sets a state that is already set, which React
+    // bails out of, and `staleTime` then suppresses the request: without a
+    // refetch the button is dead for five minutes, and the server's whole
+    // fallback rests on the client being able to try again.
+    api.on("/api/books/search", {
+      body: { matches: [match()], asked: ["open_library"], unasked: ["oenb"] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() => expect(result.current.unasked).toEqual(["oenb"]));
+
+    act(() => result.current.searchHarder());
+    await waitFor(() => expect(result.current.hasSearchedHarder).toBe(true));
+    // Refused: an ordinary answer under a harder key, so the offer stands.
+    expect(result.current.unasked).toEqual(["oenb"]);
+    const refused = searchCalls();
+
+    api.on("/api/books/search", {
+      body: {
+        matches: [match()],
+        asked: ["open_library", "oenb"],
+        unasked: [],
+      },
+    });
+    act(() => result.current.searchHarder());
+
+    await waitFor(() => expect(result.current.unasked).toEqual([]));
+    expect(searchCalls()).toBeGreaterThan(refused);
+  });
+
+  it("does not blame the catalogues for a query with nothing in it", async () => {
+    // A query reducing to no usable terms asks nothing too, and "and" survives
+    // the minimum length. Reading `asked` alone would tell that reader every
+    // catalogue their library runs is a slow one.
+    api.on("/api/books/search", {
+      body: { matches: [], asked: [], unasked: [] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("and"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.isEmpty).toBe(true));
+    expect(result.current.askedNothing).toBe(false);
+  });
+
+  it("separates asking nothing from finding nothing", async () => {
+    // Every catalogue this library has switched on is a slow one, so the
+    // ordinary "no matches" line would report a fact nothing checked.
+    api.on("/api/books/search", {
+      body: { matches: [], asked: [], unasked: ["oenb", "nlg"] },
+    });
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.askedNothing).toBe(true));
+    expect(result.current.isEmpty).toBe(false);
   });
 });
 

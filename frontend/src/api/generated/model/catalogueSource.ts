@@ -11,7 +11,7 @@
  *
  * **The values are the strings `metadata.py` already used**, because they are
  * not only a settings vocabulary: `catalogue.Record.source` and
- * `Record.sources` carry them, `metadata._SOURCES` is keyed on them, and
+ * `Record.sources` carry them, `targets.SEEDED` is keyed on them, and
  * `metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing
  * downstream and buys two things: a closed union in the generated client, and
  * a roster `sources.parse` can validate a stored row against.

@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
+import targets
 from database import Base, engine
 from enums import AuthorityScheme
 
@@ -1873,3 +1874,145 @@ class TestAnAddressPerMember:
         assert "email" not in columns
         with engine.connect() as connection:
             assert connection.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1
+
+
+@pytest.mark.usefixtures("restore_schema")
+class TestTheSeededCatalogueTargetsMatchTheCode:
+    """The nine rows the migration writes are the nine constants the code reads.
+
+    **The migration writes literals rather than importing `targets.SEEDED`**,
+    which is the rule `c1f8a7e3d240` states: a migration describes the data as it
+    was on the day it ran, so a library upgrading in a year does not seed a
+    roster that revision never saw. The cost of that rule is that the literal and
+    the constant can disagree today, and this is what stops them.
+
+    **So this compares a migrated database against `targets.SEEDED` and not
+    against `models`**, which is the same reasoning
+    `TestTheMigrationsAndTheModelsAgree` gives one class above: the suite builds
+    with `create_all` and a deployment only ever sees the migrations.
+    """
+
+    @staticmethod
+    def _rows() -> dict[str, dict[str, object]]:
+        drop_everything()
+        schema.upgrade_to_head()
+        with engine.connect() as connection:
+            result = connection.execute(text("SELECT * FROM catalogue_targets"))
+            return {row.source: dict(row._mapping) for row in result}
+
+    def test_the_migration_seeds_the_whole_roster_and_nothing_else(self):
+        assert set(self._rows()) == {source.value for source in targets.SEEDED}
+
+    def test_every_seeded_row_says_what_the_constant_says(self):
+        """Field by field, because a wrong index name is the failure that ships
+        plausible MARC for an unrelated book rather than an error."""
+        rows = self._rows()
+        wrong: list[str] = []
+        for source, target in targets.SEEDED.items():
+            row = rows[source.value]
+            expected: dict[str, object] = {
+                "rank": target.rank,
+                "transport": target.transport.value,
+                "base_url": target.base_url,
+                "reader": target.reader.value,
+                "answers_lookup": target.answers_lookup,
+                "answers_search": target.answers_search,
+                "metered": target.metered,
+                "needs_key": target.needs_key,
+                "sru_version": target.sru_version,
+                "query_parameter": target.query_parameter,
+                "query_language": (
+                    target.query_language.value if target.query_language else None
+                ),
+                "record_schema": target.record_schema,
+                "isbn_index": target.isbn_index,
+                "isbn_attribute": target.isbn_attribute,
+                "title_index": target.title_index,
+                "title_query_shape": (
+                    target.title_query_shape.value if target.title_query_shape else None
+                ),
+                "lookup_records": target.lookup_records,
+                "search_multiplier": target.search_multiplier,
+                "search_cap": target.search_cap,
+                "refuses_component_parts": target.refuses_component_parts,
+                "requires_isbn_claim": target.requires_isbn_claim,
+                "reads_author_identifiers": target.reads_author_identifiers,
+                "timeout_seconds": target.timeout_seconds,
+                "is_seeded": True,
+            }
+            for field, value in expected.items():
+                stored = row[field]
+                if isinstance(value, bool):
+                    stored = bool(stored)
+                if stored != value:
+                    wrong.append(f"{source.value}.{field}: {stored!r} not {value!r}")
+        assert not wrong, wrong
+
+    def test_the_columns_the_migration_writes_are_every_column_there_is(self):
+        """A column added to the model and not to the seed would be silently
+        default filled, which is how a row comes to disagree with the code it was
+        copied from."""
+        row = next(iter(self._rows().values()))
+        assert set(row) == {
+            column.name
+            for column in Base.metadata.tables["catalogue_targets"].columns
+        }
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [
+            ("requires_isbn_claim", 0),
+            ("transport", "z3950"),
+            ("isbn_index", "num=1 or num"),
+            ("title_index", "a b"),
+            # **These three discriminate and the four above do not**, which a
+            # critic established by mutation rather than by reading: reverting
+            # the index constraint to the ten character denylist it replaced
+            # leaves `num=1 or num` and `a b` refused, so both fixtures were
+            # cases the older version also caught. That is the shape this
+            # repository names, a guard whose own test picked the covered case.
+            #
+            # A tab and a NBSP are CQL token separators the denylist never named,
+            # so `dc.title<TAB>and<TAB>dc.title` is a two clause boolean written
+            # through the column whose constraint exists to refuse exactly that.
+            # Two spellings of the separator class, because one is a spelling and
+            # two are a class.
+            ("title_index", "dc.title\tand\tdc.title"),
+            ("title_index", "dc.title\xa0and"),
+            # `ck_catalogue_targets_use_attribute` had no SQL fixture at all:
+            # `test_targets.py` covers this value, but only through
+            # `__post_init__`, which is the arm a Core insert skips. Deleting the
+            # constraint failed nothing.
+            ("isbn_attribute", "7 @and @attr 1=4 anything"),
+        ],
+    )
+    def test_a_restore_cannot_write_a_row_the_dataclass_would_refuse(
+        self, column, value
+    ):
+        """`backup.restore` writes through Core, where no validator and no
+        `__post_init__` fires, so these are CHECK constraints or they are
+        nothing. The ÖNB row is the subject because a mistyped index there
+        answers HTTP 200 with the whole catalogue rather than with an error.
+        """
+        self._rows()
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    f"UPDATE catalogue_targets SET {column} = :value "  # noqa: S608
+                    "WHERE source = 'oenb'"
+                ),
+                {"value": value},
+            )
+
+    def test_the_dnb_may_waive_the_isbn_claim_and_only_the_dnb(self):
+        """The other half of the diagonal above: the constraint states one
+        measured exception rather than refusing the column outright."""
+        self._rows()
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET requires_isbn_claim = 0 "
+                    "WHERE source = 'dnb'"
+                )
+            )
+            connection.commit()

@@ -273,6 +273,30 @@ export const en = {
     "Pick one to fill in the details. Nothing is saved until you confirm.",
   "search.withoutKey":
     "Searching Open Library. A Google Books key adds descriptions and genres.",
+  // The catalogues are named rather than counted. "Search harder" on its own
+  // describes the machine's effort and says nothing about what the extra wait
+  // buys, and a reader deciding whether to spend it wants to know which
+  // catalogue is being offered.
+  "search.slow.offer": "{names} are slower than a quick search waits for.",
+  "search.slow.button": "Search harder",
+  "search.slow.done": "Every catalogue was asked.",
+  // The refused state. One long search runs at a time, so a second reader
+  // asking at the same moment gets an ordinary search and would otherwise press
+  // the button, wait, and see the identical offer come back with no reason.
+  //
+  // **Ours, not theirs, and the first draft said theirs.** It read "The slow
+  // catalogues were busy with another search", which blames the third parties
+  // for a limit that is entirely this application's: `_HARDER_AT_ONCE` refused
+  // the slot and those catalogues were never asked at all. A security critic
+  // caught it as the claim-nobody-checked shape this whole feature exists to
+  // remove, one notch milder and in our own copy.
+  "search.slow.busy":
+    "Only one long search runs at a time. Try again in a moment.",
+  // Not "no matches": nothing was asked. Saying so is the same rule as the 409
+  // this replaced, which exists because reporting a fact the app never checked
+  // sends somebody off to type a book in by hand.
+  "search.slow.nothingAsked":
+    "Nothing was searched. Every catalogue this library has switched on is a slow one.",
 
   // ── Loans ───────────────────────────────────────────────────────────────
   "loans.title": "Loans",
@@ -1289,6 +1313,17 @@ export const en = {
   "providers.status.lookupOnlyRegional":
     "Answers scans only, and only for ISBNs beginning {groups}, so its position does not affect a title search.",
   "providers.status.off": "Off. This catalogue is never asked.",
+  // **Its own line rather than a value `statusOf` can return.** Slow co-occurs
+  // with almost everything above it: a slow catalogue can also need a key, be
+  // promoted, or have a regional remit. A chain returning one line per row would
+  // have to swallow one of those or never fire, which is the defect
+  // `lib/providerStatus.ts` records having shipped once already.
+  "providers.slow":
+    "Too slow for a quick search. Asked only when a reader searches harder.",
+  // Shown only when a row carries it, so an install with no slow catalogue is
+  // not given a paragraph about something it does not have.
+  "providers.slowLegend":
+    "A catalogue marked slow cannot answer a title search inside the deadline the quick search allows, so it is left out of that one and asked only when somebody asks for it. It answers a scan exactly as the others do.",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

@@ -12,26 +12,47 @@ import type { Messages } from "./en";
  *
  * * **No em dashes.** House style for all UI strings, and German typography
  *   uses them differently from English anyway.
- * * **Informal address (du, dein).** This started as "a household bookshelf, not
- *   a bank". Mixing du and Sie reads badly, so it is du throughout.
+ * * **No address, in either register.** German makes you choose between `du`
+ *   and `Sie`, and this file chooses neither.
  *
- *   **Decided 2026-08-26: address follows library mode.** du with the mode off,
- *   Sie with it on, because a German library addresses a Benutzer:in as Sie and
- *   a public catalogue in du reads as careless to an institution.
+ *   The file used to be `du` throughout, justified as "a household bookshelf,
+ *   not a bank". That was right until library mode existed, at which point it
+ *   was wrong for an institution: a German library addresses a Benutzer:in as
+ *   `Sie`, and a catalogue written in `du` reads as careless. A formal overlay
+ *   was built, measured at **82 of 888 strings**, and reviewed. **The owner
+ *   retired it on 2026-09-03**: "rephrase the german version, so we dont need
+ *   to keep two versions for the same language."
  *
- *   **This file stays informal and does not gain a second copy.** The formal
- *   register is an overlay, `deFormal.ts`, holding only the keys that differ,
- *   merged over this one when library mode is on. Measured 2026-08-26: of 640
- *   string values here, **58 carry address at all** (44 with a du pronoun or
- *   possessive, 14 with a likely informal imperative, and that second number is
- *   an overestimate because it counts nouns like "Suche läuft"). So the overlay
- *   is roughly 9% of this file, and the other 582 strings cannot drift between
- *   registers because they exist once.
+ *   So **82** strings differ from the file the overlay was measured against.
+ *   The same total, and deliberately not the same set: `public.noResultsHint`
+ *   joins it, having been written in `Sie` and so needing no formal variant of
+ *   its own, and `appearance.wallpaperSurprise` leaves it, being the one place
+ *   the reader addresses the app rather than the other way round.
  *
- *   Do not switch this file to Sie, and do not mix registers within it. A string
- *   added here in du needs a formal counterpart; the test that enforces that
- *   greps the merged formal catalogue for informal markers and fails on a
- *   survivor. See docs/decisions.md, "German address follows library mode".
+ *   German has the machinery for it: the infinitive for every instruction ("Bitte die
+ *   Ziffern prüfen"), `eigen-` for a possessive that carries weight ("Eigene
+ *   Lektüre"), a plain article for one that does not ("Die Bibliothek konnte
+ *   nicht geladen werden"), the passive and `lässt sich`, and `wer …` for a
+ *   conditional about the reader.
+ *
+ *   **One string on screen does carry a `du` form, and it is not an
+ *   exception.** `appearance.wallpaperSurprise` is "Überrasch mich": the
+ *   reader addressing the app, not the app addressing the reader, and the
+ *   rule here is about the second. Worth knowing because it is the one string
+ *   that leans on the blind spot below rather than merely coexisting with it:
+ *   no rule can see it, so nothing would stop it being changed to something
+ *   the rule should catch.
+ *
+ *   **A string added here in `du` or `Sie` fails the build**, at
+ *   `frontend/tests/i18n/de.test.ts`, which also carries the one exemption
+ *   (the idiom "Mein und Dein", where `Dein` is a noun) and the blind spot
+ *   nothing can close: an informal imperative is a bare verb stem and is
+ *   homographic with a noun, so "Suche den Code" and "Suche läuft" cannot be
+ *   told apart by any rule. That one still needs a reader.
+ *
+ *   The published catalogue is no longer an exception either. It addressed a
+ *   visitor as `Sie` while the rest of the app said `du`; with one address
+ *   free file it needs no rule of its own.
  */
 export const de: Messages = {
   // ── Navigation und Rahmen ───────────────────────────────────────────────
@@ -62,7 +83,7 @@ export const de: Messages = {
   "common.loading": "Wird geladen...",
   "common.somethingWentWrong": "Etwas ist schiefgelaufen.",
   "common.cannotReachServer":
-    "Der Server ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.",
+    "Der Server ist nicht erreichbar. Bitte die Verbindung prüfen und es erneut versuchen.",
   "common.selectAll": "Alle auswählen",
   "common.clearSelection": "Auswahl aufheben",
   "common.selectedCount": "{count} ausgewählt",
@@ -85,13 +106,13 @@ export const de: Messages = {
   "ownership.label": "Besitz",
   "ownership.filterAll": "Beliebig",
   "ownership.explain":
-    "Ob ein Exemplar wirklich hier steht. Unabhängig davon, ob du es gelesen hast.",
+    "Ob ein Exemplar wirklich hier steht. Unabhängig davon, ob es gelesen wurde.",
   "ownership.confirmSelected": "Als im Regal markieren",
   "ownership.markNotOwned": "Als nicht im Besitz markieren",
   "ownership.bulkResult":
     "{updated} geändert, {unchanged} bereits gesetzt, {skipped} übersprungen.",
   "ownership.unconfirmedBanner":
-    "Bei {count} Büchern ist nicht bestätigt, ob sie in deinem Regal stehen.",
+    "Bei {count} Büchern ist nicht bestätigt, ob sie im Regal stehen.",
   "ownership.reviewThem": "Jetzt prüfen",
 
   "library.overdueBanner": "{count} Ausleihen sollten angemahnt werden.",
@@ -110,10 +131,10 @@ export const de: Messages = {
   "library.clear": "Zurücksetzen",
   "library.loadMore": "Mehr laden",
   "library.noBooks": "Keine Bücher gefunden",
-  "library.adjustFilters": "Versuche es mit anderen Filtern",
+  "library.adjustFilters": "Es mit anderen Filtern versuchen",
   "library.scanFirstBook":
-    "Scanne einen Barcode, um dein erstes Buch hinzuzufügen",
-  "library.couldNotLoad": "Deine Bibliothek konnte nicht geladen werden.",
+    "Einen Barcode scannen, um das erste Buch hinzuzufügen",
+  "library.couldNotLoad": "Die Bibliothek konnte nicht geladen werden.",
   "library.select": "Auswählen",
   "library.viewLabel": "Darstellung der Bibliothek",
   "library.viewGrid": "Cover",
@@ -160,9 +181,9 @@ export const de: Messages = {
   "book.removeTag": "{tag} entfernen",
 
   // ── Abschnitte der Buchdetails ──────────────────────────────────────────
-  "section.reading": "Deine Lektüre",
+  "section.reading": "Eigene Lektüre",
   "section.filing": "Dieses Exemplar einordnen",
-  "section.copies": "Deine Exemplare",
+  "section.copies": "Eigene Exemplare",
   "section.lending": "Dieses Exemplar verleihen",
   "section.writing": "Notizen und Zitate",
   "section.about": "Über dieses Buch",
@@ -203,7 +224,7 @@ export const de: Messages = {
     "Nichts Neues gefunden. Die Angaben hier sind bereits vollständig.",
   "enrich.pickTitle": "Welche Ausgabe ist das?",
   "enrich.pickHint":
-    "Wähle die Ausgabe, die du in der Hand hast. Es werden nur leere Felder ergänzt, deine eigenen Angaben bleiben stehen.",
+    "Die Ausgabe wählen, die vorliegt. Es werden nur leere Felder ergänzt, eigene Angaben bleiben stehen.",
   "enrich.proposedClassifications": "Vorgeschlagene Klassifikationen",
   "enrich.noClassifications": "Keine Klassifikationen vorgeschlagen.",
   "enrich.notFound": "Google Books hat keinen Eintrag zu diesem Buch.",
@@ -231,9 +252,9 @@ export const de: Messages = {
   "scan.stopScanning": "Scannen beenden",
   "scan.cameraIdle": "Die Kamera ist aus",
   "scan.cameraIdleHint":
-    "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis du sie startest.",
+    "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis sie gestartet wird.",
   "scan.notABook":
-    "{code} gelesen, das ist kein Buch-Barcode. Suche den Code ueber der ISBN.",
+    "{code} gelesen, das ist kein Buch-Barcode. Der gesuchte Code steht über der ISBN.",
   "scan.tryAgain": "Erneut versuchen",
   "scan.cameraUnavailable": "Kamera nicht verfügbar",
   "scan.orEnterManually": "Oder ISBN von Hand eingeben:",
@@ -241,9 +262,9 @@ export const de: Messages = {
   "scan.lookUp": "Nachschlagen",
   "scan.lookingUp": "Buch wird gesucht...",
   "scan.invalidIsbn":
-    "Das sieht nicht nach einer gültigen ISBN aus. Prüfe die Ziffern und versuche es erneut.",
+    "Das sieht nicht nach einer gültigen ISBN aus. Bitte die Ziffern prüfen und es erneut versuchen.",
   "scan.notFoundManual":
-    "Keine Angaben zur ISBN {isbn} gefunden. Du kannst das Buch trotzdem von Hand anlegen.",
+    "Keine Angaben zur ISBN {isbn} gefunden. Das Buch lässt sich trotzdem von Hand anlegen.",
   "scan.titleRequired": "Titel *",
   "scan.titlePlaceholder": "Buchtitel",
   "scan.authorPlaceholder": "Name des Autors",
@@ -264,11 +285,19 @@ export const de: Messages = {
   "search.button": "Suchen",
   "search.searching": "Suche läuft...",
   "search.noResults":
-    "Keine Treffer. Versuche weniger Wörter, oder trage das Buch von Hand ein.",
+    "Keine Treffer. Weniger Wörter versuchen, oder das Buch von Hand eintragen.",
   "search.pickHint":
-    "Wähle einen Treffer aus, um die Angaben zu übernehmen. Gespeichert wird erst, wenn du bestätigst.",
+    "Einen Treffer auswählen, um die Angaben zu übernehmen. Gespeichert wird erst nach dem Bestätigen.",
   "search.withoutKey":
     "Es wird Open Library durchsucht. Ein Google-Books-Schlüssel ergänzt Beschreibungen und Genres.",
+  "search.slow.offer":
+    "{names} sind langsamer, als eine schnelle Suche warten kann.",
+  "search.slow.button": "Gründlicher suchen",
+  "search.slow.done": "Alle Kataloge wurden gefragt.",
+  "search.slow.busy":
+    "Es läuft immer nur eine lange Suche gleichzeitig. Bitte gleich noch einmal versuchen.",
+  "search.slow.nothingAsked":
+    "Es wurde nichts durchsucht. Jeder Katalog, den diese Bibliothek eingeschaltet hat, ist ein langsamer.",
 
   // ── Ausleihen ───────────────────────────────────────────────────────────
   "loans.title": "Ausleihen",
@@ -332,13 +361,13 @@ export const de: Messages = {
   "quotes.pageLabel": "Seite, auf der das Zitat steht",
   "quotes.editPageLabel": "Seite des Zitats bearbeiten",
   "quotes.pagePlaceholder": "Seite",
-  "quotes.noteLabel": "Was du dazu sagen möchtest",
-  "quotes.editNoteLabel": "Deine Anmerkung bearbeiten",
+  "quotes.noteLabel": "Anmerkung dazu",
+  "quotes.editNoteLabel": "Anmerkung bearbeiten",
   "quotes.notePlaceholder": "Warum gerade dieses (optional)",
   "quotes.onPage": "S. {page}",
   "quotes.empty": "Noch keine Zitate gespeichert",
   "quotes.emptyHint":
-    "Öffne ein Buch und schreibe eine Stelle ab, die bleiben soll.",
+    "Ein Buch öffnen und eine Stelle abschreiben, die bleiben soll.",
   "quotes.couldNotLoad": "Die Zitate konnten nicht geladen werden.",
   "quotes.pagination": "Zitatseiten",
   "quotes.pageOf": "Seite {page} von {of}",
@@ -347,12 +376,12 @@ export const de: Messages = {
 
   // ── Statistik ───────────────────────────────────────────────────────────
   "stats.title": "Sammlung in Zahlen",
-  "stats.booksInLibrary": "Bücher in deiner Bibliothek",
+  "stats.booksInLibrary": "Bücher in der Bibliothek",
   "stats.byMember": "Hinzugefügt nach Person",
   "stats.byType": "Nach Art",
   "stats.byGenre": "Nach Genre",
   "stats.byAge": "Nach Alter",
-  "stats.byCustomTag": "Nach euren Schlagwörtern",
+  "stats.byCustomTag": "Nach freien Schlagwörtern",
   "stats.byCollection": "Nach Sammlung",
   "stats.finishedByMonth": "Gelesen, nach Monat",
   "stats.finishedTotal": "Bücher gelesen",
@@ -368,7 +397,7 @@ export const de: Messages = {
   "tags.type": "Art",
   "tags.genre": "Genre",
   "tags.age": "Alter",
-  "tags.custom": "Eure Schlagwörter",
+  "tags.custom": "Freie Schlagwörter",
   "tags.count": "{count}",
   "tags.countWithChosen": "{chosen} von {count}",
   "tags.newLabel": "Neues Schlagwort",
@@ -383,7 +412,7 @@ export const de: Messages = {
   // ── Anmeldung ───────────────────────────────────────────────────────────
   // The product name, left in English on purpose: a brand is not translated.
   "login.appName": "Endpaper",
-  "login.tagline": "Euer eigener Bücherkatalog",
+  "login.tagline": "Ein eigener Bücherkatalog",
   "login.signIn": "Anmelden",
   "login.createAccount": "Konto erstellen",
   "login.switchToSignIn": "Zum Anmelden wechseln",
@@ -395,19 +424,19 @@ export const de: Messages = {
   "login.email": "E-Mail-Adresse",
   "login.emailOptional": "optional",
   "login.emailHint":
-    "Hierhin ginge eine Erinnerung, die an dich gerichtet ist. Verschickt wird noch nichts, und du kannst die Adresse auch später eintragen.",
-  "login.emailPlaceholder": "du@example.org",
+    "Hierhin ginge eine persönlich adressierte Erinnerung. Verschickt wird noch nichts, und die Adresse lässt sich auch später eintragen.",
+  "login.emailPlaceholder": "name@example.org",
   "login.pleaseWait": "Bitte warten...",
   "login.browseCatalogue": "Den öffentlichen Katalog durchsuchen",
   "login.firstAccountAdmin":
     "Das zuerst erstellte Konto wird zum Administrator.",
   "login.directoryHint":
-    "Melde dich mit deinem Verzeichniskonto an. Konten werden dort verwaltet, nicht hier.",
+    "Anmeldung mit dem Verzeichniskonto. Konten werden dort verwaltet, nicht hier.",
   "login.failed": "Anmeldung fehlgeschlagen.",
   "login.setBackground": "Hintergrundbild festlegen",
   "login.changeBackground": "Hintergrundbild ändern",
   "login.uploading": "Wird hochgeladen...",
-  "login.signingYouIn": "Du wirst angemeldet",
+  "login.signingYouIn": "Anmeldung läuft",
 
   // ── Einstellungen ───────────────────────────────────────────────────────
   "settings.title": "Einstellungen",
@@ -418,30 +447,30 @@ export const de: Messages = {
   "settings.appearance.title": "Darstellung",
   "settings.appearance.summary":
     "Das Farbschema, hell oder dunkel, das Hintergrundmuster und die Sprache der App.",
-  "settings.account.title": "Dein Konto",
+  "settings.account.title": "Eigenes Konto",
   "settings.account.summary":
-    "Die Adresse, an die eine an dich gerichtete Erinnerung ginge.",
+    "Die Adresse, an die eine persönlich adressierte Erinnerung ginge.",
   "settings.catalogue.title": "Katalogquellen",
   "settings.catalogue.summary":
     "Woher die Angaben zu einem Buch stammen, wenn es gescannt oder gesucht wird.",
-  "settings.library.title": "Deine Bibliothek",
+  "settings.library.title": "Eigene Bibliothek",
   "settings.library.summary":
     "Bücher aus einem anderen Dienst übernehmen, fehlende Cover nachholen und Angaben ergänzen, für die Endpaper keine Spalte hat.",
   "settings.public.title": "Öffentlicher Katalog",
   "settings.public.summary":
-    "Der Bibliotheksmodus, und ob Lesende ohne Konto in diesem Katalog suchen dürfen. Beides ist aus, bis Sie es einschalten.",
+    "Der Bibliotheksmodus, und ob Lesende ohne Konto in diesem Katalog suchen dürfen. Beides ist aus, bis es eingeschaltet wird.",
   "settings.public.modeTitle": "Bibliotheksmodus",
   "settings.public.modeLabel": "Diese Bibliothek als Bibliothek katalogisieren",
   "settings.public.modeHint":
     "Zeigt Signatur und Schlagwörter und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
   "settings.public.modeRepublishes":
-    "Das Veröffentlichen ist bereits eingeschaltet. Wenn Sie dies wieder einschalten, ist der Katalog sofort erneut öffentlich.",
+    "Das Veröffentlichen ist bereits eingeschaltet. Wird dies wieder eingeschaltet, ist der Katalog sofort erneut öffentlich.",
   "settings.public.publishTitle": "Veröffentlichen",
   "settings.public.publishLabel": "Alle dürfen in diesem Katalog suchen",
   "settings.public.publishHint":
     "Suche und ein Datensatz je Buch, lesbar ohne Konto. Sonst nichts.",
   "settings.public.publishNeedsMode":
-    "Schalten Sie zuerst den Bibliotheksmodus ein. Ohne ihn lässt sich kein Katalog veröffentlichen.",
+    "Zuerst den Bibliotheksmodus einschalten. Ohne ihn lässt sich kein Katalog veröffentlichen.",
   "settings.public.liveNotice": "Dieser Katalog ist veröffentlicht.",
   "settings.public.liveLink": "Ansehen, was Besuchende sehen",
   "settings.public.indexingLabel": "Suchmaschinen dürfen ihn indexieren",
@@ -453,11 +482,11 @@ export const de: Messages = {
   "settings.public.confirmShown":
     "Sichtbar: Titel, Autorin oder Autor, Verlag, Jahr, ISBN, Sprache, Seitenzahl, Ausgabeform, Reihe, Beschreibung, Schlagwörter und Klassifikationen.",
   "settings.public.confirmWithheld":
-    "Nicht sichtbar: wem ein Buch gehört, ob Sie es verleihen, wer es gelesen hat, wo es steht, was es gekostet hat, und sämtliche Notizen.",
+    "Nicht sichtbar: wem ein Buch gehört, ob es verliehen wird, wer es gelesen hat, wo es steht, was es gekostet hat, und sämtliche Notizen.",
   "settings.public.confirmPrivate":
     "Private Bücher bleiben privat, und alles im Papierkorb ebenso.",
   "settings.public.confirmIndexing":
-    "Suchmaschinen wird gesagt, dass sie fernbleiben sollen, bis Sie sie eigens zulassen.",
+    "Suchmaschinen wird gesagt, dass sie fernbleiben sollen, bis sie eigens zugelassen werden.",
   "settings.public.confirmAction": "Veröffentlichen",
   "settings.lending.title": "Ausleihe",
   "settings.lending.summary":
@@ -468,12 +497,12 @@ export const de: Messages = {
   "settings.about.summary":
     "Welche Version läuft, wo der Quelltext liegt und wie sich das Projekt unterstützen lässt.",
 
-  // ── Dein Konto ──────────────────────────────────────────────────────────
+  // ── Eigenes Konto ───────────────────────────────────────────────────────
   "account.email.title": "E-Mail-Adresse",
   "account.email.hint":
-    "Hierhin ginge eine Erinnerung, die an dich gerichtet ist. Verschickt wird noch nichts: Erinnerungen an überfällige Bücher gehen an das Postfach des Haushalts.",
-  "account.email.yours": "Deine Adresse",
-  "account.email.placeholder": "du@example.org",
+    "Hierhin ginge eine persönlich adressierte Erinnerung. Verschickt wird noch nichts: Erinnerungen an überfällige Bücher gehen an das Postfach des Haushalts.",
+  "account.email.yours": "Eigene Adresse",
+  "account.email.placeholder": "name@example.org",
   "account.email.none": "Nicht hinterlegt.",
   "account.email.noneFromDirectory":
     "Nicht hinterlegt. Das Verzeichnis liefert keine Adresse, sie kann hier eingetragen werden.",
@@ -484,25 +513,24 @@ export const de: Messages = {
   "account.email.couldNotSave": "Die Adresse konnte nicht gespeichert werden.",
   "account.members.title": "Adressen der Mitglieder",
   "account.members.hint":
-    "Damit du die fehlende oder falsch getippte Adresse findest, wenn Erinnerungen nirgends ankommen.",
+    "Damit sich die fehlende oder falsch getippte Adresse finden lässt, wenn Erinnerungen nirgends ankommen.",
 
-  "theme.hint": "Wird in deinem Konto gespeichert und gilt auf allen Geräten.",
+  "theme.hint": "Wird im Konto gespeichert und gilt auf allen Geräten.",
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
   "theme.system": "Systemeinstellung",
   "theme.systemHint":
-    "Übernimmt, was auf deinem Handy oder Rechner eingestellt ist.",
+    "Übernimmt, was auf diesem Handy oder Rechner eingestellt ist.",
   "theme.wallpaperOff":
-    "Das Hintergrundmuster ist aus, weil dein System mehr Kontrast verlangt.",
+    "Das Hintergrundmuster ist aus, weil das System mehr Kontrast verlangt.",
   "theme.summary": "{palette}, {mode}, {wallpaper}",
   "theme.change": "Farbwelt, hell oder dunkel und ein Hintergrundmuster wählen",
 
   "appearance.title": "Farbschema und Hintergrund",
-  "appearance.intro":
-    "Alles hier gilt sofort und wird in deinem Konto gespeichert.",
-  "appearance.preview": "Deine Bibliothek in dieser Darstellung",
+  "appearance.intro": "Alles hier gilt sofort und wird im Konto gespeichert.",
+  "appearance.preview": "Die Bibliothek in dieser Darstellung",
   "appearance.previewEmpty":
-    "Auf diesem Gerät sind gerade keine Bücher geladen, also gibt es nichts Echtes zum Ansehen. Geh kurz in deine Bibliothek und komm zurück.",
+    "Auf diesem Gerät sind gerade keine Bücher geladen, also gibt es nichts Echtes zum Ansehen. Kurz in die Bibliothek wechseln und zurückkommen.",
   "appearance.mode": "Hell und dunkel",
   "appearance.palette": "Farbwelt",
   "appearance.attribution": "Farben von {source}.",
@@ -524,7 +552,7 @@ export const de: Messages = {
   "appearance.licencesMorris":
     "Die Morris-Musternamen bezeichnen die historischen Entwürfe, denen die Zeichnungen folgen. Dieses Projekt steht in keiner Verbindung zu Morris & Co und wird von dort nicht unterstützt.",
   "settings.language": "Sprache",
-  "settings.languageHint": "Gilt für dich auf diesem Gerät.",
+  "settings.languageHint": "Gilt nur auf diesem Gerät.",
   "settings.defaultLanguage": "Standardsprache für neue Besucher",
   "settings.language.en": "Englisch",
   "settings.language.de": "Deutsch",
@@ -540,18 +568,18 @@ export const de: Messages = {
   "settings.apiKeyMissing": "Noch kein Schlüssel gespeichert.",
   "settings.apiKeyClear": "Gespeicherten Schlüssel entfernen",
   "settings.apiKeyFromEnv":
-    "Dieser Schlüssel kommt aus der Serverkonfiguration und lässt sich hier weder ändern noch anzeigen. Ändere GOOGLE_BOOKS_API_KEY dort, wo die App bereitgestellt wird.",
+    "Dieser Schlüssel kommt aus der Serverkonfiguration und lässt sich hier weder ändern noch anzeigen. GOOGLE_BOOKS_API_KEY wird dort geändert, wo die App bereitgestellt wird.",
   "settings.apiKeyHelp": "Wie bekomme ich einen Schlüssel?",
   "settings.apiKeyHint":
-    "Lege einen in der Google Cloud Console an und aktiviere dafür die Books API. Der Schlüssel wird nach dem Speichern nicht mehr angezeigt.",
+    "Einen in der Google Cloud Console anlegen und dafür die Books API aktivieren. Der Schlüssel wird nach dem Speichern nicht mehr angezeigt.",
 
   "settings.testAccounts": "Testkonten",
   "settings.testAccountsHint":
-    "Konten mit einem Passwort, das du festlegst, um die Bibliothek so zu sehen, wie ein gewöhnliches Mitglied sie sieht. Sie sind nie Administratoren und werden auf der Anmeldeseite nicht angeboten.",
+    "Konten mit einem selbst gewählten Passwort, um die Bibliothek so zu sehen, wie ein gewöhnliches Mitglied sie sieht. Diese Konten sind nie Administratoren und werden auf der Anmeldeseite nicht angeboten.",
   "settings.testAccountsReturnProxy":
     "Zum Zurückkehren im Menü den Eintrag Zurück zu meinem Konto wählen.",
   "settings.testAccountsReturnToken":
-    "Zum Zurückkehren melde dich wieder mit deinem eigenen Konto an.",
+    "Zum Zurückkehren wieder mit dem eigenen Konto anmelden.",
   "settings.testAccountsEmpty": "Noch keine Testkonten.",
   "settings.testAccountsCreate": "Testkonto anlegen",
   "settings.testAccountsCreateFailed":
@@ -709,7 +737,7 @@ export const de: Messages = {
     "Fügt neben jedem Titel einen Link hinzu, der bei Goodreads sucht.",
 
   // ── Bewertung und Lesedaten ─────────────────────────────────────────────
-  "rating.label": "Deine Bewertung",
+  "rating.label": "Eigene Bewertung",
   "rating.clear": "Bewertung entfernen",
   "rating.setTo": "Mit {stars} von 5 bewerten",
   "rating.unrated": "Nicht bewertet",
@@ -748,7 +776,7 @@ export const de: Messages = {
   "series.complete": "Keine Lücken",
   "series.none": "Noch keine Reihen",
   "series.noneHint":
-    "Trage bei einem Buch eine Reihe ein, dann erscheint sie hier",
+    "Bei einem Buch eine Reihe eintragen, dann erscheint sie hier",
   "series.viewAll": "Ganze Reihe ansehen",
   "series.couldNotLoad": "Die Reihen konnten nicht geladen werden.",
 
@@ -757,7 +785,7 @@ export const de: Messages = {
   "location.placeholder": "Wohnzimmer Regal 3",
   "location.unset": "Nicht erfasst",
   "location.filterAll": "Überall",
-  "location.hint": "Freier Text. So, wie du es auch sagen würdest.",
+  "location.hint": "Freier Text. So, wie man es auch sagen würde.",
   "location.carriedOver":
     "Bleibt für das nächste Buch stehen, damit ein ganzes Regal nur einmal getippt wird.",
   "location.batchLabel": "Regal für alles aus diesem Durchgang",
@@ -771,7 +799,7 @@ export const de: Messages = {
   "collections.bookCount": "{count} Bücher",
   "collections.empty": "Noch keine Sammlungen",
   "collections.emptyHint":
-    "Eine Sammlung teilt das Regal auf: gedruckt und digital, behalten und verkauft, deins und meins. Ein Buch liegt in genau einer Sammlung, also nimm die wichtigste Aufteilung und für alles andere Schlagwörter.",
+    "Eine Sammlung teilt das Regal auf: gedruckt und digital, behalten und verkauft, Mein und Dein. Ein Buch liegt in genau einer Sammlung, also die wichtigste Aufteilung wählen; für alles andere gibt es Schlagwörter.",
   "collections.explain":
     "Eine Sammlung gruppiert Bücher. Sie versteckt keines: wer ein Buch sehen kann, hängt weiterhin davon ab, ob es privat ist.",
   "collections.newName": "Name",
@@ -791,12 +819,12 @@ export const de: Messages = {
   "authors.title": "Autorinnen und Autoren",
   "authors.label": "Autor",
   "authors.explain":
-    "Alle, die auf dem Regal genannt sind. Die Namen stammen aus den Büchern selbst, deshalb kann eine Person doppelt auftauchen: führe die Schreibweisen zusammen, die Bücher bleiben unverändert.",
+    "Alle, die auf dem Regal genannt sind. Die Namen stammen aus den Büchern selbst, deshalb kann eine Person doppelt auftauchen: die Schreibweisen lassen sich zusammenführen, die Bücher bleiben unverändert.",
   "authors.search": "Namen durchsuchen",
   "authors.searchPlaceholder": "Name",
   "authors.bookCount": "{count} Bücher",
   "authors.none": "Noch niemand erfasst",
-  "authors.noneHint": "Leg ein Buch mit Autorenangabe an, dann steht es hier",
+  "authors.noneHint": "Ein Buch mit Autorenangabe anlegen, dann steht es hier",
   "authors.noMatches": "Kein Name passt dazu",
   "authors.couldNotLoad": "Die Namen konnten nicht geladen werden.",
   "authors.alsoSpelled": "Auch geschrieben: {spellings}",
@@ -811,7 +839,7 @@ export const de: Messages = {
   "authors.keepNamed": "{name} behalten",
   "authors.suggestionsTitle": "Vermutlich dieselbe Person",
   "authors.suggestionsExplain":
-    "Nimm heraus, wer nicht dazugehört, und wähle dann den Namen, der bleiben soll. An den Büchern ändert sich nichts, und über die Karte lässt es sich wieder rückgängig machen.",
+    "Alle herausnehmen, die nicht dazugehören, und dann den Namen wählen, der bleiben soll. An den Büchern ändert sich nichts, und über die Karte lässt es sich wieder rückgängig machen.",
   "authors.keepThis": "Diesen Namen behalten",
   "authors.merging": "Wird zusammengeführt...",
   "authors.otherName": "Oder ein Name, den keiner von ihnen trägt",
@@ -833,7 +861,7 @@ export const de: Messages = {
   "duplicates.noneHint":
     "Nichts in der Bibliothek sieht nach demselben Buch aus",
   "duplicates.explain":
-    "Diese Einträge sehen nach demselben Buch aus. Wähle den, der bleiben soll, die anderen gehen darin auf.",
+    "Diese Einträge sehen nach demselben Buch aus. Den auswählen, der bleiben soll, die anderen gehen darin auf.",
   "duplicates.keepThis": "Diesen behalten",
   "duplicates.merging": "Wird zusammengeführt...",
   "duplicates.merged": "Zu einem Eintrag zusammengeführt.",
@@ -861,7 +889,7 @@ export const de: Messages = {
   "rapid.start": "Mehrere scannen",
   "rapid.stop": "Scannen beenden",
   "rapid.explain":
-    "Scanne einfach weiter. Jedes Buch wird nachgeschlagen und gesammelt, bestätigt wird am Ende alles zusammen.",
+    "Einfach weiterscannen. Jedes Buch wird nachgeschlagen und gesammelt, bestätigt wird am Ende alles zusammen.",
   "rapid.queued": "{count} gescannt",
   "rapid.lookingUp": "Wird nachgeschlagen...",
   "rapid.notFound": "Nicht gefunden: {isbn}",
@@ -907,7 +935,7 @@ export const de: Messages = {
 
   // ── Das Exemplar ────────────────────────────────────────────────────────
   "copy.title": "Dieses Exemplar",
-  "copy.hint": "Was du besitzt, nicht was das Buch ist.",
+  "copy.hint": "Was an diesem Exemplar hängt, nicht was das Buch ist.",
   "copy.format": "Ausgabe",
   "copy.format.unset": "Nicht erfasst",
   "copy.format.hardcover": "Gebunden",
@@ -924,7 +952,7 @@ export const de: Messages = {
   "copy.condition.ex_library": "Aus einer Bibliothek",
   "copy.price": "Bezahlter Preis",
   "copy.priceInvalid":
-    "Schreibe einen Preis wie 12,99, oder lass das Feld leer.",
+    "Einen Preis wie 12,99 eintragen, oder das Feld leer lassen.",
   "copy.currency": "Währung",
   "copy.purchasedAt": "Gekauft am",
   "copy.purchaseSource": "Gekauft bei",
@@ -960,10 +988,10 @@ export const de: Messages = {
   "lending.neverWarning":
     'Dieses Buch ist als "wird nicht hergeborgt" markiert.',
   "lending.lendAnyway": "Trotzdem herborgen",
-  "discuss.toggle": "Über dieses Buch rede ich gern, frag mich einfach danach",
+  "discuss.toggle": "Über dieses Buch rede ich gern, einfach danach fragen",
   "discuss.label": "Ansprechpartner",
   "discuss.badge": "Gesprächsstoff",
-  "discuss.others": "Sprich {names} darauf an.",
+  "discuss.others": "{names} darauf ansprechen.",
 
   // ── Bibliothek übernehmen ───────────────────────────────────────────────
   "import.title": "Bibliothek übernehmen",
@@ -988,10 +1016,10 @@ export const de: Messages = {
   "import.fieldTags": "Schlagwörter",
   "import.createMissing": "Bücher anlegen, die noch nicht im Katalog sind",
   "import.createMissingHint":
-    "Sie kommen als nicht bestätigt an: ein Export sagt, was jemand gelesen hat, nicht, was im Regal steht.",
+    "Diese Bücher kommen als nicht bestätigt an: ein Export sagt, was jemand gelesen hat, nicht, was im Regal steht.",
   "import.applyTags": "Schlagwörter mit übernehmen",
   "import.applyTagsHint":
-    "Diese Datei enthält {count} verschiedene Schlagwörter. Sie werden hier für alle angelegt, unter Eure Schlagwörter, und lassen sich nur einzeln wieder entfernen.",
+    "Diese Datei enthält {count} verschiedene Schlagwörter. Angelegt werden sie hier für alle, unter Freie Schlagwörter, und lassen sich nur einzeln wieder entfernen.",
   "import.result":
     "{rowsRead} Zeilen gelesen, {matched} zugeordnet, {created} angelegt, {statusesUpdated} Lesestände aktualisiert.",
   "import.skipped":
@@ -1016,7 +1044,7 @@ export const de: Messages = {
   "marc.createMissing":
     "Die {count} Datensätze anlegen, die dieser Katalog nicht hat",
   "marc.createMissingHint":
-    "Sie werden als nicht bestätigt angelegt: der Datensatz einer anderen Bibliothek sagt, dass jene Bibliothek das Buch besitzt, nicht diese.",
+    "Diese Datensätze werden als nicht bestätigt angelegt: der Datensatz einer anderen Bibliothek sagt, dass jene Bibliothek das Buch besitzt, nicht diese.",
   "marc.confirm": "{count} Datensätze importieren",
   "marc.confirmMatchedOnly": "{count} bereits vorhandene Datensätze ergänzen",
   "marc.result":
@@ -1050,18 +1078,18 @@ export const de: Messages = {
   "covers.result":
     "{examined} Bücher geprüft und {stored} Cover gespeichert. Für {missing} hat kein Bilddienst eines.",
   "covers.unreachable":
-    "Für {count} davon gibt es irgendwo ein Cover, das von hier aus nicht geladen werden konnte. Sie behalten ihren Link und werden beim nächsten Durchlauf durch die Bibliothek erneut versucht.",
+    "Für {count} davon gibt es irgendwo ein Cover, das von hier aus nicht geladen werden konnte. Diese Bücher behalten ihren Link und werden beim nächsten Durchlauf durch die Bibliothek erneut abgerufen.",
   "covers.remaining":
     "Noch {remaining} Bücher offen. Noch einmal ausführen, um weiterzumachen.",
   "covers.allDone": "Jedes Buch, das ein Cover haben kann, hat eines.",
 
-  // ── Über ──────────────────────────────────────────────────────────────────
+  // ── Über ────────────────────────────────────────────────────────────────
   "about.title": "Über Endpaper",
   "about.versionLabel": "Version",
   "about.licenceLabel": "Lizenz",
   "about.sourceLabel": "Quelltext",
   "about.support":
-    "Wenn dir Endpaper gefällt und du meine Arbeit unterstützen möchtest, spendier mir einen Kaffee. Er hilft, den öffentlichen Server zu finanzieren, der zwei Endpaper-Installationen miteinander verbindet. Alle Funktionen sind so oder so kostenlos.",
+    "Wer Endpaper mag und meine Arbeit unterstützen möchte, kann mir einen Kaffee spendieren. Er hilft, den öffentlichen Server zu finanzieren, der zwei Endpaper-Installationen miteinander verbindet. Alle Funktionen sind so oder so kostenlos.",
   "about.kofiAlt": "Endpaper auf Ko-fi unterstützen",
 
   // ── Gespeicherte Ansichten ──────────────────────────────────────────────
@@ -1074,9 +1102,10 @@ export const de: Messages = {
   "nav.trash": "Papierkorb",
   "trash.title": "Papierkorb",
   "trash.explain":
-    "Gelöschte Bücher warten hier, bis du den Papierkorb leerst. Von allein wird nichts entfernt.",
+    "Gelöschte Bücher warten hier, bis der Papierkorb geleert wird. Von allein wird nichts entfernt.",
   "trash.empty": "Der Papierkorb ist leer",
-  "trash.emptyHint": "Was du löschst, landet hier, mit allem, was daran hängt.",
+  "trash.emptyHint":
+    "Bücher, die gelöscht werden, landen hier, mit allem, was daran hängt.",
   "trash.deletedOn": "Gelöscht am {date}",
   "trash.restore": "Zurücklegen",
   "trash.restored": "Wieder im Regal.",
@@ -1095,9 +1124,8 @@ export const de: Messages = {
   "wishlist.title": "Wunschliste",
   "wishlist.empty": "Nichts auf der Wunschliste",
   "wishlist.emptyHint":
-    "Ein Buch, das du willst, aber noch nicht hast: markiere es als Wunsch und als nicht vorhanden.",
-  "wishlist.explain":
-    "Bücher, die du lesen willst und die nicht im Regal stehen.",
+    "Ein Buch, das noch fehlt: als Wunsch und als nicht vorhanden markieren.",
+  "wishlist.explain": "Gewünschte Bücher, die nicht im Regal stehen.",
 
   // ── Hilfe ───────────────────────────────────────────────────────────────
   "help.title": "Was ist das?",
@@ -1108,19 +1136,19 @@ export const de: Messages = {
   "help.googleBooks.what":
     "Google Books ergänzt Angaben, die ein Barcode nicht enthält: Seitenzahl, Sprache, Kategorien, Reihe und eine Beschreibung. Dafür braucht es einen kostenlosen API-Schlüssel, den ein Admin einmal für alle hier einrichtet.",
   "help.googleBooks.notConfigured":
-    "Es ist noch kein Schlüssel hinterlegt, deshalb ist die Funktion aus. So bekommst du einen.",
-  "help.googleBooks.step1": "Lege in der Google-Cloud-Konsole ein Projekt an.",
-  "help.googleBooks.step2": "Aktiviere die Books API für dieses Projekt.",
-  "help.googleBooks.step3": "Erstelle unter Anmeldedaten einen API-Schlüssel.",
+    "Es ist noch kein Schlüssel hinterlegt, deshalb ist die Funktion aus. So kommt man an einen.",
+  "help.googleBooks.step1": "In der Google-Cloud-Konsole ein Projekt anlegen.",
+  "help.googleBooks.step2": "Die Books API für dieses Projekt aktivieren.",
+  "help.googleBooks.step3": "Unter Anmeldedaten einen API-Schlüssel erstellen.",
   "help.googleBooks.step4":
-    "Trage ihn hier in den Einstellungen ein und schalte die Funktion an.",
+    "Den Schlüssel hier in den Einstellungen eintragen und die Funktion einschalten.",
   "help.googleBooks.cost":
     "Die Books API ist kostenlos. Eine Kreditkarte ist nicht nötig, und das Tageskontingent reicht für eine private Bibliothek um ein Vielfaches.",
   "help.googleBooks.restrict":
     "Der Schlüssel liegt hier und wird nur von diesem Server aus verwendet, deshalb genügt es, ihn auf die Books API zu beschränken. Nach dem Speichern wird er nie wieder angezeigt.",
   "help.googleBooks.toSettings": "Einstellungen öffnen",
   "help.googleBooks.adminOnly":
-    "Nur ein Admin kann den Schlüssel speichern. Falls du das nicht bist, schick ihm diese Seite.",
+    "Nur ein Admin kann den Schlüssel speichern. Wer keiner ist, kann einem Admin diese Seite schicken.",
 
   "help.disabledSearch":
     "Die Suche funktioniert ohne Schlüssel. Ein Schlüssel ergänzt Beschreibungen und Genres in den Treffern.",
@@ -1139,23 +1167,24 @@ export const de: Messages = {
   "error.403.code": "Fehler 403",
   "error.403.title": "Nicht erlaubt",
   "error.403.message":
-    "Dein Konto hat darauf keinen Zugriff. Falls es das haben sollte, frage die Person, die die Bibliothek eingerichtet hat.",
+    "Dieses Konto hat darauf keinen Zugriff. Falls es das haben sollte, hilft die Person weiter, die die Bibliothek eingerichtet hat.",
   "error.500.code": "Fehler 500",
   "error.500.title": "Da ist etwas kaputt",
   "error.500.message":
-    "Das liegt an uns, nicht an dir. Ein Neuladen behebt es meistens.",
+    "Hier wurde nichts falsch gemacht, der Fehler liegt bei uns. Meistens hilft ein Neuladen.",
   "error.sessionEnded.code": "Fehler 401",
-  "error.sessionEnded.title": "Deine Sitzung ist beendet",
+  "error.sessionEnded.title": "Die Sitzung ist beendet",
   "error.sessionEnded.message":
-    "Das Anmeldeportal hat diese Sitzung beendet, und ein Neuladen hat sie nicht zurückgebracht. Melde dich bitte erneut an.",
+    "Das Anmeldeportal hat diese Sitzung beendet, und ein Neuladen hat sie nicht zurückgebracht. Bitte erneut anmelden.",
   "error.sessionEnded.action": "Erneut anmelden",
   "error.backToLibrary": "Zurück zur Bibliothek",
   "error.reload": "Seite neu laden",
 
   // ── Der veröffentlichte Katalog ─────────────────────────────────────────
   //
-  // Die Bibliothek siezt hier, anders als der Rest der Anwendung: wer diese
-  // Seiten liest, gehört nicht zum Haushalt.
+  // Wer diese Seiten liest, gehört nicht zum Haushalt. Früher wurde hier
+  // gesiezt, während der Rest der Anwendung duzte; seit die ganze Datei ohne
+  // Anrede auskommt, braucht dieser Abschnitt keine eigene Regel mehr.
   "public.title": "Katalog",
   "public.skipToContent": "Zum Katalog springen",
   "public.signIn": "Anmelden",
@@ -1165,7 +1194,7 @@ export const de: Messages = {
   "public.resultCountOne": "1 Buch",
   "public.noResults": "Nichts gefunden",
   "public.noResultsHint":
-    "Versuchen Sie es mit weniger Wörtern oder einer anderen Schreibweise.",
+    "Weniger Wörter oder eine andere Schreibweise versuchen.",
   "public.emptyHint": "In diesem Katalog steht noch nichts.",
   "public.loadMore": "Mehr anzeigen",
   "public.backToCatalogue": "Zurück zum Katalog",
@@ -1215,4 +1244,8 @@ export const de: Messages = {
   "providers.status.lookupOnlyRegional":
     "Beantwortet nur Scans, und nur bei ISBNs, die mit {groups} beginnen, die Position wirkt sich also nicht auf die Titelsuche aus.",
   "providers.status.off": "Aus. Dieser Katalog wird nie gefragt.",
+  "providers.slow":
+    "Zu langsam für eine schnelle Suche. Wird nur gefragt, wenn jemand gründlicher sucht.",
+  "providers.slowLegend":
+    "Ein als langsam markierter Katalog kann eine Titelsuche nicht innerhalb der Frist beantworten, die die schnelle Suche zulässt. Er bleibt deshalb bei dieser außen vor und wird nur gefragt, wenn jemand danach verlangt. Einen Scan beantwortet er genauso wie die anderen.",
 };

@@ -1,6 +1,8 @@
+import unicodedata
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-import ddc
+import filing
 from enums import ClassificationScheme
 from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 
@@ -52,6 +54,12 @@ from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 #: has concatenated several. See `classifications.SCHEME_ORDER` for which scheme wins and why.
 MAX_CLASSIFICATIONS_PER_BOOK = 8
 
+#: Unicode categories a classification number may hold no character from.
+#:
+#: `Cc` is the control characters and `Cf` the formatting ones. Both are
+#: invisible; `ClassificationIn.tidy_number` says what each costs.
+_INVISIBLE = frozenset({"Cc", "Cf"})
+
 
 class ClassificationIn(BaseModel):
     """One heading, as a client posts it back after a lookup.
@@ -76,10 +84,48 @@ class ClassificationIn(BaseModel):
         would each earn a row past
         `uq_classifications_book_scheme_number`. A number of only spaces passes
         `min_length=1` and is not a heading.
+
+        **A control or formatting character is refused, and NUL is why.**
+        `str.split()` splits on whitespace, and NUL is not whitespace, so
+        `{"scheme": "lcc", "number": "A1B\u0000C"}` reached the column intact.
+        SQLite's string functions stop at a NUL and Python's do not, so
+        `filing` produced two different keys for that one value, in the one
+        place its Python half and its SQL half are required to agree: `A1B` in
+        the database against `A1B\u0000C` here. Found by the design critic on
+        2026-09-03 over a 40,000 value corpus, 482 of which disagreed, all of
+        them carrying a NUL and none disagreeing without one.
+
+        **Both categories, and the first attempt was narrower than the sentence
+        describing it.** `character < " "` reaches the 24 ASCII controls that
+        whitespace collapsing leaves behind, and admitted the 41 C1 controls
+        plus SOFT HYPHEN, ZERO WIDTH SPACE and BOM: measured by the security
+        seat over 72 codepoints, on 2026-09-03. No filing key diverges on
+        those, but they are invisible, so a soft hyphen inside `QA76.5` gives
+        two spellings of one call number and each earns a row past
+        `uq_classifications_book_scheme_number`. That is the case the
+        whitespace collapse above exists to close, so this closes it the same
+        way rather than stopping at the divergence that prompted it. The rule
+        is `unicodedata.category`, so it cannot drift from what the message
+        says, which is what the narrower version did.
+
+        The cost is worth naming: `Cf` holds the joiners that matter in Arabic
+        and Indic scripts. Nothing this column carries is that. A DDC or LCC
+        number is a notation, a GND number is an identifier, and an LCSH number
+        is a romanised authorised heading.
+
+        Refused at the door rather than described in `filing`, because a
+        divergence that is documented is still a divergence. Refused rather
+        than stripped, for the reason the Dewey arm below is a refusal: a
+        stored row is a catalogue assertion, and one this app has quietly
+        rewritten is worse than one it declined.
         """
         cleaned = " ".join(value.split())
         if not cleaned:
             raise ValueError("A classification needs a number.")
+        if any(unicodedata.category(character) in _INVISIBLE for character in cleaned):
+            raise ValueError(
+                "A classification number holds no control or formatting characters."
+            )
         return cleaned
 
     @model_validator(mode="after")
@@ -90,9 +136,11 @@ class ClassificationIn(BaseModel):
         `ddc.division` projects it onto a division for the browse facet, and
         `shelf._division_key` does the same projection in SQL for the filter.
         Both carried a comment saying every write path goes through
-        `ddc.notation`. Neither did: `ddc.notation` is called from nowhere
+        `ddc.notation`. Neither did: at the time it was called from nowhere
         outside `ddc.py`, and `POST /api/books` with
         `{"scheme": "ddc", "number": "Hello world"}` answered 201 and stored it.
+        This validator is what made the comment true, and it now reaches
+        `ddc.notation` through `filing.DEWEY.recognises`.
 
         What that cost was not a stored oddity, it was a **fail open filter fed
         by the app's own output**: the facet then published a division `He0`,
@@ -106,11 +154,24 @@ class ClassificationIn(BaseModel):
         A stored row is a catalogue assertion, and one that cannot be read as
         the scheme it claims is worth a 422 naming the field.
 
-        Only `ddc`. LCC has no canonical form this app parses, and for GND and
-        LCSH the number is an identifier or a phrase, so there is nothing to
-        check against.
+        Only `ddc`. Every scheme now names a filing rule that can answer
+        `recognises`, so asking each one here would be one line. It is
+        deliberately not done: `filing.LccFiling` reads the class number and
+        nothing else, so a real call number it cannot parse would be refused
+        rather than filed by its text, and refusing loses a catalogue's
+        assertion where mis-filing it only mis-files it. For GND and LCSH the
+        number is an identifier or a phrase and the generic rule recognises
+        everything, so asking would check nothing.
         """
-        if self.scheme is ClassificationScheme.DDC and ddc.notation(self.number) is None:
+        # Through the rule rather than through `ddc.notation` directly, so
+        # "what is a Dewey number" is asked in one place. `filing.DEWEY` is
+        # named rather than `filing.rule_for(self.scheme)`: every rule can
+        # answer, and asking each one here would newly refuse a Library of
+        # Congress call number this app cannot parse, which loses a
+        # catalogue's assertion where mis-filing it only mis-files it.
+        if self.scheme is ClassificationScheme.DDC and not filing.DEWEY.recognises(
+            self.number
+        ):
             raise ValueError(
                 f"{self.number!r} is not a Dewey number: three digits, "
                 "optionally a decimal fraction."

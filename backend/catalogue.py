@@ -38,6 +38,23 @@ and `as_match()` name the two schemas it fills.
 * Which fields make a record worth preferring (`completeness`).
 * That several catalogues answering for one book are recorded as one row naming
   all of them (`sources`).
+* **That every scalar it holds fits the Book column that stores it.** Four
+  consumers write those columns and three of them had a bound;
+  `PUT /api/books/{id}/refresh` wrote nine of them off a record through no model
+  at all. The bound is now at construction, so a fourth consumer inherits it.
+  See `_TEXT_CEILINGS`.
+
+## Two producers, and they differ about one thing
+
+Everything above is written for `metadata.py`, which builds a record out of a
+catalogue's answer over the network. **`marc.py` is the second producer** and
+builds one out of a file somebody uploaded, which is the same kind of evidence
+and a different kind of trust. The one place that matters is an over-wide
+string: a catalogue's is dropped, because half an assertion overwriting a good
+stored value is worse than nothing, and an uploaded file's is cut, because
+`books.title` is `NOT NULL` and a dropped title costs the row rather than the
+field. `Record.from_upload` is that door and is the only difference between
+them.
 
 ## Two ways to fold two records together, and they are two rules
 
@@ -77,13 +94,31 @@ never a Book. Nothing here touches the database.
 """
 
 import dataclasses
-from collections.abc import Iterable
+import logging
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Final
 
+import covers
 import google_books
 from enums import AuthorityScheme, ClassificationScheme
+from models import (
+    AUTHOR_LINE_MAX,
+    COVER_URL_MAX,
+    DESCRIPTION_MAX,
+    GOOGLE_BOOKS_ID_MAX,
+    LANGUAGE_MAX,
+    MAX_PAGE_NUMBER_IN_A_BOOK,
+    MAX_SERIES_INDEX,
+    PUBLISHER_MAX,
+    SERIES_NAME_MAX,
+    SUBTITLE_MAX,
+    TITLE_MAX,
+)
+from schemas.book import MAX_YEAR, MIN_YEAR
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
+
+logger = logging.getLogger("endpaper.catalogue")
 
 #: How several catalogues answering for one book are spelled in `source`.
 #:
@@ -239,6 +274,201 @@ _FILLED: Final = (
 )
 
 
+#: How wide a scalar fact may be before the column that stores it cannot hold it.
+#:
+#: Every ceiling is imported from `models`, which is where the column declares
+#: it, so this table cannot drift from the schema and there is no second literal
+#: to keep in step. `tests/test_catalogue.py::TestARecordAgreesWithTheColumnsItFeeds`
+#: recomputes each one from `Book.__table__` rather than restating it.
+#:
+#: `description` is the one whose column is `Text` and therefore declares
+#: nothing. `DESCRIPTION_MAX` is the ceiling `BookCreate`, `BookMatch` and
+#: `BookLookup` already hold it to, and it is imported from the same module for
+#: the same reason.
+_TEXT_CEILINGS: Final[dict[str, int]] = {
+    "title": TITLE_MAX,
+    "subtitle": SUBTITLE_MAX,
+    "author": AUTHOR_LINE_MAX,
+    "publisher": PUBLISHER_MAX,
+    "description": DESCRIPTION_MAX,
+    "language": LANGUAGE_MAX,
+    "cover_url": COVER_URL_MAX,
+    "series_name": SERIES_NAME_MAX,
+    "google_books_id": GOOGLE_BOOKS_ID_MAX,
+}
+
+#: How a value is rewritten between the record and the column, where anything
+#: rewrites it. The ceiling is measured against the **stored** form, not the
+#: parsed one.
+#:
+#: One entry, and it is an off by one rather than a hypothetical. `Book`'s
+#: `@validates("cover_url")` runs `covers.https_url` on every write, which turns
+#: `http://` into `https://` and so **lengthens the value by one character**.
+#: Measured through the refresh handler's own line: a 500 character http URL was
+#: stored as 501 against a `String(500)`. That is one character on SQLite, which
+#: enforces nothing, and a failed flush on an engine that does. http is not an
+#: edge here either: Google Books serves `imageLinks.thumbnail` over it, which is
+#: the whole reason `https_url` exists.
+#:
+#: A table rather than a special case inside the loop, because the next column
+#: that grows a validator has somewhere to go that is not another arm.
+_AS_STORED: Final[dict[str, Callable[[str], str | None]]] = {
+    "cover_url": covers.https_url,
+}
+
+#: What a numeric fact has to fall inside, closed at both ends.
+#:
+#: These are not column widths: all three columns are `Integer` or `Float` and
+#: SQLite would hold anything. They are the bounds this app's own request bodies
+#: already carry, and the reason they belong here is that a value outside them
+#: is a row a Member cannot then edit: `BookDetailsUpdate` answers 422 for
+#: exactly the values an unbounded catalogue write could store.
+#:
+#: `series_index` is the one with teeth beyond an untidy row. `routers/books.list_series`
+#: computes `set(range(1, max(held) + 1))` over the column, so a stored `1e9` is
+#: roughly 70 GB and ten minutes of work on every request by every Member. The
+#: refresh handler does not write that column, which is why this ticket is not
+#: that severity, but `google_books.merge_into` does and it is fed from here.
+_NUMBER_RANGES: Final[dict[str, tuple[float, float]]] = {
+    "year": (MIN_YEAR, MAX_YEAR),
+    "page_count": (1, MAX_PAGE_NUMBER_IN_A_BOOK),
+    "series_index": (0, MAX_SERIES_INDEX),
+}
+
+#: The two scalars deliberately left unbounded, each for its own reason.
+#:
+#: **`source`** is this app's own word rather than a catalogue's. Every producer
+#: sets it from a literal: the adapters in `metadata.py` from the source roster,
+#: `marc.py` from its own `SOURCE`, and `_SOURCE_JOIN` joins those. **Two
+#: modules, not one**, and the count is worth stating rather than the module,
+#: because this comment named only `metadata.py` on the day the second one
+#: arrived. No catalogue can widen it either way, which is also what makes it
+#: safe to log untruncated below. `SOURCE_LABEL_MAX` still bounds it at
+#: `BookMatch`, where it is a field on the wire.
+#:
+#: **`isbn` is here reluctantly, and the reason it has to be is one line of
+#: somebody else's module.** It was excluded, then bounded, then excluded again
+#: inside one day, and every step is worth keeping because the last one is not
+#: the obvious answer.
+#:
+#: **What the exclusion costs, measured.** `as_match()` fills `isbn13`,
+#: `BookMatch` bounds it at 20, and `_match_rows` drops the **row** rather than
+#: the field, so an unusable identifier costs a whole search result:
+#: `_match_rows` over one record carrying a 40 character ISBN returns **0**
+#: rows against **1** for the same record with a valid one. Reachable without
+#: anything unusual, because `google_books._volume_to_fields` takes
+#: `industryIdentifiers[].identifier` straight out of somebody else's JSON.
+#:
+#: **What bounding it costs is worse, and it is the same adapter.**
+#: `metadata._google_record` sets `isbn=fields.get("isbn13") or isbn`, which
+#: prefers that unparsed identifier **over** the canonicalised argument, and it
+#: is on the ISBN lookup path. So a bound here clears it, `as_lookup()` hands
+#: `None` to `BookLookup.isbn`, which is **required**, and
+#: `errors.unhandled_exception_handler` answers a Member's scan with a 500.
+#: Measured through the real adapter:
+#: `_google_record({"isbn13": "9" * 40, ...}, "9780743273565")` gives
+#: `record.isbn is None` and a `ValidationError` at `('isbn',)`. One row lost is
+#: better than the scan route down, so the trade decides itself.
+#:
+#: **The fix is at the adapter and it is one line**: spelling that
+#: `isbn=parse_isbn(fields.get("isbn13") or "") or isbn`, which is what
+#: `_first_isbn13` already does on both Open Library paths. That makes the
+#: guarantee `as_lookup` rests on literally true for every lookup source, and
+#: bounding this field here becomes safe. **At the adapter rather than here, and
+#: that is the point rather than a division of labour**: a type cannot rescue a
+#: producer that hands it a value nobody parsed, it can only refuse it, and
+#: refusing this one is the 500 above.
+#:
+#: **That fix landed in the same wave, from another trio, and this comment's
+#: blocker is therefore gone.** `metadata._google_isbn13` refuses a non string
+#: before parsing the value, which the one line above would not have: `parse`
+#: calls string methods, so an int or a bool out of somebody else's JSON raises
+#: `TypeError` past a caller catching only `httpx.HTTPError` and `ValueError`,
+#: which is the same 500 wearing a different exception. Both tripwires in
+#: `TestWhichScalarsAreBoundedAndWhichAreNamedInstead` went red on the merged
+#: tree and were inverted there, which is what they were written to do.
+#:
+#: **So `isbn` is revisitable and is deliberately not revisited at a merge.**
+#: Bounding it is a behaviour change no critic seat has reviewed, and what it
+#: would have to establish is what the exclusion refuses that a bound accepts:
+#: that no producer on the lookup path can still yield a value wider than this
+#: column, since clearing one is the 500 above. The lookup adapters were
+#: measured at six taking the canonicalised argument and one parsing its own,
+#: with Google the hole that is now closed, but that measurement was taken for a
+#: different question and is not a substitute for taking it for this one.
+#:
+#: An earlier version of this comment also said nothing writes `Record.isbn` to
+#: a column, which was false: `importing.bounded_fields` ends
+#: `fields["isbn"] = record.isbn` and `MarcImport._create` passes that into
+#: `Book(...)`. What holds it there is `metadata._marc_isbn`, which returns
+#: `isbn.parse`'s output or `None`.
+#:
+#: Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`, which asserts
+#: this set's **contents** and not only that the partition covers everything: an
+#: earlier version compared unions, so moving a name from a ceilings table into
+#: here would have left both sides equal and nothing red.
+_UNBOUNDED: Final = frozenset({"source", "isbn"})
+
+#: Which strings an uploaded file may have cut to fit, and which it may not.
+#:
+#: `Record.from_upload` truncates rather than drops, and the two sets are the
+#: half of that policy nobody would think to write down: **a cut value has to
+#: still be an instance of what it was.** A title cut to 500 characters is the
+#: same book seen through a narrower window, which is why the importer would
+#: rather have it than lose the row. A URL cut to 500 characters is a different
+#: address, a Google volume id cut to 50 names a different volume, and a
+#: language code cut to 10 names a different language or nothing at all. Those
+#: are dropped on the upload path too, which is the answer the network path
+#: gives for everything. Deliberately no count of them here: the set is on the
+#: next line and a number would be a second thing to keep in step.
+#:
+#: Neither of the first two is reachable from a MARC file today:
+#: `_MARC_RECORD_FIELDS` does not carry `cover_url` or `google_books_id`, and
+#: `_marc_language` reads a three letter `041 $a`. They are classified because a set that is exhaustive
+#: by assertion cannot acquire a field by default, which is the shape this
+#: repository keeps finding.
+_CUT_ON_UPLOAD: Final = frozenset(
+    {"title", "subtitle", "author", "publisher", "description", "series_name"}
+)
+_KEPT_WHOLE_ON_UPLOAD: Final = frozenset({"language", "cover_url", "google_books_id"})
+
+
+def _drop_unstorable(record: Record) -> list[str]:
+    """Clear every scalar the columns could not hold, and name them.
+
+    **The field rather than the record**, which is the rule
+    `routers/books._bounded_match` settled: a catalogue value too wide loses
+    that field, it does not lose the record and it never 422s a Member's own
+    request. Here it is applied one layer earlier, so every consumer of a
+    `Record` inherits it instead of each one remembering.
+
+    **`None` rather than a truncation.** A record says what a catalogue
+    asserted, and half a title is an assertion nobody made. Absent is a state
+    every consumer already handles: `filled_from` fills it from another
+    catalogue, `merge_into` skips it, and the refresh handler's `or book.title`
+    keeps what the Book already had.
+
+    This mutates through `object.__setattr__` because the class is frozen and
+    this is construction rather than mutation, exactly as the fold above it.
+    """
+    dropped: list[str] = []
+    for name, ceiling in _TEXT_CEILINGS.items():
+        value = getattr(record, name)
+        if value is None:
+            continue
+        rewrite = _AS_STORED.get(name)
+        stored = rewrite(value) if rewrite is not None else value
+        if stored is not None and len(stored) > ceiling:
+            object.__setattr__(record, name, None)
+            dropped.append(name)
+    for name, (low, high) in _NUMBER_RANGES.items():
+        value = getattr(record, name)
+        if value is not None and not low <= value <= high:
+            object.__setattr__(record, name, None)
+            dropped.append(name)
+    return dropped
+
+
 @dataclass(frozen=True, slots=True)
 class Record:
     """One catalogue's answer about one book. Evidence, never a Book.
@@ -337,8 +567,74 @@ class Record:
     #: line a failed parse writes.
     _folded: bool = dataclasses.field(default=False, repr=False, compare=False)
 
+    @classmethod
+    def from_upload(cls, **fields: Any) -> Record:
+        """A record read out of a file somebody handed over, its strings cut to fit.
+
+        **The one producer whose over-wide strings are truncated rather than
+        dropped, and the reason is the input rather than the type.** A catalogue
+        answering over the network is asserting something about a book this
+        Library already holds, and half of that assertion overwriting a good
+        stored value is worse than nothing, so `_drop_unstorable` clears it. An
+        uploaded MARC file is the Member's own library arriving in one batch,
+        where losing a title loses the row: `books.title` is `NOT NULL`, so a
+        dropped title is not a thin record, it is a 500 and a lost transfer.
+
+        That policy is not invented here. `importing.within_bounds` has held it
+        since 2026-09-03, in as many words: strings truncate because truncating
+        a title keeps the record, and numbers are dropped because clamping a
+        `9999` to 2200 asserts a date nobody supplied. This states the same rule
+        one layer above it rather than moving it: that function is unchanged and
+        still runs, and it now finds every value already inside its column. The
+        point of saying it here as well is the invariant, that every `Record` in
+        this application fits the columns whatever produced it, so the two
+        producers differ in how they get there rather than in whether they do.
+
+        **Numbers are not touched here**, deliberately: dropping them is already
+        both policies, so `__post_init__` is the whole of that rule and a second
+        statement of it would be a place for the two to disagree.
+
+        **Nor is every string.** See `_CUT_ON_UPLOAD`: a cut title is the same
+        book, and a cut URL, volume id or language code is a different thing
+        rather than a shorter one, so those are dropped here as well.
+        Deliberately no count of them, since the set is next to this and a
+        number here would be a second thing to keep in step.
+
+        `tests/test_catalogue.py::TestARecordFromAnUploadedFile` pins the split,
+        including that no module but `marc.py` opens this door.
+        """
+        cut = {
+            name: value[: _TEXT_CEILINGS[name]]
+            for name, value in fields.items()
+            if name in _CUT_ON_UPLOAD and isinstance(value, str)
+        }
+        return cls(**{**fields, **cut})
+
     def __post_init__(self) -> None:
-        """Deduplicate all three collections, in place, once per record.
+        """Bound the scalars against their columns, then deduplicate the collections.
+
+        **The bound runs above the `_folded` guard and the fold runs below it,
+        and that split is the whole of why this is not one paragraph.** The fold
+        is idempotent and expensive, so it runs once per set of collections. The
+        bound is cheap and is **not** idempotent across a `replace`:
+        `with_cover` puts a URL on a record the image services chose, after the
+        flag is already set, so a bound below the guard would let that one field
+        through unchecked. Everything else `replace` copies has been bounded
+        already, so re-checking it costs the comparisons and finds nothing.
+
+        Measured on the worst shape `_folded` records: one process on the four
+        core development host, CPython 3.14, 8,176 `filled_from` calls onto a
+        record carrying 22,784 subjects and 11,392 headings, costing **0.077s**
+        with the bound stubbed out and **0.088s** with it, a difference of
+        **0.011s** over those 8,176 constructions. Re-derived independently on
+        the same host as 0.075s, 0.088s and 0.013s. Not a suite run and so not
+        one of the worker nodes, which is why the machine is named by its shape
+        rather than by its name.
+
+        That is the replaces alone and **not** the 0.227s in
+        `_folded`, which is `_merge_matches` end to end on the same shape: a
+        different harness measuring a different thing, quoted here so the two
+        are not read as one number.
 
         **Here rather than in each parser, and that is a rule moving rather than
         a rule added.** `metadata._dnb_subjects` deduplicated its own subjects
@@ -366,6 +662,17 @@ class Record:
         the group lengths, which is the number of kept entries. The budget in
         `_folded` counts inspections per merge and is unchanged.
         """
+        dropped = _drop_unstorable(self)
+        if dropped:
+            # The source is named untruncated on purpose: it is one of this
+            # app's own roster literals, never a catalogue's string. See
+            # `_UNBOUNDED`.
+            logger.info(
+                "Dropped %s from a record from %r: the column cannot hold it",
+                ", ".join(dropped),
+                self.source,
+            )
+
         if self._folded:
             return
         object.__setattr__(self, "subjects", _folded_subjects(self.subjects))
@@ -421,10 +728,18 @@ class Record:
 
         **Absent means `None` for a scalar and empty for a collection**, and
         they are two tests because they are two kinds of field. Falsiness would
-        be one test and would be wrong: a `page_count` of 0, a `year` of 0, a
-        `series_index` of 0.0 and any `""` are values a catalogue supplied, and
-        treating them as missing lets a later source overwrite them. Measured
-        over 1,629 live rows, 1,216 carry an int and 2 a float.
+        be one test and would be wrong: a `series_index` of 0.0 and any `""` are
+        values a catalogue supplied, and treating them as missing lets a later
+        source overwrite them. Measured over 1,629 live rows, 1,216 carry an int
+        and 2 a float.
+
+        **This sentence used to name four falsy values and two of them are now
+        unreachable**, which is worth saying rather than leaving a reader to
+        re-derive. A `page_count` of 0 and a `year` of 0 fall outside
+        `_NUMBER_RANGES`, so `__post_init__` has already cleared them to `None`
+        before this runs. The rule is unchanged and still has teeth:
+        `series_index` is bounded at 0 inclusive, and no ceiling makes `""`
+        absent.
         """
         changes: dict[str, Any] = {
             name: getattr(other, name)
@@ -504,23 +819,53 @@ class Record:
         makes `BookLookup(**record.as_lookup())` raise, and `lookup_isbn`
         catches no `ValidationError`, so the response would be a 500.
 
-        **Left as it is, deliberately, and written down rather than fixed.** All
-        **five** sources on the lookup path set `isbn` from the canonicalised
-        argument `metadata.lookup` was given, so no live record reaches here
-        without one, and coercing it to `""` would answer a member's scan with a
-        book carrying an empty ISBN instead of an error. What makes it worth
-        stating is that nothing checks it: the return type is `dict[str, Any]`,
-        so mypy sees no requirement, and the guarantee lives in five adapters
-        rather than in a type.
+        **Left as it is, deliberately, and written down rather than fixed.**
+        Nearly every source on the lookup path sets `isbn` from the
+        canonicalised argument `metadata.lookup` was given, so a live record
+        reaching here without one would be unusual, and coercing it to `""`
+        would answer a member's scan with a book carrying an empty ISBN instead
+        of an error. What makes it worth stating is that nothing checks it: the
+        return type is `dict[str, Any]`, so mypy sees no requirement, and the
+        guarantee lives in the adapters rather than in a type.
 
-        **The fifth arrived on 2026-08-27 and this paragraph is why it was
-        checked.** It used to end "a fifth lookup source that leaves `isbn`
-        unset is the change that turns this paragraph into a defect", and the
-        ÖNB is that fifth source. It passes the canonicalised ISBN into
-        `metadata._dnb_record` the way the DNB's own lookup does, so the
-        guarantee holds. A **sixth** that leaves `isbn` unset is now the change
-        that turns this paragraph into a defect, and the tripwire only worked
-        because somebody wrote the trigger down rather than the count alone.
+        **"Nearly" is doing real work there, and the next paragraph says which
+        one.** This read "All **five** sources", twice, and both halves were
+        wrong: the roster is seven, and one of the seven does not keep the
+        guarantee. A seat quoted the bold version of that sentence when deciding
+        it was safe to bound this field, which then had to be reverted the same
+        day.
+
+        **The counts are struck rather than corrected**, and that is not
+        squeamishness. `tests/test_roster_counts.py` admits a candidate only
+        when its value is a **live** cardinality, `{6, 7, 8, 9}` today, so
+        writing "seven" here creates a candidate with no verdict and fails that
+        census, while "five" was invisible to it. **A count leaves the census's
+        scope at the moment it becomes stale enough**, which is worth knowing
+        about a guard whose whole subject is stale counts. A sentence with no
+        number needs no verdict and cannot rot.
+
+        **One of those adapters does not keep the guarantee, which makes the
+        bold claim above false as written, and it is why `isbn` is in
+        `_UNBOUNDED`.** `metadata._google_record` sets
+        `isbn=fields.get("isbn13") or isbn`, preferring an identifier taken out
+        of Google's JSON with no parse over the canonicalised argument. Nothing
+        currently makes that a 500, because the field is not bounded and an
+        unparsed identifier is passed straight through here. Bounding it would:
+        measured, a 40 character identifier gives `record.isbn is None` and a
+        `ValidationError` at `('isbn',)`. So the trigger this paragraph writes
+        down for itself is not hypothetical, and the reason it has not fired is
+        that nothing yet clears the field.
+
+        **The trigger is a shape, not a number, and that is why it worked.**
+        It named the next source by ordinal once, and the OENB arrived on
+        2026-08-27 and was checked because of it: it passes the canonicalised
+        ISBN into `metadata._dnb_record` the way the DNB's own lookup does, so
+        the guarantee held. The ordinal has since been wrong while the shape
+        stayed right, so only the shape is kept. **A lookup source that leaves
+        `isbn` unset, or sets it from a record's own bytes without parsing, is
+        the change that turns this paragraph into a defect.** The tripwire only
+        ever worked because somebody wrote the trigger down rather than the
+        count.
         """
         return {
             "isbn": self.isbn,

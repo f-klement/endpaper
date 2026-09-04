@@ -140,6 +140,85 @@ class TestAddingABookWithHeadings:
 
         assert res.status_code == 422
 
+    def test_a_number_carrying_a_control_character_is_refused(
+        self, client, admin
+    ):
+        """NUL specifically, and the reason is `filing`.
+
+        `str.split()` does not treat NUL as whitespace, so the whitespace
+        collapse let it through. SQLite's string functions stop at one and
+        Python's do not, so a stored `A1B\x00C` keyed as `A1B` in the database
+        and as `A1B\x00C` in Python: a divergence in the one pair that has to
+        agree. `ClassificationIn.tidy_number` carries the measurement.
+        """
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "classifications": [{"scheme": "lcc", "number": "A1B\u0000C"}],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
+    def test_an_invisible_character_is_refused_too(self, client, admin):
+        """SOFT HYPHEN, and the reason is not a key divergence.
+
+        No filing key disagrees on it. It is invisible, so `QA76.5` written
+        with one inside is a second spelling of one call number and earns its
+        own row past `uq_classifications_book_scheme_number`, which is the case
+        the whitespace collapse exists to close. The first version of this
+        refusal tested `character < " "` and admitted the C1 controls, SOFT
+        HYPHEN, ZERO WIDTH SPACE and BOM while its message said otherwise.
+        """
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "classifications": [{"scheme": "lcc", "number": "QA76\u00ad.5"}],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
+    def test_a_heading_outside_ascii_is_still_accepted(self, client, admin):
+        """So the two refusals above cannot pass by refusing everything unusual.
+
+        An LCSH heading is a phrase and a GND caption is German, so the rule
+        has to reach invisible characters without reaching accented or
+        non Latin ones.
+        """
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "classifications": [
+                    {"scheme": "lcsh", "number": "Bev\u00f6lkerungs\u00f6konomie"},
+                    {"scheme": "gnd", "number": "4203576-4"},
+                ],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+
+    def test_a_real_call_number_is_still_accepted(self, client, admin):
+        """So the refusal above cannot pass by refusing everything."""
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Docker",
+                "classifications": [
+                    {"scheme": "lcc", "number": "BF575.S75 E64 2022"}
+                ],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 201
+
     def test_more_headings_than_any_catalogue_returns_are_refused(
         self, client, admin
     ):
@@ -686,7 +765,7 @@ class TestMerging:
 class TestSubjectHeadingsFromTheLibraryOfCongress:
     """LCSH reaches a book the way a picked search row does, and only that way.
 
-    The Library of Congress is not in `_SOURCES`, so a scan never asks it and
+    The Library of Congress is not in `metadata._lookup_one`, so a scan never asks it and
     nothing here can arrive from a lookup. A member picks a search result and
     the client posts it back to `enrich/apply`, which is the path under test.
     """

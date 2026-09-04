@@ -30,9 +30,10 @@
  * here and German its only caption: `4203576-4` names one heading whatever a
  * record calls it. What differs is that a Dewey number also sorts, and a GND
  * number does not. That is now a visible difference rather than a latent one:
- * `BookSort.DDC` orders a shelf by Dewey and there is deliberately no
- * counterpart for the other three, because two of them have no order and the
- * third does not sort as text.
+ * `BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that
+ * place a book on one, each under its own rule in `filing.py`, and there is
+ * deliberately no counterpart for GND or LCSH because a subject vocabulary
+ * has no order to offer.
  *
  * **LCSH is the one member with no identifier at all, and that is measured
  * rather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a
@@ -54,7 +55,9 @@
  * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
  * now: a book shows the headings it carries, and any of them can be filtered
  * on. What DDC has that the others do not is a second reading, the division,
- * which is what makes it browsable and sortable as well as filterable.
+ * which is what makes it browsable as well as filterable. **Sortable is no
+ * longer one of the things it has alone**: every scheme names a filing rule
+ * in `filing.py`, and LCC's orders a shelf too.
  */
 export type ClassificationScheme =
   (typeof ClassificationScheme)[keyof typeof ClassificationScheme];

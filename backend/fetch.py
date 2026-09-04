@@ -153,7 +153,11 @@ class FetchRefused(httpx.HTTPError):
     timeout already lands in. A separate hierarchy would have needed an `except`
     clause added at ten sites, which is ten chances to miss one and turn a
     hostile response into a 500. Same reasoning as `metadata._parsed`, which
-    raises `ParseError` because its eight callers already caught that.
+    raises `ParseError` because its eleven callers already caught that. Eleven,
+    counted 2026-09-03 and not eight: there are three functions named `_parsed`
+    in this backend, and `marc.py` defines and calls its own despite importing
+    `metadata`, so counting the name across the tree gives sixteen and counting
+    the callers of the one named here gives eleven.
     """
 
 
@@ -170,7 +174,7 @@ class RedirectedOffHost(FetchRefused):
 
     **This is the SSRF, and it is the only one this module has.** The first
     host is a module constant, so an attacker cannot pick it; a redirect is how
-    they would pick the second. `_LOC_URL` is plaintext `http://lx2.loc.gov:210`
+    they would pick the second. `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext `http://lx2.loc.gov:210`
     by necessity, so anyone on the path, or anyone answering DNS for the pod,
     can forge a 302 and turn a member's search into a GET at any address the pod
     can reach, cluster ClusterIPs and 169.254.169.254 included, with up to the
@@ -282,7 +286,7 @@ def _same_host_hop(response: httpx.Response) -> str:
 
     Scheme, host and port all have to match. The scheme matters on its own
     because `https` to `http` on the same name is a downgrade to a channel
-    somebody on the path can rewrite, which is the position `_LOC_URL` is
+    somebody on the path can rewrite, which is the position `targets.SEEDED[CatalogueSource.LOC].base_url` is
     already in and the one this refuses to be moved into.
     """
     location = response.headers.get("location")
@@ -362,7 +366,8 @@ async def _walk_hops(
             # a call into this module catch `(httpx.HTTPError,
             # ElementTree.ParseError)` and would have let it through: one
             # hostile source 500s the whole `GET /api/books/search` instead of
-            # being dropped, and `_LOC_URL` is plaintext HTTP, so forging it
+            # being dropped, and `targets.SEEDED[CatalogueSource.LOC].base_url` is
+            # plaintext HTTP, so forging it
             # needs no TLS.
             #
             # **The unit is the `try` block, not the call**, because the handler

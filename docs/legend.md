@@ -82,7 +82,7 @@ subject heading in one and a person in the other, and they are not the same clai
 | `082` | The Dewey number. The **only** field handed to the Dewey parser, so a subject heading beginning with three digits cannot be mistaken for one. |
 | `100` | Main entry, personal name: the author, with the author's GND in `$0`. |
 | `245` | Title statement: `$a` title, `$b` subtitle, already separated where Dublin Core gave one string. |
-| `300` | Physical description. Its extent is what distinguishes a printed book from an `Online-Ressource`. |
+| `300` | Physical description. Its extent used to be what distinguished a printed book from an `Online-Ressource`, which only worked in German and English; the `007` and `008` codes decide that now and this is the fallback. |
 | `600` | A person as a subject, as opposed to `100`, a person as the author. |
 | `650` | Topical subject. |
 | `651` | Geographic subject. |

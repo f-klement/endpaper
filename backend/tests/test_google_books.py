@@ -19,6 +19,7 @@ from google_books import (
     search,
 )
 from models import Book
+from schemas import BookMatch
 
 VOLUMES = "https://www.googleapis.com/books/v1/volumes"
 
@@ -185,12 +186,23 @@ class TestSearch:
         assert route.call_count == 0
 
 
+def _as_match(volume: dict) -> BookMatch:
+    """A Google volume through the bound `merge_into` now insists on.
+
+    `merge_into` takes a `BookMatch` rather than a dictionary, so a test that
+    hands it a dictionary is testing a call the type checker refuses. That is
+    the point of the signature and not an inconvenience of it: see
+    `TestTheSignatureIsTheBound` below.
+    """
+    return BookMatch(**_volume_to_fields(volume))
+
+
 class TestMergeInto:
     """The rule that matters: fill gaps, do not overrule people."""
 
     def test_fills_an_empty_field(self):
         book = Book(title="Dune", page_count=None)
-        changed = merge_into(book, _volume_to_fields(VOLUME), overwrite=False)
+        changed = merge_into(book, _as_match(VOLUME), overwrite=False)
 
         assert book.page_count == 412
         assert "page_count" in changed
@@ -198,13 +210,13 @@ class TestMergeInto:
     def test_leaves_an_existing_value_alone(self):
         # A member who corrected a value should not have Google undo it.
         book = Book(title="Dune", publisher="The edition I actually own")
-        merge_into(book, _volume_to_fields(VOLUME), overwrite=False)
+        merge_into(book, _as_match(VOLUME), overwrite=False)
 
         assert book.publisher == "The edition I actually own"
 
     def test_overwrite_replaces_it_when_asked(self):
         book = Book(title="Dune", publisher="Wrong")
-        merge_into(book, _volume_to_fields(VOLUME), overwrite=True)
+        merge_into(book, _as_match(VOLUME), overwrite=True)
 
         assert book.publisher == "Chilton"
 
@@ -214,11 +226,11 @@ class TestMergeInto:
         book = Book(title="Dune", page_count=412, language="en")
         fields = {"page_count": 412, "language": "en"}
 
-        assert merge_into(book, fields, overwrite=False) == []
+        assert merge_into(book, BookMatch(**fields), overwrite=False) == []
 
     def test_ignores_fields_google_left_empty(self):
         book = Book(title="Dune", publisher="Chilton")
-        merge_into(book, {"publisher": None, "page_count": None}, overwrite=True)
+        merge_into(book, BookMatch(publisher=None, page_count=None), overwrite=True)
 
         assert book.publisher == "Chilton"
 
@@ -226,13 +238,13 @@ class TestMergeInto:
         # An uploaded cover lives under /covers/ and outranks a remote one,
         # exactly as in the metadata refresh.
         book = Book(title="Dune", cover_url="/covers/12.png")
-        merge_into(book, _volume_to_fields(VOLUME), overwrite=True)
+        merge_into(book, _as_match(VOLUME), overwrite=True)
 
         assert book.cover_url == "/covers/12.png"
 
     def test_fills_an_absent_cover(self):
         book = Book(title="Dune", cover_url=None)
-        changed = merge_into(book, _volume_to_fields(VOLUME), overwrite=False)
+        changed = merge_into(book, _as_match(VOLUME), overwrite=False)
 
         assert book.cover_url == "https://books.google.com/cover.jpg"
         assert "cover_url" in changed
@@ -245,9 +257,136 @@ class TestMergeInto:
         one the library uses.
         """
         book = Book(title="Dune (Dune Chronicles, Book 1)")
-        merge_into(book, _volume_to_fields(VOLUME), overwrite=True)
+        merge_into(book, _as_match(VOLUME), overwrite=True)
 
         assert book.title == "Dune (Dune Chronicles, Book 1)"
+
+
+class TestTheSignatureIsTheBound:
+    """`merge_into` takes a `BookMatch`, and that type is the whole guard.
+
+    Both routes that reach this function write third party values into columns.
+    Until 2026-09-03 one of them validated its dictionary through the model and
+    the other passed `Record.as_match()` straight through, so the identical
+    oversized value was a 422 on `POST /{id}/enrich/apply` and a stored row on
+    `POST /{id}/enrich`.
+
+    The fix is a type rather than a call site convention, because a convention
+    is what the second route already failed to follow. mypy refuses a
+    dictionary at any call site; these pin the arms mypy cannot, which are a
+    caller that never runs it and a later edit that widens the annotation back.
+    """
+
+    #: The five `BookMatch` fields `merge_into` deliberately leaves alone, and
+    #: why. Named rather than counted, so the partition below has to sum.
+    #:
+    #: `source` labels the picker row and has no column. `title` is how a book
+    #: is recognised on the shelf and Google's spelling of it is often not the
+    #: library's. `isbn13` is one printing among several rather than this copy.
+    #: `classifications` and `suggested_tag_ids` are not scalars and are
+    #: applied by `add_headings` and by the caller respectively.
+    NOT_WRITTEN = frozenset(
+        {"source", "title", "isbn13", "classifications", "suggested_tag_ids"}
+    )
+
+    def _names_read_off_the_match(self) -> set[str]:
+        """Every field name `merge_into` takes off its argument, from the source.
+
+        Two shapes, because the function uses two: a `getattr` over a tuple of
+        literal names, and a direct attribute access for the cover. Reading
+        both is what makes this a second derivation rather than a re-reading of
+        the tuple, and the cover is the name only the second shape sees.
+        """
+        import ast
+        import inspect
+
+        import google_books
+
+        tree = ast.parse(inspect.getsource(google_books))
+        fn = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "merge_into"
+        )
+        names = {
+            node.attr
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "match"
+        }
+        for loop in (node for node in ast.walk(fn) if isinstance(node, ast.For)):
+            names |= {
+                element.value
+                for element in getattr(loop.iter, "elts", [])
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+        return names
+
+    def test_every_column_it_writes_is_a_field_the_model_bounds(self):
+        """The partition has to sum, which is what stops it going vacuous.
+
+        An empty walk would leave the union short of the model's own fields and
+        fail here rather than passing quietly, and a name added to the merge
+        list that `BookMatch` does not carry cannot be bounded by anything.
+        """
+        written = self._names_read_off_the_match()
+
+        assert written & self.NOT_WRITTEN == set()
+        assert written | self.NOT_WRITTEN == set(BookMatch.model_fields)
+
+    def test_the_model_is_the_only_channel_into_it(self):
+        """Widening the annotation reopens the hole in silence, and so does
+        leaving it alone and adding a second parameter beside it.
+
+        mypy is what actually enforces the door, so the annotation is the door,
+        and the parameter list is what stops a second door being cut. The
+        partition above sees neither: it reads the names taken **off** `match`,
+        so an unbounded dictionary arriving under another name writes the same
+        columns and leaves that set untouched.
+
+        **The whole argument list, not a list of its parts.** The first version
+        of this checked `args`, `kwonlyargs`, `vararg` and `kwarg`, which is
+        four of the five kinds an argument list has, and a security seat walked
+        a `raw: dict, /` positional only parameter past both guards on the
+        fifth, reading it in the body as `raw["series_index"]` where no
+        `ast.Attribute` on `match` exists for the partition to see. Enumerating
+        the kinds is the shape this repository keeps paying for; unparsing the
+        node covers every kind there is, and the defaults and annotations with
+        them, leaving no arm to add for the next one.
+
+        Read off the source rather than off `__annotations__`, because the
+        import naming the type is `TYPE_CHECKING` only: evaluating it at
+        runtime is the cycle the guard on that import exists to avoid.
+        """
+        import ast
+        import inspect
+
+        import google_books
+
+        tree = ast.parse(inspect.getsource(google_books))
+        fn = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "merge_into"
+        )
+
+        assert (
+            ast.unparse(fn.args) == "book: object, match: BookMatch, *, overwrite: bool"
+        )
+
+    def test_a_bare_dictionary_raises_rather_than_writing(self):
+        """The runtime arm, for a caller mypy never saw.
+
+        It fails on the first field rather than on the twelfth, so nothing is
+        half written when it does.
+        """
+        book = Book(title="Dune", page_count=None)
+
+        with pytest.raises(AttributeError):
+            merge_into(book, _volume_to_fields(VOLUME), overwrite=False)  # type: ignore[arg-type]
+
+        assert book.page_count is None
 
 
 class TestSeriesParsing:

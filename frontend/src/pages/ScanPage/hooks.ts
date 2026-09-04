@@ -28,7 +28,13 @@ import {
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
 import { useGetFeatureFlags } from "../../api/generated/endpoints/settings/settings";
-import type { BookMatch, LocationOut, TagOut } from "../../api/generated/model";
+import type {
+  BookMatch,
+  BookSearchOut,
+  CatalogueSource,
+  LocationOut,
+  TagOut,
+} from "../../api/generated/model";
 import { useTranslation } from "../../i18n";
 import {
   normaliseLocation,
@@ -335,6 +341,47 @@ export interface UseBookSearchResult {
   /** True once a search has run and come back with nothing. */
   isEmpty: boolean;
   error: unknown;
+
+  /**
+   * The catalogues the search just run did not reach, because they are too slow
+   * for its deadline. Non empty is the whole trigger for offering a longer one.
+   *
+   * **Read off the answer, never inferred from what was sent.** A request
+   * asking for the slow catalogues gets an ordinary search when this library has
+   * none switched on, and when the one long fan out allowed at a time is already
+   * running. Either way this is what actually happened.
+   */
+  unasked: CatalogueSource[];
+  /**
+   * True when a search ran and reached no catalogue at all.
+   *
+   * A different state from finding nothing, and the reason it is a separate
+   * field: every catalogue this library has switched on is a slow one, so "no
+   * matches, try fewer words" would be the screen reporting a fact it never
+   * checked.
+   */
+  askedNothing: boolean;
+  /** Ask again, including the catalogues `unasked` names. */
+  searchHarder: () => void;
+  /** True while that longer search is in flight, rather than the ordinary one. */
+  isSearchingHarder: boolean;
+  /** True once the longer search has answered for the query on screen. */
+  hasSearchedHarder: boolean;
+}
+
+/**
+ * Whether this answer reached no catalogue **because they are all slow**.
+ *
+ * **Both halves, and the second is what stops a lie.** A query that reduces to
+ * no usable terms also reaches nothing, and "and" and "a b" both do at the two
+ * character minimum this box enforces. The server distinguishes them by
+ * reporting nothing left to ask for that case, and reading only `asked` here
+ * would tell somebody who typed "and" that every catalogue their library runs is
+ * a slow one, which is a claim about their settings made by something that never
+ * looked at them.
+ */
+function askedNothing(answer: BookSearchOut): boolean {
+  return answer.asked.length === 0 && answer.unasked.length > 0;
 }
 
 /**
@@ -349,6 +396,10 @@ export interface UseBookSearchResult {
 export function useBookSearch(): UseBookSearchResult {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
+  // **Per submitted query, and reset by every path that changes it.** Asking
+  // harder is an answer to the question on screen; a new question has not been
+  // asked harder yet, whatever the last one was.
+  const [harder, setHarder] = useState(false);
   const { locale } = useTranslation();
 
   const flags = useGetFeatureFlags({ query: { staleTime: 60_000 } });
@@ -357,7 +408,11 @@ export function useBookSearch(): UseBookSearchResult {
     // The reader's own language breaks ties towards the printing they are
     // most likely to be holding. It never outranks a title match, so an
     // English title searched from a German interface still comes back first.
-    { q: submitted, limit: 10, lang: locale },
+    //
+    // `harder` is part of the parameters and so part of the query key, which is
+    // what holds both answers in the cache: going back to a phrase that was
+    // already searched hard does not spend the longer wait again.
+    { q: submitted, limit: 10, lang: locale, harder },
     {
       query: {
         enabled: submitted.length >= MIN_QUERY_LENGTH,
@@ -365,26 +420,70 @@ export function useBookSearch(): UseBookSearchResult {
         // Results for a given phrase do not change minute to minute, and
         // going back to edit a draft should not re-spend the quota.
         staleTime: 5 * 60_000,
+        // **The rows stay on screen while the longer search runs.** Pressing
+        // the button changes the key, so without this the list blanks for up to
+        // the whole of the longer deadline and takes with it the candidate the
+        // reader was about to click.
+        //
+        // **Only across that flip, and a bare `keepPreviousData` was wrong.**
+        // It held the previous answer across every key change, so `clear()`
+        // emptied the box and left the results underneath it, which a test
+        // caught. `harder` is only ever true while the question on screen is
+        // the one those rows answer: submitting and clearing both reset it, so
+        // this keeps them for the one transition that wants them and drops them
+        // for the two that do not.
+        placeholderData: (previous) => (harder ? previous : undefined),
       },
     },
   );
+
+  const answered = !search.isFetching && search.data !== undefined;
 
   return {
     isConfigured: flags.data?.google_books_ready ?? false,
     query,
     setQuery,
-    submit: () => setSubmitted(query.trim()),
+    submit: () => {
+      setHarder(false);
+      setSubmitted(query.trim());
+    },
     clear: () => {
+      setHarder(false);
       setQuery("");
       setSubmitted("");
     },
-    matches: search.data ?? [],
+    matches: search.data?.matches ?? [],
     isSearching: search.isFetching,
     isEmpty:
       submitted.length >= MIN_QUERY_LENGTH &&
-      !search.isFetching &&
-      search.data?.length === 0,
+      answered &&
+      search.data.matches.length === 0 &&
+      // Nothing asked is not nothing found, and the panel says something else
+      // for it. Both would otherwise be true at once.
+      !askedNothing(search.data),
     error: search.error,
+    // **Only once the answer is in.** While a search is in flight the data on
+    // hand is the previous query's, and offering a longer search off it would
+    // name catalogues that have nothing to do with what is being typed.
+    unasked: answered ? search.data.unasked : [],
+    askedNothing: answered && askedNothing(search.data),
+    // **A refetch when it is already true, not just the state flip.** A harder
+    // search can be refused its long slot and answered as an ordinary one, and
+    // that answer is cached under `harder: true` with `unasked` still populated,
+    // so the offer stays on screen. Pressing it then sets a state that is
+    // already set, React bails out of the render, the key does not change and
+    // `staleTime` suppresses the request: the button would do nothing at all
+    // for five minutes. The refusal is the one path `_HARDER_AT_ONCE` exists to
+    // create, so the retry has to work or the server's fallback is a dead end.
+    searchHarder: () => {
+      if (harder) {
+        void search.refetch();
+        return;
+      }
+      setHarder(true);
+    },
+    isSearchingHarder: harder && search.isFetching,
+    hasSearchedHarder: harder && answered,
   };
 }
 

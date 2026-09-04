@@ -77,7 +77,7 @@ def is_valid_isbn13(candidate: str) -> bool:
 
     Both are fixed here rather than at the routers, because every caller of
     `parse` inherits the promise that what comes back is thirteen ASCII digits.
-    `metadata._nkp_query` states that promise in its own reasoning, and it was
+    `targets.Target.isbn_query` states that promise in its own reasoning, and it was
     asserted before it was true.
     """
     if len(candidate) != _ISBN13_LENGTH or not (

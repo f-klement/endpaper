@@ -215,6 +215,11 @@ export default function ScanPage() {
             onQueryChange={search.setQuery}
             onSubmit={search.submit}
             onChoose={scan.chooseMatch}
+            unasked={search.unasked}
+            askedNothing={search.askedNothing}
+            onSearchHarder={search.searchHarder}
+            isSearchingHarder={search.isSearchingHarder}
+            hasSearchedHarder={search.hasSearchedHarder}
           />
         </>
       )}

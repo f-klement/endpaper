@@ -21,7 +21,9 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute
 from starlette.types import Scope
 
+import metadata
 import notifications
+import targets
 from config import (
     DATA_DIR,
     cors_origins,
@@ -36,7 +38,7 @@ from dependencies import DbSession
 from enums import TagCategory, TagKey
 from errors import register_error_handlers, wants_html
 from middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
-from models import Tag
+from models import CatalogueTarget, Tag
 
 # `collections` here is `routers/collections.py`, not the standard library's.
 # The `from collections.abc import ...` above binds only the names it lists, so
@@ -238,6 +240,80 @@ def seed_tags() -> None:
         db.commit()
 
 
+def seed_catalogue_targets() -> None:
+    """Reconcile the seeded catalogue rows against `targets.SEEDED`.
+
+    **Reconciles rather than only inserting, which is where this differs from
+    `seed_tags` above.** A tag a library renamed is theirs, so that one never
+    updates. A seeded target is not theirs, and nothing reads these rows today,
+    so an insert-only seeder would leave a corrected index name in the table with
+    no symptom anywhere until #130 put it on a screen.
+
+    **Every seeded source is reconciled, `is_seeded` or not, and that column is
+    deliberately not honoured yet.** Honouring it would make the flag an escape:
+    a critic measured that an archive setting `is_seeded = 0` on a row keeps
+    whatever it put in the twelve columns the CHECK constraints do not cover,
+    past every boot, for good. Drift and a hostile archive are two jobs and the
+    flag only does the first. #130 is where a row somebody edited becomes a thing
+    that exists, and it is where the exemption belongs.
+
+    **A restore is the reason this runs at all.** `backup.restore` deletes every
+    row and reinserts only what the archive holds, so an archive written before
+    this revision leaves the table empty. This refills it.
+
+    **`metadata.resolve` here validates the constants, not the rows**, and the
+    eight words matter: it runs over `targets.SEEDED` before a row is looked at,
+    so it fails the boot when the code disagrees with itself and says nothing
+    about what is in the table. What validates a row is the CHECK constraints,
+    which is the only place a Core insert can be refused. #130 is where a row is
+    read back into a `Target` and where `resolve` starts having something to say
+    about one.
+    """
+    with DBSession(engine) as db:
+        rows = {row.source: row for row in db.query(CatalogueTarget).all()}
+        for source, target in targets.SEEDED.items():
+            metadata.resolve(target)
+            row = rows.get(source.value)
+            fields = {
+                "rank": target.rank,
+                "transport": target.transport.value,
+                "base_url": target.base_url,
+                "reader": target.reader.value,
+                "answers_lookup": target.answers_lookup,
+                "answers_search": target.answers_search,
+                "metered": target.metered,
+                "needs_key": target.needs_key,
+                "sru_version": target.sru_version,
+                "query_parameter": target.query_parameter,
+                "query_language": (
+                    target.query_language.value if target.query_language else None
+                ),
+                "record_schema": target.record_schema,
+                "isbn_index": target.isbn_index,
+                "isbn_attribute": target.isbn_attribute,
+                "title_index": target.title_index,
+                "title_query_shape": (
+                    target.title_query_shape.value
+                    if target.title_query_shape
+                    else None
+                ),
+                "lookup_records": target.lookup_records,
+                "search_multiplier": target.search_multiplier,
+                "search_cap": target.search_cap,
+                "refuses_component_parts": target.refuses_component_parts,
+                "requires_isbn_claim": target.requires_isbn_claim,
+                "reads_author_identifiers": target.reads_author_identifiers,
+                "timeout_seconds": target.timeout_seconds,
+                "is_seeded": True,
+            }
+            if row is None:
+                db.add(CatalogueTarget(source=source.value, **fields))
+            else:
+                for name, value in fields.items():
+                    setattr(row, name, value)
+        db.commit()
+
+
 def init_db() -> None:
     # Checked before anything else: booting production with the example
     # signing key means every session token is forgeable.
@@ -249,6 +325,7 @@ def init_db() -> None:
     # a database ends up in a shape no migration accounts for.
     upgrade_to_head()
     seed_tags()
+    seed_catalogue_targets()
 
 
 init_db()

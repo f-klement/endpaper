@@ -165,8 +165,9 @@ is the authority record number (`gnd`, `4203576-4`, `Schatz`). What those three 
 job the column does: the identifier is stable and the caption is whatever the supplying
 record wrote. That was measured across languages for Dewey; for GND the DNB is the only
 supplier here, so every caption is German today. What differs is that a Dewey number also
-sorts and a GND number does not. `sort=ddc` is the one that reads that difference: it orders
-a shelf by Dewey, and there is no equivalent for the other three.
+sorts and a GND number does not. `sort=ddc` and `sort=lcc` are what read that difference:
+each orders a shelf under its own scheme's filing rule, and there is no equivalent for
+GND or LCSH, which are subject vocabularies with no order to offer.
 
 **LCSH is the exception and is stored as one.** The Library of Congress supplies no
 identifier for a subject heading: no `valueURI` on any of 2,280 `<subject>` elements across

@@ -118,6 +118,12 @@ export const SORT_OPTIONS: { label: MessageKey; value: BookSort }[] = [
   { label: "sort.year_asc", value: BookSort.year_asc },
   { label: "sort.newest", value: BookSort.newest },
   { label: "sort.ddc", value: BookSort.ddc },
+  // **The scheme's own label rather than a second spelling of it.**
+  // `lib/classificationLabels.ts` argues that one table naming a scheme is
+  // what stops three copies drifting, and a sort named after a scheme would be
+  // a fourth. `sort.ddc` above predates that table and renaming a string a
+  // reader already knows is not this ticket's.
+  { label: "classification.scheme.lcc", value: BookSort.lcc },
   { label: "sort.series", value: BookSort.series },
 ];
 

@@ -154,9 +154,14 @@ class TestBodySizeLimit:
         assert res.status_code == 411
 
     def test_a_json_body_without_a_length_is_left_alone(self, client, admin):
-        """The rule is deliberately multipart only: a JSON body is held in
-        memory and bounded by the route's own parsing, and refusing it would
-        break clients that stream."""
+        """The rule is deliberately multipart only, because multipart is what
+        reaches the disk, and refusing every chunked request would break
+        clients that stream.
+
+        **This passing does not mean the body was bounded.** Neither rule sees
+        a chunked JSON body, and the schema that parses it runs after Starlette
+        has read all of it, so what bounds such a request is memory. See
+        `BodySizeLimitMiddleware`, which used to claim otherwise."""
         res = client.post(
             "/api/books",
             headers=admin["headers"]

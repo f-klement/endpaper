@@ -37,7 +37,7 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import Any, Final
@@ -51,6 +51,7 @@ import ddc
 import fetch
 import google_books
 import sources
+import targets
 import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
@@ -123,7 +124,13 @@ class Lookup:
 #   /works/{key}.json                 the book: subjects, and the author key
 #   /works/{key}/editions.json        the other printings
 
-_OPEN_LIBRARY: Final = "https://openlibrary.org"
+#: Open Library's own host, read off its row rather than written twice.
+#:
+#: **It was a literal here and a literal on the row, agreeing by luck.** An
+#: address stored in two places is the fact `sources.MEASURED` refuses to store
+#: twice, and here it had a second cost: a host allowlist derived from the rows
+#: would have authorised a string that was not the one the request used.
+_OPEN_LIBRARY: Final = targets.SEEDED[CatalogueSource.OPEN_LIBRARY].base_url
 
 #: A key out of an Open Library response, before it goes into a URL.
 #:
@@ -286,7 +293,12 @@ def _open_library_classifications(record: dict[str, Any]) -> list[Heading]:
         # call number is alphanumeric and this app has no schedule for it.
         # Checked rather than cast, symmetrically with the Dewey loop above:
         # `str()` on a non-string entry stores its Python repr as a call number
-        # wherever the result is under 40 characters.
+        # wherever the result fits `models.CLASSIFICATION_NUMBER_MAX`, which is
+        # **120** characters. This comment said 40, which is not a bound this
+        # application has anywhere: a `str()` of a dict or a list is well inside
+        # 120 and so would be stored rather than refused, which is a larger hole
+        # than the sentence described. Found by another trio and corrected here
+        # because the file is this one's.
         first = call_numbers[0]
         number = " ".join(first.split()) if isinstance(first, str) else ""
         if number:
@@ -320,13 +332,20 @@ def _open_library_language(raw: object) -> str | None:
 def _open_library_pages(raw: object) -> int | None:
     """`number_of_pages`, if it is a number of pages a book could have.
 
-    **Bounded here because nothing downstream bounds it.**
-    `BookLookup.page_count` is deliberately unbounded and `PUT /{id}/refresh`
-    assigns it straight onto the row, where `books.page_count` carries no CHECK.
+    **Bounded here rather than left to a downstream bound**, and the reason is
+    what the value does rather than what any other module currently checks.
     Measured: `10**19` raises `OverflowError` on the commit, so a 500 on the
     refresh, and anything from 100,001 to `2**63-1` stores silently past the
-    app's own stated ceiling. On the scan path the same value reaches
-    `BookCreate`, whose `le` then 422s the member's own post.
+    app's own stated ceiling, because `books.page_count` carries no CHECK. On the
+    scan path the same value reaches `BookCreate`, whose `le` then 422s the
+    member's own post.
+
+    **This used to say "because nothing downstream bounds it", which was a claim
+    about other modules and so a claim with an expiry date.** It was true when it
+    was written. A bound added downstream makes it false without anything
+    failing, and makes this function look redundant to whoever reads it next,
+    which is the argument for deleting the one check that stands between a wiki
+    field and the row.
 
     The unbounded writer is pre-existing (`_pages_from_extent` and
     `google_books` pass their values through raw). What is new is the supplier:
@@ -552,6 +571,37 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
     )
 
 
+def _google_isbn13(fields: dict[str, Any]) -> str | None:
+    """The volume's own ISBN, if it really is one.
+
+    **Google's identifier is not validated anywhere before this.**
+    `google_books._volume_to_fields` takes `industryIdentifiers` straight out of
+    somebody else's JSON and picks the entry whose `type` is `ISBN_13`, without
+    looking at what the `identifier` beside it is. Measured through the real
+    lookup path, two shapes get through and they fail differently:
+
+    * a 40 character string builds a `BookLookup` perfectly happily and puts a
+      40 digit ISBN in front of a member;
+    * a **non string** identifier, an int, a float or a bool, reaches
+      `BookLookup.isbn`, which is `str`, and raises `ValidationError` inside a
+      handler that catches none. That is a 500 on a scan.
+
+    **`isinstance` and not just a parse, which is the half a one line fix
+    misses.** `parse_isbn` calls string methods, so handing it the int that
+    causes the second failure raises `TypeError` out of here, where
+    `_google_books`' own `except (httpx.HTTPError, ValueError)` does not catch
+    it: the same 500 wearing a different exception. The type has to be refused
+    before the value is parsed.
+
+    Returning None puts the caller back on the canonicalised argument
+    `metadata.lookup` was given, which is what the other five lookup adapters
+    use unconditionally, so `Record.as_lookup`'s stated guarantee holds for
+    Google too rather than holding for everything except Google.
+    """
+    candidate = fields.get("isbn13")
+    return parse_isbn(candidate) if isinstance(candidate, str) else None
+
+
 def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
     """A Google volume as a Catalogue record. The adapter for that source.
 
@@ -568,7 +618,9 @@ def _google_record(fields: dict[str, Any], isbn: str | None = None) -> Record:
     """
     return Record(
         source="google_books",
-        isbn=fields.get("isbn13") or isbn,
+        # Parsed, never taken as given. `_google_isbn13` carries the two
+        # measured failures and why a bare parse is not enough.
+        isbn=_google_isbn13(fields) or isbn,
         title=fields.get("title") or "",
         subtitle=fields.get("subtitle"),
         author=fields.get("author"),
@@ -898,7 +950,8 @@ def _subject_identifier(entry: _Subfields) -> str | None:
 # field exists to reject. `300 $a` says "Online-Ressource" on all 28 of the 85
 # records that are one.
 
-_DNB_URL: Final = "https://services.dnb.de/sru/dnb"
+# The value is `targets.SEEDED[CatalogueSource.DNB].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 #: Kept because the BnF parser reads Dublin Core. The DNB no longer does.
 _DC: Final = "{http://purl.org/dc/elements/1.1/}"
@@ -996,7 +1049,7 @@ def _pages_from_extent(raw: str | None) -> int | None:
     bound are not substitutes, and that is the measurement which proves it
     rather than merely suggesting it.
 
-    `_LOC_URL` is plaintext HTTP, so this needed no compromised catalogue,
+    `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext HTTP, so this needed no compromised catalogue,
     which is the same on-path attacker `fetch.RedirectedOffHost` exists for.
 
     **The lookbehind is what makes it a refusal rather than a guess.** A bare
@@ -1216,8 +1269,11 @@ def _dnb_record(
     already knows and verified; the search path has none, so the record's own
     020 is read instead.
 
-    **`read_author_identifiers` is off for the ÖNB, and that is a decision
-    withheld rather than a mapping gap.** Its `100 $0` is if anything better
+    **`read_author_identifiers` is off for the ÖNB and for the NLG, and that is
+    a decision withheld rather than a mapping gap.** The measurement below is
+    the ÖNB's; the NLG is held to the same rule for the same reason and has no
+    measurement of its own, which is why it is named here rather than left to be
+    inferred from the ÖNB's. Its `100 $0` is if anything better
     than the DNB's: measured 2026-08-27 over 209 live `100 $a` fields, 158
     carry one, 75.6%, and every `$0` on a 100 field is `(DE-588)` with no other
     authority file appearing at all. What stops it being read is the rule
@@ -1247,8 +1303,8 @@ def _dnb_record(
     parser reads MARC at all.
 
     **Whether an online record is a book is asked by the caller, not here**,
-    because the two callers want different answers. `_dnb_search` refuses one
-    outright, exactly as `_k10plus_search` does. `_dnb` ranks it below a
+    because the two callers want different answers. the DNB title search refuses one
+    outright, exactly as the K10plus title search does. the DNB lookup ranks it below a
     physical record and takes it rather than reporting a miss: `dc:format` was
     absent on every online record, so the old parser accepted all of them, and
     refusing here would have turned 21 of 74 live lookups into misses (measured
@@ -1282,6 +1338,29 @@ def _dnb_record(
     if _is_placeholder_title(title):
         return None
 
+    # **The one refusal here still decided by prose, and it decides almost
+    # nothing.** Measured over 510 live DNB search records on 2026-09-03, 91 are
+    # discs by their own codes and `_IS_A_DISC` names **0** of them: the German
+    # for what this catalogue holds is `2 CDs`, `15 CDs`, `1 Schallplatte` and
+    # `1 Track`, and `_DISC_FORMS` spells none of those. 84 of the 91 are refused
+    # anyway by the **online** half of `_NOT_A_BOOK`, because a DNB audiobook is
+    # usually a download, so the disc half has been carrying none of them and
+    # **7 escape both halves**: `1 Track` twice, `2 CDs` twice, `1 CD`,
+    # `1 Schallplatte`, `15 CDs`. An earlier draft of this sentence credited the
+    # disc half with those 7, which inverts what they are and would send anyone
+    # deleting `_IS_A_DISC` looking for seven regressions that do not exist.
+    # Both critics caught it separately. Separately again, `_IS_A_DISC` names 7
+    # records across all 2,605, and that coincidence is where the wrong 7 came
+    # from.
+    #
+    # So this is not a language gap, it is a vocabulary gap that English shares,
+    # and #124's answer covers it: every caller now applies
+    # `_marc_is_physical_book`, which refuses all 91 on `007/00` and leader/06.
+    # What is left here is one asymmetry worth naming rather than half fixing:
+    # this refuses outright and the caller only ranks, so a disc this misses is
+    # ranked down at a lookup where one it names is a miss. Closing that means
+    # giving this function the record node, a four call site signature change,
+    # and it changes an answer rather than correcting one.
     if _IS_A_DISC.search(_marc_extent(fields) or ""):
         return None
 
@@ -1327,72 +1406,23 @@ def _dnb_record(
     )
 
 
-#: How many records the lookup asks for, where it asked for one until
-#: 2026-08-24. **The extra four are what let the print edition win.** `num=`
-#: matches any identifier anywhere in a record, including the "also published
-#: as" cross reference an ebook record carries for its print edition, so the
-#: catalogue's first answer for a printed book's ISBN is sometimes the ebook.
-#: Under Dublin Core there was no way to tell: `dc:format` is absent on an
-#: online record, so `_is_physical_book` had nothing to test and the ebook was
-#: taken. Measured over 74 live lookups on 2026-08-24: 8 answers held more than
-#: one record, and asking for five rather than one puts a printed edition in
-#: front of an online one twice and changes no other pick.
-#:
-#: Five, the same number `_K10PLUS_RECORDS` uses, for the same reason: several
-#: printings of one book each carry the ISBN somewhere, and the best of them
-#: should win rather than whichever the catalogue happened to sort first.
-_DNB_RECORDS: Final = 5
-
-
-async def _dnb(isbn: str, api_key: str) -> Lookup:
-    del api_key  # The public SRU endpoint needs none.
-
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": f"num={isbn}",
-        "recordSchema": "MARC21-xml",
-        "maximumRecords": str(_DNB_RECORDS),
-    }
-    try:
-        response = await fetch.get_once(_DNB_URL, params=params)
-        if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source="dnb")
-        if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source="dnb")
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("DNB lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="dnb")
-
-    books = [
-        (fields, record)
-        for fields in (_marc_fields(node) for node in root.iter(f"{_MARC}record"))
-        for record in [_dnb_record(fields, isbn)]
-        if record is not None
-    ]
-    if not books:
-        logger.info("DNB matched %s only as a cross reference or a non-book", isbn)
-        return Lookup(Outcome.NOT_FOUND, source="dnb")
-
-    # Three questions, in the order they decide. Does the record name this
-    # ISBN in its own 020, which separates the book from the cross references
-    # `num=` also matches. Is it something that can sit on a shelf, so a
-    # printed edition beats the ebook that shares its ISBN in a note. And is
-    # it the fullest, which is the same tie-break `_merge` uses between
-    # catalogues. `sorted` is stable, so records that tie on all three keep the
-    # catalogue's own order and the first answer wins, which is what asking for
-    # a single record used to give.
-    ranked = sorted(
-        books,
-        key=lambda pair: (
-            _marc_claims_isbn(pair[0], isbn),
-            _is_physical_book(_marc_extent(pair[0]), pair[1].title),
-            pair[1].completeness,
-        ),
-        reverse=True,
-    )
-    return Lookup(Outcome.FOUND, source="dnb", record=ranked[0][1])
+# How many records the lookup asks for, where it asked for one until
+# 2026-08-24. **The extra four are what let the print edition win.** `num=`
+# matches any identifier anywhere in a record, including the "also published
+# as" cross reference an ebook record carries for its print edition, so the
+# catalogue's first answer for a printed book's ISBN is sometimes the ebook.
+# Under Dublin Core there was no way to tell: `dc:format` is absent on an
+# online record, so `_is_physical_book` had nothing to test and the ebook was
+# taken. Measured over 74 live lookups on 2026-08-24: 8 answers held more than
+# one record, and asking for five rather than one puts a printed edition in
+# front of an online one twice and changes no other pick.
+#
+# Five, the same number `targets.SEEDED[CatalogueSource.K10PLUS].lookup_records` uses,
+# for the same reason: several
+# printings of one book each carry the ISBN somewhere, and the best of them
+# should win rather than whichever the catalogue happened to sort first.
+# The value is `targets.SEEDED[CatalogueSource.DNB].lookup_records`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 
 # ── K10plus ───────────────────────────────────────────────────────────────────
@@ -1410,11 +1440,13 @@ async def _dnb(isbn: str, api_key: str) -> Lookup:
 # Free, no key, no registration. MARCXML rather than Dublin Core because the
 # subfield structure is what makes the ISBN check below possible at all.
 
-_K10PLUS_URL: Final = "https://sru.k10plus.de/opac-de-627"
+# The value is `targets.SEEDED[CatalogueSource.K10PLUS].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: Several printings of one book each carry the same ISBN, so the search
-#: returns a handful of near-identical records and the fullest one wins.
-_K10PLUS_RECORDS: Final = 5
+# Several printings of one book each carry the same ISBN, so the search
+# returns a handful of near-identical records and the fullest one wins.
+# The value is `targets.SEEDED[CatalogueSource.K10PLUS].lookup_records`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 #: MARC relator codes for somebody who wrote the thing. Translators (`trl`) and
 #: editors (`edt`) arrive in the same field and must not become the author.
@@ -1732,43 +1764,6 @@ def _marc_year(fields: dict[str, list[_Subfields]]) -> int | None:
     return None
 
 
-async def _k10plus(isbn: str, api_key: str) -> Lookup:
-    del api_key  # Free, and no registration to have a key from.
-
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": f"pica.isb={isbn}",
-        "recordSchema": "marcxml",
-        "maximumRecords": str(_K10PLUS_RECORDS),
-    }
-    try:
-        response = await fetch.get_once(_K10PLUS_URL, params=params)
-        if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source="k10plus")
-        if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source="k10plus")
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("K10plus lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="k10plus")
-
-    candidates = [
-        record
-        for record in (_marc_fields(node) for node in root.iter(f"{_MARC}record"))
-        if _marc_claims_isbn(record, isbn)
-    ]
-    if not candidates:
-        return Lookup(Outcome.NOT_FOUND, source="k10plus")
-
-    records = [_k10plus_record(fields, isbn) for fields in candidates]
-    return Lookup(
-        Outcome.FOUND,
-        source="k10plus",
-        record=max(records, key=lambda record: record.completeness),
-    )
-
-
 def _marc_publisher(fields: dict[str, list[_Subfields]]) -> str | None:
     """The publisher, from the RDA 264 or the older 260."""
     return next(
@@ -1875,7 +1870,10 @@ def _marc_isbn(fields: dict[str, list[_Subfields]]) -> str | None:
 
 
 def _k10plus_record(
-    fields: dict[str, list[_Subfields]], isbn: str | None = None
+    fields: dict[str, list[_Subfields]],
+    isbn: str | None = None,
+    *,
+    source: str = CatalogueSource.K10PLUS.value,
 ) -> Record:
     """One MARC record as book fields.
 
@@ -1906,7 +1904,7 @@ def _k10plus_record(
     ]
 
     return Record(
-        source="k10plus",
+        source=source,
         isbn=isbn,
         title=title,
         subtitle=subtitle,
@@ -1974,46 +1972,51 @@ def _k10plus_record(
 # Superseded as a ranking by `sources.MEASURED`, which times all five free
 # sources on one 500 ISBN sample rather than three of them on this one.
 
-_OENB_URL: Final = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+# The value is `targets.SEEDED[CatalogueSource.OENB].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: The CQL index that means "the ISBN", **established by probing rather than by
-#: reading the documentation**, and it is the single fact this source was
-#: blocked on.
-#:
-#: The published examples establish MMS ID, AC number, barcode and title, and
-#: none of them establish this. Guessing it does not fail the way a wrong index
-#: name usually fails. Measured live on 2026-08-27 against the same ISBN:
-#:
-#: | query | numberOfRecords |
-#: |---|---|
-#: | `alma.isbn=9783825354077` | 1 |
-#: | `alma.isbn13=9783825354077` | **7,793,152** |
-#: | `zzz.qqq=9783825354077` | **7,793,152** |
-#:
-#: **An unknown index is not an error.** It is HTTP 200, no diagnostic, and the
-#: entire catalogue in catalogue order, of which `maximumRecords` arbitrary
-#: records come back. So a typo here ships plausible MARC for an unrelated
-#: book rather than an empty result somebody would notice, and the only thing
-#: standing between that and a member's shelf is `_marc_claims_isbn` below.
-#:
-#: Confirmed the only way it can be: an ISBN was read off a live ÖNB record's
-#: own 020 and put back through this index, returning exactly that record.
-_OENB_ISBN_INDEX: Final = "alma.isbn"
+# The CQL index that means "the ISBN", **established by probing rather than by
+# reading the documentation**, and it is the single fact this source was
+# blocked on.
+#
+# The published examples establish MMS ID, AC number, barcode and title, and
+# none of them establish this. Guessing it does not fail the way a wrong index
+# name usually fails. Measured live on 2026-08-27 against the same ISBN:
+#
+# | query | numberOfRecords |
+# |---|---|
+# | `alma.isbn=9783825354077` | 1 |
+# | `alma.isbn13=9783825354077` | **7,793,152** |
+# | `zzz.qqq=9783825354077` | **7,793,152** |
+#
+# **An unknown index is not an error.** It is HTTP 200, no diagnostic, and the
+# entire catalogue in catalogue order, of which `maximumRecords` arbitrary
+# records come back. So a typo here ships plausible MARC for an unrelated
+# book rather than an empty result somebody would notice, and the only thing
+# standing between that and a member's shelf is `_marc_claims_isbn` below.
+#
+# Confirmed the only way it can be: an ISBN was read off a live ÖNB record's
+# own 020 and put back through this index, returning exactly that record.
+# The value is `targets.SEEDED[CatalogueSource.OENB].isbn_index`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: The CQL index for a title word. `alma.title`, from the same explain record,
-#: and verified live.
-#:
-#: **One term per index reference, ANDed**, which is the shape `_k10plus_search`
-#: already uses and here it is a hard requirement rather than a precision
-#: preference: a bare multi-word term is refused. Measured, `alma.title=wien
-#: geschichte` answers 200 with SRU diagnostic 200812 `Invalid query`, where
-#: `alma.title=wien and alma.title=geschichte` answers with 4,885 records.
-_OENB_TITLE_INDEX: Final = "alma.title"
+# The CQL index for a title word. `alma.title`, from the same explain record,
+# and verified live.
+#
+# **One term per index reference, ANDed**, which is the shape the K10plus title search
+# already uses and here it is a hard requirement rather than a precision
+# preference: a bare multi-word term is refused. Measured, `alma.title=wien
+# geschichte` answers 200 with SRU diagnostic 200812 `Invalid query`, where
+# `alma.title=wien and alma.title=geschichte` answers with 4,885 records.
+# The value is `targets.SEEDED[CatalogueSource.OENB].title_index`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: Five, for the same reason `_DNB_RECORDS` and `_K10PLUS_RECORDS` are five:
-#: several printings of one book each carry the ISBN somewhere and the fullest
-#: of them should win rather than whichever the catalogue sorted first.
-_OENB_RECORDS: Final = 5
+# Five, for the same reason `targets.SEEDED[CatalogueSource.DNB].lookup_records` and
+# `targets.SEEDED[CatalogueSource.K10PLUS].lookup_records` are five:
+# several printings of one book each carry the ISBN somewhere and the fullest
+# of them should win rather than whichever the catalogue sorted first.
+# The value is `targets.SEEDED[CatalogueSource.OENB].lookup_records`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 #: MARC leader/07, the bibliographic level, for a record that is part of
 #: something else rather than a thing on a shelf: `a` is a monographic
@@ -2059,378 +2062,187 @@ def _is_component_part(record: ElementTree.Element) -> bool:
     return len(leader) > 7 and leader[7] in _COMPONENT_PART_LEVELS
 
 
-def _oenb_records(root: ElementTree.Element) -> list[ElementTree.Element]:
-    """Every MARC record in an ÖNB response that describes a whole publication.
-
-    **An SRU diagnostic needs no branch of its own here**, which is worth
-    saying because the endpoint answers every error with HTTP 200. An invalid
-    query and an unsupported one both come back as a well formed
-    `searchRetrieveResponse` carrying a `diag:diagnostic` and no records, so the
-    body parses, this returns nothing, and the source reports no results, which
-    is what it should do. `test_metadata.py` pins that with a recorded
-    diagnostic rather than leaving it to be rediscovered.
-    """
-    return [
-        record
-        for record in root.iter(f"{_MARC}record")
-        if not _is_component_part(record)
-    ]
-
-
-async def _oenb(isbn: str, api_key: str) -> Lookup:
-    del api_key  # Free, CC0, and no registration to have a key from.
-
-    params = {
-        "version": "1.2",
-        "operation": "searchRetrieve",
-        "query": f"{_OENB_ISBN_INDEX}={isbn}",
-        "recordSchema": "marcxml",
-        "maximumRecords": str(_OENB_RECORDS),
-    }
-    try:
-        response = await fetch.get_once(_OENB_URL, params=params)
-        if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source="oenb")
-        if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source="oenb")
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("ÖNB lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="oenb")
-
-    # **`_marc_claims_isbn` is not a tidy extra check on this source, it is the
-    # whole defence.** A mistyped index name answers with the entire catalogue
-    # rather than with nothing, so without this a future edit to
-    # `_OENB_ISBN_INDEX` would answer a member's scan with an arbitrary record
-    # that parses perfectly. See that constant.
-    records = [
-        fields
-        for fields in (_marc_fields(node) for node in _oenb_records(root))
-        if _marc_claims_isbn(fields, isbn)
-    ]
-    parsed = [
-        record
-        for fields in records
-        for record in [_dnb_record(fields, isbn, source="oenb", read_author_identifiers=False)]
-        if record is not None
-    ]
-    if not parsed:
-        return Lookup(Outcome.NOT_FOUND, source="oenb")
-
-    return Lookup(
-        Outcome.FOUND,
-        source="oenb",
-        record=max(parsed, key=lambda record: record.completeness),
-    )
-
-
-async def _oenb_search(query: str, limit: int) -> list[Record]:
-    """The ÖNB, one ANDed title term per word.
-
-    Not the catch-all `alma.all_for_ui`, which is the same choice
-    `_k10plus_search` made and for a sharper reason here: measured 2026-08-27,
-    ANDing "wien" and "geschichte" over the title index returns 4,885 records
-    where the same pair over the keyword index returns 65,872.
-    """
-    terms = _search_terms(query)
-    if not terms:
-        return []
-
-    cql = " and ".join(f"{_OENB_TITLE_INDEX}={term}" for term in terms)
-    params = {
-        "version": "1.2",
-        "operation": "searchRetrieve",
-        "query": cql,
-        "recordSchema": "marcxml",
-        # More than asked for, because the ordering is the catalogue's and the
-        # ranking is ours. The endpoint clamps this at 50 silently: asking for
-        # 100 or 200 returns 50 records with no diagnostic, measured.
-        "maximumRecords": str(min(limit * 3, 50)),
-    }
-    try:
-        response = await fetch.get_once(_OENB_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("ÖNB search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in _oenb_records(root):
-        fields = _marc_fields(node)
-        record = _dnb_record(
-            fields, isbn=None, source="oenb", read_author_identifiers=False
-        )
-        if record is None or not _is_physical_book(
-            _marc_extent(fields), record.title
-        ):
-            continue
-        results.append(record)
-    return results
 
 
 # ── The National Library of Greece ────────────────────────────────────────────
 
-#: The Greek legal deposit catalogue, over SRU.
-#:
-#: **Plaintext HTTP by necessity, which is the second source here that is.**
-#: Port 210 speaks no TLS, and `https://catalogue.nlg.gr` on 443 is a different
-#: service that answers 404 to this path. Both measured 2026-08-30.
-#:
-#: So this carries the exposure `_LOC_URL` already documents: the ISBN or the
-#: title asked about travels in clear, and anyone on the path, or anyone
-#: answering DNS for the pod, can answer for the catalogue.
-#:
-#: `fetch.RedirectedOffHost` refuses any hop off this host on both paths, so a
-#: forged reply cannot turn a request into a GET somewhere else, which is the
-#: SSRF.
-#:
-#: **The identity check covers one of the two paths and not the other, and the
-#: difference is worth stating rather than leaving to be inferred.** `_nlg`
-#: filters through `_marc_claims_isbn`, so a forged body has to be a plausible
-#: MARC record for the book the member scanned rather than for any book.
-#: `_nlg_search` has no identifier to check against, exactly as `_loc_search`
-#: has none, so a forged body there can offer any row it likes. What stands
-#: between that and a shelf is the same thing that stands there for the Library
-#: of Congress: a person reads the row and picks it. The search path's exposure
-#: is the Library of Congress's, not narrower.
-_NLG_URL: Final = "http://catalogue.nlg.gr:210/biblios"
+# The Greek legal deposit catalogue, over SRU.
+#
+# **Plaintext HTTP by necessity, which is the second source here that is.**
+# Port 210 speaks no TLS, and `https://catalogue.nlg.gr` on 443 is a different
+# service that answers 404 to this path. Both measured 2026-08-30.
+#
+# So this carries the exposure `targets.SEEDED[CatalogueSource.LOC].base_url` already
+# documents: the ISBN or the
+# title asked about travels in clear, and anyone on the path, or anyone
+# answering DNS for the pod, can answer for the catalogue.
+#
+# `fetch.RedirectedOffHost` refuses any hop off this host on both paths, so a
+# forged reply cannot turn a request into a GET somewhere else, which is the
+# SSRF.
+#
+# **The identity check covers one of the two paths and not the other, and the
+# difference is worth stating rather than leaving to be inferred.** the NLG lookup
+# filters through `_marc_claims_isbn`, so a forged body has to be a plausible
+# MARC record for the book the member scanned rather than for any book.
+# the NLG title search has no identifier to check against, exactly as the Library of Congress title search
+# has none, so a forged body there can offer any row it likes. What stands
+# between that and a shelf is the same thing that stands there for the Library
+# of Congress: a person reads the row and picks it. The search path's exposure
+# is the Library of Congress's, not narrower.
+# The value is `targets.SEEDED[CatalogueSource.NLG].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: The CQL index that means "the ISBN", established by probing. The endpoint
-#: answers `explain`, and its explain record carries the record schemas and no
-#: index list at all, so the documentation could not settle this.
-#:
-#: **A wrong index here fails loudly, unlike the ÖNB's**, and the defence built
-#: for that one is kept all the same. Measured 2026-08-30 against this endpoint:
-#:
-#: | query | answer |
-#: |---|---|
-#: | `dc.isbn=9789600426656` | 1 record |
-#: | `isbn=9789600426656` | 1 record |
-#: | `bib.isbn=...`, `srw.isbn=...` | SRU diagnostic 1/15, unsupported context set |
-#: | `bath.title=...`, `cql.anywhere=...` | SRU diagnostic 1/16, unsupported index |
-#: | `dc.identifier=9789600426656` | 0 records |
-#:
-#: None of them answers with the catalogue, which is what `alma.isbn13` did at
-#: the ÖNB. Confirmed the only way it can be: an ISBN read off a live NLG record
-#: and put back through this index returns exactly that record, in 0.186s.
-_NLG_ISBN_INDEX: Final = "dc.isbn"
+# The CQL index that means "the ISBN", established by probing. The endpoint
+# answers `explain`, and its explain record carries the record schemas and no
+# index list at all, so the documentation could not settle this.
+#
+# **A wrong index here fails loudly, unlike the ÖNB's**, and the defence built
+# for that one is kept all the same. Measured 2026-08-30 against this endpoint:
+#
+# | query | answer |
+# |---|---|
+# | `dc.isbn=9789600426656` | 1 record |
+# | `isbn=9789600426656` | 1 record |
+# | `bib.isbn=...`, `srw.isbn=...` | SRU diagnostic 1/15, unsupported context set |
+# | `bath.title=...`, `cql.anywhere=...` | SRU diagnostic 1/16, unsupported index |
+# | `dc.identifier=9789600426656` | 0 records |
+#
+# None of them answers with the catalogue, which is what `alma.isbn13` did at
+# the ÖNB. Confirmed the only way it can be: an ISBN read off a live NLG record
+# and put back through this index returns exactly that record, in 0.186s.
+# The value is `targets.SEEDED[CatalogueSource.NLG].isbn_index`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: The CQL index for a title word, ANDed one term per reference like the two
-#: SRU sources above.
-#:
-#: **The AND is applied rather than ignored**, which is the thing to check on a
-#: target whose explain record lists no indexes: measured 2026-08-30,
-#: `dc.title=zorba` answers 15 and `dc.title=zorba and dc.title=xyzzyqq`
-#: answers 0. A target that ignored the second term would have answered 15
-#: twice and every search here would have been one word wide.
-_NLG_TITLE_INDEX: Final = "dc.title"
+# The CQL index for a title word, ANDed one term per reference like the two
+# SRU sources above.
+#
+# **The AND is applied rather than ignored**, which is the thing to check on a
+# target whose explain record lists no indexes: measured 2026-08-30,
+# `dc.title=zorba` answers 15 and `dc.title=zorba and dc.title=xyzzyqq`
+# answers 0. A target that ignored the second term would have answered 15
+# twice and every search here would have been one word wide.
+# The value is `targets.SEEDED[CatalogueSource.NLG].title_index`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: Five, for the reason `_OENB_RECORDS` is five: one ISBN reaches several
-#: printings and the fullest of them should win.
-_NLG_RECORDS: Final = 5
+# Five, for the reason `targets.SEEDED[CatalogueSource.OENB].lookup_records` is five: one ISBN reaches several
+# printings and the fullest of them should win.
+# The value is `targets.SEEDED[CatalogueSource.NLG].lookup_records`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: What one title search may bring back.
-#:
-#: **This endpoint does not clamp `maximumRecords`, so this number is the only
-#: bound there is.** Measured 2026-08-30, asking for 200 returns 200 records
-#: where the ÖNB silently caps at 50. `fetch.MAX_RESPONSE_BYTES` is the backstop
-#: and it is a byte count rather than a record count, so a catalogue with fat
-#: records could spend the whole cap before this fired. Fifty is the same
-#: ceiling `_oenb_search` asks for, so the fan out's worst case is unchanged.
-_NLG_SEARCH_RECORDS: Final = 50
-
-
-def _nlg_records(root: ElementTree.Element) -> list[ElementTree.Element]:
-    """Every MARC record in an NLG response that describes a whole publication.
-
-    **The component part filter is here on the concept, not on a measurement
-    that needs it.** Measured over 400 live records on 2026-08-30, drawn from
-    eight title searches and not the same sample as the 500 record probe behind
-    `_isbn_entries`' table, the leader bibliographic level is `m` 371 times and
-    `s` 29 times, and a component part appears **zero** times, where the same
-    measurement at the ÖNB found 55.4%.
-    It is kept because an article is never a book in any MARC21 catalogue and
-    reading one leader costs nothing, and it is documented because the next
-    reader would otherwise have to re-measure to know whether it is load
-    bearing here. It is not, today.
-
-    A serial is not refused, which is the ÖNB's decision and is not re-taken
-    here: refusing them is a decision about what this app catalogues.
-    """
-    return [
-        record
-        for record in root.iter(f"{_MARC}record")
-        if not _is_component_part(record)
-    ]
+# What one title search may bring back.
+#
+# **This endpoint does not clamp `maximumRecords`, so this number is the only
+# bound there is.** Measured 2026-08-30, asking for 200 returns 200 records
+# where the ÖNB silently caps at 50. `fetch.MAX_RESPONSE_BYTES` is the backstop
+# and it is a byte count rather than a record count, so a catalogue with fat
+# records could spend the whole cap before this fired. Fifty is the same
+# ceiling the ÖNB title search asks for, so the fan out's worst case is unchanged.
+# The value is `targets.SEEDED[CatalogueSource.NLG].search_cap`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 
-async def _nlg(isbn: str, api_key: str) -> Lookup:
-    del api_key  # A public endpoint with no registration behind it.
-
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": f"{_NLG_ISBN_INDEX}={isbn}",
-        "recordSchema": "marcxml",
-        "maximumRecords": str(_NLG_RECORDS),
-    }
-    try:
-        response = await fetch.get_once(_NLG_URL, params=params)
-        if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source="nlg")
-        if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source="nlg")
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("NLG lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="nlg")
-
-    # The same check the ÖNB runs, and for a weaker reason that still holds: a
-    # wrong index is diagnosed here rather than answered with the catalogue, so
-    # this is not the whole defence it is there. It is still what stands between
-    # a forged reply on a plaintext connection and a member's shelf.
-    records = [
-        fields
-        for fields in (_marc_fields(node) for node in _nlg_records(root))
-        if _marc_claims_isbn(fields, isbn)
-    ]
-    parsed = [
-        record
-        for fields in records
-        for record in [
-            _dnb_record(fields, isbn, source="nlg", read_author_identifiers=False)
-        ]
-        if record is not None
-    ]
-    if not parsed:
-        return Lookup(Outcome.NOT_FOUND, source="nlg")
-
-    return Lookup(
-        Outcome.FOUND,
-        source="nlg",
-        record=max(parsed, key=lambda record: record.completeness),
-    )
-
-
-async def _nlg_search(query: str, limit: int) -> list[Record]:
-    """The NLG, one ANDed title term per word.
-
-    The same shape as `_oenb_search` and `_k10plus_search`, and the reason to
-    prefer the title index over a catch-all is the reason those two give.
-    """
-    terms = _search_terms(query)
-    if not terms:
-        return []
-
-    cql = " and ".join(f"{_NLG_TITLE_INDEX}={term}" for term in terms)
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": cql,
-        "recordSchema": "marcxml",
-        "maximumRecords": str(min(limit * 3, _NLG_SEARCH_RECORDS)),
-    }
-    try:
-        response = await fetch.get_once(_NLG_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("NLG search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in _nlg_records(root):
-        fields = _marc_fields(node)
-        record = _dnb_record(
-            fields, isbn=None, source="nlg", read_author_identifiers=False
-        )
-        if record is None or not _is_physical_book(
-            _marc_extent(fields), record.title
-        ):
-            continue
-        results.append(record)
-    return results
+# Whether a component part is refused here is
+# `targets.SEEDED[CatalogueSource.NLG].refuses_component_parts`, and this is
+# the measurement behind it.
+# Every MARC record in an NLG response that describes a whole publication.
+#
+# **The component part filter is here on the concept, not on a measurement
+# that needs it.** Measured over 400 live records on 2026-08-30, drawn from
+# eight title searches and not the same sample as the 500 record probe behind
+# `_isbn_entries`' table, the leader bibliographic level is `m` 371 times and
+# `s` 29 times, and a component part appears **zero** times, where the same
+# measurement at the ÖNB found 55.4%.
+# It is kept because an article is never a book in any MARC21 catalogue and
+# reading one leader costs nothing, and it is documented because the next
+# reader would otherwise have to re-measure to know whether it is load
+# bearing here. It is not, today.
+#
+# A serial is not refused, which is the ÖNB's decision and is not re-taken
+# here: refusing them is a decision about what this app catalogues.
+# """
 
 
 # ── The Czech National Library ────────────────────────────────────────────────
 
-#: The Czech legal deposit catalogue, over SRU with a PQF query.
-#:
-#: **Plaintext HTTP, the third source here that is**, for the same reason as the
-#: other two: port 9991 offers no TLS. `_NLG_URL` carries the reasoning in full
-#: and it applies unchanged, with one difference in this source's favour. It
-#: answers **only** an ISBN lookup, so every record it returns is checked against
-#: the ISBN that was asked for by `_nkp_claims_isbn`. There is no search path
-#: here for a forged body to reach.
-#:
-#: **The database path is load bearing and the ticket did not have it.**
-#: `aleph.nkp.cz:9991` alone, and `/biblios`, both answer SRU diagnostic 1/235,
-#: "database does not exist". Measured 2026-08-31.
-_NKP_URL: Final = "http://aleph.nkp.cz:9991/NKC"
+# The Czech legal deposit catalogue, over SRU with a PQF query.
+#
+# **Plaintext HTTP, the third source here that is**, for the same reason as the
+# other two: port 9991 offers no TLS. `targets.SEEDED[CatalogueSource.NLG].base_url`
+# carries the reasoning in full
+# and it applies unchanged, with one difference in this source's favour. It
+# answers **only** an ISBN lookup, so every record it returns is checked against
+# the ISBN that was asked for by `_nkp_claims_isbn`. There is no search path
+# here for a forged body to reach.
+#
+# **The database path is load bearing and the ticket did not have it.**
+# `aleph.nkp.cz:9991` alone, and `/biblios`, both answer SRU diagnostic 1/235,
+# "database does not exist". Measured 2026-08-31.
+# The value is `targets.SEEDED[CatalogueSource.NKP].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: The parameter this target takes a query in, and it is not `query`.
-#:
-#: Measured 2026-08-31: `query=` with CQL answers diagnostic **1/11**,
-#: unsupported query type, and `queryType=x-pquery` answers **1/8**, unsupported
-#: parameter, so the SRU 2.0 spelling does not reach it either. The query goes in
-#: its own `x-pquery` parameter, which is YAZ's SRU 1.1 extension.
-_NKP_QUERY_PARAM: Final = "x-pquery"
+# The parameter this target takes a query in, and it is not `query`.
+#
+# Measured 2026-08-31: `query=` with CQL answers diagnostic **1/11**,
+# unsupported query type, and `queryType=x-pquery` answers **1/8**, unsupported
+# parameter, so the SRU 2.0 spelling does not reach it either. The query goes in
+# its own `x-pquery` parameter, which is YAZ's SRU 1.1 extension.
+# The value is `targets.SEEDED[CatalogueSource.NKP].query_parameter`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
-#: One record, because this target renders exactly one whatever is asked for.
-#:
-#: **The other four SRU sources ask for five and rank the fullest.** That would
-#: be four empty stubs and a wasted page here: measured 2026-08-31 across three
-#: queries and four page sizes, a response carries data at position 2 of 2, 3 of
-#: 3, 5 of 5 and 20 of 20, and nowhere else. Over eight title searches at fifty
-#: records, 391 of 400 records were empty. Asking for one is the only size at
-#: which what arrives is what was requested.
-_NKP_RECORDS: Final = 1
+# One record, because this target renders exactly one whatever is asked for.
+#
+# **The other four SRU sources ask for five and rank the fullest.** That would
+# be four empty stubs and a wasted page here: measured 2026-08-31 across three
+# queries and four page sizes, a response carries data at position 2 of 2, 3 of
+# 3, 5 of 5 and 20 of 20, and nowhere else. Over eight title searches at fifty
+# records, 391 of 400 records were empty. Asking for one is the only size at
+# which what arrives is what was requested.
+# The value is `targets.SEEDED[CatalogueSource.NKP].lookup_records`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 
-def _nkp_query(isbn: str) -> str:
-    """The PQF for one ISBN lookup, built by `z3950`.
-
-    **Established by round trip, not by reading the attribute set.** An identifier
-    read off a live record, `978-3-319-52267-8`, put back through `@attr 1=7`
-    returns exactly that record, and so does its normalised form
-    `9783319522678`: the target folds the hyphens itself. Twenty ISBNs harvested
-    from this catalogue's own records and put back through it returned a populated
-    record **20 of 20** on 2026-08-31.
-
-    **Neither half of that query is spelled here, and the reason is the bug this
-    adapter already shipped once.** It first carried a local `_pqf_literal` that
-    removed the double quote and stopped there, on the stated ground that a quote
-    is the only character able to end a PQF literal. That is false, and
-    `z3950.pqf_term` had said so since 2026-08-28 from live `p_query_rpn`
-    renderings: an `@` followed by a digit is read **before** the quoted run, so
-    `@1=1016 praha` survives quoting and repins the use attribute, and a trailing
-    backslash escapes the closing quote. So it was a guard being wrong rather
-    than a leak being open, and `z3950.pqf_term` is the whole reason that is
-    true.
-
-    **The second reason this paragraph used to give was itself false.** It said
-    the shape was "not reachable through `parse_isbn`, which yields thirteen
-    ASCII digits or nothing". `parse_isbn` gated on `str.isdigit()` alone, which
-    is true of every Unicode digit, so it yielded thirteen characters that were
-    not all ASCII: `POST /api/books` stored an ISBN ending in an Arabic-Indic
-    zero. The sentence is true now, since `isbn.is_valid_isbn13` narrows to
-    ASCII, and it is written down this way because the code was defensible while
-    one of the two reasons for it was not.
-
-    The attribute was then the same defect one level up: a local `@attr 1=7`
-    beside `z3950.USE_ISBN`, in a module whose `isbn_query` already names this
-    catalogue by name in its own measurement. So the whole query comes from
-    there, and what stays here is the round trip above, which is this adapter's
-    measurement rather than PQF's rule.
-
-    `z3950.isbn_query` refuses an empty, over-long or control-bearing term with
-    `BadQuery`. A canonical ISBN reaches none of those; a future caller can, and
-    `_nkp` turns it into an unavailable answer rather than a 500.
-    """
-    return z3950.isbn_query(isbn)
+# The PQF for one ISBN lookup is built by `targets.Target.isbn_query` off
+# `targets.SEEDED[CatalogueSource.NKP].isbn_attribute`, and this is the round
+# trip that established it.
+# The PQF for one ISBN lookup, built by `z3950`.
+#
+# **Established by round trip, not by reading the attribute set.** An identifier
+# read off a live record, `978-3-319-52267-8`, put back through `@attr 1=7`
+# returns exactly that record, and so does its normalised form
+# `9783319522678`: the target folds the hyphens itself. Twenty ISBNs harvested
+# from this catalogue's own records and put back through it returned a populated
+# record **20 of 20** on 2026-08-31.
+#
+# **Neither half of that query is spelled here, and the reason is the bug this
+# adapter already shipped once.** It first carried a local `_pqf_literal` that
+# removed the double quote and stopped there, on the stated ground that a quote
+# is the only character able to end a PQF literal. That is false, and
+# `z3950.pqf_term` had said so since 2026-08-28 from live `p_query_rpn`
+# renderings: an `@` followed by a digit is read **before** the quoted run, so
+# `@1=1016 praha` survives quoting and repins the use attribute, and a trailing
+# backslash escapes the closing quote. So it was a guard being wrong rather
+# than a leak being open, and `z3950.pqf_term` is the whole reason that is
+# true.
+#
+# **The second reason this paragraph used to give was itself false.** It said
+# the shape was "not reachable through `parse_isbn`, which yields thirteen
+# ASCII digits or nothing". `parse_isbn` gated on `str.isdigit()` alone, which
+# is true of every Unicode digit, so it yielded thirteen characters that were
+# not all ASCII: `POST /api/books` stored an ISBN ending in an Arabic-Indic
+# zero. The sentence is true now, since `isbn.is_valid_isbn13` narrows to
+# ASCII, and it is written down this way because the code was defensible while
+# one of the two reasons for it was not.
+#
+# The attribute was then the same defect one level up: a local `@attr 1=7`
+# beside `z3950.USE_ISBN`, in a module whose `isbn_query` already names this
+# catalogue by name in its own measurement. So the whole query comes from
+# there, and what stays here is the round trip above, which is this adapter's
+# measurement rather than PQF's rule.
+#
+# `z3950.isbn_query` refuses an empty, over-long or control-bearing term with
+# `BadQuery`. A canonical ISBN reaches none of those; a future caller can, and
+# the NKP lookup turns it into an unavailable answer rather than a 500.
 
 
 #: The Dublin Core element names this reader wants, un-namespaced.
@@ -2494,9 +2306,18 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
 #: **Added here rather than to `_ONLINE_FORMS`, deliberately.** Widening the
 #: shared pattern is the tempting move and it changes what every other source
 #: refuses, on a phrase measured in one catalogue. This source states its own
-#: and `test_metadata.py` pins that the shared rule is unchanged. Whether the
-#: rule should be per source everywhere is a real question and a bigger one than
-#: this ticket.
+#: and `test_metadata.py` pins that the shared rule is unchanged.
+#:
+#: **#124 asked whether the rule should be per source everywhere and the answer
+#: was no**: it is per source exactly where the record carries no code, which is
+#: the two Dublin Core sources and nowhere else. `_NOT_A_BOOK_CARRIERS` holds
+#: the reasoning and `_BNF_ONLINE` is the other half of the pair.
+#:
+#: **This source is the harder of the two and is why the pair exists.** Its
+#: `dc:type` is `text` on 118 of the 119 live records measured on 2026-09-03,
+#: including on an online resource, so no type gate separates anything here and
+#: the format prose is genuinely all there is. Widening the type gate to fix the
+#: BnF would refuse this whole catalogue: see `_BNF_PRINTED`.
 _NKP_ONLINE: Final = re.compile(r"online\s+zdroj|elektronick\w*\s+zdroj", re.IGNORECASE)
 
 
@@ -2510,7 +2331,8 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
     does, would give every Czech book no author rather than a wrong one.
 
     **The denominator is 9 and not 400, and both numbers matter for different
-    reasons.** 400 is what it cost to see 9, which is `_NKP_RECORDS`' whole
+    reasons.** 400 is what it cost to see 9, which is
+    `targets.SEEDED[CatalogueSource.NKP].lookup_records`' whole
     argument. 9 is what the rules below rest on, and it is a thin sample: an
     earlier version of this docstring quoted the 400 as though `creator` had been
     looked for that many times.
@@ -2575,46 +2397,6 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
     )
 
 
-async def _nkp(isbn: str, api_key: str) -> Lookup:
-    del api_key  # A public endpoint with no registration behind it.
-
-    try:
-        # **Built inside the `try`, because `z3950.pqf_term` raises.** Outside it
-        # the `BadQuery` arm below is unreachable, which is what it was when the
-        # arm was first added.
-        params = {
-            "version": "1.1",
-            "operation": "searchRetrieve",
-            _NKP_QUERY_PARAM: _nkp_query(isbn),
-            "maximumRecords": str(_NKP_RECORDS),
-        }
-        response = await fetch.get_once(_NKP_URL, params=params)
-        if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source="nkp")
-        if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source="nkp")
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError, z3950.BadQuery):
-        logger.warning("NKP lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="nkp")
-
-    parsed = [
-        record
-        for node in _nkp_records(root)
-        if _nkp_claims_isbn(node, isbn)
-        for record in [_nkp_record(node, isbn)]
-        if record is not None
-    ]
-    if not parsed:
-        return Lookup(Outcome.NOT_FOUND, source="nkp")
-
-    return Lookup(
-        Outcome.FOUND,
-        source="nkp",
-        record=max(parsed, key=lambda record: record.completeness),
-    )
-
-
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2675,21 +2457,20 @@ async def _nkp(isbn: str, api_key: str) -> Lookup:
 # measurement and is not re-derived here**, because the seat that wrote this had
 # no key. The per source figures and the frames: `sources.MEASURED`.
 
-#: Every source that can answer an **ISBN**, by name. BNF and LOC are absent
-#: because neither was worth an ISBN request; they answer title search only.
+#: The ISBN lookup adapter for a transport that is neither SRU nor Z39.50.
 #:
-#: **Keyed on the enum, and `sources.LOOKUP_SOURCES` must name exactly these
-#: five.** `TestTheProviderRosterIsOneList` asserts it rather than a comment
-#: claiming it, because a source added to one and not the other is a `KeyError`
-#: on the path that adds a book.
-_SOURCES: Final[dict[CatalogueSource, Callable[[str, str], Awaitable[Lookup]]]] = {
-    CatalogueSource.OPEN_LIBRARY: _open_library,
-    CatalogueSource.GOOGLE_BOOKS: _google_books,
-    CatalogueSource.DNB: _dnb,
-    CatalogueSource.K10PLUS: _k10plus,
-    CatalogueSource.OENB: _oenb,
-    CatalogueSource.NLG: _nlg,
-    CatalogueSource.NKP: _nkp,
+#: **Two entries where there used to be seven**, and the five that left are the
+#: whole ticket: every SRU source now shares `_sru_lookup`, driven by its row.
+#: What is left is the two catalogues with a JSON API of their own, and they are
+#: keyed on the reader rather than on the source for the same reason the search
+#: tables are: a reader is what a row names.
+#:
+#: `metadata.resolve` is what stops a row naming a reader that is not in here.
+_BESPOKE_LOOKUPS: Final[
+    dict[targets.Reader, Callable[[str, str], Awaitable[Lookup]]]
+] = {
+    targets.Reader.OPEN_LIBRARY: _open_library,
+    targets.Reader.GOOGLE_BOOKS: _google_books,
 }
 
 #: Bookland registration group for German-language publishing.
@@ -2846,10 +2627,9 @@ async def _open_library_search(query: str, limit: int) -> list[Record]:
 #: CQL operators and punctuation. A query is user input and goes into a query
 #: language, so the metacharacters come out rather than being escaped: there is
 #: no book whose title depends on an unbalanced quote.
-_CQL_UNSAFE: Final = re.compile(r'[=<>"()/\\]+')
-
 #: CQL boolean keywords. A search for "black and white" must not become two
-#: terms joined by an operator.
+#: terms joined by an operator. The characters that would do the same thing are
+#: `targets.CQL_STRUCTURE`, which this used to sit under a stale copy of.
 _CQL_KEYWORDS: Final = frozenset({"and", "or", "not", "prox"})
 
 #: Below this a term is noise in a catalogue index: initials, articles, and the
@@ -2858,13 +2638,40 @@ _MIN_TERM_LENGTH: Final = 2
 
 
 def _search_terms(query: str) -> list[str]:
-    """The query as safe, meaningful, ANDable terms."""
-    cleaned = _CQL_UNSAFE.sub(" ", query)
-    return [
-        term
-        for term in cleaned.split()
-        if len(term) >= _MIN_TERM_LENGTH and term.lower() not in _CQL_KEYWORDS
-    ]
+    """The query as safe, meaningful, ANDable terms.
+
+    **Every term returned has been through `targets.cql_term`**, and that is a
+    guarantee rather than a coincidence of the strip above it. This function
+    used to carry its own copy of the CQL metacharacter class, one character
+    different from the one in `targets.py`: `\\s` was in the refusing spelling
+    and not in the stripping one. Two spellings of one rule is the defect the
+    Czech National Library block records having shipped once already, in the
+    other query language, so there is one class now and this is a caller of it.
+
+    **The two halves of that class are stripped differently, and a critic
+    measured why.** A relation character joins two things, so it becomes a
+    space. A masking character sits inside one word, so it is deleted:
+    `har*ry potter` was becoming `har AND ry AND potter`, three title words that
+    find nothing, where the target would have masked it to "harry potter".
+    Deleting gives `harry potter`. `targets._JOINS` and `targets._MASKS` are the
+    two halves and `targets.CQL_STRUCTURE` is their union, composed rather than
+    spelled again.
+
+    A term the strip could not make safe is dropped rather than raised on, which
+    is this function's contract and not `cql_term`'s. A control character is the
+    reachable case: `str.split` does not treat one as whitespace, so it survives
+    into a term.
+    """
+    cleaned = targets.CQL_JOINS.sub(" ", targets.CQL_MASKS.sub("", query))
+    terms: list[str] = []
+    for term in cleaned.split():
+        if len(term) < _MIN_TERM_LENGTH or term.lower() in _CQL_KEYWORDS:
+            continue
+        try:
+            terms.append(targets.cql_term(term))
+        except targets.BadQuery:
+            continue
+    return terms
 
 
 #: Extents that mean the record is not a physical book. A digitised copy of a
@@ -2874,19 +2681,24 @@ def _search_terms(query: str) -> list[str]:
 #:
 #: **Written as two halves on 2026-08-24, because the DNB lookup treats them
 #: differently.** An online resource is this book in another form, and the DNB
-#: answers with one for an ISBN whose printed record it also holds, so `_dnb`
+#: answers with one for an ISBN whose printed record it also holds, so the DNB lookup
 #: ranks it below a physical record and takes it rather than reporting a miss.
 #: A disc is a different object, so `_dnb_record` refuses it outright. Both
 #: halves are still one refusal everywhere else, `_is_physical_book` being what
 #: the search paths and K10plus ask.
 #:
-#: **This is a shared rule and a per source one sits beside it.** `_is_physical_book`
-#: is reached from seven sources: the DNB, the OENB, the NLG, the NKP, K10plus,
-#: the BnF and the Library of Congress, five of them only through a search
-#: function: K10plus, the NLG, the OENB, the BnF and the Library of Congress.
-#: So a phrase added here changes what all seven refuse, which is why the Czech
-#: online resource wording is `_NKP_ONLINE` and not another entry in this set.
-#: A reader adding a language belongs at that constant, not this one.
+#: **This is the fallback now, and a code test stands in front of it.**
+#: `_is_physical_book` is reached from seven sources: the DNB, the OENB, the
+#: NLG, the NKP, K10plus, the BnF and the Library of Congress. Five of them
+#: state the carrier in codes and are asked those first, the four MARC ones
+#: through `_marc_is_physical_book` and the Library of Congress through
+#: `_loc_carrier_is_book`. Only the two Dublin Core sources decide it from prose
+#: alone, and each states its own: `_NKP_ONLINE` and `_BNF_ONLINE`.
+#:
+#: **So a reader who has met a new wording should not lengthen this.** Widening
+#: it still changes what all seven refuse, and #124 is the record of what that
+#: buys: the wording is a property of the language, the language list is open,
+#: and five of the seven never needed the wording at all.
 _ONLINE_FORMS: Final = (
     r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 )
@@ -2898,110 +2710,233 @@ _IS_A_DISC: Final = re.compile(_DISC_FORMS, re.IGNORECASE)
 
 
 def _is_physical_book(extent: str | None, title: str | None) -> bool:
-    """Whether a record describes something that can sit on a shelf.
+    """Whether a record's prose describes something that can sit on a shelf.
 
     Both arguments are optional because a `Record`'s are: an untitled record is
     one a catalogue answered thinly, not one naming a volume slot, so it fails
     the placeholder test rather than passing it.
+
+    **This is the fallback and no longer the whole rule.** A MARC record states
+    its carrier in codes, so the four MARC sources ask `_marc_is_physical_book`
+    and reach this through it, and the Library of Congress reads the MODS
+    spelling of the same codes. What is left here is the two schemas that carry
+    no such vocabulary at all. `_marc_carrier_is_book` says why.
     """
     if extent and _NOT_A_BOOK.search(extent):
         return False
     return not _is_placeholder_title(title or "")
 
 
-async def _k10plus_search(query: str, limit: int) -> list[Record]:
-    """K10plus, one ANDed term per word.
+#: MARC's own codes for the two things `_NOT_A_BOOK` refuses in prose, so that
+#: the four MARC sources need no prose in any language.
+#:
+#: **The languages are an open set and the schemas are not**, which is the whole
+#: argument. `_NOT_A_BOOK` is written in German and English, so a Czech online
+#: resource reached a shelf (#124) and a French one would have. Lengthening the
+#: alternation buys one language at a time forever; these three sets are closed,
+#: published, and say the same two things the alternation says.
+#:
+#: Measured over 2,605 live MARC records on 2026-09-03, from ISBN lookups and
+#: title searches across all four MARC sources: **65 describe something that is
+#: not a physical book and `_NOT_A_BOOK` passes every one**, and **0** are
+#: refused by `_NOT_A_BOOK` and passed here, so nothing the prose caught is
+#: given up.
+#:
+#: **The language framing predicts 20 of that 65 and no more.** 43 carry no
+#: `300 $a` at all, so no extent rule in any language reaches them. 2 carry an
+#: extent that counts pages, `XVIII, 222 Seiten` and `24, 358 Seiten, 5
+#: ungezählte Seiten Tafeln`, because they are online resources quoting the
+#: **printed original's** collation, and an extent rule cannot refuse those
+#: without refusing books. The remaining **20** are the ones a longer alternation
+#: could have caught, and catching them would have needed `CD-ROM`, `Track`,
+#: `Schallplatte`, `Tonie-Figur` and `E-BOOK`, none of which is a language this
+#: rule was missing: `CD-ROM` is absent from `_DISC_FORMS` in English too.
+#:
+#: Each code is one of the two halves rather than a widening:
+#:
+#: | set | codes | what it is the code for |
+#: |---|---|---|
+#: | 007/00 | `c` | an electronic resource, `_ONLINE_FORMS` |
+#: | 007/00 | `s`, `v` | a sound recording and a videorecording, `_DISC_FORMS` |
+#: | leader/06 | `m` | a computer file, `_ONLINE_FORMS` |
+#: | leader/06 | `i`, `j`, `g` | sound recordings and projected media, `_DISC_FORMS` |
+#: | 008/23 | `o`, `q`, `s` | online, direct electronic and electronic |
+#:
+#: **The 008/23 row is not load bearing today and is kept anyway**, which is the
+#: reason `metadata._marc_nodes` gives for keeping a component part filter that catches
+#: nothing at that source: measured over the same 2,605 records, it refuses **0**
+#: that the 007 and the leader do not already refuse. It stays because `007` is
+#: optional and 195 of those 2,605 carry none, so a catalogue that codes the form
+#: of item and omits the carrier is ordinary MARC that this sample happens not to
+#: hold. `s` has never been observed here at all and is in the set on MARC's
+#: definition, like `b` at `_COMPONENT_PART_LEVELS`.
+#:
+#: **What is deliberately not here**: every other leader/06. Refusing them would
+#: catch 35 more of those 2,605, of which 20 are graphics, **12 are notated
+#: music**, 2 are maps and 1 is a three dimensional object. The music is why it
+#: is not one decision: `Gabriel Fauré, Catalogue des œuvres`, `LII, 496 Seiten`,
+#: is a book K10plus files as music, and `1 Partitur (101 Seiten)` is a printed
+#: score somebody may well shelve. Whether this app takes printed scores, maps or
+#: photographs is a decision about what it catalogues rather than a correction to
+#: this rule, which is the reason `_COMPONENT_PART_LEVELS` gives for not refusing
+#: serials, and widening a frozenset is the quietest possible place to take one.
+_NOT_A_BOOK_CARRIERS: Final = frozenset({"c", "s", "v"})
+_NOT_A_BOOK_RECORD_TYPES: Final = frozenset({"g", "i", "j", "m"})
+_NOT_A_BOOK_FORMS_OF_ITEM: Final = frozenset({"o", "q", "s"})
 
-    `pica.all=zauberberg mann` is **not** the same query: the catch-all index
-    treats the phrase loosely and returns anything sharing a word. ANDing the
-    terms is what turns this from a noisy source into a precise one.
+#: MARC 007/00 for text. A record carrying one is a text whatever else it also
+#: carries, which is the clause the ÖNB's digitisations turn on.
+_TEXT_CARRIER: Final = "t"
+
+#: leader/06 and 008/23, the two fixed positions read below. Named because a
+#: bare `6` and `23` in an index expression say nothing about which of MARC's
+#: forty positions is meant.
+_RECORD_TYPE_POSITION: Final = 6
+_FORM_OF_ITEM_POSITION: Final = 23
+
+
+def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
+    """Whether this record's own codes say it is a thing on a shelf.
+
+    Reads the leader and the control fields off the record node, because
+    `_marc_fields` maps `datafield` only and neither of these is one. That is
+    `_is_component_part`'s reason and it now has seven callers rather than the
+    one that argued against widening the field map; see that function.
+
+    **A field too short to index decides nothing**, which is the rule
+    `_is_component_part` already applies to the leader, and a stronger one here
+    because two of the three fields are read at a fixed offset. A truncated
+    leader or a short `008` is a broken record rather than a disc, and the
+    prose test and the fields below decide it on their own merits. `007` is
+    read by prefix rather than by offset, so an empty one yields `""` and
+    matches nothing.
+
+    **Every `007`, and a text one wins.** The field is repeatable, one per
+    carrier, and 48 of the 2,605 records measured carry two: `cr` beside `tu`.
+    Refusing on any electronic `007` refuses all 48, and they are **real books**:
+    every one is an Austrian Books Online record (`856 $x ONB-ABO $3 Volltext`)
+    for a 19th century print the ÖNB holds, with the print's imprint in the 264
+    and its collation in the 300. Their `008/23` is blank or `#` on all 48, which
+    is MARC's own answer that the **item** is not electronic; the `cr` describes
+    the scan beside it. So a `tu` is decisive and this reads all of them rather
+    than the first, which would have passed or refused whichever the cataloguer
+    happened to write first.
+
+    **It rescues from the 007 test only**, which the shape of this function
+    states and its prose did not: the leader and the 008 have returned already,
+    so a `tu` does not outrank either. That is deliberate rather than
+    incidental, because a text carrier beside a projected medium leader is a
+    record contradicting itself, where a text carrier beside an electronic one
+    is a digitisation describing two things truthfully. It also costs nothing on
+    the evidence: all 48 carry leader/06 `a` and an 008/23 that is blank or `#`,
+    so none of them reaches the question.
+
+    That was the first draft of this function and a critic caught it. It is the
+    shape CLAUDE.md names: a replacement better in the dimension it was designed
+    for and silently weaker in one nobody re-checked.
+
+    The other worry, a printed book with an accompanying CD-ROM, does not need
+    this clause and would not have been saved by it: accompanying material goes
+    in `300 $e`, and both records in the sample that carry one (`1 CD`,
+    `Zsfassung + 1 CD-ROM`) carry `007 tu` and nothing else.
     """
-    terms = _search_terms(query)
-    if not terms:
-        return []
+    leader = record.findtext(f"{_MARC}leader") or ""
+    if (
+        len(leader) > _RECORD_TYPE_POSITION
+        and leader[_RECORD_TYPE_POSITION] in _NOT_A_BOOK_RECORD_TYPES
+    ):
+        return False
 
-    cql = " and ".join(f"pica.all={term}" for term in terms)
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": cql,
-        "recordSchema": "marcxml",
-        # More than asked for, because the ordering is the catalogue's and the
-        # ranking below is ours. Taking the first `limit` would be taking the
-        # catalogue's opinion, which is the one we do not trust.
-        "maximumRecords": str(min(limit * 3, 50)),
-    }
-    try:
-        response = await fetch.get_once(_K10PLUS_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("K10plus search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in root.iter(f"{_MARC}record"):
-        fields = _marc_fields(node)
-        record = _k10plus_record(fields)
-        extent = _marc_extent(fields)
-        if not record.title or not _is_physical_book(extent, record.title):
-            continue
-        results.append(record)
-    return results
-
-
-async def _dnb_search(query: str, limit: int) -> list[Record]:
-    """The DNB, through its word-sequence index.
-
-    `WOE` is the index that takes several words and requires all of them, which
-    is what a typed search actually means. It is precise to the point of being
-    narrow: "clean code martin" is one record.
-
-    **MARC21 costs bandwidth here and it is the one place it is worth naming.**
-    A full page of results is 438 to 588 KB against Dublin Core's 51 KB,
-    measured on 2026-08-24 over four `WOE=` queries at the 50 record ceiling
-    (`clean code` 437,805 bytes, `roman liebe` 449,535, `informatik grundlagen`
-    440,115, `geschichte deutschland` 587,810), for 0.60s against 0.37s. It is
-    paid on a typed search rather than on a scan, the responses are parsed and
-    dropped rather than stored, and `docs/decisions.md` records that no
-    catalogue response is size capped, which this makes worth revisiting sooner
-    than it was.
-    """
-    terms = _search_terms(query)
-    if not terms:
-        return []
-
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": f"WOE={' '.join(terms)}",
-        "recordSchema": "MARC21-xml",
-        "maximumRecords": str(min(limit * 3, 50)),
-    }
-    try:
-        response = await fetch.get_once(_DNB_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("DNB search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in root.iter(f"{_MARC}record"):
-        fields = _marc_fields(node)
-        record = _dnb_record(fields, isbn=None)
-        # Online resources are refused here and merely ranked down in `_dnb`,
-        # and the asymmetry is deliberate: a search has no ISBN to tell an
-        # edition of this book from a digitisation of another one, so it is the
-        # same refusal `_k10plus_search` makes two functions above.
-        if record is None or not _is_physical_book(
-            _marc_extent(fields), record.title
+    carriers: list[str] = []
+    for control in record.findall(f"{_MARC}controlfield"):
+        # `control.text` and never `_marc_text`, which collapses whitespace.
+        # A control field is fixed length and its blanks are data. Measured over
+        # 2,605 live records, every one of which carries an 008, and counted in
+        # **records** rather than in distinct values, which is where the first
+        # three versions of this comment went wrong: `_marc_text` alters the 008
+        # of 2,043 of them (78.4%) and moves what sits at position 23 on 1,859.
+        # So a rule reading this field through the subfield reader refuses 31
+        # records where it should refuse 854, and says nothing about it. 5 more
+        # collapse below 24 characters, which the length test below turns into a
+        # pass rather than an `IndexError`.
+        value = control.text or ""
+        tag = control.get("tag")
+        if tag == "007":
+            carriers.append(value[:1])
+        elif (
+            tag == "008"
+            and len(value) > _FORM_OF_ITEM_POSITION
+            and value[_FORM_OF_ITEM_POSITION] in _NOT_A_BOOK_FORMS_OF_ITEM
         ):
-            continue
-        results.append(record)
-    return results
+            return False
+
+    # **A record that declares a text carrier is a text**, whatever other `007`
+    # it also carries. Not whatever else it declares: the 008 and the leader have
+    # returned already, above, and a `tu` does not outrank either. See the two
+    # 007 note in the docstring for why that asymmetry is deliberate, and for the
+    # measurement that it costs nothing, 0 of the 1,484 records carrying a text
+    # 007 also carry a refusing leader/06 or 008/23. Without this clause the 48
+    # Austrian Books Online records are refused, and they are real prints.
+    return _TEXT_CARRIER in carriers or not any(
+        carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers
+    )
+
+
+def _marc_is_physical_book(
+    record: ElementTree.Element,
+    fields: dict[str, list[_Subfields]],
+    title: str | None,
+) -> bool:
+    """The whole refusal for a MARC source: the codes, then the prose.
+
+    **The one door.** Every MARC parse path asks this and none asks
+    `_is_physical_book` directly, so a source added later gets the carrier test
+    by construction rather than by remembering to add it.
+    `test_metadata.py::TestTheCarrierTestIsTheOnlyWayIn` is what keeps that true.
+
+    Both halves, because neither subsumes the other. The codes reach the 43
+    records that state no extent; the prose reaches a record whose catalogue
+    coded it wrongly, which the DNB does, writing `338 $a Band` on three records
+    whose 007, 008 and extent all say online.
+    """
+    return _marc_carrier_is_book(record) and _is_physical_book(
+        _marc_extent(fields), title
+    )
+
+
+def _fullest_physical(
+    books: list[tuple[ElementTree.Element, dict[str, list[_Subfields]], Record]],
+) -> Record:
+    """The fullest of several records for one ISBN, a book before a digitisation.
+
+    **The three lookups this serves ranked on `completeness` alone and refused
+    nothing**, where the DNB has carried the physical test in its ranking key
+    since the halves were split. Measured over the cached bodies of 210 live
+    K10plus ISBN lookups on 2026-09-03: 9 answered with a physical **and** a non
+    physical record in the same response, and **8 of those 9 returned the non
+    physical one**, because a digitisation is often the fuller record. That is a
+    member scanning a barcode and being handed the wrong object, and it needed no
+    foreign language to happen. The ÖNB and the NLG carry the same gap and the
+    same fix; measured on the same day it changes 0 of 55 and 0 of 37 answers
+    there, so this is one source's live defect and two sources' consistency.
+
+    **31 of those 210 are answered only by records this refuses**, and they stay
+    answered, which is what makes the paragraph below a decision rather than an
+    omission.
+
+    **A rank and not a refusal**, which is the DNB's documented asymmetry, now
+    carried on `targets.Target.requires_isbn_claim`, and is re-taken here rather
+    than assumed: an online resource is this book in another
+    form, so when it is the only answer it is better than reporting a miss. A
+    search has no ISBN to tie the two together and refuses outright instead.
+    """
+    return max(
+        books,
+        key=lambda book: (
+            _marc_is_physical_book(book[0], book[1], book[2].title),
+            book[2].completeness,
+        ),
+    )[2]
 
 
 # ── The regional catalogues ───────────────────────────────────────────────────
@@ -3035,48 +2970,44 @@ async def _dnb_search(query: str, limit: int) -> list[Record]:
 # Neither is in the chain, so the Library of Congress is still the substitute
 # here, but it is a substitute for something that exists rather than for nothing.
 
-_BNF_URL: Final = "https://catalogue.bnf.fr/api/SRU"
-_LOC_URL: Final = "http://lx2.loc.gov:210/lcdb"
+# The value is `targets.SEEDED[CatalogueSource.BNF].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
+# The value is `targets.SEEDED[CatalogueSource.LOC].base_url`. It became a row on the
+# catalogue targets table, and what is left here is the measurement.
 
 _MODS: Final = "{http://www.loc.gov/mods/v3}"
 
 #: BnF `dc:type` values that are a printed book. It also catalogues manuscripts,
 #: scores, maps and recordings, all of which match a title search.
+#:
+#: **`text` is the entry that lets an electronic resource through, and taking it
+#: out is not the fix.** This constant is shared with `_nkp_record`, and 118 of
+#: the 119 live NKP records measured on 2026-09-03 carry a `dc:type` of exactly
+#: `text`, so dropping it refuses the whole Czech catalogue to fix the French
+#: one. `_BNF_NOT_PRINTED` refuses on the other side instead.
 _BNF_PRINTED: Final = ("texte imprim", "printed text", "text")
 
+#: What the BnF's `dc:type` says when the thing is **not** printed, tested after
+#: `_BNF_PRINTED` rather than instead of it.
+#:
+#: The BnF repeats `dc:type` in French, in English and as a DCMI type, and the
+#: DCMI type of an ebook is `text`: `ressource électronique | electronic
+#: resource | text` passes the gate above on its last third. Measured over 444
+#: live BnF records, 8 pass that way. The English term is matched because the
+#: BnF emits all three spellings on every record, so one is enough and it is the
+#: one with no accents to normalise.
+_BNF_NOT_PRINTED: Final = "electronic resource"
 
-async def _bnf_search(query: str, limit: int) -> list[Record]:
-    """The BnF, through its catch-all index.
-
-    `bib.anywhere all "..."` requires every word, which is the same contract as
-    the other two SRU sources and the same reason it is precise enough to use.
-    """
-    terms = _search_terms(query)
-    if not terms:
-        return []
-
-    params = {
-        "version": "1.2",
-        "operation": "searchRetrieve",
-        "query": f'bib.anywhere all "{" ".join(terms)}"',
-        "recordSchema": "dublincore",
-        "maximumRecords": str(min(limit * 2, 20)),
-    }
-    try:
-        response = await fetch.get_once(_BNF_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("BnF search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in root.findall(f".//{_DC}title/.."):
-        record = _bnf_record(node)
-        if record is not None:
-            results.append(record)
-    return results
+#: What this catalogue calls a digital copy in its `dc:format`, which is the
+#: BnF's `_NKP_ONLINE` and exists for the same reason.
+#:
+#: **The `dc:type` does not save this case**, which is the thing to know before
+#: deleting it as redundant: 6 of those 444 records carry `dc:type` = `texte
+#: imprimé | printed text | text`, the printed value, beside `dc:format` = `1
+#: ressource dématérialisée`. The type is simply wrong on them and the format is
+#: right. So Dublin Core needs prose here even where a type gate exists, and
+#: this is the second of the **two** per source constants the roster needs.
+_BNF_ONLINE: Final = re.compile(r"ressources?\s+d[eé]mat[eé]rialis", re.IGNORECASE)
 
 
 def _bnf_record(record: ElementTree.Element) -> Record | None:
@@ -3095,6 +3026,10 @@ def _bnf_record(record: ElementTree.Element) -> Record | None:
     kinds = " ".join(texts("type")).casefold()
     if kinds and not any(kind in kinds for kind in _BNF_PRINTED):
         return None
+    # And not printed, which is a separate question from not being printed:
+    # the DCMI `text` on an ebook satisfies the gate above. See the constant.
+    if _BNF_NOT_PRINTED in kinds:
+        return None
 
     # The BnF writes the statement of responsibility into the title, the same
     # way the DNB does, so the same parser applies.
@@ -3103,7 +3038,12 @@ def _bnf_record(record: ElementTree.Element) -> Record | None:
         return None
 
     extent = next((value for value in texts("format")), None)
-    if not _is_physical_book(extent, title):
+    # Two refusals, the same pair `_nkp_record` makes: the shared rule for the
+    # forms every source writes, and this catalogue's own French, which the
+    # shared one cannot see. See `_BNF_ONLINE`.
+    if not _is_physical_book(extent, title) or (
+        extent is not None and _BNF_ONLINE.search(extent)
+    ):
         return None
 
     # `dc:identifier` holds an ARK URL and sometimes "ISBN 0333532945".
@@ -3158,44 +3098,56 @@ def _bnf_authors(creators: list[str]) -> str | None:
     return ", ".join(authors) or None
 
 
-async def _loc_search(query: str, limit: int) -> list[Record]:
-    """The Library of Congress, restricted to text.
+#: MODS `physicalDescription/form` values that say the carrier is electronic,
+#: per `@authority`, which is this source's spelling of the MARC codes.
+#:
+#: **The Library of Congress publishes MODS generated from MARC**, so
+#: `marcform` is `008/23` written out, `marccategory` is `007/00` written out,
+#: and `rdamedia` is the RDA media type. Whole strings from a controlled
+#: vocabulary, so nothing here is a positional read.
+#:
+#: **`typeOfResource` does not cover this**, which is the point: it is `text` on
+#: 322 of 391 live records measured on 2026-09-03, and **30 of those 322** carry
+#: a form saying electronic. `_NOT_A_BOOK` refuses **5** of the 30, on
+#: `1 online resource` and `1 electronic resource (255 pages )`; 6 more read
+#: `1 CD-ROM : sd., col. ; 4 3/4 in.`, which no alternative in that pattern
+#: matches in any language.
+#:
+#: **All three authorities, not the shortest rule that fits.** `rdamedia` alone
+#: agrees with the union on 322 of 322 here, and it is RDA: a record catalogued
+#: before RDA carries `marcform` and `marccategory` and no `rdamedia` at all. 3
+#: of the 322 already carry no `rdamedia`, and none of those 3 is electronic
+#: today, which is a fact about this sample rather than about the catalogue.
+#:
+#: Microform is deliberately absent. 17 of the 322 are microfilm, and whether
+#: this app shelves one is the decision `_COMPONENT_PART_LEVELS` declines to
+#: take about serials.
+_LOC_NOT_A_BOOK_FORMS: Final = {
+    "marcform": frozenset({"electronic"}),
+    "marccategory": frozenset({"electronic resource"}),
+    "rdamedia": frozenset({"computer"}),
+}
 
-    `typeOfResource` is the denoising that makes this usable: without it a
-    title search returns sound recordings and microfilm alongside the book,
-    and "moby dick" came back as a 78rpm spoken-word disc.
+
+def _loc_carrier_is_book(record: ElementTree.Element) -> bool:
+    """Whether this MODS record's own form codes say it is a thing on a shelf.
+
+    `_marc_carrier_is_book` for the one source that answers MODS. A record with
+    no `form` at all decides nothing here: 1 of the 391 measured carries none,
+    and an absent code is a thin record rather than a disc.
     """
-    terms = _search_terms(query)
-    if not terms:
-        return []
-
-    params = {
-        "version": "1.1",
-        "operation": "searchRetrieve",
-        "query": f'dc.title="{" ".join(terms)}"',
-        "recordSchema": "mods",
-        "maximumRecords": str(min(limit * 2, 20)),
-    }
-    try:
-        response = await fetch.get_once(_LOC_URL, params=params)
-        if response.status_code != 200:
-            return []
-        root = _parsed(response.text)
-    except (httpx.HTTPError, ElementTree.ParseError):
-        logger.warning("Library of Congress search failed for %r", query, exc_info=True)
-        return []
-
-    results: list[Record] = []
-    for node in root.iter(f"{_MODS}mods"):
-        record = _loc_record(node)
-        if record is not None:
-            results.append(record)
-    return results
+    for form in record.findall(f"{_MODS}physicalDescription/{_MODS}form"):
+        refused = _LOC_NOT_A_BOOK_FORMS.get(form.get("authority") or "")
+        if refused and (form.text or "").strip().casefold() in refused:
+            return False
+    return True
 
 
 def _loc_record(record: ElementTree.Element) -> Record | None:
     kind = record.find(f"{_MODS}typeOfResource")
     if kind is None or (kind.text or "").strip() != "text":
+        return None
+    if not _loc_carrier_is_book(record):
         return None
 
     title_info = record.find(f"{_MODS}titleInfo")
@@ -3429,7 +3381,7 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
 
     **A parser extension rather than a new source.** The record this reads is
     the one `_loc_record` already has in hand, so LCSH costs no outbound
-    request and the Library of Congress does not join `_SOURCES`. It stays off
+    request and the Library of Congress does not join `metadata._lookup_one`. It stays off
     the lookup path for the reason `docs/decisions.md` records: it is reached
     over plaintext HTTP, and it held nothing for either German ISBN measured,
     which is this library's main case. **It was the only plaintext catalogue
@@ -3502,6 +3454,347 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
             continue
         found.append(Heading(ClassificationScheme.LCSH, _LCSH_SUBDIVISION.join(parts)))
     return found
+
+
+# ── The SRU door ──────────────────────────────────────────────────────────────
+#
+# One request builder and one dispatch over `targets.Target` rows, where there
+# used to be eleven near identical adapters: five ISBN lookups and six title
+# searches, differing in an index name, a version string, a record schema and a
+# page size. Adding an SRU catalogue is now a row in `targets.SEEDED` plus, only
+# if its record format is genuinely new, a `Reader`.
+#
+# **What did not move.** The parsers, and every refusal in them. A row picks a
+# reader; it cannot say what a reader accepts. That is the line the ticket drew
+# against Koha's `add_xslt`, and `_marc_claims_isbn`, `_is_placeholder_title`,
+# `_is_physical_book` and `_isbn_entries` are what sit on our side of it.
+
+
+def _marc_nodes(
+    root: ElementTree.Element, target: targets.Target
+) -> list[ElementTree.Element]:
+    """Every MARC record in a response that this target wants read.
+
+    **An SRU diagnostic needs no branch of its own**, and it is worth saying
+    because these endpoints answer every error with HTTP 200. An invalid query
+    and an unsupported one both come back as a well formed
+    `searchRetrieveResponse` carrying a `diag:diagnostic` and no records, so the
+    body parses, this returns nothing, and the source reports no results, which
+    is what it should do. `test_metadata.py` pins that with a recorded
+    diagnostic rather than leaving it to be rediscovered.
+
+    The component part filter is the ÖNB's and the NLG's. What it catches and
+    what it does not is on `targets.Target.refuses_component_parts`, and the two
+    measurements behind it are in those sources' blocks above.
+    """
+    nodes = root.iter(f"{_MARC}record")
+    if target.refuses_component_parts:
+        return [node for node in nodes if not _is_component_part(node)]
+    return list(nodes)
+
+
+def _marc_build(
+    target: targets.Target, fields: dict[str, list[_Subfields]], isbn: str | None
+) -> Record | None:
+    """One MARC record as book fields, through the reader the row names.
+
+    **Two MARC readers and not one**, which is where this diverges from the
+    ticket's "four readers cover all nine". `_dnb_record` harvests GND identified
+    headings across five tags and refuses a title that names a volume slot;
+    `_k10plus_record` joins `650 $a` and `$x` into one subject and does neither.
+    Folding them would change answers rather than restructure code, which is the
+    class of thing `add_xslt` was refused over.
+    """
+    if target.reader is targets.Reader.MARC_PLAIN:
+        return _k10plus_record(fields, isbn, source=target.source.value)
+    return _dnb_record(
+        fields,
+        isbn,
+        source=target.source.value,
+        read_author_identifiers=target.reads_author_identifiers,
+    )
+
+
+def _marc_lookup(
+    root: ElementTree.Element, isbn: str, target: targets.Target
+) -> Lookup:
+    """The best MARC record in a response for the ISBN that was asked about.
+
+    **Two behaviours, and the row picks which.** Everywhere but the DNB a record
+    that does not name the ISBN in its own 020 is refused: at the ÖNB that check
+    is the whole defence against a mistyped index answering with the entire
+    catalogue rather than with nothing. The DNB's `num=` index matches cross
+    references, so refusing there turns a live lookup into a miss for a record
+    that describes the right book, and it ranks instead. See
+    `targets.Target.requires_isbn_claim`, which defaults to the refusing arm so
+    a new row gets the safe answer by omission.
+
+    **The ranking key is the same three questions in both arms**, in the order
+    they decide: does the record claim this ISBN, can it sit on a shelf, and is
+    it the fullest. `sorted` is stable, so records that tie keep the catalogue's
+    own order and its first answer wins.
+    """
+    name = target.source.value
+    books = [
+        (node, fields, record)
+        for node in _marc_nodes(root, target)
+        for fields in [_marc_fields(node)]
+        for record in [_marc_build(target, fields, isbn)]
+        if record is not None
+    ]
+    if not books:
+        logger.info("%s matched %s only as a cross reference or a non-book", name, isbn)
+        return Lookup(Outcome.NOT_FOUND, source=name)
+
+    if target.requires_isbn_claim:
+        claimed = [book for book in books if _marc_claims_isbn(book[1], isbn)]
+        if not claimed:
+            return Lookup(Outcome.NOT_FOUND, source=name)
+        return Lookup(Outcome.FOUND, source=name, record=_fullest_physical(claimed))
+
+    ranked = sorted(
+        books,
+        key=lambda book: (
+            _marc_claims_isbn(book[1], isbn),
+            _marc_is_physical_book(book[0], book[1], book[2].title),
+            book[2].completeness,
+        ),
+        reverse=True,
+    )
+    return Lookup(Outcome.FOUND, source=name, record=ranked[0][2])
+
+
+def _dublin_core_bare_lookup(
+    root: ElementTree.Element, isbn: str, target: targets.Target
+) -> Lookup:
+    """The best un-namespaced Dublin Core record for the ISBN that was asked about.
+
+    The Czech National Library's shape, and it is the whole of this reader's
+    roster. `_nkp_claims_isbn` is this format's `_marc_claims_isbn`: it has no
+    020 to read and tests the record's own identifier elements instead.
+    """
+    name = target.source.value
+    parsed = [
+        record
+        for node in _nkp_records(root)
+        if not target.requires_isbn_claim or _nkp_claims_isbn(node, isbn)
+        for record in [_nkp_record(node, isbn)]
+        if record is not None
+    ]
+    if not parsed:
+        return Lookup(Outcome.NOT_FOUND, source=name)
+    return Lookup(
+        Outcome.FOUND,
+        source=name,
+        record=max(parsed, key=lambda record: record.completeness),
+    )
+
+
+def _marc_search(
+    root: ElementTree.Element, target: targets.Target
+) -> list[Record]:
+    """Every book in a MARC response, non-books refused.
+
+    **An online resource is refused here and only ranked down at a lookup**, and
+    the asymmetry is deliberate rather than an oversight: a search has no ISBN to
+    tell an edition of this book from a digitisation of another one.
+    """
+    results: list[Record] = []
+    for node in _marc_nodes(root, target):
+        fields = _marc_fields(node)
+        record = _marc_build(target, fields, None)
+        if record is None or not record.title:
+            continue
+        if not _marc_is_physical_book(node, fields, record.title):
+            continue
+        results.append(record)
+    return results
+
+
+def _dublin_core_search(
+    root: ElementTree.Element, target: targets.Target
+) -> list[Record]:
+    """Every book in a namespaced Dublin Core response. The BnF's shape."""
+    del target  # The selector is the format's, not the row's.
+    return [
+        record
+        for node in root.findall(f".//{_DC}title/..")
+        for record in [_bnf_record(node)]
+        if record is not None
+    ]
+
+
+def _mods_search(
+    root: ElementTree.Element, target: targets.Target
+) -> list[Record]:
+    """Every book in a MODS response. The Library of Congress's shape."""
+    del target
+    return [
+        record
+        for node in root.iter(f"{_MODS}mods")
+        for record in [_loc_record(node)]
+        if record is not None
+    ]
+
+
+#: Which reader reads a lookup response, by `targets.Reader`.
+#:
+#: **Keyed on the reader and not on the source**, which is the whole change:
+#: three sources share `MARC_GND` and a fourth would add no entry here. A reader
+#: absent from this table is a target that answers a lookup with nothing able to
+#: parse the answer, and `resolve` is what turns that into a failure at load
+#: rather than a `KeyError` on the path that adds a book.
+_LOOKUP_READERS: Final[
+    dict[
+        targets.Reader,
+        Callable[[ElementTree.Element, str, targets.Target], Lookup],
+    ]
+] = {
+    targets.Reader.MARC_GND: _marc_lookup,
+    targets.Reader.MARC_PLAIN: _marc_lookup,
+    targets.Reader.DUBLIN_CORE_BARE: _dublin_core_bare_lookup,
+}
+
+#: Which reader reads a title search response, by `targets.Reader`.
+_SEARCH_READERS: Final[
+    dict[
+        targets.Reader,
+        Callable[[ElementTree.Element, targets.Target], list[Record]],
+    ]
+] = {
+    targets.Reader.MARC_GND: _marc_search,
+    targets.Reader.MARC_PLAIN: _marc_search,
+    targets.Reader.DUBLIN_CORE: _dublin_core_search,
+    targets.Reader.MODS: _mods_search,
+}
+
+
+async def _sru_lookup(target: targets.Target, isbn: str) -> Lookup:
+    """One ISBN lookup against an SRU target.
+
+    **The query is built inside the `try`, because building one raises.**
+    `targets.cql_term` refuses a value that is not a term and `z3950.pqf_term`
+    refuses an empty, over-long or control bearing one, so outside the block the
+    `BadQuery` arm below is unreachable, which is exactly what it was when that
+    arm was first written for the Czech National Library.
+    """
+    name = target.source.value
+    try:
+        params = target.sru_params(target.isbn_query(isbn), target.lookup_records)
+        response = await fetch.get_once(target.base_url, params=params)
+        if response.status_code == 429:
+            return Lookup(Outcome.RATE_LIMITED, source=name)
+        if response.status_code != 200:
+            return Lookup(Outcome.UNAVAILABLE, source=name)
+        root = _parsed(response.text)
+    except (
+        httpx.HTTPError,
+        ElementTree.ParseError,
+        targets.BadQuery,
+        z3950.BadQuery,
+    ):
+        logger.warning("%s lookup failed for %s", name, isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source=name)
+    return _LOOKUP_READERS[target.reader](root, isbn, target)
+
+
+async def _sru_search(
+    target: targets.Target, query: str, limit: int
+) -> list[Record]:
+    """One title search against an SRU target.
+
+    The shape of the query is the row's, out of the four `targets.TitleQuery`
+    holds, and every term in it has been through `targets.cql_term`. Asking for
+    more records than the caller wants is deliberate: the ordering is the
+    catalogue's and the ranking is ours, so taking the first `limit` would be
+    taking the catalogue's opinion, which is the one we do not trust.
+    """
+    terms = _search_terms(query)
+    if not terms:
+        return []
+    try:
+        params = target.sru_params(
+            target.title_query(terms), target.search_records(limit)
+        )
+        response = await fetch.get_once(target.base_url, params=params)
+        if response.status_code != 200:
+            return []
+        root = _parsed(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError, targets.BadQuery):
+        logger.warning(
+            "%s search failed for %r", target.source.value, query, exc_info=True
+        )
+        return []
+    return _SEARCH_READERS[target.reader](root, target)
+
+
+def resolve(target: targets.Target) -> None:
+    """Refuse a row that names a capability nothing here can serve.
+
+    **The successor to `TestTheProviderRosterIsOneList`, and it is a function
+    rather than only a test because a row is written to a database.** That test
+    compared two dispatch tables against `sources`, which was the right guard
+    while a source was a Python constant: a source in one and not the other was a
+    `KeyError` on the path that adds a book. Both tables are keyed on
+    `targets.Reader` now and one reader serves three sources, so the comparison
+    cannot be restated; this asks the question it was really asking, one row at a
+    time.
+
+    **Two call sites, and neither validates a database row**, which is worth
+    stating because the name invites the opposite reading.
+    `main.seed_catalogue_targets` calls this over `targets.SEEDED` at boot, so a
+    constant naming a reader nothing implements fails the boot rather than a
+    member's scan, and
+    `test_house_rules.py::TestEveryTargetResolvesToADoorAndAReader` calls it over
+    the same roster. Both check the **code** against itself. What checks a row is
+    `models.CatalogueTarget`'s CHECK constraints, because `backup.restore` writes
+    through Core and reaches no Python. #130 is where a row becomes a `Target`
+    and where this starts having something to say about one.
+
+    Raises `ValueError`, which is what `targets.Target.__post_init__` raises for
+    the invariants it can see on one row on its own. This is the half that needs
+    to know what code exists.
+    """
+    if target.answers_lookup:
+        table = (
+            _LOOKUP_READERS
+            if target.transport is targets.Transport.SRU
+            else _BESPOKE_LOOKUPS
+        )
+        if target.reader not in table:
+            raise ValueError(
+                f"{target.source}: answers a lookup and {target.reader} reads none"
+            )
+    if target.answers_search:
+        readers: Collection[targets.Reader]
+        if target.transport is targets.Transport.SRU:
+            readers = _SEARCH_READERS.keys()
+        elif target.metered:
+            readers = _METERED_SEARCHES.keys()
+        else:
+            readers = _FREE_SEARCHES.keys()
+        if target.reader not in readers:
+            raise ValueError(
+                f"{target.source}: answers a search and {target.reader} reads none"
+            )
+
+
+async def _lookup_one(target: targets.Target, isbn: str, api_key: str) -> Lookup:
+    """Ask one target about one ISBN, through whichever door its row names."""
+    if target.transport is targets.Transport.SRU:
+        return await _sru_lookup(target, isbn)
+    return await _BESPOKE_LOOKUPS[target.reader](isbn, api_key)
+
+
+async def _search_one(
+    target: targets.Target, query: str, limit: int, api_key: str
+) -> list[Record]:
+    """Ask one target for title matches, through whichever door its row names."""
+    if target.transport is targets.Transport.SRU:
+        return await _sru_search(target, query, limit)
+    if target.metered:
+        return await _METERED_SEARCHES[target.reader](query, limit, api_key)
+    return await _FREE_SEARCHES[target.reader](query, limit)
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
@@ -3695,6 +3988,34 @@ def _match_key(match: Record) -> str:
     return f"{title}|{author}"
 
 
+@dataclass(frozen=True)
+class Search:
+    """What one title search asked, and what it found.
+
+    **`asked` is what the fan out really did**, not what the request wanted. A
+    harder search can be refused its slot (`_HARDER_AT_ONCE`) or find the two
+    rosters equal, and in both cases it runs the ordinary search. A screen that
+    then reported the slow catalogues as asked would be promising something the
+    server did not do, which is the one thing this repository's derived fields
+    exist to stop.
+    """
+
+    matches: list[Record]
+    asked: tuple[CatalogueSource, ...]
+    #: The enabled search catalogues this fan out did not reach, which is
+    #: exactly what asking harder would add.
+    #:
+    #: **Computed here and not from `plan` by the caller**, because only here is
+    #: it known that a query with no usable terms asked nothing **and** has
+    #: nothing left to ask. A caller subtracting `asked` from `plan.searched_harder`
+    #: gets the whole roster for that query, and a screen reading it then tells a
+    #: reader who typed "and" that every catalogue this library runs is a slow
+    #: one. That is a claim about their configuration made by something that
+    #: never looked at it, which is the failure this whole feature exists to
+    #: remove, one level in.
+    unasked: tuple[CatalogueSource, ...]
+
+
 async def search(
     query: str,
     api_key: str = "",
@@ -3702,7 +4023,35 @@ async def search(
     prefer_language: str | None = None,
     *,
     plan: sources.Plan,
+    harder: bool = False,
 ) -> list[Record]:
+    """The rows alone, for a caller with no use for the roster.
+
+    A wrapper over `title_search` rather than a second implementation. Kept
+    because most callers want the list and threading a dataclass through them
+    buys nothing.
+    """
+    return (
+        await title_search(
+            query,
+            api_key,
+            limit,
+            prefer_language,
+            plan=plan,
+            harder=harder,
+        )
+    ).matches
+
+
+async def title_search(
+    query: str,
+    api_key: str = "",
+    limit: int = 10,
+    prefer_language: str | None = None,
+    *,
+    plan: sources.Plan,
+    harder: bool = False,
+) -> Search:
     """Find a book by title and author, across every catalogue this library asks.
 
     **Which catalogues those are is `plan`**, and it is the household's, not
@@ -3755,7 +4104,7 @@ async def search(
 
     **Holding the edition is necessary and not sufficient**, because this is a
     title search source: the table says the record exists to be found, not that
-    a title query finds it. `_loc_search` below carries the title side, and the
+    a title query finds it. the Library of Congress title search below carries the title side, and the
     durable half of this source's justification is not in the table at all: it
     is the best free source for a book printed before ISBNs existed, which no
     ISBN measurement can touch.
@@ -3811,60 +4160,120 @@ async def search(
     A source that fails is skipped rather than failing the search. Losing one
     of four is not worth refusing to answer, and a library that has switched
     every source off gets an empty list rather than an error.
+
+    **`harder` asks the catalogues the default search leaves out**, under
+    `SEARCH_HARDER_DEADLINE_SECONDS` instead of `SEARCH_DEADLINE_SECONDS`.
+    `sources.SLOW` is what separates the two rosters and carries the bar it is
+    drawn on. It is empty on today's roster, so the two rosters are the same set
+    here and this is a mechanism waiting for a slow catalogue rather than a live
+    difference; the deadline differs regardless, and paying the longer one is
+    what the reader asked for.
+
+    **A library whose every search catalogue is slow gets an empty default
+    search, not an error.** That is the same rule as the paragraph above and it
+    is worth stating separately, because the two reach it from opposite
+    directions: there the household switched everything off, here it switched
+    nothing off and the default roster is empty all the same. The refusal in
+    `routers/books.py` is keyed on the harder roster for exactly that reason.
     """
     trimmed = query.strip()
     terms = _search_terms(trimmed)
     if not terms:
-        return []
+        # Nothing was asked and there is nothing left to ask, because there was
+        # no question. Reachable on a two character query: "and" and "a b" both
+        # reduce to no terms. See `Search.unasked`.
+        return Search([], (), ())
 
     # **Only the enabled sources are constructed**, so a source this library
     # turned off is never built and never awaited. Building all eight and
     # dropping some would leave un-awaited coroutines behind, which is a warning
     # per search and a request nobody asked for if one ever ran.
     #
-    # `plan.searched` holds only names in `sources.SEARCH_SOURCES`, and
-    # `TestTheProviderRosterIsOneList` pins that set equal to `_FREE_SEARCHES`
-    # plus the metered one, so there is no `KeyError` to reach here.
-    tiers = await _within_deadline(
-        [
-            _METERED_SEARCHES[name](trimmed, limit, api_key)
-            if name in _METERED_SEARCHES
-            else _FREE_SEARCHES[name](trimmed, limit)
-            for name in plan.searched
-        ]
-    )
+    # Both rosters hold only names in `sources.SEARCH_SOURCES`, which is
+    # derived from `answers_search` on the rows, so `targets.SEEDED[name]` here
+    # cannot miss and `_search_one` has a reader for whatever it finds:
+    # `metadata.resolve` is what refuses a row that would not.
+    # **Asked for is not the same as granted**, and the two conditions that
+    # narrow it are separate because they refuse for separate reasons.
+    #
+    # A wider roster is the only thing the longer deadline buys. Where this
+    # library has no slow catalogue enabled the two rosters are the same set, so
+    # `harder` would spend three times the wall clock on the identical fan out,
+    # and `harder` is a query parameter rather than a button: nothing makes a
+    # caller press anything.
+    #
+    # A slot is the second condition, and it is taken without waiting. See
+    # `_HARDER_AT_ONCE`.
+    harder_now = harder and bool(plan.searched_only_harder)
+    # `locked()` then `acquire()` is atomic here and it is worth saying why,
+    # because it reads like a race. `Semaphore.acquire` returns without
+    # suspending while a slot is free, and this is one event loop, so no task
+    # can run between the two lines. A `Lock` would read the same and buy
+    # nothing; waiting is the thing being refused, not the thing being tuned.
+    if harder_now and not _HARDER_AT_ONCE.locked():
+        await _HARDER_AT_ONCE.acquire()
+    else:
+        harder_now = False
+
+    try:
+        # **The roster and its deadline move together, in one branch.** Two
+        # conditionals on the same flag would admit the combination nothing
+        # wants: the long roster under the short deadline, which asks the slow
+        # catalogues and then cancels every one of them, spending the requests
+        # and returning the same rows as before with nothing to say what
+        # happened.
+        roster, deadline = (
+            (plan.searched_harder, SEARCH_HARDER_DEADLINE_SECONDS)
+            if harder_now
+            else (plan.searched, SEARCH_DEADLINE_SECONDS)
+        )
+        tiers = await _within_deadline(
+            [
+                _search_one(targets.SEEDED[name], trimmed, limit, api_key)
+                for name in roster
+            ],
+            deadline,
+        )
+    finally:
+        if harder_now:
+            _HARDER_AT_ONCE.release()
 
     merged = _merge_matches([row for tier in tiers for row in tier])
 
     ranked = sorted(
         merged, key=lambda match: _relevance(match, terms, prefer_language), reverse=True
     )
-    return ranked[:limit]
+    asked = frozenset(roster)
+    return Search(
+        ranked[:limit],
+        tuple(roster),
+        tuple(name for name in plan.searched_harder if name not in asked),
+    )
 
 
-#: The title search adapter for every source that needs no credential.
+#: The title search adapter for a bespoke transport that needs no credential.
 #:
-#: **Module level and introspectable on purpose.** The guard that keeps this
-#: table and the roster in step used to read the fan out with `ast`, as a list
-#: literal handed to `_within_deadline`, and it broke the moment the fan out
-#: stopped being a literal. A dictionary a test can compare with
-#: `sources.SEARCH_SOURCES` at runtime cannot go stale the same way.
+#: **One entry, where this held seven.** Six of those were SRU sources that now
+#: share `_sru_search`, driven by a row, and the seventh is Google Books, which
+#: needs a key and so cannot share this signature: `_METERED_SEARCHES` below
+#: holds it.
 #:
-#: Google Books is the one absent, because it is the one that needs an API key
-#: and so cannot share this signature. `_METERED_SEARCHES` below holds it, and
-#: `TestTheProviderRosterIsOneList` asserts the two tables together are the
-#: whole roster: a source added to the roster and to neither table fails rather
-#: than going quietly unasked.
+#: **Keyed on the reader and not on the source**, which is what makes the
+#: sharing possible: three sources name `MARC_GND` and a fourth would add no
+#: entry anywhere. What that costs is the guard: `set(this) | set(that) ==
+#: sources.SEARCH_SOURCES` cannot be restated against a reader keyed table, and
+#: `resolve` is the replacement. It asks the question the old one was really
+#: asking, one row at a time: this row says it answers a search, is there
+#: anything here that can read the answer.
+#:
+#: **Module level and introspectable on purpose.** The guard that keeps this in
+#: step with the roster used to read the fan out with `ast`, as a list literal
+#: handed to `_within_deadline`, and it broke the moment the fan out stopped
+#: being a literal. A table a test can import cannot go stale that way.
 _FREE_SEARCHES: Final[
-    dict[CatalogueSource, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
+    dict[targets.Reader, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
 ] = {
-    CatalogueSource.OPEN_LIBRARY: _open_library_search,
-    CatalogueSource.K10PLUS: _k10plus_search,
-    CatalogueSource.DNB: _dnb_search,
-    CatalogueSource.BNF: _bnf_search,
-    CatalogueSource.LOC: _loc_search,
-    CatalogueSource.OENB: _oenb_search,
-    CatalogueSource.NLG: _nlg_search,
+    targets.Reader.OPEN_LIBRARY: _open_library_search,
 }
 
 
@@ -3897,31 +4306,100 @@ async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
 #:
 #: Separate from `_FREE_SEARCHES` because the signature differs, and a table
 #: rather than a branch on one name because a branch is only correct while there
-#: is exactly one of them. `TestTheProviderRosterIsOneList` pins these keys equal
-#: to `sources.METERED`.
+#: is exactly one of them. `resolve` is what stops a metered row naming a reader
+#: that is not in here.
 _METERED_SEARCHES: Final[
-    dict[CatalogueSource, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
+    dict[targets.Reader, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
 ] = {
-    CatalogueSource.GOOGLE_BOOKS: _google_search,
+    targets.Reader.GOOGLE_BOOKS: _google_search,
 }
 
 
 #: How long a search may take, whatever the catalogues do.
 #:
-#: Eight sources are asked at once, so the wall clock is the slowest of them, and
-#: one national catalogue having a bad afternoon was turning a 1.3s search into
-#: a 7s one. A deadline degrades the *results* instead of the latency: whatever
+#: Up to eight sources are asked at once, so the wall clock is the slowest of
+#: them, and one national catalogue having a bad afternoon was turning a 1.3s
+#: search into a 7s one. A deadline degrades the *results* instead of the latency: whatever
 #: has answered is ranked and returned, and the straggler is cancelled.
 #:
 #: Well above the 1.2s to 1.8s a healthy search measures, so this only ever
 #: fires on a source that is genuinely struggling.
 SEARCH_DEADLINE_SECONDS: Final = 4.0
 
+#: How long an explicit "search harder" may take, whatever the catalogues do.
+#:
+#: **A second constant rather than a bigger first one**, and that is the whole of
+#: the decision behind it: raising `SEARCH_DEADLINE_SECONDS` makes every search
+#: in the library wait longer, including the ones that find nothing, which is the
+#: common case. Nobody waits this long unless they asked to.
+#:
+#: **The margin over the transport is chosen, not measured, and saying so
+#: replaces a sentence this constant shipped with for one round.** That sentence
+#: read that 12.0 leaves 2.0s over the 10.0s ceiling one request already has and
+#: is three times the default, "so two derivations land on the same number".
+#: They are not two derivations: `10.0 + m = 3 x 4.0` has one solution, so the
+#: margin was picked to make the coincidence and the second clause restates the
+#: first.
+#:
+#: **And on today's adapters it does not bind.** Every title search adapter here
+#: makes exactly one request, and `fetch.TIMEOUT_SECONDS` and
+#: `z3950.TIMEOUT_SECONDS` both cap one request at 10.0s, so a concurrent fan out
+#: cannot reach 12.0s however slow a catalogue is. What this admits that 4.0s
+#: does not is the whole of that 10.0s, which is what a slow catalogue actually
+#: needs. The only caller the extra 2.0s could serve is a source whose search
+#: costs more than one request, and that shape is refused in
+#: `sources.SLOW_SEARCHES` for a reason of its own.
+#:
+#: **So a measurement is owed before that set is filled**: the p90 of at least
+#: twenty title searches against the candidate, which is the bar
+#: `sources.SLOW_SEARCHES` states, and this figure re-derived against it rather
+#: than assumed to still be roomy.
+#:
+#: **Bounded, which is the point of its being a constant at all.** Searching
+#: harder is not searching forever: a source that has not answered by here is
+#: cancelled exactly as it is at 4.0s, and the rows that did arrive are ranked
+#: and returned. `_HARDER_AT_ONCE` bounds how many of these may run together,
+#: which is a different question and one a deadline cannot answer.
+SEARCH_HARDER_DEADLINE_SECONDS: Final = 12.0
+
+
+#: How many "search harder" fan outs may run at once, process wide.
+#:
+#: **A concurrency bound, which a rate limit cannot supply.** `metadata_limiter`
+#: allows 60 requests a minute per member and says nothing about how many are
+#: open together. At that ceiling Little's law puts rate times wall clock in
+#: flight: 1.0/s x 4.0s is 4 searches on the default path, and 1.0/s x 12.0s
+#: would be 12 on this one, from one member, inside the limit, with no burst.
+#: Each holds one socket per source, so twelve is 96 sockets and, at the ~81 MB
+#: an eight source search costs by `fetch.MAX_RESPONSE_BYTES`' own honest figure,
+#: about 972 MB against a 512 MiB pod.
+#:
+#: **One, because a reader who asked is one reader.** It takes that sustained
+#: figure from 12 back to 1 and costs nothing when nobody searches hard.
+#:
+#: **Never waited on, and that half is what makes it safe.** A queue here would
+#: be worse than what it fixes: `auth.get_current_user` checks a database
+#: connection out before this runs and `get_db` returns it only after the
+#: response, so a request parked on this semaphore holds one of the pool's
+#: fifteen for as long as it waits. Fifteen waiters at 12.0s each is a pool
+#: exhausted for minutes, which is a worse outage than the memory it saves. A
+#: caller that cannot have the slot runs the ordinary search instead, and the
+#: answer says which catalogues were asked, so it is a true answer rather than a
+#: slow one.
+_HARDER_AT_ONCE: Final = asyncio.Semaphore(1)
+
 
 async def _within_deadline(
-    searches: list[Coroutine[Any, Any, list[Record]]],
+    searches: list[Coroutine[Any, Any, list[Record]]], deadline: float
 ) -> list[list[Record]]:
     """Run every search, keep what answers in time, drop the rest.
+
+    **The deadline is an argument and has no default**, which is what stops the
+    two from silently becoming one. A default would be whichever of them was
+    written here, and the other would then be reached only by a caller that
+    remembered to pass it; the failure mode is the long roster run under the
+    short deadline, which cancels every slow source and produces exactly the
+    result the reader asked to avoid, with nothing in the output to say so.
 
     **Empty is a real case and is answered here rather than raised.**
     `asyncio.wait` refuses an empty set with `ValueError`, so a library that has
@@ -3932,7 +4410,7 @@ async def _within_deadline(
     if not searches:
         return []
     tasks = [asyncio.ensure_future(search) for search in searches]
-    done, pending = await asyncio.wait(tasks, timeout=SEARCH_DEADLINE_SECONDS)
+    done, pending = await asyncio.wait(tasks, timeout=deadline)
 
     for task in pending:
         task.cancel()
@@ -4353,7 +4831,7 @@ async def candidates(
 async def _work_cluster(
     isbn: str | None, limit: int, prefer_language: str | None, plan: sources.Plan
 ) -> list[Record]:
-    """`editions`, bounded by the search deadline and never fatal.
+    """`editions`, bounded by `SEARCH_DEADLINE_SECONDS` and never fatal.
 
     **The same 4.0s the search is held to**, so the endpoint's worst case does
     not move: both halves are asked at once and neither may exceed it. Measured
@@ -4492,7 +4970,9 @@ async def lookup(
     # failures into an UNAVAILABLE outcome, so an exception escaping one of
     # them is a bug worth seeing rather than a network condition to absorb.
     together = plan.lookup_together
-    fast = await asyncio.gather(*(_SOURCES[name](isbn, api_key) for name in together))
+    fast = await asyncio.gather(
+        *(_lookup_one(targets.SEEDED[name], isbn, api_key) for name in together)
+    )
     attempts.extend(
         (name, result.outcome) for name, result in zip(together, fast, strict=True)
     )
@@ -4523,7 +5003,7 @@ async def lookup(
     # hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
     # carries the measurement and the bound that keeps it from losing a book.
     for name in plan.lookup_in_turn(registration_group(isbn)):
-        result = await _SOURCES[name](isbn, api_key)
+        result = await _lookup_one(targets.SEEDED[name], isbn, api_key)
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
             # Open Library's own record carries a cover URL and Google's

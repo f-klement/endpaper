@@ -79,6 +79,18 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+# W605 is an invalid escape sequence, `\d` in a non raw string. CPython warns
+# about it today and has it scheduled to become a SyntaxError, at which point the
+# file stops importing. This is the fast path: a column and an autofix, in a job
+# that runs before the suite. The backstop is
+# TestEveryPythonFileCompilesWithoutAWarning, which asks the compiler rather than
+# a rule list, and the two are not redundant: see that class's docstring.
+#
+# `extend-select` with the one rule rather than the whole `W` family on purpose.
+# Measured 2026-09-02: `--select W` reports one further finding, W291 trailing
+# whitespace in a generated Alembic header, which is a tidiness preference nobody
+# asked for. W605 alone reports nothing today.
+extend-select = ["W605"]
 ignore = [
     # FastAPI's dependency-injection idiom is a function call in a default
     # argument, which B008 exists to forbid.

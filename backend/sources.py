@@ -90,6 +90,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 import isbn
+import targets
 from enums import CatalogueSource
 
 
@@ -177,7 +178,7 @@ class Measured:
 #: which Open Library and Google Books hold best, so it understates the miss rate
 #: rather than flattering it.
 #:
-#: **Asked through `metadata._SOURCES` itself**, so "answered" means what the
+#: **Asked through `metadata`'s own lookup door itself**, so "answered" means what the
 #: application means rather than what a probe decides. A source that returned
 #: `rate_limited` or `unavailable` after five retries is dropped from its own
 #: denominator instead of counted as a miss. None was: every source answered all
@@ -506,21 +507,19 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     CatalogueSource.LOC,
 )
 
-#: The sources that can answer an ISBN lookup: `metadata._SOURCES`' keys.
+#: The sources that can answer an ISBN lookup.
 #:
 #: BNF and LOC are absent because neither was worth an ISBN request. The
 #: measured reason is in `metadata.py`'s chain comment: the Library of Congress
 #: answered 2 of 10, and both were covered by something else.
+#: **Derived from the rows rather than written out**, which is the change this
+#: ticket is. The capability was a Python set here and a dispatch table in
+#: `metadata`, kept equal by a test; it is one field on one row now, so there is
+#: nothing left for two lists to disagree about. What still has to be checked is
+#: a different question, and `metadata.resolve` is where it went: whether the
+#: reader a row names can actually read what the target answers with.
 LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    {
-        CatalogueSource.DNB,
-        CatalogueSource.K10PLUS,
-        CatalogueSource.OENB,
-        CatalogueSource.NLG,
-        CatalogueSource.NKP,
-        CatalogueSource.OPEN_LIBRARY,
-        CatalogueSource.GOOGLE_BOOKS,
-    }
+    target.source for target in targets.SEEDED.values() if target.answers_lookup
 )
 
 #: The sources that can answer a title search.
@@ -534,26 +533,79 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
 #: else's free catalogue inside a 4.0s shared deadline. Its ISBN lookup wants one
 #: record and gets one, 20 of 20, so that path is unaffected.
 #:
-#: **Written out rather than derived**, because a derivation would have to
-#: encode the exception anyway and `TestTheProviderRosterIsOneList` compares this
-#: against `metadata`'s own dispatch tables: a source added here with no search
-#: adapter fails there rather than raising a `KeyError` on a member's search.
+#: **Derived from the rows**, and the sentence this replaces is worth keeping in
+#: view: it said this was written out rather than derived, because a derivation
+#: would have to encode the exception anyway. That was true while the alternative
+#: was deriving it from `DEFAULT_ORDER` minus a special case. It is not true of
+#: this derivation, because the exception is now the thing being read:
+#: `targets.SEEDED[CatalogueSource.NKP].answers_search` is False, on the row,
+#: with the measurement beside it.
 SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    {
-        CatalogueSource.DNB,
-        CatalogueSource.K10PLUS,
-        CatalogueSource.OENB,
-        CatalogueSource.NLG,
-        CatalogueSource.OPEN_LIBRARY,
-        CatalogueSource.GOOGLE_BOOKS,
-        CatalogueSource.BNF,
-        CatalogueSource.LOC,
-    }
+    target.source for target in targets.SEEDED.values() if target.answers_search
 )
+
+#: Catalogues whose title search does not fit the default deadline, so the
+#: default search leaves them out and a reader has to ask for them.
+#:
+#: **Named `SLOW_SEARCHES` and not `SLOW`, because this module already has a
+#: rule about how slow a source may be.** `FIRST_TIER_BUDGET_SECONDS` bounds a
+#: source's ISBN lookup at 1.0s to earn a place in the gathered tier. That is a
+#: different path, a different statistic and a different bound, and one word
+#: covering both is how a reader comes to apply one measurement to the other.
+#:
+#: **A subset of `SEARCH_SOURCES` and never of the lookup path.**
+#: `metadata.lookup` asks one source at a time and stops at the first hit, so a
+#: slow catalogue there is reached only when every faster one has already missed,
+#: which is exactly when a reader wants it: the cost is a slow answer instead of
+#: no answer, paid on the books nobody else holds. That path is already right and
+#: nothing here touches it. `Plan.searched_harder` is the one door past this set,
+#: and `lookup_chain` never consults it.
+#:
+#: **The bar, and it names its statistic.** A source belongs here when the
+#: **p90** of at least twenty title searches, at the shape `metadata.search` asks
+#: for, is at or above `metadata.SEARCH_DEADLINE_SECONDS`. p90 rather than a
+#: maximum, for the reason `Measured.p90_seconds` gives one line at a time: the
+#: fan out is gathered and so costs its slowest member, and a bar drawn on the
+#: worst single sample is a bar whoever holds the sample can move. Twenty rather
+#: than any number, because a p90 over ten samples is the second worst of ten.
+#:
+#: Under the bar, the deadline is what protects the search and the source still
+#: contributes rows. At or above it the source is a burned connection and never a
+#: record, which is what makes a switch alone inert for search and is why this is
+#: a set rather than a position in the order.
+#:
+#: **Empty today, and that is a measurement rather than an omission.** The
+#: slowest title search this tree records is the OENB at **3.23s**, the worst of
+#: 24 live searches on 2026-08-27 at the shape this fan out asks for; `search`'s
+#: own docstring carries the range and how variable it is. A maximum under a bar
+#: puts the p90 under it too, so 3.23s against 4.0s settles it without the p90
+#: ever having been computed, and the claim that belongs beside it is the one
+#: that docstring already makes: the OENB is the likeliest of the fan out to be
+#: the one the deadline drops, which is a different statement from being slow.
+#: `MEASURED` agrees from the other side, its worst p90 being Open Library at
+#: 2.562s of 500 ISBNs on 2026-08-31, though that is lookup latency and so
+#: corroborates rather than measures.
+#:
+#: **The one catalogue that really was dropped from search is not in here, and
+#: the reason is a mechanism rather than a missing measurement.** The Czech
+#: National Library is absent from `SEARCH_SOURCES` because its server renders
+#: one populated record per response whatever page size is asked for. That is a
+#: source returning a **degraded result**, not a source that is slow once: giving
+#: it a longer deadline buys a capped run of sequential requests and fewer
+#: records than were asked for, which the merge would accept in silence. So this
+#: set is the wrong tool for it whatever a latency probe said, and re-admitting
+#: it needs a title search adapter `metadata._FREE_SEARCHES` has not got.
+#:
+#: So this ships empty and #91 fills it. That is what splitting #108 out of #91
+#: and #92 was for: until there is somewhere to put a slow catalogue, adding one
+#: is the choice #92 refused.
+SLOW_SEARCHES: Final[frozenset[CatalogueSource]] = frozenset()
 
 #: Sources that cost money per request, so asking one for a book another source
 #: already answered is a bill for nothing. See `Plan.lookup_together`.
-METERED: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_BOOKS})
+METERED: Final[frozenset[CatalogueSource]] = frozenset(
+    target.source for target in targets.SEEDED.values() if target.metered
+)
 
 #: Sources that need a credential the household supplies, so an install without
 #: one has a provider in the list that can never answer. The settings screen
@@ -578,7 +630,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_B
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
-    {CatalogueSource.GOOGLE_BOOKS}
+    target.source for target in targets.SEEDED.values() if target.needs_key
 )
 
 #: How many enabled lookup sources are asked **together** before the rest are
@@ -811,7 +863,7 @@ class Plan:
     """Which sources to ask on one request, resolved once and passed in.
 
     **A permutation of the roster, always.** `parse` guarantees it, so nothing
-    downstream has to handle a name `metadata._SOURCES` has no function for, and
+    downstream has to handle a name `targets.SEEDED` has no row for, and
     there is no `KeyError` to reach on the hourly path.
     """
 
@@ -881,8 +933,52 @@ class Plan:
 
     @property
     def searched(self) -> tuple[CatalogueSource, ...]:
-        """Every enabled source that answers a title search, in order."""
+        """What the default title search asks: enabled, answers a search, not slow.
+
+        **`SLOW_SEARCHES` is subtracted here rather than at the fan out**, so every caller
+        of the default search gets the same roster and there is no second place
+        to remember it. `searched_harder` is the one door past it, and it is a
+        different property rather than an argument, so a caller that wants the
+        slow catalogues has to say so in a name a reader can grep for.
+        """
+        return tuple(
+            name for name in self.searched_harder if name not in SLOW_SEARCHES
+        )
+
+    @property
+    def searched_harder(self) -> tuple[CatalogueSource, ...]:
+        """Every enabled source that answers a title search at all, slow included.
+
+        What an explicit "search harder" asks, and it is a superset of `searched`
+        by construction rather than by a second filter agreeing with the first.
+
+        **A subset of `SEARCH_SOURCES` whatever the household stores**, which is
+        the one place the memory argument for this feature belongs.
+        `fetch.MAX_RESPONSE_BYTES` prices its concurrency on the roster's size
+        rather than on what is enabled, and
+        `tests/test_fetch.py::_concurrent_search_sources` is what enforces that,
+        so this roster being wider than `searched` costs the bound nothing.
+        """
         return tuple(name for name in self.asked if name in SEARCH_SOURCES)
+
+    @property
+    def searched_only_harder(self) -> tuple[CatalogueSource, ...]:
+        """The enabled search catalogues only the harder search asks.
+
+        **Public because emptiness here is the question two callers ask**, the
+        same reason `lookup_chain` is public. Empty means asking harder would ask
+        nothing new: the router declines to spend the longer deadline on it, and
+        the screen declines to offer a button that runs the identical search
+        twice.
+
+        **Not named after `SLOW_SEARCHES`**, deliberately. That set is a property
+        of the catalogues and this is a fact about one household's roster, and a
+        constant and a property one underscore apart is a pair a reader has to
+        keep straight rather than read.
+        """
+        return tuple(
+            name for name in self.searched_harder if name in SLOW_SEARCHES
+        )
 
     @property
     def lookup_chain(self) -> tuple[CatalogueSource, ...]:
@@ -992,6 +1088,20 @@ class Described:
     enabled: bool
     answers_lookup: bool
     answers_search: bool
+    #: Whether the default title search leaves this catalogue out for being too
+    #: slow to answer inside its deadline.
+    #:
+    #: **A property of the catalogue, not a setting**, which is why it sits here
+    #: with the derived fields rather than beside `enabled`. A household decides
+    #: whether a source is asked and where; how long it takes is the source's
+    #: own. `SLOW_SEARCHES` carries the bar and the measurements.
+    #:
+    #: **It is not a second off switch and the screen must not draw it as one.**
+    #: A slow catalogue that is switched on is asked on every scan exactly as
+    #: before, and left out of one path only. That is the distinction the
+    #: settings section exists to make: off because it is slow, rather than off
+    #: because it is broken.
+    slow: bool
     asked_first: bool
     needs_a_key: bool
     has_key: bool
@@ -1079,6 +1189,10 @@ def describe(
             enabled=entry.enabled,
             answers_lookup=entry.source in LOOKUP_SOURCES,
             answers_search=entry.source in SEARCH_SOURCES,
+            # Unconditional, like `needs_a_key` and for the same reason: it is a
+            # fact about the catalogue, and a household switching one on wants
+            # to be told what it costs at the moment it switches it on.
+            slow=entry.source in SLOW_SEARCHES,
             asked_first=entry.source in leading,
             needs_a_key=entry.source in NEEDS_A_KEY,
             has_key=entry.source in credentials,

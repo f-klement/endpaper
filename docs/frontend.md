@@ -162,6 +162,28 @@ const { t, locale, setLocale } = useTranslation();
 t("book.by", { author: book.author });   // "by Frank Herbert"
 ```
 
+**German addresses the reader in neither register.** German makes you choose between `du`
+and `Sie`, and a catalogue has to pick: `du` reads as careless from an institution, `Sie`
+reads as a bank in a household. `de.ts` chooses neither, so one file serves both.
+
+That was not the first answer. A formal overlay was built and measured first: of 888
+strings, **82 carried address**, 9.2%. The owner retired it on 2026-09-03, "rephrase the
+german version, so we dont need to keep two versions for the same language", and **82**
+strings were rephrased instead. The same total as the overlay held and not the same set:
+`public.noResultsHint` joins it, having been formal already and so needing no formal variant
+of its own, and `appearance.wallpaperSurprise` leaves it, being the one string where the
+reader addresses the app rather than the app addressing the reader. German has the machinery: the infinitive for an instruction ("Bitte
+die Ziffern prüfen"), `eigen-` for a possessive that carries weight ("Eigene Lektüre"), a
+plain article for one that does not, the passive and `lässt sich`, and `wer …` for a
+conditional about the reader. The measured list of which strings carry register is what the
+overlay left behind, and it is what made the rewrite a day's work rather than a survey.
+
+`tests/i18n/de.test.ts` fails the build on a `du` or a `Sie`, carries the single exemption
+(the idiom "Mein und Dein", where `Dein` is a noun and not a pronoun, matched as a phrase so
+the rest of that string stays guarded), and states the blind spot: a German imperative is a
+bare verb stem, homographic with a noun, so "Suche den Code" and "Suche läuft" cannot be
+told apart by a rule and a new one still needs a reader.
+
 **The seeded tag names are the one piece of data that is translated**, and they are
 translated by key rather than by message. `tags.name` holds the English name, and
 `tagNames.ts` maps `TagKey` to the German one; `tagName(tag, locale)` is the only road to a

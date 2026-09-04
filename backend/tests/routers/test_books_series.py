@@ -242,3 +242,87 @@ class TestLocations:
     @pytest.mark.parametrize("path", ["/api/books/series", "/api/books/locations"])
     def test_requires_authentication(self, client, path):
         assert client.get(path).status_code == 401
+
+
+class TestOneRowCannotCostEveryMemberTheRequest:
+    """The gap calculation is linear in a value read out of the database.
+
+    `list_series` builds a set and a sorted list of every integer below the
+    highest number held, so the work is not bounded by the size of the library.
+    Three request bodies now refuse a `series_index` past `MAX_SERIES_INDEX`,
+    and that is not enough on its own: `backup.restore` inserts through Core
+    where neither pydantic nor a `@validates` runs, and an instance upgraded
+    from a release before 2026-09-03 carries whatever its enrichment route
+    stored while that route was unbounded. Both write the row this refuses to
+    read.
+
+    Measured before the ceiling, on one row at 2,000,000 in a library of one
+    book: `GET /api/books/series` answered 14,888,944 bytes carrying 1,999,999
+    missing indexes.
+
+    **The series is called `Restored` because the figure counts its name.** The
+    response is JSON and the name is in it, so an eight character name gives
+    14,888,944 and a seven character one gives 14,888,943. The fixture said
+    `Corrupt` for one round, which made the number beside it off by one and
+    unreproducible from the test carrying it. A measurement whose inputs are not
+    the fixture's inputs is a measurement of something else.
+    """
+
+    def _numbered(self, db, book_id: int, name: str, index: float) -> None:
+        """Set the column directly, which is what restore does.
+
+        Through the session rather than `PATCH /api/books/{id}`, because the
+        point of the test is a value no request body will accept.
+        """
+        from models import Book
+
+        book = db.get(Book, book_id)
+        book.series_name = name
+        book.series_index = index
+        db.commit()
+
+    def test_an_index_past_the_ceiling_does_not_enumerate_up_to_it(
+        self, client, admin, make_book, db
+    ):
+        from models import MAX_SERIES_INDEX
+
+        book = make_book(admin["headers"], title="Restored")
+        self._numbered(db, book["id"], "Restored", 2_000_000)
+
+        res = client.get("/api/books/series", headers=admin["headers"])
+
+        assert res.status_code == 200
+        row = next(r for r in res.json() if r["name"] == "Restored")
+        assert len(row["missing_indexes"]) == MAX_SERIES_INDEX
+
+    def test_the_gaps_below_the_ceiling_are_still_reported(
+        self, client, admin, make_book, db
+    ):
+        """Truncated, not discarded, and the ceiling is exactly where it says.
+
+        The last assertion is what pins the value of the cap, and it is here
+        rather than in a test of its own because **a row at the ceiling cannot
+        see the ceiling**. A series whose highest number is 1000 excludes 1000
+        from its own gaps, so it reports 1 to 999 whatever the cap is: measured
+        against four caps, `MAX_SERIES_INDEX`, one below it, one above it and
+        no cap at all, a test built that way passes under every one, including
+        no cap. It was in this class for one round doing nothing, and a
+        security seat took it apart.
+
+        A row **past** the ceiling can see it. With 2,000,000 held, the last
+        gap is 1000 / 999 / 1001 / 1999999 under those same four caps, so this
+        one assertion separates all four.
+        """
+        from models import MAX_SERIES_INDEX
+
+        book = make_book(admin["headers"], title="Restored")
+        self._numbered(db, book["id"], "Restored", 2_000_000)
+        second = make_book(admin["headers"], title="Volume two")
+        self._numbered(db, second["id"], "Restored", 2)
+
+        res = client.get("/api/books/series", headers=admin["headers"])
+
+        row = next(r for r in res.json() if r["name"] == "Restored")
+        assert 1 in row["missing_indexes"]
+        assert 2 not in row["missing_indexes"]
+        assert row["missing_indexes"][-1] == MAX_SERIES_INDEX

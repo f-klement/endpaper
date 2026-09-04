@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Locale } from "../../../src/api/generated/model";
+import { de } from "../../../src/i18n";
 import SessionEndedPage from "../../../src/pages/errors/SessionEndedPage";
 import { renderLocalised } from "../../utils";
 
@@ -46,6 +47,11 @@ describe("SessionEndedPage", () => {
     // The screen a reader is most likely to meet in a bad moment, so it is
     // worth pinning that it is not English in the middle of a German page.
     renderLocalised(<SessionEndedPage />, { locale: Locale.de });
-    expect(screen.getByText("Deine Sitzung ist beendet")).toBeInTheDocument();
+    // Read from the catalogue rather than typed in here. A test that restates
+    // a string is a second copy of it, and this one went stale the moment the
+    // German was rephrased to carry no address.
+    expect(
+      screen.getByText(de["error.sessionEnded.title"]),
+    ).toBeInTheDocument();
   });
 });

@@ -82,6 +82,17 @@ class CatalogueSourceOut(BaseModel):
     #: say that reordering them changes nothing about scanning a barcode.
     answers_lookup: bool
     answers_search: bool
+    #: Whether the ordinary title search leaves this catalogue out for being too
+    #: slow to answer inside its deadline, so a reader has to ask for it.
+    #:
+    #: **Not a second off switch, and the screen must not draw it as one.** A
+    #: slow catalogue that is switched on is asked on every scan exactly as
+    #: before, and left out of one path only. Off because it is slow rather than
+    #: off because it is broken is the distinction the section exists to make, so
+    #: this is rendered beside the status line rather than folded into it:
+    #: `sources.SLOW_SEARCHES` is a subset of the search roster and so co-occurs
+    #: with almost every value `statusOf` returns.
+    slow: bool
     #: Whether it is one of the leading enabled sources asked together on every
     #: lookup. This is what "what does enabling cost" resolves to on the ISBN
     #: path: everything below the leading run is asked only after a miss.

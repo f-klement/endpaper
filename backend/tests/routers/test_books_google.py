@@ -13,12 +13,16 @@ Every outbound call is intercepted with respx, so the suite never touches the
 network and never needs a real API key.
 """
 
+import logging
+from contextlib import contextmanager
+
 import httpx
 import pytest
 import respx
 
 from enums import SettingKey
-from models import Classification
+from models import CATEGORIES_MAX, DESCRIPTION_MAX, TITLE_MAX, Classification
+from routers.books import _bounded_match
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import GOOGLE_BOOKS, K10PLUS, silence_catalogues, sru_response
 
@@ -65,7 +69,7 @@ def google_enabled(client, admin):
 def google_search():
     """Google answers with one volume; every other catalogue holds nothing.
 
-    Enrichment reaches all seven sources now, so the rest have to be silenced
+    Enrichment reaches all nine sources now, so the rest have to be silenced
     for a test to prove that Google's answer is the one that landed.
     """
     with respx.mock(assert_all_called=False) as mock:
@@ -512,3 +516,365 @@ class TestAnEnrichmentBodyCannotOverflowTheDatabase:
         )
 
         assert res.status_code == 422, res.text
+
+
+@contextmanager
+def only_google_answering(item: dict):
+    """Google answers with one volume and every other catalogue holds nothing.
+
+    The `google_search` fixture above with the volume chosen per test, which is
+    what a bound needs: the value under test is the one the catalogue supplies.
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(GOOGLE_BOOKS).mock(
+            return_value=httpx.Response(200, json={"items": [item]})
+        )
+        silence_catalogues(mock)
+        yield
+
+
+def volume_with(**info) -> dict:
+    """The standard volume with some of its `volumeInfo` replaced."""
+    item = volume()
+    item["volumeInfo"].update(info)
+    return item
+
+
+class TestACatalogueCannotWriteWhatTheColumnsRefuse:
+    """`POST /{id}/enrich` writes what a catalogue answered, and it was the one
+    route that bounded none of it.
+
+    The threat model is not a hostile member, it is a hostile, compromised or
+    merely broken upstream: every catalogue that answers here is somebody
+    else's. Deliberately no count of them, because a roster sized number beside
+    a roster noun is a number that rots, and `tests/test_roster_counts.py` took
+    this docstring's first draft apart for carrying one.
+
+    Until 2026-09-03 the ceilings on `BookMatch` applied to
+    `POST /{id}/enrich/apply` and to neither half of this route, so the
+    identical value was a 422 on one and a stored row on its neighbour.
+
+    **The field is dropped, not the record.** A search page can lose a row and
+    still answer; this route has the one record the catalogues returned, so
+    refusing it whole would report `found=False` about a book they did find.
+    """
+
+    def test_a_series_index_past_the_ceiling_is_not_stored(
+        self, client, admin, make_book, google_enabled
+    ):
+        """The sharp one. `list_series` computes `set(range(1, max + 1))` over
+        this column for every member on every request, so a stored `1e9` is
+        tens of gigabytes and tens of minutes until somebody finds the row.
+
+        Reachable from a title alone: `_series_from_title` matches the shape
+        below and calls `float()` on the digits, which is the same door
+        `metadata._marc_title` opens from `245 $n`.
+        """
+        book = make_book(admin["headers"])
+
+        with only_google_answering(
+            volume_with(title="Dune (Dune Chronicles #1000000000)")
+        ):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["found"] is True
+        assert res.json()["book"]["series_index"] is None
+        assert "series_index" not in res.json()["updated_fields"]
+
+    def test_the_rest_of_the_record_still_lands(
+        self, client, admin, make_book, google_enabled
+    ):
+        """Dropping the field rather than the record is the whole difference
+        between this and `_match_rows`, so it is pinned rather than described.
+        The series **name** is read off the same title as the refused index.
+        """
+        book = make_book(admin["headers"])
+
+        with only_google_answering(
+            volume_with(title="Dune (Dune Chronicles #1000000000)")
+        ):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["book"]["page_count"] == 412
+        assert res.json()["book"]["series_name"] == "Dune Chronicles"
+
+    def test_a_series_index_the_column_holds_is_still_stored(
+        self, client, admin, make_book, google_enabled
+    ):
+        """The diagonal. A guard that refuses everything is not a guard, and
+        1000 is the ceiling itself rather than a value comfortably under it.
+        """
+        book = make_book(admin["headers"])
+
+        with only_google_answering(volume_with(title="Dune (Dune Chronicles #1000)")):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["book"]["series_index"] == 1000
+        assert "series_index" in res.json()["updated_fields"]
+
+    def test_categories_past_the_column_are_dropped_and_the_book_still_fills(
+        self, client, admin, make_book, google_enabled
+    ):
+        """`CATEGORIES_MAX` is read in one place, `BookMatch.categories`, and
+        this route did not pass through it. Nothing caps the subject list
+        upstream: `metadata._OPEN_LIBRARY_MAX_SUBJECTS` is the only slice in
+        that module, and the lookup fold unions two records' subjects.
+        """
+        book = make_book(admin["headers"])
+
+        with only_google_answering(
+            volume_with(categories=["s" * (CATEGORIES_MAX + 1)])
+        ):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.status_code == 200, res.text
+        assert res.json()["book"]["categories"] == []
+        assert res.json()["book"]["page_count"] == 412
+
+    def test_categories_the_column_holds_are_still_stored(
+        self, client, admin, make_book, google_enabled
+    ):
+        """The other half of the diagonal, at the ceiling rather than under it."""
+        book = make_book(admin["headers"])
+
+        with only_google_answering(volume_with(categories=["s" * CATEGORIES_MAX])):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["book"]["categories"] == ["s" * CATEGORIES_MAX]
+
+
+class TestTheTwoRoutesAgreeAboutOneVolume:
+    """The asymmetry `_match_rows` used to document, closed one layer down.
+
+    That docstring recorded it as measured: on one volume with a 10,001
+    character description, `GET /{id}/enrich/candidates` answered with **0**
+    candidates while `POST /{id}/enrich` filled the rest of the record from the
+    same volume, so the unattended route stored a record the picker would not
+    show. `catalogue.Record` now clears a scalar its column cannot hold at
+    construction, so neither route sees the value and both see the rest.
+    """
+
+    def test_a_description_no_column_can_hold_costs_the_field_not_the_candidate(
+        self, client, admin, make_book, google_enabled
+    ):
+        book = make_book(admin["headers"])
+
+        with only_google_answering(
+            volume_with(description="d" * (DESCRIPTION_MAX + 1))
+        ):
+            res = client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200
+        assert len(res.json()) == 1
+        assert res.json()[0]["description"] is None
+        assert res.json()[0]["page_count"] == 412
+
+    def test_the_other_route_fills_the_same_book_from_the_same_volume(
+        self, client, admin, make_book, google_enabled
+    ):
+        """The half that always worked, asserted beside the half that did not,
+        because the finding was the disagreement rather than either answer."""
+        book = make_book(admin["headers"])
+
+        with only_google_answering(
+            volume_with(description="d" * (DESCRIPTION_MAX + 1))
+        ):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["found"] is True
+        assert res.json()["book"]["description"] is None
+        assert res.json()["book"]["page_count"] == 412
+
+    def test_a_title_no_column_can_hold_still_costs_the_whole_search_row(
+        self, client, admin, make_book, google_enabled
+    ):
+        """A second field, because a guard proved on one is then trusted for
+        the ones beside it, and this one does **not** behave like the first.
+
+        `BookMatch.title` is optional, so the schema would accept the row. It
+        never reaches the schema: `metadata._merge_matches` skips a record with
+        no title, because a search result nobody can read is not a result. So
+        the answer here is 0 and the reason is a rule that has nothing to do
+        with a ceiling.
+        """
+        book = make_book(admin["headers"])
+
+        with only_google_answering(volume_with(title="t" * (TITLE_MAX + 1))):
+            res = client.get(
+                f"/api/books/{book['id']}/enrich/candidates",
+                headers=admin["headers"],
+            )
+
+        assert res.status_code == 200
+        assert res.json() == []
+
+    def test_the_two_routes_agree_about_a_title_they_cannot_read_either(
+        self, client, admin, make_book, google_enabled
+    ):
+        """Both routes read the same merged list, so the titleless row is
+        missing from both rather than from one, which is the property this
+        class is named for."""
+        book = make_book(admin["headers"])
+
+        with only_google_answering(volume_with(title="t" * (TITLE_MAX + 1))):
+            res = client.post(
+                f"/api/books/{book['id']}/enrich", headers=admin["headers"]
+            )
+
+        assert res.json()["found"] is False
+
+
+class TestBoundingOneRecord:
+    """`routers.books._bounded_match`, the door that route now goes through.
+
+    Its policy is per field where its neighbour `_match_rows` is per row, and
+    the two disagree in a way a member can see: a record the picker refuses to
+    show whole is a record the unattended route still fills a Book from.
+    Measured, and filed rather than resolved here. These drive the arms the
+    route tests above cannot reach from outside.
+    """
+
+    def test_a_clean_record_arrives_whole(self):
+        match = _bounded_match({"title": "Dune", "page_count": 412, "year": 1965})
+
+        assert (match.title, match.page_count, match.year) == ("Dune", 412, 1965)
+
+    def test_only_the_refused_field_is_dropped(self):
+        match = _bounded_match({"title": "Dune", "series_index": 1e9})
+
+        assert match.title == "Dune"
+        assert match.series_index is None
+
+    def test_two_refused_fields_are_both_dropped(self):
+        """Pydantic collects every field error in one pass, so this costs one
+        iteration rather than two. Pinned anyway, because the loop's
+        termination argument does not rest on that and a reader should not have
+        to assume it.
+        """
+        match = _bounded_match({"title": "Dune", "series_index": 1e9, "year": 99999})
+
+        assert match.title == "Dune"
+        assert match.series_index is None
+        assert match.year is None
+
+    def test_a_refusal_naming_no_field_gives_up_on_the_record(
+        self, monkeypatch, caplog
+    ):
+        """The arm there is nothing to drop for.
+
+        `BookMatch` carries no model level validator today, which is exactly
+        why this drives one in rather than asserting the arm is there.
+        Measured: pydantic reports a `mode="after"` model validator's error at
+        `loc == ()`, where a field error reports `loc == ("title",)`.
+
+        The log is what separates this arm from the loop simply running out,
+        which the bound makes it do to the same value. Without the early exit
+        the record is reported as a dropped field, repeatedly, naming none.
+        """
+        from pydantic import BaseModel, Field, model_validator
+
+        import routers.books as books_router
+
+        class Stub(BaseModel):
+            title: str | None = Field(default=None, max_length=500)
+
+            @model_validator(mode="after")
+            def _refuse_shouting(self):
+                if self.title == "SHOUT":
+                    raise ValueError("not that one")
+                return self
+
+        monkeypatch.setattr(books_router, "BookMatch", Stub)
+
+        with caplog.at_level(logging.INFO, logger="endpaper.books"):
+            assert books_router._bounded_match({"title": "SHOUT"}).title is None
+
+        assert "Discarded" in caplog.text
+        assert "Dropped" not in caplog.text
+        assert books_router._bounded_match({"title": "Dune"}).title == "Dune"
+
+    def test_a_record_whose_every_field_is_refused_is_not_a_discard(self, caplog):
+        """The pass the loop bound's `+ 1` exists for.
+
+        Every pass deletes at least one key, so a record of one refused field
+        needs a second pass to answer with the empty match. A bound of exactly
+        one pass per key falls through to the fallback instead and reaches the
+        same value, so only the log tells the two apart: this record was read
+        and stripped, it was not refused whole.
+        """
+        with caplog.at_level(logging.INFO, logger="endpaper.books"):
+            match = _bounded_match({"series_index": 1e9})
+
+        assert match.series_index is None
+        assert "series_index" in caplog.text
+        assert "Discarded" not in caplog.text
+
+    def test_a_field_the_record_never_supplied_is_not_deleted_from_it(
+        self, monkeypatch
+    ):
+        """The arm the first mutation round missed, under its right name.
+
+        Pydantic reports a **missing** required field at a `loc` naming a key
+        the record never sent, so without intersecting the refused names with
+        the record's own keys the helper deletes a key that is not there.
+        Measured on a stub carrying one required field: `Req(title="x" * 10)`
+        reports `[('name',), ('title',)]`, only the second of which is in the
+        record, and removing the intersection raises `KeyError: 'name'`.
+
+        **It is a `KeyError`, not a stall**, which is what this test was called
+        after for one round. There is no shape that repeats a pass: a refused
+        set either meets the record, in which case the record shrinks, or it
+        does not, in which case the old code raised.
+
+        The same stub drives the give up arm, which is why they are one test:
+        with `name` required, `Req()` raises too, so a fallback that validated
+        would answer 500 on the one path that exists to avoid one.
+        """
+        from pydantic import BaseModel, Field
+
+        import routers.books as books_router
+
+        class Req(BaseModel):
+            name: str
+            title: str | None = Field(default=None, max_length=5)
+
+        monkeypatch.setattr(books_router, "BookMatch", Req)
+
+        match = books_router._bounded_match({"title": "far too long"})
+
+        assert match.title is None
+
+    def test_the_empty_match_is_what_the_fallback_builds(self):
+        """`model_construct` skips validation, so it is worth pinning that it
+        still produces the model `BookMatch()` produces rather than something
+        emptier. If a required field is ever added the two stop agreeing, and
+        this is where that shows up."""
+        from schemas import BookMatch
+
+        assert BookMatch.model_construct() == BookMatch()
+
+    def test_it_says_what_it_dropped(self, caplog):
+        """A dropped field is invisible in the response by design, so the log
+        is where it is recorded. INFO, like `_match_rows`.
+        """
+        with caplog.at_level(logging.INFO, logger="endpaper.books"):
+            _bounded_match({"source": "dnb", "title": "Dune", "series_index": 1e9})
+
+        assert "series_index" in caplog.text
+        assert "dnb" in caplog.text

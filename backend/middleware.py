@@ -189,9 +189,40 @@ class BodySizeLimitMiddleware:
        Without a length there is nothing to check in advance, and the spool is
        then bounded only by the client's willingness to keep sending. Every
        HTTP client that uploads a file sends a length, so this costs nothing
-       real. It is deliberately limited to multipart: a chunked JSON body is
-       held in memory rather than spooled, and bounded by the route's own
-       parsing.
+       real. It is deliberately limited to multipart, because that is the case
+       that reaches the disk.
+
+    **A chunked JSON body is bounded by neither rule, and this docstring used
+    to say the route's own parsing bounded it.** It does not. Rule 1 never sees
+    such a request, because a chunked request declares no `Content-Length`;
+    rule 2 skips it, because it is not multipart. What the route applies is a
+    schema, and a schema runs only after Starlette has accumulated the whole
+    body in memory, so a field bound cannot refuse the bytes that arrive before
+    it. And the deferral was empty on the route this was found from: `POST
+    /api/books/{id}/enrich/apply` parses a `BookMatch`, which bounded four of
+    its seventeen fields, so the sentence handed the job to a parser that was
+    not doing it either. Every field of that model is bounded now, and that
+    closes the row rather than the request.
+
+    **And the body is read before anybody is authenticated**, which is the half
+    that decides who can spend it. Measured: a chunked `POST /api/books` with
+    no `Authorization` header at all consumed **64 of 64 MiB** in 1 MiB chunks
+    and then answered **401**. The same 64 MiB with a declared `Content-Length`
+    is refused **413** having read nothing. So this is an anonymous cost, not a
+    member's, and no route's schema stands between the caller and the memory.
+
+    That gap is stated rather than closed here: closing it means wrapping
+    `receive` to count bytes and refuse mid stream, which changes the behaviour
+    of every request with a body and belongs in its own change. A cheaper
+    option belongs on that ticket rather than being dismissed here: widening
+    rule 2 from "multipart with no length" to "any body with no length" is one
+    line and no wrapper, and its stated cost, clients that stream, is currently
+    unmeasured, since nothing in `frontend/` sends a bodied request without a
+    `Content-Length`.
+
+    What the schemas do bound is what a request can **store**, which is the
+    other half and the half that was missing. They do not bound what it can
+    make this process allocate.
 
     This is pure ASGI rather than BaseHTTPMiddleware because it has to answer
     without the request being consumed, which BaseHTTPMiddleware's call_next

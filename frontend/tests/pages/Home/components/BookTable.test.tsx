@@ -291,13 +291,13 @@ describe("BookTable, the cataloguer's columns", () => {
     expect(cell(/Where it is/)).toHaveTextContent("Reading room, case 2");
   });
 
-  it("asks the server for the Dewey order, not for the cell's text", async () => {
+  it("asks the server for a shelf order, not for the cell's text", async () => {
     // The cell reads "Dewey 155.9042": a scheme name in the reader's language
     // followed by a notation, and a second notation from a different shelf
     // order after that. Ordering the library by that string would order it by
-    // the word "Dewey". `BookSort.ddc` is
-    // `min(classifications.number) where scheme = ddc`, in SQL, over the whole
-    // table rather than over the page that has been loaded.
+    // the word "Dewey". `BookSort.ddc` is `min` of the scheme's filing key, in
+    // SQL, over the whole table rather than over the page that has been
+    // loaded: see `_shelf_order` in `backend/shelf.py`.
     const onSortChange = vi.fn();
     renderTable({
       books: [CATALOGUED()],
@@ -310,6 +310,85 @@ describe("BookTable, the cataloguer's columns", () => {
 
     expect(onSortChange).toHaveBeenCalledWith(BookSort.ddc);
     expect(onSortChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for the Library of Congress order when pressed again", async () => {
+    // The defect this column had: one order over a cell that draws two
+    // schemes. `BF75` files before `BF575` on a shelf and after it under a
+    // Dewey rule, so an LCC library was reading a wrong order with nothing
+    // saying so.
+    const onSortChange = vi.fn();
+    renderTable({
+      books: [CATALOGUED()],
+      columns: ["title", "callNumber"],
+      sort: BookSort.ddc,
+      onSortChange,
+    });
+
+    const header = screen.getByRole("columnheader", { name: /Call number/ });
+    await userEvent.setup().click(within(header).getByRole("button"));
+
+    expect(onSortChange).toHaveBeenCalledWith(BookSort.lcc);
+  });
+
+  it("comes back round to the Dewey order", async () => {
+    // The cycle closes rather than stopping on the last scheme, which is what
+    // a header offering one order already did.
+    const onSortChange = vi.fn();
+    renderTable({
+      books: [CATALOGUED()],
+      columns: ["title", "callNumber"],
+      sort: BookSort.lcc,
+      onSortChange,
+    });
+
+    const header = screen.getByRole("columnheader", { name: /Call number/ });
+    await userEvent.setup().click(within(header).getByRole("button"));
+
+    expect(onSortChange).toHaveBeenCalledWith(BookSort.ddc);
+  });
+
+  it("names the shelf it is reading", () => {
+    // Two orders behind one header, and the rows are the only other evidence
+    // of which is running. Without the name a reader cannot tell a Dewey order
+    // from a Library of Congress one at all.
+    renderTable({
+      books: [CATALOGUED()],
+      columns: ["title", "callNumber"],
+      sort: BookSort.lcc,
+    });
+
+    expect(
+      screen.getByRole("columnheader", { name: /Call number/ }),
+    ).toHaveTextContent("Library of Congress");
+  });
+
+  it("names no scheme until it is the column ordering the list", () => {
+    // A scheme drawn on an inactive header would read as a claim that the
+    // library is already in that order.
+    renderTable({
+      books: [CATALOGUED()],
+      columns: ["title", "callNumber"],
+      sort: BookSort.title_asc,
+    });
+
+    const header = screen.getByRole("columnheader", { name: /Call number/ });
+
+    expect(header).not.toHaveTextContent("Dewey");
+    expect(header).not.toHaveTextContent("Library of Congress");
+  });
+
+  it("keeps the one order columns asking for the same one", async () => {
+    // The property the cycle must not have broken. `author` offers ascending
+    // only, so pressing it while it is active re-asks for it rather than
+    // turning the column off.
+    const onSortChange = vi.fn();
+    renderTable({ sort: BookSort.author, onSortChange });
+
+    const header = screen.getByRole("columnheader", { name: /Author/ });
+    await userEvent.setup().click(within(header).getByRole("button"));
+
+    expect(onSortChange).toHaveBeenCalledWith(BookSort.author);
   });
 
   it("draws the rows in the order it was given them", () => {

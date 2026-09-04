@@ -124,6 +124,7 @@ from sqlalchemy import func, nullslast, or_, select
 from sqlalchemy.orm import Query, Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
+import filing
 from enums import (
     BookFormat,
     BookSort,
@@ -352,40 +353,94 @@ def _division_key(number: Any) -> Any:
     return func.substr(number, 1, 2)
 
 
-#: This Book's Dewey number, as one value, for the shelf order.
-#:
-#: A correlated subquery rather than a join, because a join would multiply the
-#: listing: a Book carries up to eight classifications, so joining the table to
-#: order by it returns that Book once per row. The count would follow, and a
-#: page of 25 would hold fewer than 25 Books.
-#:
-#: `min` because a Book may carry more than one Dewey number, from more than
-#: one catalogue, and an ORDER BY needs one value per row. The lowest is the
-#: one a shelf would file it under.
-_DDC_NUMBER = (
-    select(func.min(Classification.number))
-    .where(
-        Classification.book_id == Book.id,
-        Classification.scheme == ClassificationScheme.DDC,
-    )
-    .scalar_subquery()
-)
+def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ...]:
+    """This Book's place on a shelf filed under one scheme.
 
-#: Shelf order. `nullslast` for the reason `_SERIES_ORDER` has it: a library is
-#: mostly unclassified until somebody enriches it, and scattering those through
-#: the list wherever SQLite puts NULL would make the sort look broken rather
-#: than partial.
-_DDC_ORDER: tuple[UnaryExpression[Any], ...] = (nullslast(_DDC_NUMBER.asc()),)
+    **The key is the scheme's own, and that is the whole point.** `filing.py`
+    holds one rule per scheme and this asks it rather than deciding; before it
+    existed there was one order, Dewey's, offered on a column that also draws
+    Library of Congress numbers. `BF75` files before `BF575` on a shelf and
+    after it in a string comparison, so the old order was wrong exactly where a
+    cataloguer would trust it.
+
+    A correlated subquery rather than a join, because a join would multiply the
+    listing: a Book carries up to eight classifications, so joining the table to
+    order by it returns that Book once per row. The count would follow, and a
+    page of 25 would hold fewer than 25 Books.
+
+    `min` because a Book may carry more than one number in one scheme, from more
+    than one catalogue, and an ORDER BY needs one value per row. The lowest is
+    the one a shelf would file it under. Taken over the **key** rather than over
+    the stored number, so "lowest" means lowest on the shelf. For Dewey the two
+    differ only on a number carrying MARC's segmentation prime, which
+    `filing.DeweyFiling` removes and which `ClassificationIn` lets through, so
+    every other row keeps exactly the key it had. Its **position** can still
+    move, because a primed row jumping past it changes what sits above it: 53
+    of 463 live K10plus 082 values carry a prime, 11.4%, measured 2026-08-23
+    and recorded in `ddc.SEGMENTATION_PRIME`. For LCC the two differ on every
+    row that has a class number at all.
+
+    `nullslast` for the reason `_SERIES_ORDER` has it: a library is mostly
+    unclassified until somebody enriches it, and scattering those through the
+    list wherever SQLite puts NULL would make the sort look broken rather than
+    partial. It covers a Book with no number in **this** scheme too, so a Dewey
+    only library asked for the LCC order gets its books in one block rather than
+    an error.
+
+    **Refuses a scheme whose rule orders no shelf, at import.** Without this
+    `orders_a_shelf` was a field three documents described as the mechanism and
+    nothing read: giving GND a `BookSort` member and an entry in `_SHELF_SORTS`
+    below would have shipped a shelf ordered by a subject vocabulary under the
+    generic rule, with every test green. Two steps rather than one, because
+    `BookSort` has no GND member to map; an earlier version of this sentence
+    wrote `BookSort.GND` as though it did, which made the illustration an
+    `AttributeError` nobody could follow. Both critic seats found the missing
+    enforcement independently, and the design seat found the bad example.
+    Raising here rather than in the request is deliberate, since this runs once
+    while `_MULTI_COLUMN_ORDERS` is built: the failure is a broken import in
+    the developer's own gate, not a 500 for a member.
+    """
+    rule = filing.rule_for(scheme)
+    if not rule.orders_a_shelf:
+        raise ValueError(
+            f"{scheme.value!r} files under the {rule.name} rule, which orders no "
+            "shelf. See filing.GenericFiling for why."
+        )
+    key = rule.sort_expression(Classification.number)
+    lowest = (
+        select(func.min(key))
+        .where(
+            Classification.book_id == Book.id,
+            Classification.scheme == scheme,
+        )
+        .scalar_subquery()
+    )
+    return (nullslast(lowest.asc()),)
+
+
+#: Which `BookSort` value asks for which scheme's shelf order.
+#:
+#: **Two tables meeting, and the test is what holds them together.** `filing`
+#: says which schemes file a shelf and this says how a client asks for one, and
+#: neither can derive the other: `BookSort` is the API's vocabulary and a
+#: scheme is the catalogue's. `tests/test_shelf.py::TestEverySortHasAnOrdering`
+#: pins that this covers `filing.SHELF_SCHEMES` exactly, so a scheme whose rule
+#: starts ordering a shelf is a failing test rather than an order nobody can ask
+#: for.
+_SHELF_SORTS: dict[BookSort, ClassificationScheme] = {
+    BookSort.DDC: ClassificationScheme.DDC,
+    BookSort.LCC: ClassificationScheme.LCC,
+}
 
 #: The sorts that need more than one column. `_SORT_CLAUSES` holds one each;
-#: series needs two and a null rule, and Dewey needs a subquery. A second table
-#: rather than a special case in an `if`, so a third one is an entry rather than
-#: another branch. The two tables partition `BookSort` between them, which
-#: `tests/test_shelf.py` pins: a value in neither raises `KeyError` on a
-#: request rather than failing a test.
+#: series needs two and a null rule, and a shelf order needs a subquery. A
+#: second table rather than a special case in an `if`, so a third one is an
+#: entry rather than another branch. The two tables partition `BookSort` between
+#: them, which `tests/test_shelf.py` pins: a value in neither raises `KeyError`
+#: on a request rather than failing a test.
 _MULTI_COLUMN_ORDERS: dict[BookSort, tuple[UnaryExpression[Any], ...]] = {
     BookSort.SERIES: _SERIES_ORDER,
-    BookSort.DDC: _DDC_ORDER,
+    **{sort: _shelf_order(scheme) for sort, scheme in _SHELF_SORTS.items()},
 }
 
 

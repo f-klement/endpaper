@@ -28,21 +28,35 @@ import {
 
 const SKELETON_ROWS = 8;
 
+type SortDirection = "ascending" | "descending";
+
 /**
- * Which sorts a column offers, or null where the API cannot order by it.
+ * One order a column offers.
  *
- * **Deliberately not client side.** Sorting the rows in the browser would sort
- * only the page that has been loaded, silently, and a table headed "Publisher,
- * ascending" showing the first 25 books by title is worse than a header that
- * does nothing. So a column the backend cannot order by is plain text.
+ * **`scheme` is set only where a column offers more than one**, and the call
+ * number column is the only one that does. It draws Dewey and Library of
+ * Congress notations side by side, and the two file by different rules, so
+ * "sorted by call number" is not a complete statement: the header has to say
+ * which shelf it is reading. See `backend/filing.py`.
  */
-interface ColumnSort {
-  asc: BookSort | null;
-  desc: BookSort | null;
+interface SortOption {
+  sort: BookSort;
+  direction: SortDirection;
+  scheme?: ClassificationScheme;
 }
 
 interface Column {
-  sort: ColumnSort | null;
+  /**
+   * The orders this column offers, in the order pressing it cycles them.
+   * Empty where the API cannot order by it.
+   *
+   * **Deliberately not client side.** Sorting the rows in the browser would
+   * sort only the page that has been loaded, silently, and a table headed
+   * "Publisher, ascending" showing the first 25 books by title is worse than a
+   * header that does nothing. So a column the backend cannot order by is plain
+   * text.
+   */
+  sort: readonly SortOption[];
   /** Right aligned, for the columns that hold a number. */
   numeric?: boolean;
   render: (book: BookOut, t: Translate, locale: Locale) => string;
@@ -86,18 +100,21 @@ function subjectHeadings(book: BookOut): ClassificationOut[] {
 
 const COLUMNS: Record<ColumnKey, Column> = {
   title: {
-    sort: { asc: BookSort.title_asc, desc: BookSort.title_desc },
+    sort: [
+      { sort: BookSort.title_asc, direction: "ascending" },
+      { sort: BookSort.title_desc, direction: "descending" },
+    ],
     render: (book) => book.title,
   },
   author: {
     // One direction only: the API sorts by author ascending and has no
     // descending counterpart, and offering a toggle that silently reverses
     // nothing would be the client side sort this table refuses to do.
-    sort: { asc: BookSort.author, desc: null },
+    sort: [{ sort: BookSort.author, direction: "ascending" }],
     render: (book) => book.author ?? "",
   },
   series: {
-    sort: { asc: BookSort.series, desc: null },
+    sort: [{ sort: BookSort.series, direction: "ascending" }],
     render: (book, t) =>
       book.series_name
         ? book.series_index === null || book.series_index === undefined
@@ -109,23 +126,46 @@ const COLUMNS: Record<ColumnKey, Column> = {
         : "",
   },
   year: {
-    sort: { asc: BookSort.year_asc, desc: BookSort.year_desc },
+    sort: [
+      { sort: BookSort.year_asc, direction: "ascending" },
+      { sort: BookSort.year_desc, direction: "descending" },
+    ],
     numeric: true,
     render: (book) => number(book.year),
   },
   publisher: {
-    sort: null,
+    sort: [],
     render: (book) => book.publisher ?? "",
   },
   callNumber: {
-    // **The only sort here that is not on a column of its own.** The API
-    // orders by `min(classifications.number) where scheme = ddc`, in SQL, over
-    // the table: see `_DDC_ORDER` in `backend/shelf.py`. It is deliberately
-    // not the string this cell draws, which carries a scheme name in the
-    // reader's language and can hold a Library of Congress notation as well,
-    // and would therefore sort by neither shelf's order. Ascending only,
-    // because that is the one direction the API offers.
-    sort: { asc: BookSort.ddc, desc: null },
+    // **The only column offering two orders, and the only one that has to.**
+    // It draws both schemes that place a book on a shelf, and the two file by
+    // different rules: `filing.DeweyFiling` sorts a notation as its own text
+    // and `filing.LccFiling` pads the class number, because `BF75` stands
+    // before `BF575` on a shelf and after it in a string comparison. One order
+    // over both would be a Dewey rule applied to LCC numbers, which is what
+    // this replaced.
+    //
+    // Neither is the string this cell draws, which carries a scheme name in
+    // the reader's language and both notations at once, and would therefore
+    // sort by neither shelf. The API orders in SQL over the whole table: see
+    // `_shelf_order` in `backend/shelf.py`.
+    //
+    // Ascending only, in both, because that is the one direction the API
+    // offers. Pressing the header cycles Dewey, then Library of Congress, and
+    // the header names whichever is running.
+    sort: [
+      {
+        sort: BookSort.ddc,
+        direction: "ascending",
+        scheme: ClassificationScheme.ddc,
+      },
+      {
+        sort: BookSort.lcc,
+        direction: "ascending",
+        scheme: ClassificationScheme.lcc,
+      },
+    ],
     // Every notation names its scheme, for the reason `ClassificationPanel`
     // gives: `004` is computing in Dewey and is not a Library of Congress call
     // number at all, so a notation shown without its scheme cannot be read.
@@ -135,7 +175,7 @@ const COLUMNS: Record<ColumnKey, Column> = {
         .join(" · "),
   },
   classification: {
-    sort: null,
+    sort: [],
     // The caption where there is one, the identifier where there is not, and
     // no scheme name: a subject heading is words rather than a notation, so
     // the argument for prefixing the call number does not reach it. GND is
@@ -148,69 +188,69 @@ const COLUMNS: Record<ColumnKey, Column> = {
         .join(", "),
   },
   format: {
-    sort: null,
+    sort: [],
     render: (book, t) => (book.format ? t(FORMAT_LABELS[book.format]) : ""),
   },
   condition: {
-    sort: null,
+    sort: [],
     render: (book, t) =>
       book.condition ? t(CONDITION_LABELS[book.condition]) : "",
   },
   lending: {
-    sort: null,
+    sort: [],
     render: (book, t) => (book.lending ? t(LENDING_LABELS[book.lending]) : ""),
   },
   discuss: {
-    sort: null,
+    sort: [],
     // The names, not a tick. "Ask about it" is only useful if it says whom.
     render: (book) =>
       (book.discuss_with ?? []).map((member) => member.username).join(", "),
   },
   location: {
-    sort: null,
+    sort: [],
     render: (book) => book.location ?? "",
   },
   pageCount: {
-    sort: null,
+    sort: [],
     numeric: true,
     render: (book) => number(book.page_count),
   },
   language: {
-    sort: null,
+    sort: [],
     render: (book) => book.language ?? "",
   },
   status: {
-    sort: null,
+    sort: [],
     render: (book, t) => t(STATUS_LABELS[book.my_status ?? ReadStatus.unread]),
   },
   rating: {
-    sort: null,
+    sort: [],
     numeric: true,
     render: (book) => number(book.my_rating),
   },
   tags: {
-    sort: null,
+    sort: [],
     render: (book, _t, locale) =>
       (book.tags ?? []).map((tag) => tagName(tag, locale)).join(", "),
   },
   ownership: {
-    sort: null,
+    sort: [],
     render: (book, t) =>
       t(OWNERSHIP_LABELS[book.ownership ?? OwnershipStatus.unknown]),
   },
   addedBy: {
-    sort: null,
+    sort: [],
     render: (book) => book.added_by?.username ?? "",
   },
   addedAt: {
     // Newest first is the only order the API offers for this, so the column
     // sorts one way and says so through `aria-sort` rather than pretending to
     // toggle.
-    sort: { asc: null, desc: BookSort.newest },
+    sort: [{ sort: BookSort.newest, direction: "descending" }],
     render: (book, _t, locale) => date(book.added_at, locale),
   },
   price: {
-    sort: null,
+    sort: [],
     numeric: true,
     render: (book) => {
       const amount = formatMinor(book.purchase_price_minor);
@@ -221,11 +261,11 @@ const COLUMNS: Record<ColumnKey, Column> = {
     },
   },
   purchasedAt: {
-    sort: null,
+    sort: [],
     render: (book, _t, locale) => date(book.purchased_at, locale),
   },
   purchaseSource: {
-    sort: null,
+    sort: [],
     render: (book) => book.purchase_source ?? "",
   },
 };
@@ -243,23 +283,28 @@ function drawn(columns: readonly ColumnKey[]): ColumnKey[] {
   return COLUMN_KEYS.filter((key) => wanted.has(key));
 }
 
-/** Which way this column is currently ordering, for `aria-sort`. */
-function direction(
-  column: Column,
-  sort: BookSort,
-): "ascending" | "descending" | "none" {
-  if (column.sort?.asc === sort) return "ascending";
-  if (column.sort?.desc === sort) return "descending";
-  return "none";
+/** The order this column is running, or undefined when it is not the one. */
+function activeOption(column: Column, sort: BookSort): SortOption | undefined {
+  return column.sort.find((option) => option.sort === sort);
 }
 
-/** The sort pressing this header should ask for next. */
+/** Which way this column is currently ordering, for `aria-sort`. */
+function direction(column: Column, sort: BookSort): SortDirection | "none" {
+  return activeOption(column, sort)?.direction ?? "none";
+}
+
+/**
+ * The sort pressing this header should ask for next.
+ *
+ * `findIndex` answers -1 when this column is not the one ordering the list,
+ * which the modulo turns into the first option. So a column offering one order
+ * asks for that one again rather than turning itself off, which is what it did
+ * before there was a list here.
+ */
 function nextSort(column: Column, sort: BookSort): BookSort | null {
-  if (!column.sort) return null;
-  const { asc, desc } = column.sort;
-  if (asc !== null && sort !== asc) return asc;
-  if (desc !== null && sort !== desc) return desc;
-  return asc ?? desc;
+  if (column.sort.length === 0) return null;
+  const at = column.sort.findIndex((option) => option.sort === sort);
+  return column.sort[(at + 1) % column.sort.length]!.sort;
 }
 
 interface BookTableProps {
@@ -330,11 +375,12 @@ export default function BookTable({
                 const column = COLUMNS[key];
                 const way = direction(column, sort);
                 const next = nextSort(column, sort);
+                const active = activeOption(column, sort);
                 return (
                   <th
                     key={key}
                     scope="col"
-                    aria-sort={column.sort ? way : undefined}
+                    aria-sort={column.sort.length > 0 ? way : undefined}
                     className={`whitespace-nowrap px-3 py-2 text-xs font-semibold text-paper-700 dark:text-paper-200 ${
                       column.numeric ? "text-right" : ""
                     }`}
@@ -348,6 +394,18 @@ export default function BookTable({
                         className="inline-flex items-center gap-1 hover:text-accent-700 dark:hover:text-accent-300"
                       >
                         {t(COLUMN_SPECS[key].label)}
+                        {/* Which shelf is being read, where the column offers
+                            more than one. Only the call number column does,
+                            and without this the reader cannot tell a Dewey
+                            order from a Library of Congress one: the rows
+                            simply come back differently. Inside the button, so
+                            a screen reader gets it with the name rather than
+                            after the sort direction. */}
+                        {active?.scheme !== undefined && (
+                          <span className="font-normal text-paper-600 dark:text-paper-400">
+                            {t(SCHEME_LABEL[active.scheme])}
+                          </span>
+                        )}
                         {/* Always drawn, dimmed until this column is the one
                             ordering the list. Only 6 of the 23 columns can be
                             sorted, and with the chevron shown only when active

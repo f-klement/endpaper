@@ -50,6 +50,7 @@ function row(
     enabled: true,
     answers_lookup: true,
     answers_search: true,
+    slow: false,
     asked_first: false,
     needs_a_key: false,
     has_key: true,
@@ -449,4 +450,47 @@ describe("ProviderSection", () => {
       }
     },
   );
+});
+
+describe("a slow catalogue", () => {
+  it("says it is left out of the quick search rather than broken", () => {
+    draw([row("oenb", { slow: true }), row("dnb")]);
+
+    expect(
+      screen.getByText(
+        "Too slow for a quick search. Asked only when a reader searches harder.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps its ordinary status line as well", () => {
+    draw([row("oenb", { slow: true, asked_first: true })]);
+
+    expect(
+      screen.getByText(
+        "Asked on every scan, with the others at the top of this list.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("explains the group once, above the list", () => {
+    draw([row("oenb", { slow: true }), row("nlg", { slow: true })]);
+
+    expect(
+      screen.getAllByText(
+        /A catalogue marked slow cannot answer a title search/,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("says nothing at all when no catalogue is slow", () => {
+    draw([row("oenb"), row("dnb")]);
+
+    expect(
+      screen.queryByText(/A catalogue marked slow/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Too slow for a quick search/),
+    ).not.toBeInTheDocument();
+  });
 });

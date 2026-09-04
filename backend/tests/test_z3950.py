@@ -812,7 +812,7 @@ class TestTheBoundsAgreeWithEachOther:
         # Measured 2026-08-28 at `lx2.loc.gov:210/LCDB`, stable to two decimal places
         # across four option sets: 5 records 0.62s, 10 records 1.30s, 20 records 2.70s,
         # against `metadata.SEARCH_DEADLINE_SECONDS` of 4.0 for the WHOLE fan out across
-        # seven sources. 5 spends 15% of it on one target; 20 would spend two thirds.
+        # eight sources. 5 spends 15% of it on one target; 20 would spend two thirds.
         import metadata
 
         seconds_for_the_bound = 0.62

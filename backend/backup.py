@@ -43,6 +43,7 @@ from models import (
     AuthorAlias,
     AuthorIdentifier,
     Book,
+    CatalogueTarget,
     Classification,
     Collection,
     CustomField,
@@ -160,6 +161,23 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # archive written before this restores with none, which is the state it
         # was written in.
         ("author_identifiers", AuthorIdentifier),
+        # The catalogue roster as rows. No foreign key of its own, so its
+        # position here is free; beside `settings` because it is the same kind
+        # of thing, a library wide configuration rather than anybody's data.
+        #
+        # **Here on the day the table was created**, for the reason the comment
+        # above gives, and with one difference worth stating: nothing reads
+        # these rows at runtime, so losing them costs no lookup. What it costs
+        # is #130, which is the ticket that puts them on a screen, and
+        # `main.seed_catalogue_targets` refills them on the next start anyway.
+        # The reason to be in this tuple regardless is that an archive is
+        # supposed to hold the library, and a row a household has edited is
+        # theirs the moment #130 ships.
+        #
+        # Absent from `_REQUIRED_TABLES` for the reason `author_identifiers` is:
+        # an archive written before this restores with none, which is the state
+        # it was written in.
+        ("catalogue_targets", CatalogueTarget),
         ("settings", Setting),
     )
 )

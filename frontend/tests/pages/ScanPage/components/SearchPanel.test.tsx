@@ -4,7 +4,10 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { BookMatch } from "../../../../src/api/generated/model";
+import type {
+  BookMatch,
+  CatalogueSource,
+} from "../../../../src/api/generated/model";
 import SearchPanel from "../../../../src/pages/ScanPage/components/SearchPanel";
 import { renderLocalised } from "../../../utils";
 
@@ -33,6 +36,11 @@ function renderPanel(
     onQueryChange: vi.fn(),
     onSubmit: vi.fn(),
     onChoose: vi.fn(),
+    unasked: [] as CatalogueSource[],
+    askedNothing: false,
+    onSearchHarder: vi.fn(),
+    isSearchingHarder: false,
+    hasSearchedHarder: false,
     ...overrides,
   };
   renderLocalised(<SearchPanel {...props} />);
@@ -204,5 +212,111 @@ describe("SearchPanel without a Google Books key", () => {
       );
 
     expect(props.onOpenHelp).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the offer to search harder", () => {
+  it("is not made when every catalogue was already asked", () => {
+    renderPanel({ matches: [match()] });
+
+    expect(
+      screen.queryByRole("button", { name: "Search harder" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the catalogues it would add", () => {
+    renderPanel({ matches: [match()], unasked: ["oenb", "nlg"] });
+
+    expect(
+      screen.getByText(
+        "Austrian National Library and National Library of Greece are slower than a quick search waits for.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("is made when the search found nothing, which is when it is wanted most", () => {
+    renderPanel({ matches: [], isEmpty: true, unasked: ["oenb"] });
+
+    expect(
+      screen.getByRole("button", { name: "Search harder" }),
+    ).toBeInTheDocument();
+  });
+
+  it("asks upwards when pressed", async () => {
+    const props = renderPanel({ unasked: ["oenb"] });
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Search harder" }));
+
+    expect(props.onSearchHarder).toHaveBeenCalledOnce();
+  });
+
+  it("says why the offer came back when the longer search was refused", () => {
+    // Having asked harder and still having something unasked is the one shape
+    // that means refused. Without this the reader presses, waits, and gets the
+    // identical offer back with no reason.
+    renderPanel({
+      matches: [match()],
+      unasked: ["oenb"],
+      hasSearchedHarder: true,
+    });
+
+    expect(
+      screen.getByText(
+        "Only one long search runs at a time. Try again in a moment.",
+      ),
+    ).toBeInTheDocument();
+    // Still offered, because the retry is the point of saying so.
+    expect(
+      screen.getByRole("button", { name: "Search harder" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not call it busy before a longer search has been asked for", () => {
+    renderPanel({ matches: [match()], unasked: ["oenb"] });
+
+    expect(
+      screen.queryByText(/Only one long search runs at a time/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says everything was asked once the longer search has answered", () => {
+    renderPanel({ matches: [match()], unasked: [], hasSearchedHarder: true });
+
+    expect(screen.getByText("Every catalogue was asked.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Search harder" }),
+    ).not.toBeInTheDocument();
+    // **The other half of the busy condition, on the fixture that already has
+    // it.** Busy is having asked harder **and** still having something unasked,
+    // and only the first half was pinned: dropping the second survived the whole
+    // gate, and under that mutant this fixture renders "only one long search
+    // runs at a time" directly above "Every catalogue was asked."
+    // Same two condition shape as `askedNothing`, one level along.
+    expect(
+      screen.queryByText(/Only one long search runs at a time/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing about the longer search before one has been run", () => {
+    renderPanel({ matches: [match()], unasked: [], hasSearchedHarder: false });
+
+    expect(
+      screen.queryByText("Every catalogue was asked."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("distinguishes asking nothing from finding nothing", () => {
+    renderPanel({ matches: [], askedNothing: true, unasked: ["oenb"] });
+
+    expect(
+      screen.getByText(
+        "Nothing was searched. Every catalogue this library has switched on is a slow one.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No matches\. Try fewer words/),
+    ).not.toBeInTheDocument();
   });
 });

@@ -23,4 +23,5 @@ export const BookSort = {
   newest: "newest",
   series: "series",
   ddc: "ddc",
+  lcc: "lcc",
 } as const;

@@ -45,6 +45,7 @@ import type {
   BookMatch,
   BookOut,
   BookRatingUpdate,
+  BookSearchOut,
   BookStatusUpdate,
   BulkRequest,
   BulkResult,
@@ -3701,13 +3702,20 @@ export const getSearchBooksUrl = (params: SearchBooksParams) => {
  * Two segments (`/google/search`) used to guard against this being confused
  * with `/{book_id}`; a single one is safe for the same reason `/export` is,
  * which is that it is declared first.
+ *
+ * **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+ * It is a request rather than an instruction: the server runs the ordinary
+ * search when this library has no such catalogue enabled, and when the one
+ * long fan out allowed at a time is already in flight. `asked` and `unasked`
+ * on the response say what actually happened, so a client never has to infer
+ * it from what it sent.
  * @summary Search Books
  */
 export const searchBooks = async (
   params: SearchBooksParams,
   options?: Parameters<typeof customFetch>[1],
-): Promise<BookMatch[]> => {
-  return customFetch<BookMatch[]>(getSearchBooksUrl(params), {
+): Promise<BookSearchOut> => {
+  return customFetch<BookSearchOut>(getSearchBooksUrl(params), {
     ...options,
     method: "GET",
   });
@@ -5840,9 +5848,11 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  * Matched by ISBN when there is one, which runs the full merged chain, and by
  * title and author otherwise, which runs the ranked search. **Which
  * catalogues either of those asks is the library's own provider list**, set
- * in Settings; a new install asks the DNB and K10plus together, then the
- * Austrian National Library, then Open Library, then Google, and searches all
- * seven. A source switched off is not asked on either path.
+ * in Settings: the roster holds seven lookup sources that answer an ISBN and
+ * eight search sources that answer a title, the leading pair is asked together
+ * and the rest one at a time, and a source switched off is not asked on either
+ * path. Google Books answers only when its own section is on and a key is in
+ * force, so a library missing either asks one fewer on each path.
  *
  * **No API key is required.** This was Google-only and refused outright
  * without a key, which made it useless for exactly the books the German and

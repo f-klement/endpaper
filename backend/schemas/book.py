@@ -10,12 +10,18 @@ from enums import (
     BookCondition,
     BookFormat,
     BulkAction,
+    CatalogueSource,
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
 )
 from google_books import split_categories
-from models import DESCRIPTION_MAX, MAX_PAGE_NUMBER_IN_A_BOOK
+from models import (
+    CATEGORIES_MAX,
+    DESCRIPTION_MAX,
+    MAX_PAGE_NUMBER_IN_A_BOOK,
+    MAX_SERIES_INDEX,
+)
 from schemas.author import RefusedAssertionOut
 from schemas.classification import (
     MAX_CLASSIFICATIONS_PER_BOOK,
@@ -44,6 +50,11 @@ MAX_YEAR = 2200
 # million in any ordinary currency: high enough for a genuinely rare book, low
 # enough that a mistyped field is caught rather than stored.
 MAX_PRICE_MINOR = 100_000_000
+
+# How long `BookMatch.source` may be. Here rather than in `models.py` because
+# there is no column: it is a label naming which catalogues answered, and
+# nothing stores it. See the field for the derivation.
+SOURCE_LABEL_MAX = 120
 
 
 class BookLookup(BaseModel):
@@ -97,13 +108,23 @@ class BookCreate(BaseModel):
     cover_url: str | None = Field(default=None, max_length=500)
     is_private: bool = False
     series_name: str | None = Field(default=None, max_length=255)
-    series_index: float | None = Field(default=None, ge=0, le=1000)
+    series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
     location: str | None = Field(default=None, max_length=120)
     #: Which collection to file it into, or absent for none. Refused with a 400
     #: when no such collection exists, rather than surfacing the foreign key as
     #: a 500. Bounded like every other caller-supplied row id: see MAX_ROW_ID.
     collection_id: RowIdField | None = None
-    language: str | None = Field(default=None, max_length=16)
+    #: 10, which is what `books.language` is, and it was 16 until 2026-09-02.
+    #: SQLite ignores VARCHAR width so the disagreement refused nothing here,
+    #: but it meant this API accepted six characters no engine that enforces a
+    #: width would store, and `importing.py` had to consult both numbers and
+    #: take the smaller. Nothing legitimate is lost: every language this app
+    #: writes comes from `metadata._LANGUAGES` (two letters) or Google's own
+    #: `language` (two or three), and the longest tag anybody could want,
+    #: `zh-Hant-HK`, is exactly 10. A row already holding a longer value stays
+    #: readable and editable: `BookOut` bounds nothing and `BookDetailsUpdate`
+    #: has no language field.
+    language: str | None = Field(default=None, max_length=10)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     # The one collector field offered at add time. Somebody scanning a book is
     # holding it, so this is the one moment they can answer without checking.
@@ -378,30 +399,136 @@ class BookMatch(BaseModel):
     Named for what it is rather than where it came from: search asks Open
     Library always and Google Books when a key is configured, and merges what
     they agree on into one row. `source` says which of them supplied it.
+
+    **Every field is bounded, because this is a request body and not only a
+    response.** `POST /api/books/{id}/enrich/apply` accepts one, so each field
+    is a value a member chose rather than one a catalogue supplied.
+
+    **And since 2026-09-03 it is the only way a catalogue value reaches a Book
+    column through `merge_into`**, which is a second reason for the same
+    bounds rather than a second rule. `google_books.merge_into` takes this
+    model rather than a dictionary, so `POST /api/books/{id}/enrich` builds one
+    through `routers/books._bounded_match` instead of handing over whatever
+    `Record.as_match()` assembled. Before that the ceilings applied on one
+    route and not on its neighbour: the same oversized value was a 422 on
+    apply and a stored row on enrich, same book, one route apart.
+
+    **Through `merge_into` was the whole of the claim, because a third route
+    did not go through it, and that closed on 2026-09-03 one layer below all
+    three.** `PUT /api/books/{id}/refresh` assigns nine columns straight off the
+    same `catalogue.Record` and builds no model at all, so a 9999 year and a
+    40,000 character description were stored there and refused on both of the
+    other two. Measured, one volume, three routes. Both critic seats found it
+    separately while checking an earlier version of this paragraph that claimed
+    the whole family was closed, which is why the sentence says which door it
+    means.
+
+    `catalogue.Record` now clears every scalar its column cannot hold at
+    construction, so no producer hands any of the three an unusable value and
+    the refresh route needed no model of its own. What these bounds still do
+    alone is the two fields a record does not carry: `categories`, which
+    `as_match` assembles from the record's subject list, and `suggested_tag_ids`.
     """
 
+    # **Where each number comes from, and it is never taste.** A field naming a
+    # column `BookCreate` also names takes `BookCreate`'s number, so two
+    # request bodies for one column cannot disagree. A field naming a column
+    # `BookCreate` does not takes the column's own width from `models.py`.
+    # Only `source` has neither, and its bound is derived at the field.
+    #
+    # **Naming, not writing**, and the distinction is a correction rather than
+    # pedantry: `google_books.merge_into` writes eleven of these plus
+    # `cover_url`, and `title` and `isbn13` are not among them. The rule that
+    # picks their numbers is agreement with the other bodies writing that
+    # column, which holds whether or not this route writes it.
+    #
+    # Four of these seventeen fields were bounded and thirteen were not,
+    # until 2026-09-02, under a comment saying the bounds matched
+    # `BookCreate`'s. That was true of the two fields it sat above and false of
+    # the rest, which is why reading it found nothing. The ticket that fixed it
+    # counted eleven, having read only the strings: `series_index` is a float
+    # and `suggested_tag_ids` is a list, and both were open too.
+    #
+    # A comment does not keep this, so
+    # `tests/schemas/test_book.py::TestEveryFieldARequestBodyCarriesIsBounded`
+    # does, over every request body in the application rather than over this
+    # model: this model is how the class arrived, not where it ends.
+
     #: Which catalogue this row came from, for the label in the picker.
-    source: str = ""
-    google_books_id: str | None = None
-    title: str | None = None
-    subtitle: str | None = None
-    author: str | None = None
-    publisher: str | None = None
-    # Bounded because this model is a **request body**, not only a response:
-    # `POST /api/books/{id}/enrich/apply` accepts one and `merge_into` writes
-    # these two straight onto the book. Unbounded, `{"year": 2**63}` raised
-    # `OverflowError` on the commit and answered 500 to any member. Measured.
-    # The bounds are the same as `BookCreate`'s, because the value ends up in
-    # the same column.
+    #:
+    #: The one field with no column behind it: `apply_enrichment` excludes it
+    #: and `merge_into` does not name it, so nothing stores it. The bound is
+    #: therefore about the request rather than the row, and is derived from
+    #: what the field can legitimately say: `catalogue.Record.sources` joins
+    #: the answering catalogues with `+`, and the whole roster of nine
+    #: (bnf, dnb, google_books, k10plus, loc, nkp, nlg, oenb, open_library)
+    #: joined measures **58** characters. 120 admits that roster roughly
+    #: doubling.
+    source: str = Field(default="", max_length=SOURCE_LABEL_MAX)
+    #: `books.google_books_id` is `String(50)` and `BookCreate` has no
+    #: counterpart, so the column is the source of the number. A Google volume
+    #: id is 12 characters (`zyTCAlFPjgYC`), so the column already carries 4.2x
+    #: what the field holds.
+    google_books_id: str | None = Field(default=None, max_length=50)
+    title: str | None = Field(default=None, max_length=500)
+    subtitle: str | None = Field(default=None, max_length=500)
+    author: str | None = Field(default=None, max_length=500)
+    publisher: str | None = Field(default=None, max_length=255)
+    # `{"year": 2**63}` raised `OverflowError` on the commit and answered 500
+    # to any member. Measured, and the reason this model started carrying
+    # bounds at all.
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
-    language: str | None = None
-    categories: str | None = None
-    cover_url: str | None = None
-    isbn13: str | None = None
-    series_name: str | None = None
-    series_index: float | None = None
+    language: str | None = Field(default=None, max_length=10)
+    categories: str | None = Field(default=None, max_length=CATEGORIES_MAX)
+    cover_url: str | None = Field(default=None, max_length=500)
+    #: The `isbn` column under another name, because a search row is one
+    #: printing among several rather than the one asked for. So
+    #: `BookCreate.isbn`'s 20, which is the agreement rule's number rather than
+    #: a column's: `merge_into` names neither `isbn13` nor `title`, so neither
+    #: is written on this route at all. Both critic seats caught the earlier
+    #: wording claiming a write that does not happen.
+    isbn13: str | None = Field(default=None, max_length=20)
+    series_name: str | None = Field(default=None, max_length=255)
+    #: **The sharpest of the thirteen**, and a stored denial of service rather
+    #: than an oversized row. `merge_into` writes this column, and
+    #: `routers/books.list_series` computes `set(range(1, max(held) + 1))` over
+    #: it under `Shelf.seen_by`, so every member pays. Measured twice, on
+    #: different machines and by different seats: 70.5 bytes and 0.624 seconds
+    #: per million elements (`importing.py`), and 99.2 bytes and 1.554 seconds
+    #: per million counting the `sorted()` list as well as the set. A stored
+    #: `1e9` is therefore tens of gigabytes and tens of minutes, per request,
+    #: until somebody finds the row.
+    #:
+    #: **Both routes that write the column now go through here**, and the
+    #: second one was closed on 2026-09-03. `POST /api/books/{id}/enrich` used
+    #: to hand `Record.as_match()` straight to `merge_into` and never build a
+    #: `BookMatch`, so a catalogue supplying `1e9` was stored with a 200 where
+    #: the identical value here was a 422: measured end to end, same book, one
+    #: route apart. It is reachable from a catalogue rather than only from an
+    #: upload, because `metadata._marc_title` takes the first digit run of
+    #: `245 $n` and calls `float()` on it.
+    #:
+    #: So `importing.py`'s claim that this field is `ge=0, le=1000` on every
+    #: API path is true of every path that validates, and it was false of one
+    #: of those until then. `POST /api/backup/restore` is outside it and always
+    #: was: it inserts through Core, where neither pydantic nor a `@validates`
+    #: fires, and its own module states that an admin is not a reason to trust
+    #: a file. That is why the ceiling is also applied at the reader, in
+    #: `routers/books.list_series`, which is the only thing that covers a row
+    #: already written.
+    #:
+    #: **The bound is on the signature rather than at the call site**, because
+    #: a rule a caller has to remember is a rule the next caller forgets: this
+    #: hole was one route failing to do what its neighbour did.
+    #: `google_books.merge_into` takes a `BookMatch`, so a dictionary fails
+    #: mypy at any call site and raises on the first `getattr` at runtime.
+    #: The mutual import that costs is `TYPE_CHECKING` only and cannot be
+    #: otherwise: this module imports `split_categories` from `google_books`,
+    #: which is the cycle, and PEP 649 is why the annotation still needs no
+    #: quoting.
+    series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
     #: Bounded for the same reason `year` is: this model is a request body, and
     #: `POST /api/books/{id}/enrich/apply` turns every entry into a row.
     classifications: list[ClassificationIn] = Field(
@@ -415,7 +542,54 @@ class BookMatch(BaseModel):
     # Row ids, so bounded like every other one, even though `apply_enrichment`
     # excludes this field from the merge today: a body field is caller supplied
     # whether or not this year's handler reads it.
-    suggested_tag_ids: list[RowIdField] = []
+    #
+    # **`RowIdField` bounds the value and `max_length` bounds the count, and
+    # this field carried only the first.** On a `list`, `max_length` is the
+    # number of entries, so a list of bounded ids is still an unbounded amount
+    # of parsing. 500 rather than something tighter because the handler ignores
+    # the field, so the bound is there to make the work finite rather than to
+    # police a size: it matches `BulkRequest.book_ids`, the largest
+    # caller-supplied id list here, and is 4.8x the 105 seeded tags, so no
+    # realistic vocabulary trips it.
+    suggested_tag_ids: list[RowIdField] = Field(default=[], max_length=500)
+
+
+class BookSearchOut(BaseModel):
+    """A page of search results, and which catalogues produced it.
+
+    **The roster travels with the answer rather than sitting on a feature
+    flag**, for two reasons that both bite. It is per request: the same library
+    asks a different set depending on whether the reader asked to search harder,
+    and a deployment level flag cannot say which of the two this page is. And
+    `FeatureFlagsOut` is served without a token, so a bit about which catalogues
+    a household runs would be readable by anyone who can reach the door.
+
+    **Names and not booleans, which cost a round to arrive at.** The first draft
+    sent `slow_available` and `asked_slow`, and their fourth quadrant was
+    undefined for exactly the case every install reaches today: a harder request
+    on a library with no slow catalogue, where the response includes no slow
+    source and it is unclear whether that means "none contributed" or "not run
+    harder". Two lists have no such quadrant, they partition the roster by
+    construction, and they let the screen name the catalogue it is offering
+    rather than describing the machine's effort.
+    """
+
+    matches: list[BookMatch]
+    #: The catalogues this fan out actually asked.
+    #:
+    #: **What was asked, not what was wanted.** A harder request runs the
+    #: ordinary search when the two rosters are equal or when the one slow fan
+    #: out allowed at a time is already running, and this reports what happened
+    #: either way. Empty with an empty `matches` is a real state and a different
+    #: one from finding nothing: it means this library's only search catalogues
+    #: are slow ones and nobody has asked for them yet.
+    asked: list[CatalogueSource]
+    #: The enabled search catalogues this fan out did not ask.
+    #:
+    #: Non empty is the whole trigger for offering a second, longer search: it
+    #: is exactly what asking harder would add. Empty means asking again would
+    #: ask nothing new, whatever the reader presses.
+    unasked: list[CatalogueSource]
 
 
 class BookStatusUpdate(BaseModel):
@@ -460,7 +634,7 @@ class BookDetailsUpdate(BaseModel):
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
     series_name: str | None = Field(default=None, max_length=255)
-    series_index: float | None = Field(default=None, ge=0, le=1000)
+    series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
     location: str | None = Field(default=None, max_length=120)
 
     format: BookFormat | None = None
@@ -547,8 +721,18 @@ class BulkRequest(BaseModel):
     # fills depends on the verb, so a tag id, an ownership status, a shelf name
     # and a collection id all arrive here. Every handler that reads it as an id
     # validates the range itself before the value reaches the database
-    # (`_require_tag`, `_checked_collection`), which is why that check in
-    # `_checked_collection` is written out rather than left to the schema.
+    # (`_require_tag`, `_checked_collection`), which is why those checks are
+    # written out rather than left to the schema.
+    #
+    # **That sentence named two handlers and only one of them did it**, from
+    # the day it was written until 2026-09-03. `_checked_collection` carried
+    # the range check and said so in its own docstring; `_require_tag` beside
+    # it did `int(str(value))` and went straight to `db.get`, so
+    # `{"action": "add_tag", "value": 2**63}` was an `OverflowError` from
+    # inside the driver and a **500** to any member. This is the shape this
+    # repository keeps meeting: a guard proved on one field, trusted for the
+    # field beside it, and a comment asserting both is what carries it past a
+    # reader. Counted rather than read, next time.
     value: str | int | None = None
 
 

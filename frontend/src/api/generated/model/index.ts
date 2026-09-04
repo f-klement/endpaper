@@ -42,6 +42,7 @@ export * from "./bookLookup.ts";
 export * from "./bookMatch.ts";
 export * from "./bookOut.ts";
 export * from "./bookRatingUpdate.ts";
+export * from "./bookSearchOut.ts";
 export * from "./bookSort.ts";
 export * from "./bookStatusUpdate.ts";
 export * from "./bulkAction.ts";

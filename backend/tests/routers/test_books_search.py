@@ -17,6 +17,9 @@ import httpx
 import pytest
 import respx
 
+import sources
+from enums import CatalogueSource
+from models import CATEGORIES_MAX
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.helpers import (
     BNF,
@@ -100,7 +103,7 @@ class TestNoKeyRequired:
         )
 
         assert res.status_code == 200
-        assert res.json()[0]["title"] == "Moby Dick"
+        assert res.json()["matches"][0]["title"] == "Moby Dick"
 
     def test_google_is_not_called_when_it_is_switched_off(
         self, client, admin, open_library_search
@@ -130,7 +133,7 @@ class TestResults:
     def test_maps_the_open_library_fields(self, client, admin, open_library_search):
         [match] = client.get(
             "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-        ).json()
+        ).json()["matches"]
 
         assert match["title"] == "Moby Dick"
         assert match["author"] == "Herman Melville"
@@ -156,7 +159,7 @@ class TestResults:
             silence_catalogues(mock)
             [match] = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         assert match["title"] == "Moby Dick"
         assert match["isbn13"] is None
@@ -173,7 +176,7 @@ class TestResults:
             silence_catalogues(mock)
             [match] = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         assert match["isbn13"] == "9780585382944"
 
@@ -188,7 +191,7 @@ class TestResults:
             )
 
         assert res.status_code == 200
-        assert res.json() == []
+        assert res.json()["matches"] == []
 
     def test_writes_nothing(self, client, admin, open_library_search):
         """Search is a lookup. A book appears only when someone confirms one."""
@@ -214,7 +217,7 @@ class TestResults:
                 headers=admin["headers"],
             )
 
-        assert len(res.json()) == 3
+        assert len(res.json()["matches"]) == 3
 
     def test_an_open_library_outage_is_an_empty_list_not_a_500(self, client, admin):
         """A search that cannot answer is not a crash."""
@@ -228,7 +231,7 @@ class TestResults:
             )
 
         assert res.status_code == 200
-        assert res.json() == []
+        assert res.json()["matches"] == []
 
 
 class TestMergingTheTwoSources:
@@ -245,7 +248,7 @@ class TestMergingTheTwoSources:
             silence_catalogues(mock)
             matches = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         assert len(matches) == 1
         # Open Library has the cover and the page count, Google the blurb.
@@ -270,7 +273,7 @@ class TestMergingTheTwoSources:
                 match["title"]
                 for match in client.get(
                     "/api/books/search", params={"q": "melville"}, headers=admin["headers"]
-                ).json()
+                ).json()["matches"]
             ]
 
         assert titles == ["Moby Dick", "Billy Budd"]
@@ -297,7 +300,7 @@ class TestMergingTheTwoSources:
             silence_catalogues(mock)
             matches = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         # Both survive. The order between them is the ranker's, not the
         # catalogue's, and a tie on relevance goes to the newer printing.
@@ -317,7 +320,7 @@ class TestMergingTheTwoSources:
             silence_catalogues(mock)
             matches = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         assert [match["title"] for match in matches] == ["Moby Dick"]
 
@@ -337,7 +340,7 @@ class TestMergingTheTwoSources:
             silence_catalogues(mock)
             [match] = client.get(
                 "/api/books/search", params={"q": "moby"}, headers=admin["headers"]
-            ).json()
+            ).json()["matches"]
 
         tags = client.get("/api/books/tags", headers=admin["headers"]).json()
         names = {tag["id"]: tag["name"] for tag in tags}
@@ -527,7 +530,7 @@ class TestEveryCatalogueAnswers:
             silence_catalogues(mock)
             return client.get(
                 "/api/books/search", params={"q": query}, headers=headers
-            ).json()
+            ).json()["matches"]
 
     def test_k10plus_contributes(self, client, admin):
         [match] = self._search(client, admin["headers"], **{K10PLUS: marc()})
@@ -684,7 +687,7 @@ class TestLanguagePreference:
                 "/api/books/search",
                 params={"q": "der schwarm schatzing", "lang": "de"},
                 headers=admin["headers"],
-            ).json()
+            ).json()["matches"]
 
         assert matches[0]["language"] == "de"
 
@@ -709,15 +712,31 @@ class TestOneBadRecordCostsOneResult:
     **The classifications no longer reach that guard at all.** They go through
     `classifications.bounded_headings` first, like the lookup path, so an unusable heading costs its
     own row and a ninth heading costs the ninth heading. Everything else in the
-    record still costs the whole result, `year` being the reachable one: MARC
-    writes 9999 for a continuing resource and `MAX_YEAR` is 2200.
+    record used to cost the whole result, and almost nothing does any more.
 
-    **`page_count` used to be reachable here too and no longer is.**
-    `_pages_from_extent` was bounded on 2026-08-27, to close a `ValueError`
-    that 500d the whole request, and range checking it against
-    `MAX_PAGE_NUMBER_IN_A_BOOK` was part of that fix. An out of range extent
-    now costs the page count rather than the row, so a test that wants a record
-    the model refuses has to poison the year.
+    **Two bounds moved below this guard, a week apart, and each took a field
+    out of reach of it.** `_pages_from_extent` was range checked on
+    2026-08-27, so an out of range extent costs the page count. Every scalar a
+    `catalogue.Record` carries was bounded at construction on 2026-09-03, so a
+    `9999` year, an over-wide title or an over-wide publisher costs that field.
+
+    **What is left is `categories`, and it is left for a structural reason
+    rather than by having been missed.** It is not a field the record carries:
+    `Record.as_match` builds it by joining the record's subject list, so the
+    ceiling at construction never sees the value that `BookMatch.categories`
+    refuses. A test that wants a record the model refuses has to poison that.
+
+    `source` is the other survivor and is not reachable: every producer sets it
+    from a module literal, and joining every source name this tree has comes to
+    63 characters against a ceiling of 120.
+
+    **`isbn13` is the third and the one that still matters.**
+    `BookMatch.isbn13` refuses one past 20 and a design critic seat measured it
+    at 0 rows against 1, from an identifier `google_books._volume_to_fields`
+    takes straight out of somebody else's JSON. It is deliberately not bounded
+    at construction: `catalogue._UNBOUNDED` carries the measurement showing that
+    bounding it today 500s the scan route instead, through the same adapter, so
+    one lost row is the cheaper of the two.
     """
 
     def _search(self, client, headers, **routes):
@@ -774,7 +793,7 @@ class TestOneBadRecordCostsOneResult:
         )
 
         assert res.status_code == 200
-        assert [match["classifications"] for match in res.json()] == [[]]
+        assert [match["classifications"] for match in res.json()["matches"]] == [[]]
 
     def test_a_record_with_more_headings_than_the_ceiling_keeps_its_row(
         self, client, admin
@@ -792,7 +811,7 @@ class TestOneBadRecordCostsOneResult:
         nine = "".join(self._ddc(f"{100 + index}") for index in range(9))
         [match] = self._search(
             client, admin["headers"], **{K10PLUS: marc(extra=nine)}
-        ).json()
+        ).json()["matches"]
 
         assert match["title"] == "Der Zauberberg"
         assert len(match["classifications"]) == 8
@@ -818,7 +837,7 @@ class TestOneBadRecordCostsOneResult:
             client,
             admin["headers"],
             **{DNB: marc(extra=headings + self._ddc("830"))},
-        ).json()
+        ).json()["matches"]
 
         assert match["classifications"][0] == {
             "scheme": "ddc",
@@ -832,28 +851,37 @@ class TestOneBadRecordCostsOneResult:
         take the other results on the page with it. Before the guard this
         answered 500 and lost both.
 
-        **On the year, and it moved there on 2026-08-27.** It used to poison the
-        record with `999999 Seiten`, because an out of range page count reached
-        `BookMatch` and failed its bound. `_pages_from_extent` now range checks
-        what it parses, so that extent costs the page count and nothing else,
-        and the record is no longer bad at all. The year is the reachable bound
-        this class's docstring already named: MARC writes 9999 for a continuing
-        resource and `MAX_YEAR` is 2200.
+        **On the categories, and this is the third field it has sat on.** It
+        poisoned the record with `999999 Seiten` until 2026-08-27, when
+        `_pages_from_extent` began range checking what it parses; then with a
+        `9999` year, until 2026-09-03, when `catalogue.Record` began clearing
+        every scalar its column cannot hold at construction. Both moves cost
+        the field rather than the row, which is what this test then has to stop
+        asserting about them.
+
+        `categories` is what is left and is unlikely to move, because it is not
+        a field the record carries: `as_match` builds it by joining the
+        record's subject list, so the bound is on a value the ceiling above
+        never sees. One `650 $a` wider than `CATEGORIES_MAX` is enough.
         """
+        subject = (
+            '<datafield tag="650"><subfield code="a">'
+            + "s" * (CATEGORIES_MAX + 1)
+            + "</subfield></datafield>"
+        )
         res = self._search(
             client,
             admin["headers"],
             **{
                 K10PLUS: self._two_records(
-                    "",
+                    subject,
                     "Der Zauberberg Kommentar",
-                    first_year="9999",
                 )
             },
         )
 
         assert res.status_code == 200
-        assert [match["title"] for match in res.json()] == [
+        assert [match["title"] for match in res.json()["matches"]] == [
             "Der Zauberberg Kommentar"
         ]
 
@@ -866,7 +894,7 @@ class TestOneBadRecordCostsOneResult:
             client,
             admin["headers"],
             **{K10PLUS: marc(extra=self._ddc("610") + self._ddc("610"))},
-        ).json()
+        ).json()["matches"]
 
         assert match["classifications"] == [
             {"scheme": "ddc", "number": "610", "label": None}
@@ -877,7 +905,7 @@ class TestSubjectHeadingsOnASearchRow:
     """LCSH, out of the Library of Congress record this path already fetches.
 
     The search path is the only one that reaches it: the Library of Congress is
-    not in `_SOURCES`, so a scan never asks it. A picked row carries the
+    not in `metadata._lookup_one`, so a scan never asks it. A picked row carries the
     headings into `POST /{id}/enrich/apply` like any other, which is how they
     reach a book.
     """
@@ -905,7 +933,7 @@ class TestSubjectHeadingsOnASearchRow:
                 "/api/books/search",
                 params={"q": "sombra viento zafon"},
                 headers=headers,
-            ).json()
+            ).json()["matches"]
         return match
 
     def test_a_subject_heading_reaches_a_search_row(self, client, admin):
@@ -970,3 +998,234 @@ class TestSubjectHeadingsOnASearchRow:
         assert len(schemes) == MAX_CLASSIFICATIONS_PER_BOOK
         assert schemes[:2] == ["ddc", "lcc"]
         assert schemes[2:] == ["lcsh"] * 6
+
+
+class TestSearchingHarder:
+    """The slow catalogues are asked only when the request asks for them.
+
+    **Every test here injects a slow catalogue**, because `sources.SLOW_SEARCHES`
+    is empty on the shipped roster and this whole surface would otherwise assert
+    nothing. `test_sources.py` pins the shipped value on its own so the injection
+    cannot become the only thing anything knows about it.
+
+    The ÖNB is what is injected, being the source measured closest to the
+    ordinary deadline today.
+    """
+
+    @pytest.fixture
+    def slow_oenb(self, monkeypatch):
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
+        )
+
+    def _search(self, client, headers, *, harder=False, answering=None):
+        with respx.mock(assert_all_called=False) as mock:
+            oenb = mock.get(url__startswith=OENB).mock(
+                return_value=sru_response(answering or oenb_record())
+            )
+            silence_catalogues(mock)
+            params = {"q": "angehaltene leben"}
+            if harder:
+                params["harder"] = "true"
+            response = client.get(
+                "/api/books/search", params=params, headers=headers
+            )
+            return response, oenb
+
+    def test_the_ordinary_search_does_not_ask_a_slow_catalogue(
+        self, client, admin, slow_oenb
+    ):
+        response, oenb = self._search(client, admin["headers"])
+
+        assert response.status_code == 200
+        assert not oenb.called
+        assert response.json()["matches"] == []
+
+    def test_asking_harder_asks_it(self, client, admin, slow_oenb):
+        response, oenb = self._search(client, admin["headers"], harder=True)
+
+        assert oenb.called
+        [match] = response.json()["matches"]
+        assert match["source"] == "oenb"
+
+    def test_the_answer_names_what_was_left_out(self, client, admin, slow_oenb):
+        """So a client offers the second search rather than inferring it."""
+        response, _ = self._search(client, admin["headers"])
+        body = response.json()
+
+        assert body["unasked"] == ["oenb"]
+        assert "oenb" not in body["asked"]
+
+    def test_the_answer_names_what_was_reached_once_it_is_asked(
+        self, client, admin, slow_oenb
+    ):
+        response, _ = self._search(client, admin["headers"], harder=True)
+        body = response.json()
+
+        assert body["unasked"] == []
+        assert "oenb" in body["asked"]
+
+    def test_nothing_is_left_out_when_no_catalogue_is_slow(self, client, admin):
+        """The shipped state, and the reason a client must read the field.
+
+        With nothing marked slow the two rosters are the same, so `unasked` is
+        empty and a second search would ask nothing new whatever the reader
+        presses.
+        """
+        response, _ = self._search(client, admin["headers"])
+
+        assert response.json()["unasked"] == []
+
+    def test_a_library_whose_search_catalogues_are_all_slow_is_not_refused(
+        self, client, admin, monkeypatch
+    ):
+        """An empty page plus the offer, rather than a 409 naming the wrong cause.
+
+        This library has switched nothing off, so "turn one back on under
+        Settings" would be a screen reporting a fact it never checked. The
+        refusal is keyed on the harder roster for exactly this case.
+        """
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset(sources.SEARCH_SOURCES)
+        )
+        response, oenb = self._search(client, admin["headers"])
+        body = response.json()
+
+        assert response.status_code == 200
+        assert not oenb.called
+        assert body["matches"] == []
+        assert body["asked"] == []
+        # **The roster in force, not the stored one.** `settings_store` drops a
+        # source whose credential is missing before the plan reaches the search,
+        # so Google Books is absent from a keyless install's roster and is
+        # therefore neither asked nor left out: it is not on the list at all.
+        assert set(body["unasked"]) == {
+            source.value
+            for source in sources.SEARCH_SOURCES - sources.NEEDS_A_KEY
+        }
+
+    def test_the_same_library_finds_books_when_it_asks_harder(
+        self, client, admin, monkeypatch
+    ):
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset(sources.SEARCH_SOURCES)
+        )
+        response, oenb = self._search(client, admin["headers"], harder=True)
+
+        assert oenb.called
+        assert response.json()["matches"] != []
+
+
+class TestAQueryWithNothingInItBlamesNobody:
+    """A query that reduces to no usable terms asked nothing, for its own reason.
+
+    "and" and "a b" both survive the two character minimum and reduce to no
+    terms. Nothing is asked, exactly as when every enabled catalogue is a slow
+    one, and the two must not report the same way: a screen reading `asked`
+    alone would tell somebody who typed "and" that every catalogue their library
+    runs is slow, which is a claim about their settings that nothing checked.
+    """
+
+    @pytest.mark.parametrize("query", ["and", "a b"])
+    def test_it_leaves_nothing_to_ask_harder_for(
+        self, client, admin, monkeypatch, query
+    ):
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            response = client.get(
+                "/api/books/search", params={"q": query}, headers=admin["headers"]
+            )
+        body = response.json()
+
+        assert response.status_code == 200
+        assert body["matches"] == []
+        assert body["asked"] == []
+        # Not the slow catalogue. There was no question to ask it.
+        assert body["unasked"] == []
+
+    def test_a_real_query_does_leave_the_slow_one_to_ask(
+        self, client, admin, monkeypatch
+    ):
+        """The other arm, so the test above is not passing for the wrong reason."""
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            response = client.get(
+                "/api/books/search",
+                params={"q": "zauberberg"},
+                headers=admin["headers"],
+            )
+
+        assert response.json()["unasked"] == ["oenb"]
+
+
+class TestTheRefusalNamesThePathItRefuses:
+    """409 is about this library, so it has to name the right thing about it.
+
+    The shared sentence said "can look up an ISBN" and was raised from two title
+    searches. Reachable with nothing slow involved: the Czech National Library
+    answers an ISBN and answers no title search, so a library running it alone
+    got a title search refused by naming the one path that still worked.
+    """
+
+    def _only_the_czech_catalogue(self, client, admin):
+        client.put(
+            "/api/settings",
+            json={
+                "catalogue_sources": [
+                    {"source": source.value, "enabled": source is CatalogueSource.NKP}
+                    for source in sources.DEFAULT_ORDER
+                ]
+            },
+            headers=admin["headers"],
+        )
+
+    def test_a_title_search_is_refused_by_naming_the_title_search(
+        self, client, admin
+    ):
+        self._only_the_czech_catalogue(client, admin)
+        response = client.get(
+            "/api/books/search", params={"q": "anything"}, headers=admin["headers"]
+        )
+
+        assert response.status_code == 409
+        assert "title search" in response.json()["detail"]
+
+    def test_the_candidates_route_is_refused_by_naming_the_title_search(
+        self, client, admin, make_book
+    ):
+        """The second of the two sites, which the first fix did not reach.
+
+        `GET /{id}/enrich/candidates` runs a title search too: it calls
+        `metadata.candidates`, which calls `search` internally and reaches the
+        catalogues by the book's title rather than by its ISBN. It refused with
+        the default wording until 2026-09-03, so the same library got the same
+        wrong sentence one route along.
+        """
+        book = make_book(admin["headers"])
+        self._only_the_czech_catalogue(client, admin)
+
+        response = client.get(
+            f"/api/books/{book['id']}/enrich/candidates", headers=admin["headers"]
+        )
+
+        assert response.status_code == 409
+        assert "title search" in response.json()["detail"]
+
+    def test_the_isbn_path_still_answers_for_that_library(self, client, admin):
+        """Which is why naming the ISBN there was wrong rather than merely vague."""
+        self._only_the_czech_catalogue(client, admin)
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            response = client.get(
+                "/api/books/lookup",
+                params={"isbn": "9783596294336"},
+                headers=admin["headers"],
+            )
+
+        assert response.status_code != 409

@@ -647,7 +647,17 @@ class TestTheOrderFollowsTheMeasurement:
         assert tail == set(sources.TAIL_MARGINAL)
 
     def test_every_source_is_searched_by_default(self):
-        assert set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES
+        """The two search rosters, stated as a partition rather than as one set.
+
+        `searched_harder` is the whole of `SEARCH_SOURCES` and `searched` is
+        that minus `SLOW_SEARCHES`. Written this way so the day a catalogue is marked
+        slow the failure lands where the rule is, rather than here as a set
+        comparison nobody can read a reason off.
+        """
+        assert set(sources.DEFAULT_PLAN.searched_harder) == sources.SEARCH_SOURCES
+        assert (
+            set(sources.DEFAULT_PLAN.searched) == sources.SEARCH_SOURCES - sources.SLOW_SEARCHES
+        )
 
     def test_the_two_lookup_tiers_are_the_whole_lookup_roster(self):
         """Nothing that can answer an ISBN is dropped between the tiers.
@@ -668,7 +678,7 @@ class TestTheOrderFollowsTheMeasurement:
 class TestAStoredRowAlwaysResolvesToTheWholeRoster:
     """`parse` returns a permutation, whatever it is handed.
 
-    That is the property `metadata._SOURCES[name]` rests on: there is no name it
+    That is the property `targets.SEEDED[name]` rests on: there is no name it
     can be given that has no function behind it, so there is no `KeyError` to
     reach on the path that adds a book.
     """
@@ -1419,3 +1429,180 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         # twice.
         assert set(plan.lookup_together) == {CatalogueSource.OENB, CatalogueSource.NLG}
         assert plan.lookup_in_turn("978-84") == ()
+
+
+class TestASlowCatalogueIsAskedOnlyWhenSomebodyAsks:
+    """The default search leaves the slow catalogues out; a second action adds them.
+
+    **Every behavioural test here injects a slow source**, because `sources.SLOW_SEARCHES`
+    is empty on today's roster and a suite that only ran against the live value
+    would assert nothing at all. `test_nothing_on_this_roster_is_marked_slow`
+    pins the live value on its own, so the injection cannot quietly become the
+    only thing this class knows about.
+
+    The ÖNB is the source injected, because it is the one the deadline is
+    likeliest to drop today and so the closest live thing to the case: measured
+    0.156s to 3.23s across 24 live title searches on 2026-08-27, against a 4.0s
+    deadline.
+    """
+
+    @pytest.fixture
+    def slow_oenb(self, monkeypatch):
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB})
+        )
+        return sources.DEFAULT_PLAN
+
+    def test_the_marking_can_only_name_a_catalogue_that_answers_a_search(self):
+        """A member outside `SEARCH_SOURCES` is a rule that can never apply.
+
+        The set relation on its own is vacuous while the set is empty, and a
+        critic said so: delete the assertion and nothing goes red, delete the
+        rule it names and nothing goes red either. The arm below drives the
+        consequence instead of asserting the absence of one.
+        """
+        assert sources.SLOW_SEARCHES <= sources.SEARCH_SOURCES
+
+    def test_marking_a_catalogue_that_answers_no_search_is_silently_inert(
+        self, monkeypatch
+    ):
+        """Which is why the subset above is a rule rather than a preference.
+
+        Both rosters filter on `SEARCH_SOURCES` before consulting the marking,
+        so a member outside it changes nothing and raises nothing. The Czech
+        National Library is the live instance: on the roster, answers an ISBN,
+        answers no title search.
+        """
+        monkeypatch.setattr(
+            sources, "SLOW_SEARCHES", frozenset({CatalogueSource.NKP})
+        )
+        plan = sources.DEFAULT_PLAN
+        assert CatalogueSource.NKP not in plan.searched
+        assert CatalogueSource.NKP not in plan.searched_harder
+        assert plan.searched_only_harder == ()
+        # The marking made no difference at all, and nothing anywhere would have
+        # said it had been misapplied. That is what the subset rule buys.
+        assert set(plan.searched) == set(plan.searched_harder)
+
+    def test_nothing_on_this_roster_is_marked_slow(self):
+        """Empty, and said out loud so the day it changes somebody re-reads why.
+
+        The bar is a measured title search at or above
+        `metadata.SEARCH_DEADLINE_SECONDS`; the slowest this tree records is
+        3.23s. Deleting this leaves the class below testing an injected value and
+        nothing testing the shipped one.
+        """
+        assert not sources.SLOW_SEARCHES
+
+    def test_the_default_search_does_not_ask_a_slow_catalogue(self, slow_oenb):
+        assert CatalogueSource.OENB not in slow_oenb.searched
+
+    def test_the_harder_search_does_ask_it(self, slow_oenb):
+        assert CatalogueSource.OENB in slow_oenb.searched_harder
+
+    def test_the_two_rosters_differ_by_exactly_the_slow_catalogues(self, slow_oenb):
+        """A partition that sums, checked in both directions.
+
+        **Tautological against today's definition, and that is what it is for.**
+        `searched` is `searched_harder` minus the marking, one filter over one
+        list, so both assertions follow from the code rather than testing it. A
+        critic said so and the honest answer is not to dress it up: what this
+        pins is that the two stay **one** computation. Rewrite either as its own
+        pass over `asked` and they become two rules free to disagree, which is
+        the shape a corrected partition that does not sum arrives in.
+        """
+        assert set(slow_oenb.searched_harder) - set(slow_oenb.searched) == {
+            CatalogueSource.OENB
+        }
+        assert set(slow_oenb.searched) | {CatalogueSource.OENB} == set(
+            slow_oenb.searched_harder
+        )
+
+    def test_the_harder_search_keeps_the_household_order(self, slow_oenb):
+        """Position still decides precedence, so the longer roster is not resorted."""
+        harder = slow_oenb.searched_harder
+        assert list(harder) == [
+            name for name in slow_oenb.asked if name in sources.SEARCH_SOURCES
+        ]
+
+    def test_slow_searches_names_what_the_default_left_out(self, slow_oenb):
+        assert slow_oenb.searched_only_harder == (CatalogueSource.OENB,)
+
+    def test_slow_searches_is_empty_when_nothing_is_slow(self):
+        """What the screen reads to decide whether the second action is offered."""
+        assert sources.DEFAULT_PLAN.searched_only_harder == ()
+
+    def test_a_slow_catalogue_that_is_switched_off_is_in_neither_roster(
+        self, monkeypatch
+    ):
+        """Slow is not a second on switch, in either direction.
+
+        The household's off switch still wins: asking harder asks the
+        catalogues this library kept, not every catalogue that exists.
+        """
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB}))
+        plan = sources.parse({"sources": [{"source": "oenb", "enabled": False}]})
+        assert CatalogueSource.OENB not in plan.searched
+        assert CatalogueSource.OENB not in plan.searched_harder
+        assert plan.searched_only_harder == ()
+
+    def test_a_slow_catalogue_is_still_asked_on_every_scan(self, slow_oenb):
+        """The ISBN path is untouched, which is half of what #108 decided.
+
+        A regression test rather than a new rule: `lookup_chain` and the two
+        tiers under it never consult `SLOW_SEARCHES`, because a sequential chain reaches
+        a slow source only after every faster one has missed, which is exactly
+        when a reader wants it.
+        """
+        assert CatalogueSource.OENB in slow_oenb.lookup_chain
+        assert CatalogueSource.OENB in (
+            slow_oenb.lookup_together + slow_oenb.lookup_in_turn(None)
+        )
+
+    def test_a_library_whose_search_catalogues_are_all_slow_has_an_empty_default(
+        self, monkeypatch
+    ):
+        """An empty default roster and a full harder one, rather than an error.
+
+        The shape `_within_deadline` once answered with a 500. It is also the
+        case that decides which roster the router's refusal is keyed on: this
+        library has switched nothing off, so telling it to switch one back on
+        would be a screen naming the wrong cause.
+        """
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", sources.SEARCH_SOURCES)
+        assert sources.DEFAULT_PLAN.searched == ()
+        assert set(sources.DEFAULT_PLAN.searched_harder) == sources.SEARCH_SOURCES
+
+    def test_the_screen_is_told_which_catalogues_are_slow(self, monkeypatch):
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB}))
+        described = {
+            row.source: row.slow
+            for row in sources.describe(
+                sources.DEFAULT_PLAN,
+                ready=frozenset(CatalogueSource),
+                credentials=frozenset(),
+            )
+        }
+        assert described[CatalogueSource.OENB] is True
+        assert described[CatalogueSource.K10PLUS] is False
+
+    def test_the_screen_is_told_even_for_a_catalogue_that_is_switched_off(
+        self, monkeypatch
+    ):
+        """Unconditional, like `needs_a_key`.
+
+        A household switching a slow catalogue on wants to be told what it costs
+        at the moment it switches it on, and a field that went true only once the
+        source was already enabled could not say so first.
+        """
+        monkeypatch.setattr(sources, "SLOW_SEARCHES", frozenset({CatalogueSource.OENB}))
+        plan = sources.parse({"sources": [{"source": "oenb", "enabled": False}]})
+        [row] = [
+            row
+            for row in sources.describe(
+                plan, ready=frozenset(CatalogueSource), credentials=frozenset()
+            )
+            if row.source is CatalogueSource.OENB
+        ]
+        assert row.enabled is False
+        assert row.slow is True

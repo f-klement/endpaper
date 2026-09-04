@@ -13,6 +13,35 @@ import type { ClassificationIn } from "./classificationIn.ts";
  * Named for what it is rather than where it came from: search asks Open
  * Library always and Google Books when a key is configured, and merges what
  * they agree on into one row. `source` says which of them supplied it.
+ *
+ * **Every field is bounded, because this is a request body and not only a
+ * response.** `POST /api/books/{id}/enrich/apply` accepts one, so each field
+ * is a value a member chose rather than one a catalogue supplied.
+ *
+ * **And since 2026-09-03 it is the only way a catalogue value reaches a Book
+ * column through `merge_into`**, which is a second reason for the same
+ * bounds rather than a second rule. `google_books.merge_into` takes this
+ * model rather than a dictionary, so `POST /api/books/{id}/enrich` builds one
+ * through `routers/books._bounded_match` instead of handing over whatever
+ * `Record.as_match()` assembled. Before that the ceilings applied on one
+ * route and not on its neighbour: the same oversized value was a 422 on
+ * apply and a stored row on enrich, same book, one route apart.
+ *
+ * **Through `merge_into` was the whole of the claim, because a third route
+ * did not go through it, and that closed on 2026-09-03 one layer below all
+ * three.** `PUT /api/books/{id}/refresh` assigns nine columns straight off the
+ * same `catalogue.Record` and builds no model at all, so a 9999 year and a
+ * 40,000 character description were stored there and refused on both of the
+ * other two. Measured, one volume, three routes. Both critic seats found it
+ * separately while checking an earlier version of this paragraph that claimed
+ * the whole family was closed, which is why the sentence says which door it
+ * means.
+ *
+ * `catalogue.Record` now clears every scalar its column cannot hold at
+ * construction, so no producer hands any of the three an unusable value and
+ * the refresh route needed no model of its own. What these bounds still do
+ * alone is the two fields a record does not carry: `categories`, which
+ * `as_match` assembles from the record's subject list, and `suggested_tag_ids`.
  */
 export interface BookMatch {
   author?: string | null;
@@ -28,9 +57,11 @@ export interface BookMatch {
   publisher?: string | null;
   series_index?: number | null;
   series_name?: string | null;
+  /** @maxLength 120 */
   source?: string;
   subtitle?: string | null;
   /**
+   * @maxItems 500
    * @items.minimum 1
    * @items.maximum 9223372036854776000
    */

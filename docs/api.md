@@ -90,7 +90,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
 | GET | `/api/books/export?format=csv\|txt\|marcxml` | user | File download, not paginated. `marcxml` needs library mode, **403** without |
-| GET | `/api/books/search?q=` | user | Free-text search for the add flow. Needs no API key |
+| GET | `/api/books/search?q=&harder=` | user | Free-text search for the add flow. Needs no API key. `harder` also asks the slow catalogues |
 | GET | `/api/books/series` | user | Every series, with the gaps in it |
 | GET | `/api/books/authors` | user | Everybody credited on the shelf, with counts, spellings and merges |
 | GET | `/api/books/authors/suggestions` | user | Names that look like one person |
@@ -468,7 +468,7 @@ cluster with the book's own ISBN: every row in it is a printing of the same book
 Library's own merge rather than by a title match. Underneath it sits the free text search
 across every catalogue the library has switched on, which is the only answer for a book
 with no ISBN, for a work Open Library has not merged, and for a good deal of German
-publishing, where Open Library returns 404. A new install has all eight on; see the
+publishing, where Open Library returns 404. A new install has all nine on; see the
 provider list below.
 
 **Open Library switched off answers no cluster at all**, because nothing else here holds
@@ -524,8 +524,11 @@ one more source when a key is set.
 
 ### Free-text search
 
-`GET /api/books/search?q=&limit=&lang=` is how a book with no barcode, a damaged one, or
-one printed before ISBNs existed gets added. **It needs no API key.**
+`GET /api/books/search?q=&limit=&lang=&harder=` is how a book with no barcode, a damaged
+one, or one printed before ISBNs existed gets added. **It needs no API key.**
+
+It answers with an object, not a bare list: `matches`, plus `asked` and `unasked` naming
+the catalogues this fan out did and did not reach. See *Searching harder* below.
 
 Eight catalogues, in three tiers, all asked concurrently:
 
@@ -560,6 +563,42 @@ from a German interface still returns the English book first.
 A source that fails is skipped rather than failing the search, and a source that has not
 answered within `SEARCH_DEADLINE_SECONDS` is cancelled. One national catalogue having a
 bad afternoon degrades the results, not the latency.
+
+#### Searching harder
+
+A catalogue can be slow enough that the shared deadline cancels it before it ever answers,
+which makes it a burned connection and never a record. Switching such a catalogue on would
+therefore change nothing, so it is left out of the ordinary search and reached by asking
+for it: `harder=true`, under a longer deadline of its own.
+
+Nothing is left out on the ISBN path and nothing needed to be. That chain asks one source
+at a time and stops at the first hit, so a slow catalogue there is reached only when every
+faster one has already missed, which is exactly when a reader wants it.
+
+`harder` is a request rather than an instruction, and three things can make the answer an
+ordinary search anyway: this library has no such catalogue switched on, the one long fan
+out allowed at a time is already running, or the query reduced to no usable terms. The
+response says which catalogues were reached rather than leaving a client to infer it:
+
+| field | meaning |
+|---|---|
+| `asked` | the catalogues this fan out reached |
+| `unasked` | the switched on catalogues it did not, which is exactly what asking harder would add |
+
+So a client offers the second search when `unasked` is not empty, and never has to guess
+whether the first one already ran.
+
+**An empty `asked` beside a non empty `unasked` is a distinct state from finding nothing**:
+every catalogue this library has switched on is a slow one and nobody has asked for them
+yet, so "no matches" would be a claim about the book from a request that asked nobody. Both
+empty is the other way of asking nothing, and it is the reader's doing rather than the
+library's: a query of two characters can reduce to no usable terms, `and` and `a b` both
+do, and nothing was asked because there was no question. The two are told apart by
+`unasked` and not by `asked` alone.
+
+**Which catalogues are slow is a property of the catalogue, not a setting.** It is decided
+from measured latency against the ordinary deadline, and the settings screen says so on the
+row, so a catalogue that is off because it is slow does not read as one that is broken.
 
 Deduplication is **across** sources only, never within one. Two printings of one book share
 a title and an author, and choosing between them is the entire point of the picker.
@@ -696,7 +735,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the six sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the seven sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the
@@ -1313,6 +1352,9 @@ With every capable source switched off, **all four routes that reach a catalogue
 that asked nobody, and an empty result page reads the same way. Enrichment refuses up
 front rather than per half, so one request cannot answer 409 for its ISBN half and fail
 for its search half.
+
+**`GET /api/books/search` names the title search in its message.** The other three name
+the ISBN lookup, which is what the shared sentence has always said.
 
 `PUT /api/settings` takes `catalogue_sources` as a list of `{source, enabled}`. It is
 **merged against what is stored, not taken whole**: a payload naming one source says

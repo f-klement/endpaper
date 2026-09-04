@@ -90,6 +90,34 @@ def fold_collection_name(name: str) -> str:
     """
     return name.lower()
 
+
+#: The highest volume number a series is reasoned about up to.
+#:
+#: Read by the three request bodies that write `books.series_index`
+#: (`BookCreate`, `BookMatch`, `BookDetailsUpdate`) **and** by
+#: `routers/books.list_series`, which is the reason it is a name here rather
+#: than a literal in each. The bound and its consumer have to agree: that
+#: handler computes `set(range(1, max(held) + 1))` over the column under
+#: `Shelf.seen_by`, so the ceiling on what may be stored is also the ceiling on
+#: how much work one stored row can make every member's request do.
+#:
+#: **Bounding the writers was not enough, and this is the half that covers the
+#: rows already written.** Every API path now refuses a larger value, but
+#: `backup.restore` inserts through Core, where neither pydantic nor a
+#: `@validates` fires, and an instance upgraded from a release before
+#: 2026-09-03 carries whatever its enrichment route stored. Measured on one row
+#: at 2,000,000, which is 2,000x this number: `GET /api/books/series` answered
+#: **14,888,944 bytes** carrying 1,999,999 missing indexes. So the handler
+#: truncates the range at this ceiling, which loses nothing a member could have
+#: entered and keeps the gaps below it, rather than answering with a series
+#: nobody can read or with nothing at all.
+#:
+#: 1000 rather than a rounder or tighter number is inherited: it is the `le` the
+#: three bodies already carried as a literal, and moving it here changed no
+#: value. `tests/schemas/test_book.py` keeps the three from drifting apart and
+#: cannot see this fourth reader, which is the second reason for the name.
+MAX_SERIES_INDEX = 1000
+
 #: The highest page a book is allowed to have, in the database's own words.
 #:
 #: The same number `schemas/progress.py` calls `MAX_PAGE` and `BookCreate`
@@ -607,6 +635,29 @@ class User(Base):
     )
 
 
+#: How wide each of the Book's own text columns is.
+#:
+#: Named rather than written as a literal inside `String(...)` because a second
+#: module now has to agree with them. `catalogue.Record` bounds what a catalogue
+#: asserted against the column that will store it, and a ceiling it derived from
+#: a literal it could not see would be a fact stored twice.
+#: `tests/test_catalogue.py::TestARecordAgreesWithTheColumnsItFeeds` recomputes
+#: each one from `Book.__table__` rather than restating it.
+#:
+#: **`AUTHOR_LINE_MAX` is not `authors.AUTHOR_NAME_MAX`.** That one bounds a
+#: single person's name (300); this bounds the whole credit line, which is every
+#: person `authors.split_authors` will later separate.
+TITLE_MAX = 500
+SUBTITLE_MAX = 500
+AUTHOR_LINE_MAX = 500
+PUBLISHER_MAX = 255
+LANGUAGE_MAX = 10
+COVER_URL_MAX = 500
+SERIES_NAME_MAX = 255
+GOOGLE_BOOKS_ID_MAX = 50
+ISBN_MAX = 20
+
+
 class Book(Base):
     __tablename__ = "books"
 
@@ -649,15 +700,15 @@ class Book(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    isbn: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)
+    isbn: Mapped[str | None] = mapped_column(String(ISBN_MAX), index=True, nullable=True)
     # Indexed because it is the default sort for every listing and export.
-    title: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
-    subtitle: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    author: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    publisher: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str] = mapped_column(String(TITLE_MAX), nullable=False, index=True)
+    subtitle: Mapped[str | None] = mapped_column(String(SUBTITLE_MAX), nullable=True)
+    author: Mapped[str | None] = mapped_column(String(AUTHOR_LINE_MAX), nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(PUBLISHER_MAX), nullable=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_url: Mapped[str | None] = mapped_column(String(COVER_URL_MAX), nullable=True)
 
     # Enrichment fields. Left empty by the ordinary scan flow and filled on
     # demand from Google Books, which carries them far more often than Open
@@ -665,9 +716,9 @@ class Book(Base):
     # deliberately NOT the Tag system: tags are a small curated vocabulary the
     # library chooses from, these are whatever the publisher supplied.
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    language: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    language: Mapped[str | None] = mapped_column(String(LANGUAGE_MAX), nullable=True)
     categories: Mapped[str | None] = mapped_column(Text, nullable=True)
-    google_books_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    google_books_id: Mapped[str | None] = mapped_column(String(GOOGLE_BOOKS_ID_MAX), nullable=True)
 
     # Series membership. Two columns rather than a `series` table: a series has
     # no attributes of its own here beyond a name, and the questions asked of it
@@ -678,7 +729,7 @@ class Book(Base):
     # Indexed because "everything in this series" is a browse action, not a
     # search. `series_index` is a float: omnibus editions and novellas really are
     # numbered 2.5.
-    series_name: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    series_name: Mapped[str | None] = mapped_column(String(SERIES_NAME_MAX), nullable=True, index=True)
     series_index: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Where the copy physically is: "living room shelf 3", "loft box 2".
@@ -1297,6 +1348,117 @@ CLASSIFICATION_NUMBER_MAX = 120
 #: characters and is not the longest.
 CLASSIFICATION_LABEL_MAX = 200
 
+#: The longest subject list a client may write into `books.categories`.
+#:
+#: The second `Text` column on this table and the second one on the **list**
+#: payload, so it inherits `DESCRIPTION_MAX`'s argument whole: an oversized
+#: value here is paid for on every page of every listing, and the column stays
+#: `Text` so this bounds new writes without making a stored row unreadable.
+#:
+#: **Computed rather than chosen, so the arithmetic cannot drift from the
+#: sentence.** This field is a `"; "` joined list of subject headings, and this
+#: app already states how wide one heading may be: `CLASSIFICATION_NUMBER_MAX`
+#: is 120, set so that no LCSH heading is refused. So the ceiling is exactly 32
+#: of those joined, **3,902**, and 33 would need 4,024.
+#:
+#: **Half of that expression is a named constant and half is the literal `2`**,
+#: which is the width of `google_books.CATEGORY_SEPARATOR`. That module is the
+#: only place allowed to know the separator, by its own docstring, so importing
+#: it here would make this a second place that knows. The literal is pinned by
+#: a test instead:
+#: `tests/schemas/test_book.py::test_the_categories_ceiling_assumes_the_separator_it_is_derived_from`.
+#: A critic seat raised it because the comment below claims the arithmetic
+#: cannot drift, and one of its two terms could.
+#:
+#: It was written as a round 4,000 first, described as "32 headings at that
+#: ceiling". It was not: 32 joined is 3,902 and 4,000 admits 32 and refuses 33,
+#: landing on no boundary of its own domain. That is the tell this repository
+#: records for a number whose instrument stopped somewhere arbitrary, and the
+#: fix is to let the expression state it.
+#:
+#: 32 rather than something nearer the measured shapes, because **the two
+#: failure modes are not symmetric**. Too loose costs page weight, which the
+#: arithmetic below bounds. Too tight costs a whole search result, silently:
+#: `routers/books._match_rows` drops the row rather than the field, and logs at
+#: INFO. So the count carries the headroom.
+#:
+#: The measured shapes it has to clear: **this app** caps an Open Library work
+#: at 12 subjects (`metadata._OPEN_LIBRARY_MAX_SUBJECTS`, ours and not theirs,
+#: against their own lists measured at up to 137), a live Library of Congress
+#: record carries 14 headings, and the longest single heading measured here is
+#: 91 characters over 1,559 live headings (see `CLASSIFICATION_NUMBER_MAX` in
+#: `docs/decisions.md`). Fourteen of those is 14 x 91 plus thirteen two
+#: character separators, **1,300**, so this admits the widest shape anybody has
+#: measured with 3.0x to spare.
+#:
+#: The page cost: 25 books at 3,902 is 97,550 characters, 39% of what
+#: `DESCRIPTION_MAX` already permits on the same payload, against the 3.2 MB
+#: page that made an unbounded `Text` column visible in the first place.
+#:
+#: **It bounded what a caller can store and not what a catalogue could, and
+#: that gap closed on 2026-09-03.** `catalogue.Record.merged_with` unions
+#: subjects, only on the lookup path, which used to hand `merge_into` a plain
+#: dictionary and never build a `BookMatch`. Every path that constructs a
+#: `BookMatch` folds with `filled_from`, which takes the leading catalogue's
+#: list whole and unions nothing, so this bound was the whole of what a request
+#: body could carry and none of what the lookup path could. `merge_into` now
+#: takes a `BookMatch`, so both paths pass this number.
+#:
+#: **What that changed is the failure, not the fold.** Everything measured
+#: below still describes what the union can assemble; what an oversized union
+#: now costs is the `categories` field on that one enrichment, dropped by
+#: `routers/books._bounded_match` and logged at INFO, rather than a row stored
+#: past its column for ever.
+#:
+#: **How large that other path can get is not known, and the figure that used
+#: to stand here was invented.** It read, in full and now retired: "nine
+#: catalogues x 14 headings of 91 characters joined by 125 separators, that
+#: path stores 11,716 characters, 3.0x this bound". Every part of that is
+#: wrong, and wrong in the direction that made the risk sound worse.
+#:
+#: The fold is **two** records, not nine. `merged_with` has one production
+#: caller, `metadata._merge`, which has one call site, which reduces over
+#: `plan.lookup_together`, and that is sliced to `sources.ALWAYS_ASKED = 2`.
+#: The tail tier returns a single record on its first hit and folds nothing.
+#: Driven rather than read, with all nine sources enabled and every one
+#: answering: `merged_with` is called **once**, the record carries two sources,
+#: and `categories` comes to **2,602** characters, **0.67x** this bound. On the
+#: tail path it is called zero times.
+#:
+#: And both per record figures came from a catalogue that cannot be on that
+#: path. The 14 is `routers/books.py`'s note that a live Library of Congress
+#: record carries up to 14 subject headings; the 91 is `docs/decisions.md`'s
+#: longest of 1,559 live **LCSH** headings. LOC and BNF are title search only,
+#: so neither is ever asked for an ISBN: seven of the nine sources reach the
+#: lookup path and those two do not. Both numbers illustrate a heading's size;
+#: neither measures this path.
+#:
+#: **The reason the size is unknowable is the reason worth keeping**, and it is
+#: why the bound is applied rather than the fold capped. Nothing caps the
+#: subject list on that path: `metadata._OPEN_LIBRARY_MAX_SUBJECTS = 12` is the
+#: only slice in the module, and nothing truncates downstream either.
+#: `CATEGORIES_MAX` is still read in exactly one place, `BookMatch.categories`,
+#: and neither `join_categories` nor `merge_into` applies it itself: what
+#: changed is that the lookup path now goes through that one place too.
+#:
+#: **And the pair that gets folded is chosen from the settings screen.** The
+#: pool is six, not seven: `lookup_together` filters `METERED`, so Google Books
+#: can never be in the folded pair and reaches this column only through the
+#: tail, where nothing folds. Of those six, `open_library` is the one that is
+#: capped and `dnb`, `k10plus`, `nkp`, `nlg` and `oenb` are not, and
+#: `lookup_chain` is the household's own order. Driven: a household leading
+#: `dnb` then `k10plus` folds exactly those two, both uncapped, with no code
+#: change and no unusual record.
+#:
+#: So there is no ceiling to quote here, and that is the finding rather than a
+#: gap in it. Feeding those two 40 subjects each reaches 7,438 characters,
+#: 1.91x this bound, but **40 is an input chosen to show the shape**, not a
+#: measurement of any catalogue, and writing it down as a worst case is exactly
+#: the mistake the retired sentence above made. That is also why a fold with no
+#: ceiling can be left alone: an unquotable size needs a bound at the column
+#: rather than a guess at the source.
+CATEGORIES_MAX = 32 * CLASSIFICATION_NUMBER_MAX + 31 * 2
+
 
 class Classification(Base):
     """One published scheme's assertion about what a book is about.
@@ -1696,3 +1858,199 @@ def in_trash_for(user_id: int) -> ColumnElement[bool]:
         Book.deleted_at.isnot(None),
         or_(Book.is_private.is_(False), Book.added_by_user_id == user_id),
     )
+
+
+class CatalogueTarget(Base):
+    """One catalogue source as a row: its address, transport, indexes and bounds.
+
+    **Seeded and, today, read by nothing at runtime.** `targets.SEEDED` is what
+    `metadata` asks, and it is a module constant. That is deliberate rather than
+    unfinished: `fetch.py` and `z3950.py` both argue they need no host allowlist
+    because a target's address is a module constant, and #127's decision D2 sends
+    a member supplied host to its own ticket with its own review. Reading an
+    address off this table is that decision, not this one.
+
+    So what the table is for is the tickets it unblocks, each of which owns one
+    column that is inert here: #130 makes a row editable and reads `rank`, #132
+    enforces `timeout_seconds`, and #32 adds the institution's hard filter. The
+    rule separating a column that is kept from one that is not is that a column
+    reserved for a **named** ticket is kept and a column reserved for a
+    hypothetical target is not, which is why `encoding` is absent: nothing in the
+    roster needs one, `fetch.Fetched.text` resolves the charset off the response,
+    and no ticket is waiting for it.
+
+    **A refused row answers 500 on the restore route rather than 400**, which is
+    the fourth instance of something `backup.py` already records at three sites:
+    an `IntegrityError` is not a `RestoreError`. Worth knowing before somebody
+    meets one and goes looking for the bug, and not worth widening the handler
+    for on its own.
+
+    **Every constraint that matters is a `CheckConstraint` and not a
+    `__post_init__`**, because `backup.restore` writes through Core. An admin is
+    not a reason to trust a file: it may have come from another deployment or
+    have been edited by hand, and `docs/security.md` records what one restored
+    row did to `custom_fields.kind`. Three of them are worth reading:
+
+    * `ck_catalogue_targets_isbn_claim` states the one measured exception to the
+      ISBN identity check. At the OENB that check is the whole defence against a
+      mistyped index, which answers HTTP 200 with 7,793,152 records and no
+      diagnostic, so a boolean flipped on a restored row would put an arbitrary
+      record on a member's shelf from a scan.
+    * `ck_catalogue_targets_transport` refuses `z3950`, which is the refusal
+      `targets.Target.__post_init__` makes and which #129 lifts in both places
+      at once.
+    * `ck_catalogue_targets_indexes` admits only `targets._INDEX`'s repertoire,
+      letters, digits, a dot and an underscore, or the empty string the BnF and
+      the Czech National Library legitimately carry. **It was a denylist of ten
+      characters and that was measured wrong.** A critic ran 25 index shapes
+      against both spellings: they agreed on 10 and **disagreed on 15**, and
+      seven of the fifteen carry a CQL token separator the list did not name,
+      TAB, LF, CR, VT, FF, NBSP and U+3000. `dc.title<TAB>and` as a title index
+      builds a two clause boolean through the column whose constraint exists to
+      refuse exactly that. The negated class is the same 25 probes at **1 gap**,
+      an embedded NUL, which SQLite's pattern matcher stops at; `_INDEX` refuses
+      it in Python and no path writes an index from anything but a literal.
+
+      **The lesson is the one this repository already bought**, one query
+      language along: split on the repertoire rather than forbidding one
+      spelling and allowing the others.
+
+      **"1 gap" is a repertoire figure and not an equality**, which is worth
+      saying because the next reader will take it for one. A CHECK has no way to
+      spell "one dot, not two", so the constraint is a character test where
+      `_INDEX` is a grammar. Measured over 19 shapes: **0** that `_INDEX` accepts
+      and the CHECK refuses, which is the direction that matters for a restore
+      and which is structural rather than lucky, since `_INDEX`'s repertoire is
+      a subset of the CHECK's; and **6** the other way, `.foo`, `1abc`, `a..b`,
+      `___`, `a_b` and `x.`. Every one of the six is character safe: none can
+      carry a separator, a relation character or a quote, so none can be more
+      than a name the target does not know.
+
+      **A twentieth shape makes that six a seven, and the seventh is the NUL
+      already counted one paragraph up.** Anybody recomputing this with an
+      embedded NUL in their probe set gets seven and has to work out which
+      register the extra belongs to, so: it is the residual of the 1 gap
+      above and is deliberately not one of these six. Two figures, one shape,
+      and the six are what a CHECK cannot express rather than what it cannot
+      see.
+    * `ck_catalogue_targets_use_attribute` is `targets._USE_ATTRIBUTES` in SQL.
+      Without it the whole PQF attribute rule lived in `__post_init__` and
+      `z3950.query`, which are the two places a Core insert does not reach.
+
+      **`typeof` is redundant given the `IN`, which is not the same as dead**,
+      and this paragraph has now been wrong in both directions. It first credited
+      `typeof` with catching the float; it then said `typeof` catches nothing. A
+      critic ran the three spellings separately over seven values against a
+      column declared INTEGER:
+
+      | probe | `typeof` alone | `IN` alone | shipped |
+      |---|---|---|---|
+      | NULL | accepts | accepts | accepts |
+      | `7` | accepts | accepts | accepts |
+      | `4` | accepts | **refuses** | refuses |
+      | `True` | accepts | **refuses** | refuses |
+      | `'7'` | accepts | accepts | accepts |
+      | `7.0` | accepts | accepts | accepts |
+      | `'7 @and @attr 1=4 x'` | **refuses** | **refuses** | refuses |
+
+      So `typeof` refuses exactly one, the injection payload, and everything it
+      refuses the `IN` refuses too: the `IN` alone and the shipped pair give
+      identical verdicts on all seven. `'7'` and `7.0` are accepted and stored
+      **as the integer 7**, because INTEGER affinity converts a well formed
+      integer literal before either half is evaluated, so a reader meeting those
+      two in a probe should not file them as gaps.
+
+      `typeof` is kept for what it pins rather than for what it uniquely catches:
+      the **stored** type is what `z3950.query` will be handed, the `IN` is a
+      value test where this is a type test, and affinity's conversion is SQLite's
+      behaviour rather than a guarantee this project controls. Anybody deleting
+      it should re-run that table first. The Python side is a separate layer and
+      is not redundant: `Target.__post_init__` uses `type(...) is not int`, which
+      refuses a float `7.0` that never reaches affinity.
+
+    **A restore empties this table and refills it only from the archive**, so an
+    archive written before this revision leaves it empty. That does not break a
+    lookup, because nothing reads the table; it would hand #130 a screen with no
+    rows on it. `main.seed_catalogue_targets` runs at startup and reconciles
+    every row carrying `is_seeded` against `targets.SEEDED`, which makes a
+    restore self healing.
+
+    **Reconciled rather than only inserted, and that is where this departs from
+    `seed_tags`.** That function inserts what is missing and never updates,
+    because a tag a library renamed is theirs. A seeded target is not: nothing
+    reads these rows, so a corrected constant would leave the table holding an
+    old index name with no symptom anywhere, until #130 handed somebody a screen
+    editing rows that disagree with the code the request actually uses. A design
+    critic found that the drift is created by this ticket's scope rather than by
+    its diff. `is_seeded` is `seed_tags`' `is_predefined` for the same job one
+    step further on: it says which rows the application still owns, so #130 can
+    clear it on a row a household edits and the reconciliation will leave that
+    row alone from then on.
+    """
+
+    __tablename__ = "catalogue_targets"
+
+    __table_args__ = (
+        CheckConstraint(
+            "requires_isbn_claim = 1 OR source = 'dnb'",
+            name="ck_catalogue_targets_isbn_claim",
+        ),
+        CheckConstraint(
+            "transport IN ('sru', 'bespoke')",
+            name="ck_catalogue_targets_transport",
+        ),
+        CheckConstraint(
+            "(isbn_index = '' OR isbn_index NOT GLOB '*[^A-Za-z0-9._]*') "
+            "AND (title_index = '' OR title_index NOT GLOB '*[^A-Za-z0-9._]*')",
+            name="ck_catalogue_targets_indexes",
+        ),
+        CheckConstraint(
+            "isbn_attribute IS NULL OR (typeof(isbn_attribute) = 'integer' "
+            "AND isbn_attribute IN (7))",
+            name="ck_catalogue_targets_use_attribute",
+        ),
+    )
+
+    #: The `CatalogueSource` this row is, and the primary key. Closed, because
+    #: `sources.Plan.parse` validates a stored settings row against that enum.
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    #: Position in `sources.DEFAULT_ORDER`. #130 reads it.
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    transport: Mapped[str] = mapped_column(String(16), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    reader: Mapped[str] = mapped_column(String(32), nullable=False)
+    answers_lookup: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    answers_search: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    metered: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    needs_key: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    sru_version: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    query_parameter: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    query_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    record_schema: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    isbn_index: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    isbn_attribute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title_index: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    title_query_shape: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lookup_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    search_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    search_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    refuses_component_parts: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    requires_isbn_claim: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    reads_author_identifiers: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    #: NULL on every seeded row. #132 enforces it, under
+    #: `metadata.SEARCH_DEADLINE_SECONDS` as the ceiling over the whole fan out.
+    timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Whether this row is still the application's rather than the household's.
+    #:
+    #: True on all nine today, because nothing can edit one yet. Read by
+    #: `main.seed_catalogue_targets`, which reconciles exactly these rows against
+    #: `targets.SEEDED` on every start, so a corrected constant reaches the table
+    #: instead of drifting from it in silence. #130 clears it on a row somebody
+    #: edits, and that row stops being reconciled.
+    is_seeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

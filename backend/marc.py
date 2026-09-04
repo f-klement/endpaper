@@ -654,7 +654,11 @@ def _record(fields: dict[str, list[metadata._Subfields]]) -> Record | None:
 
     subjects, gnd = metadata._dnb_subjects(fields)
 
-    return Record(
+    # `from_upload`, not `Record(...)`: an over-wide string in a file somebody
+    # handed over is cut to the column rather than dropped, because
+    # `books.title` is NOT NULL and a dropped title costs the row. The reason in
+    # full, and the network path it differs from, are on that classmethod.
+    return Record.from_upload(
         source=SOURCE,
         isbn=metadata._marc_isbn(fields),
         title=title,
@@ -685,11 +689,15 @@ def read(content: bytes) -> ParsedMarc:
     `MarcError`: no XML, a doctype, an encoding this reader refuses, no
     `<record>` element anywhere, or more records than `MAX_RECORDS`.
 
-    Nothing here bounds a value. `catalogue.Heading` is deliberately unbounded,
-    because a 400 character heading is a real thing to have parsed and a bad
-    thing to have raised on halfway through a file; `classifications.bounded_headings`
-    is where an unusable entry is dropped, one layer later, with the whole
-    record in hand.
+    **A scalar is bounded here and a heading is not**, and the two are not one
+    rule. `_record` builds through `catalogue.Record.from_upload`, so a title,
+    subtitle, author, publisher, description or series name too wide for its
+    column is cut to it, and a URL, volume id or language code that a cut would
+    rename is dropped instead. `catalogue.Heading` is deliberately unbounded, because a
+    400 character heading is a real thing to have parsed and a bad thing to have
+    raised on halfway through a file; `classifications.bounded_headings` is
+    where an unusable entry is dropped, one layer later, with the whole record
+    in hand.
     """
     root = _parsed(content)
 

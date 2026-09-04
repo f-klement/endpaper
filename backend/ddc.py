@@ -50,12 +50,18 @@ _HEADING: Final = re.compile(r"^(\S+)(?:\s+(.*))?$")
 #: short for its own shelves (`005.13/3`); it is a printing instruction, not
 #: part of the notation, and the DNB stores the same heading as `005.133`.
 #:
+#: **Public, because a second reader needs it.** `filing.DeweyFiling` removes it
+#: from a stored number before sorting, since `ClassificationIn` validates
+#: through `notation` without writing its answer back: a row whose number is
+#: `005.13/3` is accepted, stored verbatim, and files between `005.13` and
+#: `005.14` only once the prime is gone.
+#:
 #: **Stripped, never rejected.** Measured against K10plus on 2026-08-23 over
 #: 463 live 082 `$a` values, 53 of them (11.4%) carry one. Refusing those would
 #: throw away an eighth of what that catalogue supplies, and keeping them raw
 #: leaves two spellings of one heading that
 #: `uq_classifications_book_scheme_number` cannot collapse.
-_SEGMENTATION_PRIME: Final = "/"
+SEGMENTATION_PRIME: Final = "/"
 
 
 def notation(raw: str) -> str | None:
@@ -69,7 +75,7 @@ def notation(raw: str) -> str | None:
     language independent notation, and three answers to "what is one" is the
     same flattened string this table was built to stop storing.
     """
-    cleaned = raw.strip().replace(_SEGMENTATION_PRIME, "")
+    cleaned = raw.strip().replace(SEGMENTATION_PRIME, "")
     return cleaned if _NOTATION.match(cleaned) else None
 
 

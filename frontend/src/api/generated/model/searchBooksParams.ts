@@ -23,4 +23,8 @@ export type SearchBooksParams = {
    * Prefer editions in this language when ranking
    */
   lang?: Locale | null;
+  /**
+   * Also ask the catalogues too slow for the ordinary deadline. Ignored when there are none to ask.
+   */
+  harder?: boolean;
 };

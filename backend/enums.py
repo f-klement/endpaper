@@ -311,9 +311,10 @@ class ClassificationScheme(StrEnum):
     here and German its only caption: `4203576-4` names one heading whatever a
     record calls it. What differs is that a Dewey number also sorts, and a GND
     number does not. That is now a visible difference rather than a latent one:
-    `BookSort.DDC` orders a shelf by Dewey and there is deliberately no
-    counterpart for the other three, because two of them have no order and the
-    third does not sort as text.
+    `BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that
+    place a book on one, each under its own rule in `filing.py`, and there is
+    deliberately no counterpart for GND or LCSH because a subject vocabulary
+    has no order to offer.
 
     **LCSH is the one member with no identifier at all, and that is measured
     rather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a
@@ -335,7 +336,9 @@ class ClassificationScheme(StrEnum):
     Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
     now: a book shows the headings it carries, and any of them can be filtered
     on. What DDC has that the others do not is a second reading, the division,
-    which is what makes it browsable and sortable as well as filterable.
+    which is what makes it browsable as well as filterable. **Sortable is no
+    longer one of the things it has alone**: every scheme names a filing rule
+    in `filing.py`, and LCC's orders a shelf too.
     """
 
     DDC = "ddc"
@@ -494,24 +497,28 @@ class BookSort(StrEnum):
     # no series sort last: mixing them in by a NULL index would scatter them
     # through the list rather than grouping them at the end.
     SERIES = "series"
-    # Shelf order, by Dewey number, with the unclassified last for the reason
-    # SERIES puts the un-serialised last.
+    # Shelf order, one value per scheme that files a shelf, with the
+    # unclassified last for the reason SERIES puts the un-serialised last.
     #
-    # **Dewey and no other scheme, which is a measurement rather than a
-    # preference.** A DDC notation always carries exactly three leading digits
+    # **Named for the scheme rather than for "classification", because a
+    # scheme is what decides how its numbers sort.** `filing.py` holds one
+    # rule per scheme and `shelf._SHELF_SORTS` pairs each of these with one.
+    #
+    # A DDC notation always carries exactly three leading digits
     # (`ddc._NOTATION` refuses anything else), so ordering the text orders the
     # numbers: `004` then `155.9042` then `830`. A Library of Congress call
     # number does not have that property. Its class letters are followed by a
     # number that sorts numerically, so `BF75` precedes `BF575` on a real
     # shelf and text order reverses them, measured against the live row
-    # `BF575.S75 E64 2022` on 2026-08-29. Sorting on LCC would ship an order
-    # that is wrong exactly where somebody would trust it. GND and LCSH are
-    # subject vocabularies and have no order at all: they filter.
+    # `BF575.S75 E64 2022` on 2026-08-29. That is why the two have different
+    # filing rules and not why one of them has none: `filing.LccFiling` pads
+    # the class number so text order reproduces the shelf.
     #
-    # So this value is named for the scheme it sorts rather than for
-    # "classification", because a reader who sees the latter will assume their
-    # LCC numbers are in it.
+    # GND and LCSH get no value here. They are subject vocabularies with no
+    # order at all, they file under `filing.GENERIC`, and that rule declares
+    # `orders_a_shelf = False` so no listing can be ordered by one.
     DDC = "ddc"
+    LCC = "lcc"
 
 
 class AppEnv(StrEnum):
@@ -630,7 +637,7 @@ class SettingKey(StrEnum):
     #
     # **Never read directly.** `sources.parse` turns whatever the row holds
     # into a full roster, so a hand edit or a restore cannot produce a name
-    # `metadata._SOURCES` has no function for. See `settings_store.catalogue_sources`.
+    # `targets.SEEDED` has no entry for. See `settings_store.catalogue_sources`.
     CATALOGUE_SOURCES = "catalogue_sources"
 
 
@@ -760,7 +767,7 @@ class CatalogueSource(StrEnum):
 
     **The values are the strings `metadata.py` already used**, because they are
     not only a settings vocabulary: `catalogue.Record.source` and
-    `Record.sources` carry them, `metadata._SOURCES` is keyed on them, and
+    `Record.sources` carry them, `targets.SEEDED` is keyed on them, and
     `metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing
     downstream and buys two things: a closed union in the generated client, and
     a roster `sources.parse` can validate a stored row against.

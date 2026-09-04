@@ -2,7 +2,45 @@
 
 ## Unreleased
 
+### Added
+
+- A **filing rule** per classification scheme, which is how that scheme's call numbers
+  sort. Dewey files a notation as its own text, Library of Congress files by class letters
+  then class number so `BF75` stands before `BF575` as it does on a shelf, and a scheme
+  with no rule of its own files as text and offers no shelf order. The library can be
+  ordered by Library of Congress call number as well as by Dewey.
+
+- **Search harder.** A catalogue can be slow enough that the shared 4.0s deadline cancels
+  it before it answers, which makes switching it on a burned connection and never a
+  record. Such a catalogue is now left out of the ordinary title search and reached by
+  asking for it, under a longer deadline of its own. The search panel offers it after a
+  search comes back, names the catalogues it would add, and says so instead of "no
+  matches" when every catalogue this library has switched on is a slow one. Nothing
+  changes on the ISBN path, which already reached a slow catalogue only after every
+  faster one had missed.
+- The catalogue settings section says on the row when a catalogue is left out for being
+  slow, so off because it is slow does not read as off because it is broken.
+
+
 ### Changed
+
+- A catalogue's address, transport, query indexes, record format and page sizes are data
+  on one typed row per source, and its parser stays code: eleven near identical adapters,
+  five ISBN lookups and six title searches, are one request builder and a reader chosen
+  per row. Adding a national catalogue is a row, plus a reader only when its record format
+  is genuinely new. Nothing a household sees changes: the same sources, asked in the same
+  order, returning the same records. The database table those rows will live in is created
+  and seeded here and deliberately not read yet, because reading an address off a row is
+  the decision that lets somebody supply one, and that has its own ticket.
+- The German interface no longer addresses the reader informally, and does not address
+  them formally either. 82 strings were rephrased to carry no address at all, so one
+  catalogue reads correctly in a household and in a library without either being told
+  which it is. German has the machinery for it: the infinitive for an instruction,
+  `eigen-` for a possessive that carries weight, a plain article for one that does not,
+  the passive, and `wer …` for a conditional about the reader.
+- The published catalogue was the one section written formally, addressing a visitor
+  formally while the rest of the app was informal. It reads the same as everything else
+  now.
 
 - A national catalogue is asked only about the ISBNs it could hold. An ISBN names its own
   registration group, and a catalogue whose collecting remit is one group is skipped for a
@@ -29,9 +67,29 @@
   alone, and showing one word twice because two vocabularies claim it would be a
   worse page. This is the half a later change needs in hand, and it is worth a
   line only because the identifier stopped being thrown away.
-```
 
-Nothing under `### Added`: no column, no endpoint, no visible feature.
+- **A house rule that compiles every Python file under `backend/` and fails on any compile
+  time warning.** An invalid escape sequence in a non raw string is a `SyntaxWarning`
+  today and a `SyntaxError` on CPython's schedule, at which point the file stops importing
+  and every house rule in `test_house_rules.py` goes with it. Nothing here read that
+  warning. The walk covers the tests and the migrations as well as the application
+  modules, because the failure is at import and does not care which a file is. ruff's
+  `W605` is selected in the same change as the fast path: it reports the same escape with
+  a column and an autofix, before the suite runs.
+- **The catalogue roster's size is recomputed wherever the tree spells it.**
+  `backend/tests/test_roster_counts.py` takes a census of every number written beside a
+  roster noun across the backend, the docs that ship, the root Markdown and the frontend,
+  and requires a verdict for each: it names a cardinality computed from `sources.py` and
+  is compared with it, or it records what the number counts instead. A candidate with no
+  verdict fails and a verdict judging nothing fails, so neither half can rot, and no count
+  is written in the guard. Adding one source had previously made twenty two prose
+  statements stale, found in three passes each believing it was the last; six were still
+  stale when this landed and five are fixed here. Four more in `docs/decisions.md` were
+  corrected at the merge, and that register is read by the census since 2026-09-03.
+- The wrapper that serialises `api:generate` refuses when a generation did not rewrite
+  the schema. Two runs that
+  die the same way produce two identical trees and a diff of nothing, and that clean diff
+  had been read as verification.
 
 **The first draft of this entry claimed "two identical strings from two vocabularies stop
 being merged" as a user visible change and that was wrong.** `Record.subject_labels`
@@ -46,8 +104,65 @@ before `Informatik` declared answered `Informatik; Roman` where the rule it repl
 answered `Roman; Informatik`. The fold now groups by label, so a label keeps the place of
 its first occurrence and the string is unchanged. `frontend/openapi.json` is separately
 byte identical, which is about the schema and was never about this.
+- `GET /api/books/search` answers with an object rather than a bare list: `matches`, plus
+  `asked` and `unasked` naming the catalogues the fan out did and did not reach. It takes
+  a `harder` parameter.
+- The roster count census now reads `docs/decisions.md`. That register was excluded on the
+  reasoning that a count in it is dated by the file's structure, which is true of
+  `CHANGELOG.md` and false here: it carries no version headings and records decisions that
+  still bind. Every one of the 15 candidates it holds now carries a verdict, 3 of them live
+  claims the guard checks against `sources.py` and 12 of them records of what a figure
+  counted when it was taken.
 
 ### Fixed
+
+- The cataloguer's call number column drew Dewey **and** Library of Congress notations and
+  offered one order, a Dewey one, over both. A library shelving by Library of Congress got
+  an order written for another scheme, silently. The column now offers each scheme's own
+  order and names the one it is reading.
+- A Dewey number carrying MARC's segmentation prime (`005.13/3`) filed apart from the same
+  heading written `005.133`. The validator accepted the prime without writing its answer
+  back, so it reached the column; the filing rule removes it before sorting. Measured, 53
+  of 463 live K10plus values carry one, so those rows change key and their neighbours
+  change position.
+- A classification number carrying a control character was accepted. A NUL is the one that
+  mattered: it is not whitespace, so the collapse let it through, and SQLite's string
+  functions stop at one where Python's do not, so a single stored value produced two
+  different filing keys.
+- Five strings on the public catalogue settings page addressed the reader formally while
+  the rest of the German interface was informal. They arrived with the wave that built the
+  published catalogue and nothing noticed the mix.
+- Three German strings opened a sentence with `Sie` about the books, the records and the
+  covers. In an interface that also addresses its reader that way, they read as statements
+  about the reader: that they are created unconfirmed, arrive unconfirmed, and keep a
+  link. Each names its subject now.
+- A German string said `ueber` where it meant `über`.
+
+- **Every field a request body carries is bounded.** `BookMatch`, the body of
+  `POST /api/books/{id}/enrich/apply`, bounded four of its seventeen fields and left the
+  rest open, so a member chose how large a stored value was and how much parsing the
+  server did. The sharpest was `series_index`, which had no ceiling at all while
+  `GET /api/series` computes a range over it: a stored `1e9` is roughly 70 GB and ten
+  minutes of work, on every request, for every member. `suggested_tag_ids` bounded each
+  entry's value and not the number of entries. The guard is not a per field assertion:
+  every field naming a column two request bodies both write must carry the same bound in
+  both, which is how this one arrived.
+- `BookCreate.language` accepted 16 characters into a `String(10)` column. Narrowed to 10,
+  which is what the column has always said and what `importing.py` already truncated to.
+  **This narrows what `POST /api/books` accepts**: an 11 to 16 character language now gets
+  a 422 where it used to get a 201, and no such value was ever a valid tag or storable on
+  an engine that enforces a width.
+- `BodySizeLimitMiddleware`'s docstring said a chunked JSON body was bounded by the
+  route's own parsing. Neither of its two rules sees such a request and a schema runs only
+  after the body is in memory, so nothing bounded it. The docstring now says so.
+- The `CATEGORIES_MAX` comment justified itself with a lookup path worst case of nine
+  catalogues storing three times the bound. The fold is two records, not nine, because it
+  reduces over a tier sliced to `sources.ALWAYS_ASKED`, and both per record figures came
+  from the Library of Congress, which is title search only and can never be on that path.
+  Driven with every source answering, the real figure is 0.67x the bound. The risk it was
+  describing is real for a better reason: five of the six catalogues that can be folded
+  cap their subject list not at all, and the fold order is the household's, so two
+  uncapped records are reachable from the settings screen.
 
 - An ISBN of Unicode digits that are not ASCII is refused rather than accepted or crashing.
   `str.isdigit()` is true of far more than `0` to `9`, and the two halves failed in
@@ -56,6 +171,84 @@ byte identical, which is about the schema and was never about this.
   ISBN constraint could not see as the same book. The tag filter had the first shape on a
   query string. Every digit predicate in the backend is now narrowed to ASCII, and a house
   rule requires it.
+
+- **A catalogue can no longer write a value the columns refuse.** Automatic enrichment
+  (`POST /api/books/{id}/enrich`) handed the merge whatever the catalogues answered, while
+  its neighbour `POST /api/books/{id}/enrich/apply` refused the identical value with a 422:
+  same book, same column, one route apart. The sharp one is a series number, which is a
+  stored denial of service rather than an untidy row, because the series view computes a
+  range over that column on every request for every member and a stored `1e9` is roughly
+  70 GB and ten minutes of it. A value the column cannot hold now costs that one field on
+  that one enrichment, logged, and the rest of the record still lands: refusing the whole
+  record would report "nothing found" about a book a catalogue did find. Every catalogue
+  that answers that route is somebody else's, so this needs a broken or compromised
+  upstream rather than a hostile member.
+
+- **A bulk tag action with an absurd id answered 500.** `{"action": "add_tag", "value":
+  2**63}` passed the parse, reached the row lookup and raised out of the database driver.
+  It is a 404 now, which is what an id no row can carry already got when it merely did not
+  exist.
+
+- **A single corrupt series number no longer costs every member the series page.** That
+  view lists the gaps in a series, and it worked them out by counting up from one to the
+  highest number held, so one row holding a number no member could have typed made it
+  build a list millions of entries long on every request. Measured at 14,888,944 bytes
+  from a library of one book. Such a row cannot be created through the API and can still
+  arrive: a restore writes what the file says, and an instance upgraded from an earlier
+  release keeps what its enrichment stored. The gaps below the ceiling are still reported,
+  so a library with one bad row still gets the answer it can act on.
+
+- **The refusal that keeps a digitised copy, an audiobook or a disc off a shelf was written
+  in German and English**, so it silently did nothing for a catalogue that describes one in
+  any other language. It now reads the carrier codes the record itself carries: MARC's
+  leader/06, `007` and `008/23` for the four MARC sources, the MODS
+  `physicalDescription/form` for the Library of Congress, and the `dc:type` for the BnF.
+  Measured over 2,605 live MARC records, 65 that are not physical books passed the old rule
+  and 43 of those state no extent at all, so no wording in any language could have reached
+  them. The two Dublin Core sources keep a phrase of their own because they carry no code
+  to read.
+
+- A K10plus, OeNB or NLG lookup ranked the records for one ISBN on completeness alone and
+  applied no not-a-book test, where the DNB lookup always had one. A digitisation is
+  usually the fuller record, so it won: measured over 210 live K10plus ISBN lookups, 9
+  answered with both kinds and 8 of the 9 returned the digitisation.
+
+- The BnF's printed-only gate accepted any record whose `dc:type` contained `text`, which
+  is the Dublin Core type an ebook carries too.
+
+- **The enrichment endpoint's API documentation said a new install "searches all seven"
+  catalogues** where the search fan out asks eight, and enumerated a source order that had
+  been wrong since the Austrian National Library moved down the default list. FastAPI
+  publishes a route docstring as the OpenAPI description, so the wrong number shipped in
+  the published schema and in the generated client. The sentence now counts the roster,
+  says separately that Google Books answers only once its section is on and a key is in
+  force, and no longer enumerates the order. Two comments in the settings store said the
+  stored provider row holds "seven entries" where it spells nine.
+
+- **Two published registers rendered as one code block from partway down.** A previous
+  wave folded a working draft into `CHANGELOG.md` and `docs/decisions.md` along with
+  its own scaffolding, leaving an unclosed fence in each and 42 lines of instructions
+  addressed to a main session in the second. Everything below the fence was code on
+  GitHub and nothing failed, because no test read a Markdown file for its shape. A house
+  rule now counts the fences in every published Markdown file.
+- A book catalogue can no longer write a value the database column cannot hold. Refreshing
+  a book's metadata wrote nine fields straight from the catalogue's answer with no ceiling
+  on eight of them; a value too wide now loses that one field and the refresh keeps
+  everything else.
+- Scanning an ISBN whose catalogue record carries a very long description no longer fails
+  with a server error.
+- Importing a MARC file with a very long title still cuts the title to fit rather than
+  dropping the book, which is the right answer for a file you uploaded yourself and the
+  wrong one for a catalogue's guess about a book you already own.
+- The 409 raised when no catalogue can answer named the ISBN path from both title search
+  routes. A library running only the Czech National Library, which answers an ISBN and
+  answers no title search, was refused a title search by being told nothing could look up
+  an ISBN.
+- `docs/decisions.md` said "Six of the eight sources publish a carrier vocabulary" where
+  the backend reaches its not-a-book test from seven sources and five of those state a
+  carrier in codes. Five of seven, and the sentence's own list already named five.
+- The same register justified rejecting a blanket scan with a figure that had already
+  moved twice. It no longer restates a number the guard's own docstring recomputes.
 
 ## v0.12.0
 
