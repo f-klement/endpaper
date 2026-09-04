@@ -5741,6 +5741,49 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
 
 
+#: One representative of every distinct plan the roster's permutations produce.
+#:
+#: **Session scoped because it is enumeration, not state.** Building it walks all
+#: 362,880 permutations once at about eight seconds; the class below then runs
+#: 3,600 lookups per holder instead of 362,880, which took that class from 290
+#: seconds to a fraction of it without dropping a single order.
+#: The registration groups the filter is checked against: the two this class
+#: actually asks about, and two it does not, so the property is not established
+#: only on the inputs that happen to be used.
+_GROUPS_CHECKED = ("978-0", "978-960", "978-3", "978-80")
+
+
+@pytest.fixture(scope="session")
+def distinct_orders() -> tuple[tuple[tuple[CatalogueSource, ...], ...], dict]:
+    """The representatives, and the evidence that they are all of them.
+
+    **One walk, not two.** The deduplication and the proof that it loses nothing
+    read the same 362,880 permutations, so computing them separately would be
+    the same fact derived twice at twice the cost. The map is returned rather
+    than asserted here because a fixture that fails is an error rather than a
+    failure, and this repository separates those.
+    """
+
+    def plan(order: tuple[CatalogueSource, ...]) -> sources.Plan:
+        return sources.parse(
+            {"sources": [{"source": name.value, "enabled": True} for name in order]}
+        )
+
+    seen: dict[tuple, tuple[CatalogueSource, ...]] = {}
+    filtered: dict[tuple, tuple] = {}
+    collisions: list[tuple] = []
+    for order in itertools.permutations(sources.DEFAULT_ORDER):
+        built = plan(order)
+        signature = (tuple(built.lookup_together), tuple(built.lookup_in_turn(None)))
+        seen.setdefault(signature, order)
+        chains = tuple(
+            (group, tuple(built.lookup_in_turn(group))) for group in _GROUPS_CHECKED
+        )
+        if filtered.setdefault(signature, chains) != chains:
+            collisions.append((signature, order))
+    return tuple(seen.values()), {"collisions": collisions, "signatures": set(seen)}
+
+
 class TestNoOrderOfTheRosterFindsMoreBooks:
     """The chain asks every enabled source until one answers, so order is a schedule.
 
@@ -5787,6 +5830,17 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         )
 
     @staticmethod
+    def _signature(plan: sources.Plan) -> tuple:
+        """Everything about a plan that `lookup` can see.
+
+        The first tier it gathers, and the chain it walks one at a time with no
+        registration group filter applied. Two orders with the same signature
+        are the same input to `lookup`, which is what makes the deduplication
+        below lossless rather than a sample.
+        """
+        return (tuple(plan.lookup_together), tuple(plan.lookup_in_turn(None)))
+
+    @staticmethod
     def _only(holder: CatalogueSource):
         """A `metadata._lookup_one` table where exactly one catalogue holds the book."""
 
@@ -5809,11 +5863,25 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     async def test_every_permutation_finds_a_book_any_one_source_holds(
         self,
         holder: CatalogueSource,
+        distinct_orders: tuple[tuple[tuple[CatalogueSource, ...], ...], dict],
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ):
         """Parametrised on the holder, because a table where nothing answers
-        would pass this with the chain deleted."""
+        would pass this with the chain deleted.
+
+        **`distinct_orders` is every permutation, deduplicated by what `lookup`
+        can see, and that is not a sample.** The roster is nine sources and the
+        lookup chain is seven, of which the first tier gathers two, so most of a
+        permutation is invisible here: measured, the 362,880 orders produce
+        **3,600** distinct plans. Running one representative of each covers every
+        order, because the ones dropped are byte identical after `parse` rather
+        than merely similar, and `test_the_deduplication_reaches_every_order`
+        drives all 362,880 to prove it.
+
+        What that bought is the reason it is worth the paragraph: this class was
+        290 of the backend suite's 308 seconds.
+        """
         # **Silenced for memory, not for tidiness.** `lookup` logs one line per
         # resolved ISBN, and pytest's capture handler holds every record emitted
         # inside a single test. This loop is one test, so at 9! orders it held
@@ -5839,7 +5907,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         monkeypatch.setattr(covers, "resolve", no_cover)
         isbn = self.ISBNS.get(holder, self.ISBN)
         first_asked = set()
-        for order in itertools.permutations(sources.DEFAULT_ORDER):
+        for order in distinct_orders[0]:
             metadata.clear_cache()
             result = await metadata.lookup(isbn, "a-key", plan=self._plan(order))
             assert result.outcome is metadata.Outcome.FOUND, order
@@ -5857,6 +5925,34 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         # `DEFAULT_PLAN` for every input. This says the permutations really did
         # reach `lookup` as different plans.
         assert len(first_asked) > 1
+
+    def test_the_deduplication_reaches_every_order(
+        self, distinct_orders: tuple[tuple[tuple[CatalogueSource, ...], ...], dict]
+    ):
+        """The half that makes the class above exhaustive rather than a sample.
+
+        It drives all 362,880 permutations, which the class itself no longer
+        does, and asserts two things about them. That the signature really is
+        everything `lookup` sees: two orders sharing one produce the same chain
+        **after** the registration group filter, for every group this class
+        asks about and two it does not. And that the deduplicated set is the
+        whole of the signature space rather than a prefix of it.
+
+        **Without this the optimisation is a silent coverage cut.** A change to
+        `parse` that made the chain depend on something outside the signature
+        would leave the class above passing on a fraction of the orders it
+        claims, with nothing red. Here it fails.
+        """
+        orders, evidence = distinct_orders
+
+        assert not evidence["collisions"], (
+            "two orders share a signature and ask a different chain once the "
+            "registration group filter runs, so the signature is no longer "
+            "everything `lookup` sees and the class above covers a fraction of "
+            f"the orders it claims: {evidence['collisions'][:3]}"
+        )
+        assert evidence["signatures"] == {self._signature(self._plan(o)) for o in orders}
+        assert len(orders) == len(evidence["signatures"])
 
     @pytest.mark.asyncio
     async def test_a_source_no_permutation_reaches_would_fail_this(

@@ -1115,7 +1115,10 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             "constant of its own; `metadata.py` counts the same set including it"
         )
     ],
-    ("backend/tests/test_metadata.py", "{n} sources"): [Counts("SEARCH_SOURCES")],
+    ("backend/tests/test_metadata.py", "{n} sources"): [
+        Counts("SEARCH_SOURCES", near="asked at once"),
+        Counts("the whole roster", near="deduplicated by what"),
+    ],
     ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [
         Counts("LOOKUP_SOURCES")
     ],
