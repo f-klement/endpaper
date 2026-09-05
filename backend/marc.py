@@ -1,67 +1,20 @@
 """MARC21 records in and out, as pure functions over bytes.
 
-The exchange format every other library system speaks. An archive that cannot
-hand its records to another institution, or take theirs, is an island, and
-`csv_import.py` is not an answer: a CSV column list is this app's own shape and
-a MARC record is everybody's.
+**Reading is not written here.** `metadata.py` already parses MARCXML from four
+catalogues, and a second parser would be a second set of field decisions to keep
+in step. This module reuses it.
 
-## Reading is not written here, and that is the point
+**What the writer emits is deliberately narrow.** It carries the bibliographic
+fields this app stores and nothing about the copy: no shelf mark, no price, no
+acquisition source. That is what lets the SRU server reuse it for a public record,
+and `tests/test_sru.py` pins the property so adding one fails there.
 
-`metadata.py` has parsed MARC21 since the DNB moved to it, and it knows the
-fields from contact with live catalogues rather than from a specification
-reading: the non-sorting delimiters in two spellings, NFC normalisation, the
-repeated `$a` in an 082, the `$q` that marks a cross reference to another
-edition **beside the record's own ISBN and not where it is the only one**
-(`metadata._isbn_entries`), the ISBD punctuation that introduces the *next*
-subfield. None of that
-is derivable from the standard and all of it is wrong to write twice.
-`ddc.notation` records what three notions of a Dewey number cost the last time
-this was got wrong.
+**Round tripping is the test and it is the strongest available**: export a book,
+import it into an empty catalogue, compare. A field the writer forgets and the
+reader ignores is invisible to any other check.
 
-So this module composes those primitives rather than restating them. What is
-ours is the **policy**, which differs from a catalogue lookup's in two ways
-worth naming:
-
-* A lookup asks one catalogue about one ISBN it already verified. An import
-  reads a whole file of records about books nobody here has seen, so a record
-  that cannot be read is **counted and skipped** rather than failing the batch.
-* A lookup refuses a record whose title names a volume slot and refuses a disc,
-  because `num=` matches cross references and the wrong record poisons an
-  entry. An import is a cataloguer handing over their own file: what they wrote
-  is what they meant, and second-guessing it drops rows they will not know are
-  missing.
-
-## What the writer emits, and what it deliberately does not
-
-MARCXML, and only MARCXML. **ISO 2709 is the fiddly half**: the binary format
-carries a 24 byte leader, a directory of 12 byte entries whose offsets and
-lengths must agree with the field data, and a record length that has to be
-recomputed after any change. Every consumer that reads it reads MARCXML too.
-
-No `008`. The fixed length data elements field encodes place of publication,
-illustration codes, literary form, intended audience and a government
-publication code, none of which this app holds. Filling forty positions with
-`|` (no attempt to code) is legal and says nothing; filling them with guesses
-writes assertions no one here can support. The language goes in `041` and the
-date in `264`, which is where a reader looks anyway.
-
-No `003`. It names the organisation that assigned `001`, as a MARC
-Organization Code from the Library of Congress register. This deployment has
-none, and inventing one puts a false institution in an exchanged record.
-
-## Round tripping is the test, and it is the strongest one available
-
-`tests/test_marc.py` exports a Book and reads it back through this module's own
-reader, which is `metadata.py`'s reader. So a record this app writes is proved
-to be a record this app's live catalogue parser accepts, rather than a record
-that merely validates against a schema. Where a field cannot survive the trip
-the reason is recorded beside the mapping rather than left to be discovered.
-
-## Nothing here touches the database
-
-`write` reads attributes off Books somebody else resolved through the Shelf,
-and `read` returns `catalogue.Record` objects, which are evidence about a book
-and never a Book. No session, no query, no `visible_to`.
+**Nothing here touches the database.** Pure functions over bytes, which is why
+both an export and an SRU response can call them.
 """
 
 from __future__ import annotations

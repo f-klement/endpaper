@@ -1,63 +1,47 @@
 /**
  * The one place this app decides a string may become an `<a href>`.
  *
- * The backend already decides it: `custom_fields.link_target` refuses anything
- * that is not `http` or `https` with a real host, and it does so on every read
- * rather than only on every write, so a value that reached the table through a
- * restore is served as text. This is the same rule again on this side of the
- * wire, and the reason to have it twice is what React does with the string.
- *
- * **React renders `href="javascript:..."` without a word.** The development
- * warning that used to be there was removed in React 19, and there has never
- * been an error: the attribute is written to the DOM and the browser runs it on
- * click. So a component that interpolates a server value straight into `href`
- * is trusting the server for something the framework will not check, and that
+ * The backend refuses anything that is not `http` or `https` with a real host,
+ * on every read rather than only on every write. **The reason to have the rule
+ * twice is what React does with the string**: it renders
+ * `href="javascript:..."` without a word, the development warning having been
+ * removed in React 19, so a component interpolating a server value straight into
+ * `href` trusts the server for something the framework will not check, and that
  * trust is invisible in the JSX.
  *
- * Refused, therefore, and each one is a string a person can type into a text
- * box: `javascript:`, `data:`, `vbscript:`, a scheme relative `//host` (which
- * carries no scheme and inherits the page's), a bare path, anything `URL`
- * cannot parse at all, and an authority carrying any of `AUTHORITY_REFUSED`.
+ * Refused, each of them a string a person can type into a text box:
+ * `javascript:`, `data:`, `vbscript:`, a scheme relative `//host`, a bare path,
+ * anything `URL` cannot parse, and an authority carrying any of
+ * `AUTHORITY_REFUSED`.
  *
- * Returns `undefined` rather than `""` for a refusal, because that is the value
- * that leaves the attribute off the element entirely. An empty string is a link
- * back to the current page.
+ * **Returns `undefined` rather than `""` for a refusal**, because that is what
+ * leaves the attribute off the element; an empty string is a link to the current
+ * page. On acceptance it returns the **parsed** URL, so an `<a>` is never
+ * pointed at a string this code has not resolved itself.
  *
- * On acceptance it returns the **parsed** URL rather than the input, so an
- * `<a>` is never pointed at a string this code has not resolved itself. See
- * the comment on the return.
- *
- * **A host this parser reads differently from the stored text is refused, not
- * resolved**, which is the opposite of what the return above does for
- * everything else and is deliberate. The caller renders the stored value as
- * the link text and this as the destination, so resolving
+ * **A host this parser reads differently from the stored text is refused rather
+ * than resolved**, which is deliberate and is the opposite of the line above:
+ * the caller renders the stored value as the link text, so resolving
  * `calibre.example%2eevil.example` would name two registrable domains in one
- * anchor: `evil.example` where the reader sees `calibre.example`. That is a
- * sharper phishing case than an unlinked value. See AUTHORITY_REFUSED.
+ * anchor, `evil.example` under text reading `calibre.example`.
  */
 /**
  * Characters that must not appear in the authority of a stored link.
  *
- * All four make a browser read a **different host** than the string does, so an
- * `<a>` built from one names one domain in its text and goes to another. Three
+ * All four make a browser read a **different host** than the string does. Three
  * are the WHATWG label separators (U+3002, U+FF0E, U+FF61); the fourth is `%`,
- * which is the same divergence one step earlier, because the host is
- * percent-decoded before IDNA maps it: `calibre.example%2eevil.example`
- * resolves to `evil.example`.
+ * the same divergence one step earlier, because the host is percent decoded
+ * before IDNA maps it.
  *
- * `custom_fields.link_target` rewrites the separators and refuses the percent
- * escape, so a value this app stored contains none of them and this test is
- * free. It is here for the row it did not store: `backup.restore` writes
- * through Core.
+ * The server rewrites the separators and refuses the escape, so this is free for
+ * anything this app stored. It is here for the row it did not store, since
+ * `backup.restore` writes through Core.
  *
- * **Refusing beats comparing.** The obvious check is `parsed.href !== href`,
- * and it is wrong: the two parsers normalise legitimately different things, so
- * a stored `https://a.example` compares unequal to the browser's
- * `https://a.example/` and a perfectly good link would stop working. This tests
- * the four characters the server would have removed, and nothing else.
- *
- * The authority only. A percent escape in a path or a query is ordinary and
- * both parsers agree about it, so `/book/12%20a` is a link.
+ * **Refusing beats comparing.** `parsed.href !== href` is the obvious check and
+ * is wrong: the two parsers normalise legitimately different things, so a stored
+ * `https://a.example` compares unequal to `https://a.example/` and a good link
+ * stops working. **The authority only**: a percent escape in a path or query is
+ * ordinary and both parsers agree, so `/book/12%20a` is a link.
  */
 const AUTHORITY_REFUSED = /[%\u3002\uff0e\uff61]/;
 

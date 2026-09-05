@@ -19,8 +19,8 @@ may bind to, and only **four** distinct sizes among them, because three of the
 six are 9. Nothing in a sentence's shape says which is meant. So "six sources" in
 this tree is a correct count of the free lookup sources, a correct count of some
 other subject entirely, or a stale search count. Measured over the census below,
-**40** of its occurrences count something that is not the roster, so a scan with
-no classification fails 40 times on its first run and is switched off.
+**28** of its occurrences count something that is not the roster, so a scan with
+no classification fails 28 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -1013,45 +1013,13 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("SEARCH_SOURCES", near="`metadata.search` asks"),
         Counts("the whole roster", near="compression is not requested"),
     ],
-    ("backend/models.py", "{n} catalogues"): [
-        NotTheRoster(
-            "the retired figure, quoted verbatim and labelled retired so the "
-            "sentence that was wrong stays readable beside the correction",
-            near="now retired",
-        )
-    ],
-    ("backend/models.py", "{n} sources"): [
-        Counts("the whole roster", near="Driven rather than read"),
-        Counts("the whole roster", near="per record figures came from a catalogue"),
-    ],
-    ("backend/metadata.py", "{n} catalogues"): [
-        NotTheRoster("the sources that build a Heading, which `_merge` concatenates")
-    ],
     # The **singular** phrase, and the three entries around it are all plural, so
     # this collides with none of them and needs no anchor. The sentence prices the
     # harder search's concurrency against what a whole fan out costs, so its eight
     # is a search roster count read off that comment's own arithmetic.
     ("backend/metadata.py", "{n} source"): [Counts("SEARCH_SOURCES")],
     ("backend/metadata.py", "{n} free sources"): [
-        Counts("the free lookup sources", near="most deployments actually run"),
-        NotTheRoster(
-            "the free lookup sources on the day the eight query comparison ran",
-            dated="2026-08-27",
-            near="comparison",
-        ),
-    ],
-    ("backend/metadata.py", "{n} sources"): [
-        NotTheRoster(
-            "the sources `_NOT_A_BOOK` refuses for, which is the roster minus the "
-            "two ordinary web APIs and has no constant of its own to compare with",
-            near="_NOT_A_BOOK",
-        ),
-        NotTheRoster(
-            "the sources `_is_physical_book` is reached from, enumerated in the "
-            "same sentence and with no constant of its own",
-            near="_is_physical_book",
-        ),
-        Counts("SEARCH_SOURCES", near="wall clock"),
+        Counts("the free lookup sources", near="most deployments actually run")
     ],
     ("backend/ratelimit.py", "{n} public catalogues"): [Counts("SEARCH_SOURCES")],
     # Both halves of one sentence in the enrichment route's docstring, which
@@ -1075,7 +1043,14 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("DEFAULT_ORDER", near="invalidated on write"),
     ],
     ("backend/sources.py", "{n} free sources"): [Counts("the free lookup sources")],
-    ("backend/sources.py", "{n} sources"): [Counts("LOOKUP_SOURCES")],
+    ("backend/metadata.py", "{n} sources"): [
+        NotTheRoster(
+            "the sources that reach `_is_physical_book`, which is the roster "
+            "minus the two that never ask it and has no constant of its own",
+            near="_is_physical_book",
+        ),
+        Counts("SEARCH_SOURCES", near="asked at once"),
+    ],
     ("backend/tests/helpers.py", "{n} sources"): [Counts("lookup or search")],
     ("backend/tests/routers/test_books_google.py", "{n} sources"): [
         Counts("the whole roster")
@@ -1196,70 +1171,32 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # `CARDINALITIES` warns about. The consequence is that "five of the seven",
     # corrected by hand in the pass that wrote these, is permanently unchecked
     # and a reader re-deriving it has to go back to `metadata.py`.
-    ("docs/decisions.md", "{n} catalogue"): [
-        NotTheRoster(
-            "the catalogue sources whose responses are XML parsed, which is the "
-            "roster minus the two ordinary web APIs and has no constant of its own"
-        )
-    ],
-    ("docs/decisions.md", "{n} catalogues"): [
-        NotTheRoster(
-            "a quotation of the invented worst case the entry around it refutes",
-            near="CATEGORIES_MAX",
-        ),
-        NotTheRoster(
-            "the sentence a reader could add to `legend.md` and have misjudged, "
-            "quoted in the rule that now refuses it",
-            near="asked concurrently",
-        ),
-    ],
+    # `docs/decisions.md` was pruned on 2026-09-05 and most of the sentences these
+    # verdicts were written for went with the entries around them. What is left is
+    # four occurrences in two paragraphs, both of which are about the counting
+    # problem itself rather than about the roster.
     ("docs/decisions.md", "{n} other sources"): [
         NotTheRoster(
-            "the sources `_NOT_A_BOOK` refuses for besides the NKP, with no "
-            "constant of its own; `metadata.py` counts the same set including it"
+            "the sources `_NKP_ONLINE` does not change, in the entry recording that "
+            "the fix was deliberately per source"
         )
     ],
     ("docs/decisions.md", "{n} source"): [
         NotTheRoster(
-            "the source adapters at the time `catalogue.Record` replaced the two "
-            "dict dialects, in the past tense"
+            "the same set as the line above it, in the same sentence about what a "
+            "shared pattern would have changed"
         )
     ],
     ("docs/decisions.md", "{n} sources"): [
         NotTheRoster(
-            "the search fan out on the day the decompression figure was taken; "
-            "the sentence says it was asked at once when that was measured",
-            near="a cap counted after decoding",
+            "the census entry's own worked example of an ambiguous count, quoted so "
+            "the paragraph can say what makes it ambiguous",
+            near="not one number",
         ),
         NotTheRoster(
-            "the sources the plaintext parser risk pre-dated, in the entry "
-            "recording the item that added a seventh",
-            near="_LOC_URL",
-        ),
-        Counts("SEARCH_SOURCES", near="whole fan out"),
-        Counts("the whole roster", near="Driven rather than read"),
-        Counts("the whole roster", near="per record figures came from a catalogue"),
-        NotTheRoster(
-            "an example phrase, in the entry that states the rule",
-            near="is not one number",
-        ),
-        NotTheRoster(
-            "a quotation of the sentence in `docs/security.md` named as the model",
-            near="A date is not the exemption rule",
-        ),
-        NotTheRoster(
-            "a quotation of this file's own stale sentence, in the paragraph "
-            "that corrects it",
-            near="found two errors",
-        ),
-        NotTheRoster(
-            "a fixture text, in the entry that states the rule",
-            near="50 records",
-        ),
-        NotTheRoster(
-            "the sources that answer in a record schema, which is the roster "
-            "minus the two ordinary web APIs and has no constant of its own",
-            near="The list of languages is open",
+            "the sources answering in a record schema, which is the roster minus the "
+            "two that answer Dublin Core and has no constant of its own",
+            near="carrier vocabulary",
         ),
     ],
     ("docs/legend.md", "{n} catalogues"): [

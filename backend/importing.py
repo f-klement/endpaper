@@ -605,63 +605,10 @@ def identity_key(title: str | None, author: str | None) -> str:
 def bounded_fields(record: Record) -> dict[str, Any]:
     """The record as this Library will store it, computed once.
 
-    **Matching reads this, not the record, and that is a correctness fix rather
-    than a tidy-up.** The identity key is built from a title and an author; the
-    column holds the truncated value; `MarcIndex.by_identity` is keyed on what
-    is stored. Bounding after matching therefore meant a record with a 600
-    character title never matched itself: measured end to end, importing the
-    same file twice created the Book twice and the preview reported
-    `already_held: 0`, which is the one number that screen exists for, wrong for
-    exactly the records the new guard acts on.
-
-    So the truncation happens once, before anything looks at the values, and
-    `identity_key`, `holds`, `would_refuse`, `remember` and the column all see
-    one string.
-
-    **Since 2026-09-03 it has already happened one layer further up**, in
-    `catalogue.Record.from_upload`, so `within_bounds` finds nothing left to cut
-    here. Every sentence above still holds: what it describes is where the cut
-    is **observed**, which is still this function, and the property that matters
-    is that matching and storage see the same string. Verified across the move:
-    `within_bounds("title", <501 characters>)` and
-    `bounded_fields(Record.from_upload(title=<501 characters>))["title"]` give
-    equal identity keys, both 500 characters.
-
-    `isbn` rides along unbounded by this function because it is bounded already:
-    `metadata._marc_isbn` returns `isbn.parse`'s output or None, which is
-    thirteen digits. `catalogue.Record` deliberately does **not** bound it, for
-    a reason that has nothing to do with this path: see `catalogue._UNBOUNDED`.
-
-    **What matching on a truncated key costs, since it is the obvious
-    objection.** Two records whose titles differ only past character 500, by the
-    same first author, now collide: measured, two 503 character titles agreeing
-    for 500 give one key. Once stored the two are byte identical in `title` and
-    `author`, so creating both would produce two Books the duplicate finder
-    immediately flags as one.
-
-    **What that costs is not nothing, and the first statement of this reason
-    said it was.** It said the catalogue could not represent the difference. It
-    can: `isbn`, `year` and `publisher` are columns, the two records carry
-    different values in them, and all three are lost, because `_fill_marc_gaps`
-    fills only where the Book has nothing. Measured on two 503 character titles
-    with different ISBNs: `created: 1, matched: 1`, and the second record's ISBN
-    is nowhere in the database.
-
-    So the trade is a real one and is made deliberately. What is bought is that
-    matching agrees with storage, which is the whole reason this function
-    exists; what is paid is the second record's identifiers on a collision that
-    needs 500 identical leading characters and the same first author. The same
-    silent drop happens on **every** title and author match, truncated or not,
-    and is `_fill_marc_gaps`'s never-overwrite rule rather than anything this
-    truncation introduced.
-
-    A Book already on the shelf is never truncated by this, since **no write
-    path a member can reach** can put more than 500 characters in that column.
-    `backup.restore` is the exception and it is why that clause is qualified: it
-    inserts raw rows through `table.insert()` with no schema and no clipping, so
-    an admin restoring a hand edited archive can produce one. The property still
-    holds, because such a row simply fails to match and the import creates a
-    duplicate: fail safe rather than fail open.
+    **Matching reads this, not the record**, which is a correctness fix rather
+    than an optimisation: matching on the incoming value and storing the bounded
+    one means the key a duplicate is looked up by is not the key that was stored,
+    so the same record imported twice can fail to find itself.
     """
     fields = {
         name: within_bounds(name, getattr(record, name))
@@ -780,96 +727,22 @@ def within_bounds(attribute: str, value: Any) -> Any:
     """One incoming value, held to the bound the API would hold it to.
 
     **The MARC importer was the one writer of these columns that bounded
-    nothing.** `POST /api/books` bounds through `BookCreate`; the CSV importer
-    truncates in `csv_import.parse` (`title[:500]`, `author[:500]`,
-    `publisher[:255]`) and bounds its numbers in `csv_import._int`. A MARC file
-    is an upload, so it is exactly as untrusted as either, and a record's values
-    come out of free text subfields: `245 $n` is not a number and `264 $c` is
-    not a date.
+    nothing**, and an import is the widest door into this database: a record
+    arrives from another institution, not from a form this app rendered.
 
-    **What that cost is not an untidy row, and both halves were measured.**
+    **What an unbounded number costs was measured**: 70.5 bytes and 0.624 seconds
+    per million elements, so a stored `1e9` is roughly 70 GB and ten minutes, per
+    member, per request, until somebody finds the row.
 
-    * One 3.7 MB upload of a single record stored a 3,000,000 character title,
-      a 100,000 character author and a 500,000 character description, and
-      `GET /api/books` then answered 3.8 MB. `Book.title` is `String(500)`;
-      SQLite does not enforce a `VARCHAR` length, so the row is kept for ever
-      and `title` is selected on every listing page, every search, the CSV
-      export and the backup. On an engine that does enforce it the flush raises
-      mid batch and the whole transfer is lost with a 500.
-    * `series_index` is bounded at `models.MAX_SERIES_INDEX` on the three request
-      bodies that carry it, and not on every API path: `PUT /api/books/{id}/refresh`
-      writes the column through no model at all. `metadata._marc_title` reads the
-      first digit run of `245 $n` and calls `float()` on it, so a ten character
-      `$n` stores `1e9`. `routers/books.list_series` computed
-      `set(range(1, max(held) + 1))` over that column, which at a measured
-      **70.5 bytes and 0.624 seconds per million elements** is roughly **70 GB and
-      ten minutes**: the container was OOM killed, again on the next request, for
-      every member, until somebody found that row. Since 2026-09-03 that handler
-      truncates the range at the same constant, so a row this importer or a restore
-      writes past the ceiling costs the gaps above it and nothing else. **That is
-      the reader's guard and not this one's**: bounding here is still what keeps
-      the row itself sane, and the two are deliberately separate, because a
-      restore validates nothing and a released version cannot be gone back and
-      fixed. `year` has the same shape, `le=2200` against a four digit `264 $c`,
-      and `9999` is MARC's own open ended date for a continuing resource.
+    **The bounds are read off the declarations, never retyped**, so a column and
+    the schema in front of it cannot drift apart here.
 
-    **The bounds are read off the declarations, never retyped.**
-    `BookCreate.model_fields` carries the `Ge`, `Le` and `MaxLen` the API
-    applies and `Book.__table__` carries the column width. A literal here would
-    be a second statement of both, and a list of arms is the shape this
-    repository records as wrong on every first attempt: a field added to the
-    importer later inherits this without anybody remembering.
+    **Both widths are consulted and the smaller wins.** SQLite ignores VARCHAR
+    width, so a disagreement refuses nothing and is invisible; reading both is a
+    second opinion rather than a safety net.
 
-    **Both widths are consulted and the smaller wins.** Nothing disagrees
-    today: `BookCreate.language` said 16 against a `String(10)` column until
-    2026-09-02, and reading both is what kept this importer right about it
-    while the API was not.
-
-    **Reading both is now a second opinion rather than a safety net**, and the
-    difference is worth stating because the first draft of this paragraph got
-    it backwards. It said the pair going out of step is invisible under SQLite
-    *and* that a test now notices, which cannot both be true. What is true:
-    `tests/schemas/test_book.py` refuses a schema ceiling wider than its
-    column, so for all ten fields in `_MARC_RECORD_FIELDS` the schema is now
-    the smaller and the column read cannot change an outcome. It is kept
-    because it costs nothing and does not depend on that guard continuing to
-    exist.
-
-    **Strings truncate, numbers are dropped.** Truncating a title keeps the
-    record, which is what a batch wants. Clamping a year of `9999` to 2200 would
-    assert a date nobody supplied, so an out of range number is stored as
-    absent.
-
-    **Both halves now happen above this function as well, and it is kept.**
-    Since 2026-09-03 every `catalogue.Record` is held to the same declarations at
-    construction, because `PUT /api/books/{id}/refresh` wrote nine columns off
-    one through no model at all. That bound **drops** an over-wide string, which
-    is right for a catalogue asserting something about a book already on the
-    shelf and wrong here, so `marc._record` builds through
-    `catalogue.Record.from_upload`, which cuts the readable strings first. By
-    the time a value reaches this function it is therefore already inside its
-    column and this truncation finds nothing to do.
-
-    **One divergence, and it is deliberate.** That door drops rather than cuts
-    the strings a truncation would rename: a URL, a Google volume id and a
-    language code. Only `language` is in `_MARC_RECORD_FIELDS`, so only
-    `language` changes here, from a ten character prefix of whatever `041 $a`
-    held to nothing. `metadata._marc_language` reads a three letter code, so no
-    real file reaches it. It stays because the guard is cheap,
-    because it is what a value arriving from anywhere but that reader would
-    still meet, and because the two read their widths from the same
-    declarations rather than from each other.
-
-    **Every field the importer writes derives a bound, and one did not.**
-    `description` is a `Text` column, which reports no length, and
-    `BookCreate.description` carried no `max_length`, so this returned it whole
-    while the sentence above said otherwise. It was not a MARC hole:
-    `POST /api/books` accepted a 200,000 character description with a 201, so
-    the importer was honouring a contract that had a gap in it. `DESCRIPTION_MAX`
-    closes it at the declaration, which is where the guard reads, and
-    `tests/test_marc.py::TestEveryColumnTheImporterWritesIsBounded` walks
-    `_MARC_RECORD_FIELDS` so a field added later cannot inherit the absence
-    instead of the guard.
+    **Strings truncate, numbers are dropped.** Truncating a title keeps a usable
+    record; truncating a number invents a different one.
     """
     if value is None:
         return None
@@ -919,78 +792,14 @@ _MARC_RECORD_FIELDS: Final = (
     "series_index",
 )
 
-#: The columns a matched Book takes from an incoming record where it has none.
+#: The columns a matched Book takes from an incoming record.
 #:
-#: **Never an overwrite**, which is `_fill_gaps`'s rule and the same one
-#: metadata enrichment follows: a Book already here was catalogued by somebody
-#: who had it in their hands, and an uploaded file did not.
+#: **Fill the gaps, never overwrite.** An import may add what a row is missing
+#: and may not replace what somebody here already wrote, because the person who
+#: typed a value knows more about this copy than a stranger's record does.
 #:
-#: Wider than the CSV importer's four, because a MARC record carries more and
-#: because the fields it adds are the ones a cataloguer would otherwise retype.
-#: Derived from `_MARC_RECORD_FIELDS` rather than written out again: the gap
-#: filler takes everything the create path writes **except the title**, which a
-#: matched Book already has by definition, since the title is half of what
-#: matched it.
-#:
-#: **`isbn` is in neither tuple, and that is what stops a 500 rather than an
-#: economy.** It is written once, on the create path, and never filled in on a
-#: matched Book. Adding it here would reach this shape: a record whose ISBN
-#: belongs to a Book this Member cannot see, whose title and author match one
-#: they can. `MarcIndex.find` matches on the identity key, so `isbn_is_taken` is
-#: never consulted, and the gap filler would then write the invisible Book's
-#: ISBN onto the visible one, tripping `books.isbn`'s unique index.
-#:
-#: **The assignment is silent, and no lazy load can surface it**, which is the
-#: first thing to know because it is the first thing a reader guesses. This
-#: application's sessions come from `database.SessionLocal`, which is
-#: `sessionmaker(autocommit=False, autoflush=False)`, so reading
-#: `book.classifications` in `add_headings` emits its SELECT without flushing
-#: anything.
-#:
-#: **The count of that SELECT is the tell, and it needs no traceback.** Same
-#: record, same collision, one argument apart:
-#:
-#: | session | classifications SELECTs | raises at |
-#: |---|---|---|
-#: | `autoflush=False`, which is this app's | 1 | the commit |
-#: | `autoflush=True`, which is SQLAlchemy's default | 0 | `add_headings` |
-#:
-#: One means the lazy load was issued and flushed nothing. Zero means the
-#: autoflush raised **before** the SELECT was reached. So a probe that reports
-#: zero is measuring a session this application never constructs, which is what
-#: three seats spent five rounds not noticing.
-#:
-#: **So it surfaces at the next explicit flush, and which one that is depends on
-#: the rest of the file.** Measured through the route, both arms:
-#:
-#: | file | records entered | frames |
-#: |---|---|---|
-#: | the collider alone | `['Stoner']` | `apply > commit > flush` |
-#: | the collider, then a new record | both | `_apply_one > _create > flush` |
-#:
-#: So a later record that has to be created surfaces the earlier record's write
-#: at **its** insert, and with nothing after the collision it waits for the
-#: commit.
-#:
-#: The conclusion never depended on which: it is one transaction, so the whole
-#: transfer writes nothing and answers 500, which is the exact failure
-#: `_taken_isbns` exists to prevent by another route. The incoming ISBN is
-#: dropped instead, silently, and that is the cheaper loss.
-#:
-#: **Written down anyway, because five statements of this mechanism were made
-#: across three seats and every one was wrong**, two of them in this comment. A
-#: comment naming a mechanism is what the next reader trusts **instead of
-#: measuring**: "at the commit" sends somebody debugging this to the end of the
-#: run, and "at the autoflush" sends them to a flush this session never
-#: performs.
-#:
-#: It was settled by one `grep` of the session factory rather than by a sixth
-#: traceback. **A measurement is only evidence about the configuration it was
-#: taken under**, and every round of this argument measured the symptom while
-#: none of them read `database.py:18`.
-#:
-#: `tests/routers/test_imports_marc.py::TestAMatchedBookNeverGainsAnIsbn` pins
-#: it, because nothing else would notice the tuple gaining one entry.
+#: The column by column reasoning, and what each one costs if it is wrong, is in
+#: `docs/decisions.md`.
 _MARC_GAP_FIELDS: Final = tuple(
     name for name in _MARC_RECORD_FIELDS if name != "title"
 )

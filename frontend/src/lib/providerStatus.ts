@@ -1,65 +1,24 @@
 /**
  * The one line under a catalogue in the provider list.
  *
- * **Its own module rather than a helper inside `ProviderSection`**, because the
- * invariant below is worth testing over every combination of the fields rather
- * than through however many renders it takes to reach one. `classificationLabels`
- * is the same shape: a pure map from a wire row to a `MessageKey`, with no React
- * in it.
- *
- * ## The invariant, which cost two rounds
+ * **Its own module rather than a helper inside `ProviderSection`**, so the
+ * invariant below can be tested over every combination of the fields rather than
+ * through however many renders it takes to reach one.
  *
  * **A line that names registration groups may only be shown for a row those
  * groups actually narrow.** `serves_groups` is the remit a catalogue declares,
  * not the filter applied to it: the leading tier is asked about every ISBN
  * whatever a source's remit, so a promoted catalogue carries a populated
  * `serves_groups` **and** is asked about everything. `asked_first` is the field
- * that answers "is this filtered", and it has to be read before any line that
- * makes a claim about which ISBNs.
+ * that answers "is this filtered".
  *
- * That rule was written down and then broken one branch along, in the same
- * commit: `lookupOnlyRegional` returned from the `!answers_search` arm, above
- * the `asked_first` test, so a promoted lookup only catalogue with a remit was
- * told it answers "only for ISBNs beginning 978-80" while sitting in a tier
- * nothing filters. Reachable and measured: a plan of `nkp, k10plus, dnb` gives
- * the NKP `asked_first: true, answers_search: false`.
+ * **So `isFiltered` is asked by every arm that names groups**, rather than the
+ * guarantee resting on the order of the `if` chain. That ordering is how the rule
+ * was broken one branch along in the commit that wrote it down: a promoted lookup
+ * only catalogue with a remit was told it answers "only for ISBNs beginning
+ * 978-80" while sitting in a tier nothing filters.
  *
- * **`lookupOnly` was safe in that position and `lookupOnlyRegional` is not**,
- * and that is the whole difference: the first makes no claim about which ISBNs
- * and the second does. So the fix is not a fourth condition on one branch.
- * `isFiltered` is asked by **every** arm that names groups, which takes the
- * guarantee off the ordering of the `if` chain, and
- * `tests/lib/providerStatus.test.ts` sweeps the whole field space to check no
- * arm was missed.
- *
- * **The sweep cannot see its own oracle, which is worth knowing before trusting
- * it.** `isFiltered` is both the condition the arms ask and the assertion the
- * sweep checks them against, so a change *inside* it moves both sides together:
- * drop `!row.asked_first` from it and the sweep and its anti vacuity arm both
- * still pass, and only the named example,
- * `says a promoted lookup only catalogue is asked on every scan`, fails.
- * Nothing is unguarded, but the example is carrying work the sweep gets the
- * credit for. The sweep's real subject is which **arms** consult the predicate,
- * not whether the predicate is right.
- *
- * ## One thing no test here can catch, said rather than left to be found
- *
- * Replacing `isFiltered` in the **regional** arm with the two conditions spelled
- * out again changes no behaviour, because that arm sits below the `asked_first`
- * test and so is already unreachable for a promoted row. A mutation harness
- * scored it a survivor and it is an honest one: the two programs are identical.
- *
- * **That mutant is the code that shipped in `1d89801`**, byte for byte, so it
- * was not caught before this module existed either. The survivor is the state
- * this arm was always in rather than coverage lost in the move, which is worth
- * knowing because a survivor that used to be caught would be a finding.
- *
- * What `isFiltered` buys there is that the arm stops depending on its position,
- * and that was measured rather than argued. Moving the `asked_first` test below
- * it: with `isFiltered` the sweep still passes, and with the two conditions
- * written out it fails on two tests. So the ordering is what protected that arm
- * before, and it is exactly the protection the `!answers_search` arm did not
- * have.
+ * `tests/lib/providerStatus.test.ts` sweeps the whole field space.
  */
 
 import type { CatalogueSourceOut } from "../api/generated/model";

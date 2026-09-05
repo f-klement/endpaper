@@ -1,14 +1,10 @@
 """SRU, served rather than consumed, which is the other direction from `targets.py`.
 
-An archive that publishes a catalogue can be searched by a person. Being searched
-by another institution's software needs a protocol, and the one this domain uses
-is SRU: a query in CQL on a URL, and MARCXML back.
+## The second surface reachable without a session, answering the same five
+## questions as the first
 
-## This is the second surface reachable without a session, and it answers the
-## same five questions as the first
-
-`routers/public.py` names them, and the whole of this module's placement is that
-it must not answer any of them a second, different way:
+`routers/public.py` names them, and this module's whole placement is that it must
+not answer any of them a second, different way:
 
 | Question | Answered by |
 |---|---|
@@ -16,78 +12,39 @@ it must not answer any of them a second, different way:
 | Which **rows** may be shown? | `Shelf.seen_by_the_public` |
 | Which **columns** may be shown? | `marc.py`'s field mapping, pinned against `schemas/public.py` |
 | How fast may a stranger ask? | `ratelimit.public_catalogue_limiter`, the same counter |
-| May a crawler index it? | `middleware.SecurityHeadersMiddleware`, which leaves this path `noindex` |
+| May a crawler index it? | `middleware.SecurityHeadersMiddleware` |
 
-The first is not a new switch. The ticket asks only that library mode off makes
-the endpoint disappear, and `public_catalogue_is_published` is library mode
-**and** the publish row, so reusing it is stricter than that and it is the only
-arrangement in which the SRU surface cannot drift away from the JSON one. An
-institution that has not published its catalogue has not published it over a
-protocol either.
+**Reusing the publish gate is stricter than the ticket asked**, which wanted only
+that library mode off makes the endpoint disappear. An institution that has not
+published its catalogue has not published it over a protocol either, and this is
+the only arrangement where the two surfaces cannot drift apart.
 
-The third is the one that took work. A row filter is necessary and not
-sufficient, and MARC is a richer record than `PublicBookOut`: it has a field for
-the shelf mark, for the price paid, for the acquisition source. `marc.py` writes
-none of them today, which is what makes reusing it safe, and
-`tests/test_sru.py::TestTheRecordCarriesNoColumnThePublicPayloadWithholds`
-is what keeps it true. The day a `852 $b` is added for a cataloguer, that test
-fails and this server needs a record writer of its own.
+**The column question is the one that took work.** A row filter is necessary and
+not sufficient: MARC has fields for the shelf mark, the price paid and the
+acquisition source, and `marc.py` writes none of them, which is what makes
+reusing it safe. `TestTheRecordCarriesNoColumnThePublicPayloadWithholds` keeps it
+true, and the day an `852 $b` is added for a cataloguer that test fails and this
+server needs a writer of its own.
 
 ## The CQL parser is the real work, and it is an outside input
 
-Everything a stranger sends arrives in one string. So the parse is bounded
-**five** ways, each with a constant and each refused with the diagnostic the
-specification has for it: `MAX_QUERY_CHARS`, `MAX_NESTING_DEPTH`, `MAX_CLAUSES`,
-`MAX_WORDS_IN_A_TERM` and `MAX_MASKS_IN_A_TERM`. The ticket named the first
-three; the fourth and fifth are the two that decide how many predicates a
-clause expands into, which is the number the first three do not bound. The depth
-bound is enforced **during** the recursion rather than after it, because the
-failure it exists to stop is a `RecursionError` on `((((...))))`, and a check
+Everything a stranger sends arrives in one string, so the parse is bounded
+**five** ways, each with its own constant and its own diagnostic:
+`MAX_QUERY_CHARS`, `MAX_NESTING_DEPTH`, `MAX_CLAUSES`, `MAX_WORDS_IN_A_TERM` and
+`MAX_MASKS_IN_A_TERM`. The last two decide how many predicates a clause expands
+into, which the first three do not bound. **The depth bound is enforced during
+the recursion**, because the failure it stops is a `RecursionError` and a check
 that runs after the parse never runs.
 
 **Every refusal this module decides is a diagnostic in an HTTP 200**, never a
-4xx. That is the protocol: an SRU client reads the body, and a status code it did
-not expect is indistinguishable from a proxy having eaten the request. The gate's
-two answers are outside that sentence and are not this module's: an unpublished
-catalogue is HTTP 404, for the reason `routers/public.py` gives, and an over-rate
-caller is HTTP 429, because a client that must back off is better told in a
-header it already understands.
-
-**An exception that is not an `SruError` is still a 500, and that is deliberate
-rather than a gap**: it is a defect here rather than a refusal of anything a
-client asked for, and swallowing it would turn a bug into an empty result set.
-What is not acceptable is a hostile input reaching one, and an earlier version of
-this paragraph claimed no input could. It was wrong for three parameters:
-`rec.id`, `dc.date` and `startRecord` each accepted an integer Python parses and
-SQLite cannot store, and the `OverflowError` from the driver arrived at an
-unauthenticated client as `Internal Server Error`. `SQLITE_MAX_INTEGER` is the
-fix and it is worth reading, because the claim was made in three documents and
-was false in all three.
-
-## What is deliberately not implemented
-
-* **`scan`.** A third operation, an index browse, and it is a different query
-  over the same rows. Diagnostic 4.
-* **`sortKeys` and result sets.** Diagnostics 80 and 50, each the number the
-  specification has for declining that feature, rather than the 8 that means
-  "no such parameter". A parameter nobody has heard of still gets 8.
-* **`stylesheet`.** Diagnostic 110, and this one is a refusal rather than an
-  omission: honouring it puts a client supplied URL into a processing
-  instruction at the top of our response, so anybody could hand a third party a
-  link to this catalogue that renders through their XSLT.
-* **Classification headings as an index.** `dc.subject` searches this library's
-  own tags. Reaching `classifications` from here would put a statement in
-  `BOOK_OWNED_READERS` in `tests/test_shelf.py`, which is a decision about the
-  privacy guard rather than about SRU. `explain` reports the indexes that exist,
-  so a client sees the omission rather than guessing at it.
-* **Anchoring (`^`).** Diagnostic 31. Masking (`*` and `?`) **is** supported:
-  see `_pattern` for the measurement that decided it.
+4xx: an SRU client reads the body, and a status it did not expect is not an
+answer it can act on. **An exception that is not an `SruError` is still a 500**,
+deliberately, because a bug here must not be dressed as a protocol answer.
 
 ## Nothing here writes, and nothing here parses XML
 
-The only XML this module touches is the XML it emits. `marc.py` has a reader and
-it is not on this path, so none of the entity expansion and doctype refusal that
-an upload needs applies to a request that is a query string.
+The module builds documents and never reads one, so there is no parser on the
+untrusted path at all.
 """
 
 from __future__ import annotations

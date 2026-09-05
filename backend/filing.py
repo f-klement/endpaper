@@ -296,83 +296,23 @@ class LccFiling(FilingRule):
     ) -> SQLColumnExpression[str]:
         """The key, as one `CASE` of twelve arms with literal offsets.
 
-        **Flattened because the obvious shape is several times slower, and the
-        table below is what says how much.** The
-        first version computed the letter run and the digit run as `CASE`
-        expressions and then used them as `substr` offsets. SQLAlchemy has no
-        common subexpression elimination and SQL has no way to name a value
-        inside an expression, so each run length was re-rendered at every
-        offset that mentioned it: `letters` inside all four arms of the digit
-        run, and the position past the integer inside all six arms of the
-        decimal run and three times again in the tail. That is 522 `substr`
-        calls for a four part key, every one of them evaluated per
-        classification row per page.
+        **Flattened because the obvious shape is several times slower**, and the
+        cost is per classification row rather than per book, so it grows with a
+        library's cataloguing rather than with its size.
 
-        Measured in this tree on one four core development host, `ORDER BY
-        <clause> LIMIT 25` over a seeded library whose books carry one Dewey
-        and one LCC row each, best of 3. **Every column of a row from one run**,
-        including the pre-flattening clause rebuilt for the comparison, because
-        a pair drawn from two runs is how this paragraph went wrong twice:
+        **The absolute milliseconds are a floor, not an estimate**: the test
+        database is file backed on tmpfs, so a deployment on a spinning disk pays
+        more, and most of an LCC row is expression evaluation rather than I/O.
 
-        | books | `books.title` | `ddc` | `lcc` before | `lcc` after |
-        |---|---|---|---|---|
-        | 5,000 | 1.1 ms | 16.7 ms | 393.3 ms | 73.1 ms |
-        | 20,000 | 4.2 ms | 70.6 ms | 1,652.3 ms | 291.8 ms |
+        **Do not read a ratio against another column as a constant**, which is how
+        the first version of this note went wrong: the two scale differently, so
+        the ratio is a property of the corpus rather than of the query.
 
-        **The figure that holds across shapes is the cost per classification
-        row**, because that is what the correlated subquery evaluates once per
-        row: net of the title baseline, **0.078 and 0.082 ms before, 0.0144
-        after**, a factor of **5.4x at 5,000 books and 5.7x at 20,000**. Both
-        seats caught that written as a single 5.7x, which is true of the second
-        row only. The security seat measured 0.131 against 0.020 on its own
-        corpus, and 0.017 after this arm was trimmed.
+        **The flattening is possible because both runs are bounded**, which is
+        what keeps twelve arms from becoming an open list.
 
-        **The absolute milliseconds are a floor, not an estimate**, and the
-        reason is the storage rather than the processor: SQLite here was backed
-        by a file on tmpfs, so every read was RAM, where a deployment puts the
-        database on real storage.
-
-        **Most of an LCC row is expression evaluation rather than I/O, which
-        is what storage would change, and the baseline for saying so has to be
-        `ddc`.** It runs the identical correlated subquery over the identical
-        rows and differs only in the expression, so the difference between them
-        is expression cost above identical row access: **77% at 5,000 books and
-        76% at 20,000** on the table above, and 83% on the design seat's own
-        paired run.
-
-        **`books.title` cannot be that baseline**, which is how the first
-        version of this paragraph got 99%. It never reads `classifications` at
-        all, so it is not an upper bound on this clause's I/O, and both figures
-        in that ratio were themselves measured on tmpfs: two RAM speed numbers
-        say nothing about what happens when one becomes disk speed. A cross
-        instrument comparison dressed as a same instrument one, which is the
-        fault this ticket has now paid for five times.
-
-        **Do not read a ratio against `books.title` as a constant.** That order
-        never touches this table, so the ratio grows with rows per book: the
-        security seat measured 59.5x at one LCC row per book and 316x at four,
-        both on its own corpus.
-
-        `MAX_CLASSIFICATIONS_PER_BOOK` is 8, so the worst case a member can
-        build is 8 rows on 20,000 books. **Each pair from one corpus, never
-        mixed**: **13.2 s to 2.3 s** here (8 x 20,000 x 0.082 and x 0.0144) and
-        **21.0 s to 3.2 s** on the security seat's (x 0.131 and x 0.020). Slow,
-        and no longer enough to serialise the app from an ordinary catalogue.
-
-        Both critic seats found the cost independently, which is the strongest
-        signal this process produces.
-
-        **The flattening is possible because both runs are bounded.** One to
-        three class letters and one to four digits is twelve combinations, and
-        naming the combination up front makes every offset inside the arm a
-        literal. `CASE` short circuits, so exactly one arm is evaluated and
-        nothing in it re-derives a length. The decimal run keeps
-        `_run_length`, which is cheap once its start is a literal.
-
-        **A stored key removes this rather than shrinking it, and it is what
-        the reference implementation does.** Koha computes `cn_sort` on write.
-        That is a column and a migration, and it is the obvious next move on
-        this module.
+        **A stored key removes this rather than shrinking it**, and that is the
+        change to make if it ever matters.
         """
         arms = [self._arm(column, *shape) for shape in _ARM_SHAPES]
         return case(*arms, else_=GENERIC.sort_expression(column))

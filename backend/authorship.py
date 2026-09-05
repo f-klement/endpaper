@@ -1,81 +1,22 @@
 """Who wrote what: the half of author identity that touches the database.
 
-`authors.py` holds the thinking and is deliberately pure: `author_key`,
-`squashed_key`, `resolve_alias_map`, `build_index`, `suggest_merges`, no session
-and no writes. That purity is why it is easy to test, and it is not the problem.
-The problem was that **everything the database knows about "these two spellings
-are one person" lived in a route handler**: the index query, the merge write, the
-repointing pass, the alias delete and the resolution behind `?author=`. The pure
-functions were extracted so they could be tested, and the failures that matter
-now were in the calling code left behind. That is a locality problem, not a
-testing one.
-
-So this module owns both halves. `authors.py` stays exactly as it is and becomes
-the implementation underneath: still pure, still tested that way, still imported
-directly by the three modules that need `AUTHOR_NAME_MAX`, `author_key`
-and `split_authors`: `models.py`, `schemas/author.py` and `schemas/book.py`.
-
-## The interface
-
-    authorship = Authorship.seen_by(db, member.id)
-    authorship.listing()                       # every author, as the API serves them
-    authorship.suggestions()                   # names that are probably one person
-    authorship.book_ids_for("le guin ursula k")
-    authorship.merge(keys, keep_name, by_user_id=member.id)
-    authorship.unmerge(alias_id)
-    authorship.identifiers_for(name)            # what is stored for one author
-    authorship.spelling_for(key)
-    authorship.display_name(name)
-    authorship.record_catalogue_assertions(assertions, credited=book.author)
-    authorship.confirm_identifier(name, scheme, value, by_user_id=member.id)
-    authorship.record_cross_references(name, refs, by_user_id=member.id)
-    authorship.forget_identifier(identifier_id)
-
-`seen_by` mirrors `Shelf.seen_by`, and for the same reason: an author index is a
-Book query wearing a different hat, so it is scoped to a viewer at the point of
-construction rather than by each caller remembering to pass an id.
-
 ## Three rules that are the design, not oversights
 
-**A key is written by the system; a display name is written by a person.**
-`author_key` derives the key from the name, so a merge retires the keys it folds
-exactly as it retires the spellings. Both the filter and the merge endpoint
-therefore accept either a key or any spelling, and resolve a retired one through
-the alias rows. Nothing lets a caller choose a key.
+**A key is written by the system; a display name is written by a person.** The
+two never swap roles, so a rename cannot silently repoint an identity.
 
 **Removing a key is allowed; retyping it is refused.** `unmerge` deletes a row
-and the spelling becomes its own author again. There is no operation that
-changes an `alias_key` in place, because that is not an undo of anything: it
-would silently reassign every book carrying that spelling.
-
-**The same rule, arrived at from the opposite direction, governs an authority
-identifier.** A `canonical_name` is a preference and `merge` overwrites it
-freely; an identifier is a claim about which record in an external file an
-author is, so `forget_identifier` deletes and nothing updates, and a second,
-differing assertion raises `IdentifierConflict` rather than winning. The
-asymmetry is written out in full on `models.AuthorIdentifier`.
+rather than editing one, because editing a key means asserting a different
+person under the same evidence. The same rule governs an authority identifier
+from the other direction.
 
 **A key is per spelling, not per person.** Two alias rows may disagree about who
-a pair of spellings means, and that disagreement is evidence about what two
-members decided rather than a bug to reconcile. `resolve_alias_map` flattens
-what it is given; it does not adjudicate. An authority identifier is filed the
-same way, so two spellings folded into one person may carry different numbers:
-`AuthorOut.identifier_conflicts` reports that and nothing resolves it.
+a name refers to, and that disagreement is data rather than a fault to resolve.
 
 ## The index is read fresh, and there is no cache
 
-An earlier version of this module cached the index per instance and invalidated
-it from the two writes. **It saved nothing.** Measured over every method: no path
-reads the index twice without a write between the two reads, `merge` loads,
-writes and loads again for two loads either way, and every route builds a fresh
-instance for a single call. Its stated justification, "read three times in one
-merge", was a wrong count.
-
-It was removed rather than kept as insurance, on the module's own argument
-against a session watcher: machinery guarding against a caller that does not
-exist. The two tests that pinned "a read after a write is not stale" were kept,
-because that behaviour still has to hold and they now guard against the cache
-coming back.
+A stale index answers a question about identity with yesterday's merge, and the
+read is cheap enough that a cache would buy less than it risks.
 """
 
 import logging

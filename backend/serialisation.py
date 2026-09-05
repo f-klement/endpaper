@@ -316,71 +316,16 @@ def _collection_names(books: list[Book], db: Session) -> dict[int, str]:
 def books_to_out(books: list[Book], current_user: User, db: Session) -> list[BookOut]:
     """Serialise a page of books, adding the per-request fields.
 
-    None of them is a column, and the obvious implementation queries for each
-    of them per book, which is what made listing 25 books cost 53 SELECTs.
-
     **The cost, measured rather than counted off the source.** This function is
-    the one place that states it; `docs/architecture.md` and
-    `docs/data-model.md` point here rather than repeating a number, because
-    both have been wrong before and were wrong in the same way twice.
+    **7** statements, constant in the size of the page.
 
-    **7** statements, constant in the size of the page: the books re-read to
-    populate their tags, the tag load itself, the classification load, the
-    loans, the statuses, the progress, and the members offering to talk about
-    each book. Measured at 1, 5 and 25 books, unchanged.
+    **8 when the page holds a copy**, because the copy count issues its statement
+    only when there is one, and **8 when the page holds a book filed in a
+    collection**, for the same reason. **Plus one per distinct `added_by` the
+    session has not already loaded.**
 
-    It was 6 until classifications were stored: `selectinload` issues one
-    statement per relationship, so loading a second one on the same re-read
-    costs exactly one more for the whole page, not one per book.
-
-    **8 when the page holds a copy.** `_copy_counts` issues its statement only
-    when some book on the page carries a `copy_group`, which almost none do,
-    and it is one statement for the whole page whatever it finds.
-
-    **8 as well when the page holds a book filed in a collection.**
-    `_collection_names` is the same shape: nothing at all until a library
-    makes a collection and puts something in it, then one statement for the
-    page however many collections it spans. Measured directly on this function
-    over a page of five filed books against a page of plain ones: **8 against
-    7**, a delta of exactly one.
-
-    **Plus one per distinct `added_by` author the session has not already
-    loaded**, and that one is not this function's: `BookOut.model_validate`
-    reads `book.added_by`, which lazy loads unless the caller fetched it. So
-    the number depends on who called, and on who wrote the books.
-
-    The caller's own row is always already loaded, because the auth dependency
-    put it in this session before the endpoint touched a book, so **books the
-    caller added cost nothing here**. That is the one condition that moves the
-    number, which is why it is stated rather than left in the measurement.
-
-    **Which of these figures a test would catch.** The 7 is read back out of
-    this docstring by
-    `test_the_number_in_the_docstring_is_the_number_it_costs`, and the two 8s
-    follow from it, since `TestCopyCount` and `TestCollectionName` each assert a
-    delta of exactly one against the same base. The 11 below and the per-author
-    table are measurements and nothing pins them, so treat them as true of the
-    day they were taken.
-
-    Measured on rows fetched without `joinedload`, identical at 5 and at 25
-    books, for one, two and three distinct authors:
-
-        authors                  1   2   3
-        caller wrote none        8   9  10
-        caller is one of them    7   8   9
-
-    Every listing endpoint in `routers/books.py` passes
-    `joinedload(Book.added_by)`, so none of them pays any of it: `GET
-    /api/books` measures a flat **11 SELECTs** end to end at 25 books, and
-    `books_to_out` on rows fetched with the option is a flat 7 at 1, 5 and 25
-    books. Both figures are for a page holding neither a copy nor a filed book,
-    and the two conditional statements above are what a page holding either
-    costs on top. The 7 was one lower before the classification load, and the
-    11 was 12 until `Loading.SERIALISED` stopped loading tags this function
-    loads anyway (2026-08-30, measured at 5 and at 25 books).
-
-    A new caller that fetches books without that option gets the per-author
-    cost back. That is the trap this paragraph exists to name.
+    **Only the 7 is pinned by a test**, which is worth knowing before quoting the
+    others: the conditional statements need a page shaped to trigger them.
     """
     if not books:
         return []

@@ -1,70 +1,30 @@
 """Chasing overdue loans, by sending one digest on every channel that is on.
 
-Four senders. **The app itself, a webhook, mail over SMTP, and Telegram**, each
-switched on independently. The three that push outward carry the same content;
-the fourth is read rather than sent, and carries what its reader may see.
-
-**The webhook was once the only one, on an argument this module used to make and
-that is now overruled.** It said a self-hosted app should not ship an
-integration nobody else runs, and that a webhook is the one shape every receiver
-already speaks. What that reasoning missed is that it makes the household build
-the receiver: most have no webhook endpoint and no intention of writing one, so
-the feature was off for them in practice. The two additions are chosen against
-exactly that objection. **SMTP is universal**, carried by every household that
-has a mailbox, and **Telegram is one fixed host**, so "an integration with
-something nobody else runs" costs one constant here rather than a service.
-Recorded so the next reader does not think a decision was quietly reversed:
-issue #8, and `docs/decisions.md`.
-
 **Private books are excluded from every sender that pushes.** A channel has no
-member identity behind it and lands where the whole household reads, so putting
-a private book's title through one defeats the single promise the data model
-makes. See `docs/decisions.md` and `docs/security.md`.
+member identity behind it and lands where the whole household reads, so putting a
+private book's title through one defeats the single promise the data model makes.
 
 **The in app channel is the exception, and it is the rule rather than a hole in
 it.** Its audience is a member, so `overdue_for_viewer` roots the query at
-`Shelf.seen_by` and each reader gets exactly what `visible_to` already says they
-may see, their own private books included. Being told about your own book is not
-a disclosure. That is the one capability the other three cannot have, and the
-reason this module's exemption from the Shelf rule covers the digest only: the
-digest has no viewer, and that query does.
+`Shelf.seen_by` and each reader gets exactly what `visible_to` already grants,
+their own private books included: being told about your own book is not a
+disclosure. That is why this module's exemption from the Shelf rule covers **the
+digest only**. The digest has no viewer; that query does.
 
-**A per borrower mail would be the one audience that could carry a private
-book**, because being reminded of a book you borrowed is not a disclosure. It is
-**still not built**, and what changed is only the fact it was blocked on:
-`models.User` now carries an `email` column (issue #80), so an address can
-exist. Nothing here reads it. Mail goes to the household's own mailbox, which is
-a channel like the other two and excludes private books like the other two, and
-that stays true for a member who has filled the field in, because no code path
-consults it yet.
+**Three channels rather than the webhook alone**, because a webhook makes the
+household build the receiver: most have none and no intention of writing one, so
+the feature was off for them in practice. SMTP is universal and Telegram is one
+fixed host, so neither costs a service.
 
-So the column's arrival is invisible to this module by construction rather than
-by discipline: `send_mail` takes its recipients from `mailer.checked_config`,
-which reads `overdue_mail_to` and nothing else. A per borrower mode is a second
-audience for `build_digest` and a second recipient list, which is issue #8's
-remaining work rather than a column.
+**A per borrower mail is the one audience that could carry a private book**,
+since being reminded of a book you borrowed is not a disclosure. It is not built.
+`User.email` exists, and nothing here reads it: `send_mail` takes its recipients
+from `mailer.checked_config`, so the column's arrival is invisible to this module
+**by construction rather than by discipline**.
 
-`notified_at` is stamped when **at least one sender that pushes** delivered,
-because the column records that a reminder went out and one did. The
-alternative, stamping only when every sender delivered, turns one broken
-receiver into an hourly repeat of the same list on the channels that work,
-which `build_digest` calls the behaviour people switch off. A sender that
-failed is reported in its own entry rather than compensated for, and its
-standing record is kept by `record_run` rather than left in the log.
-
-The in app channel is outside that condition on purpose: it delivers nothing,
-so counting it would stamp every loan on every run and cut the pushing senders
-from hourly attempts to one per interval. `pushes_outward` carries the number.
-
-The reminder interval is the library's, not this module's. Handy Library's
-named differentiator in this space is configurable timing, and it is the right
-one to copy: a week is nagging in one house and silence in another.
-
-Not Koha's `--triggered` shape, which fires only when a loan is overdue by
-exactly the configured number of days and therefore sends nothing at all if the
-run is missed. State on the loan (`notified_at`) plus an interval is robust to a
-skipped tick, which matters here because the ticker lives in the web process and
-dies with a restart.
+`notified_at` is stamped when **at least one pushing sender** delivered, because
+the column records that a reminder went out and one did. Stamping only when every
+sender delivered turns one broken channel into silence on all of them.
 """
 
 import asyncio
@@ -291,44 +251,14 @@ def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
 def count_private_overdue(db: Session, now: datetime) -> int:
     """How many overdue loans the privacy exclusion held back.
 
-    A count, never a title. Reported so a library that expects five entries
-    and receives four can see why without reading the source.
+    **The number for a sender whose audience is a channel**, so it says how much
+    the household is not being told rather than naming anything.
 
-    **This is the number for a sender whose audience is a channel, and every
-    sender has one today**, so all three report it and all three agree. It is
-    carried per sender in `SenderOutcome` rather than only once at the top, and
-    the reason belongs here, at the function that exists to report what was
-    withheld: what one channel withholds is not necessarily what another did.
-    An audience with a member behind it could carry a private book the others
-    may not, and a single figure would then be a lie on two channels of three.
+    **A per borrower mail would be the audience that could carry those books**,
+    and it does not exist. `User.email` exists and nothing here reads it.
 
-    **A per borrower mail is that audience, and it does not exist yet.** Being
-    reminded of a book you borrowed is not a disclosure, so such a mail could
-    include one.
-
-    **What has changed, and what has not.** `models.User` now carries an `email`
-    column and the LDAP backend requests an attribute where one is configured
-    (issue #80), so an address can exist: the premise this paragraph used to
-    rest on is gone. What has not changed is the conclusion. Nothing reads that
-    column here: `send_mail` takes its recipients from `mailer.checked_config`,
-    which reads `overdue_mail_to` and nothing else, so mail still goes to the
-    household's mailbox and is a channel like the other two. A member who has
-    filled the field in is in exactly the position of one who has not.
-
-    So this count is still every private overdue book in the library, and when a
-    per borrower audience arrives this function grows a caller that asks for a
-    different number, not a second definition of the rule.
-
-    **No reminder interval here, and that is the difference from
-    `due_for_reminder`.** A private book is never sent, so nothing in this
-    feature ever stamps its `notified_at`; the only way one carries a value is
-    a book that was public when a reminder went out and was made private
-    afterwards. Filtering on it therefore hid exactly those from the count for
-    the length of the interval, and the answer to "how many did privacy hold
-    back" does not depend on when anything was last sent.
-
-    It takes no `days` for the same reason: a parameter nothing reads is a
-    parameter the next caller passes wrongly.
+    **No reminder interval here**, unlike the digest: this counts what is overdue
+    rather than what is due to be chased again.
     """
     return (
         db.query(Loan)
@@ -396,43 +326,12 @@ def sees_every_loan(db: Session, viewer: User) -> bool:
 def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
     """The overdue loans the in app notice tells **this member** about.
 
-    **Rooted at the Shelf, which is what makes this different from every other
-    query in this module.** The digest has no viewer and is exempt from the
-    house rule for that reason; this one has a viewer, so it is not covered by
-    that exemption and does not inherit it. `Shelf.seen_by` applies
-    `visible_to` by construction, so a private book somebody else added cannot
-    reach here whatever the clauses below do.
+    **Rooted at the Shelf**, which is what makes this different from every other
+    sender in the module: it has a viewer, so it inherits `visible_to` and shows
+    a member their own private books without disclosing anybody else's.
 
-    That is also the capability the outward channels cannot have. A mailbox or
-    a chat has no member behind it, so the digest excludes every private book
-    and reports a count instead. This audience **is** a member, so their own
-    private books belong in it: `visible_to()` has always said a private book
-    is visible to the member who added it, and telling somebody about their own
-    book is not a disclosure.
-
-    Two arms, and `sees_every_loan` is the only place the difference is
-    decided. Staff, and every member in library mode, read every overdue loan
-    on their shelf. Otherwise a member reads the ones they are party to: they
-    borrowed it, or they lent it out. Both are facts about the loan rather than
-    about the book, which is why neither arm needs a second privacy rule on top
-    of the Shelf's.
-
-    No `notified_at` clause, deliberately. That column records that a reminder
-    went **out**, and nothing goes out here: an overdue loan is on the member's
-    screen for as long as it is overdue, and quieting it for a week would be
-    the app forgetting something it is still looking at.
-
-    **The query, not the rows, and the caller chooses.** The one production
-    caller wants a number, and `len(query.all())` for a number is the defect it
-    reads like: measured against 500 overdue loans it built 500 ORM objects, on
-    every visit to the library page, to call `len` on them. `.count()` is one
-    statement and none. `Shelf.select()` hands its own query out for the same
-    reason, and the privacy predicate is already on this one by construction, so
-    there is nothing a caller can widen: `.filter()` on it can only narrow.
-
-    No eager loading here for the same reason. It was `joinedload(Loan.book)`
-    and `joinedload(Loan.loaned_to)`, which were for rendering titles, and the
-    notice reports a count and never a title.
+    **Returns the query rather than the rows**, so the caller chooses between
+    counting and listing without a second implementation of the rule.
     """
     query = (
         Shelf.seen_by(db, viewer.id)

@@ -1,213 +1,56 @@
 """The authority files, read for a person rather than for a book.
 
-`metadata.py` asks catalogues about **books** and normalises their answers into
-`catalogue.Record`. This module asks three authority files about **people** and
-normalises theirs into `AuthorityCandidate`. The question is different: a book
-record describes a printing and dies with it, and an authority record describes
-somebody who outlives every printing.
+`metadata.py` asks catalogues about **books**; this module asks three authority
+files about **people**. A book record describes a printing and dies with it; an
+authority record describes somebody who outlives every printing.
 
-## Two suppliers and one enrichment, and the third is not a third supplier
+## Two suppliers, one comparator, one enrichment
 
-**lobid.org** serves the GND, which is the file the DNB is already citing in
-MARC `100 $0`. **Wikidata** is the cross check. They assert overlapping facts, so
-where they disagree the disagreement is **surfaced and never resolved by
-precedence**: see `Disagreement`, and `docs/decisions.md` for why a merge of
-several sources beats taking the first hit.
+**lobid.org** serves the GND, which the DNB already cites in MARC `100 $0`.
+**Wikidata** is the cross check: where the two disagree the disagreement is
+**surfaced and never resolved by precedence**, which is `Disagreement`.
 
-**Wikidata has a second job since 2026-08-28 and the two must not be confused.**
-On the six national library numbers it is a **fallback supplier**, asked only
-where VIAF produced no cluster, never a comparator: see `_NATIONAL_PROPERTIES`
-for the measurement that decided it and `national_identifiers` for the table of
-what does and does not trigger it. One supplier speaks per confirmation, so the
-report-never-adjudicate rule above is untouched by it.
+**The join is verifiable in both directions**, and that is what makes it worth
+two requests. lobid's `sameAs` on a GND number asserts a Wikidata item, and
+Wikidata's `haswbstatement:P227` independently returns the same one. Neither was
+told the other's answer.
 
-The join is verifiable in **both directions**, which is the property that makes
-this worth two requests rather than one. Measured 2026-08-27 for
-`Stevenson, Robert Louis`:
+**Wikidata has a second job and the two must not be confused.** On the six
+national library numbers it is a **fallback supplier**, asked only where VIAF
+produced no cluster, never a comparator. One supplier speaks per confirmation, so
+the report-never-adjudicate rule is untouched.
 
-* lobid's `sameAs` on GND `118753711` asserts `wikidata.org/entity/Q1512`.
-* Wikidata's `haswbstatement:P227=118753711` independently returns `Q1512`.
+**VIAF is never an entry point.** `resolve` and `search` do not touch it, so a
+lookup a member is reading costs nothing extra. It is asked by
+`national_identifiers` alone, after a member has confirmed a GND record, for the
+numbers that record's `sameAs` does not carry. A cluster names the GND record it
+was built from, so it is checked against an identifier already in hand rather
+than trusted on a name.
 
-Neither was told the other's answer.
+## Why VIAF is not a supplier
 
-**VIAF is the third host and it answers a different question.** It is never an
-entry point and never resolves a person: `resolve` and `search` do not touch it,
-and a lookup a Member is reading costs nothing extra. It is asked by
-`national_identifiers` alone, after a Member has confirmed a GND record, for the
-six national library numbers that record's `sameAs` does not carry. The same
-both directions property is what makes it usable: a cluster names the GND record
-it was built from, so it is checked against the identifier already in hand
-rather than trusted on a name.
+**Half of its read API answers, and which half depends on the `Accept` header
+alone**, not on the path. That is easy to probe wrongly in either direction,
+which is why the finding is recorded here rather than left to be rediscovered.
 
-## Why not VIAF as a supplier, which the ticket was written around
+## Terms, read rather than assumed
 
-**Half of VIAF's read API answers, and the half that does is easy to probe
-wrongly in two opposite directions**, so the whole of it is recorded here rather
-than a conclusion. Measured 2026-08-27.
-
-**The variable is the `Accept` request header, and nothing else.** Not the
-`User-Agent`, which is what two separate probes of this concluded before the
-matrix below was run: both had changed the agent and the header together and
-credited the agent.
-
-`GET viaf.org/viaf/search?query=...&httpAccept=application/json`:
-
-| `Accept: application/json` | `User-Agent` | result |
-|---|---|---|
-| sent | anything, curl's default included | **200 `application/json`**, ten `VIAFCluster` records |
-| absent | `endpaper`, `endpaper/1.0`, a Chrome string | **307** to `/en/viaf/search?...` |
-| absent | curl's default | **403**, 5,481 bytes of `text/html` |
-
-`httpAccept=application/json` in the query string is VIAF's **old** API
-convention and the current site ignores it, which is the trap: following the 307
-answers **200 `text/html`**, 93,813 bytes of Next.js page, and that is a 200 for
-a request that carried `httpAccept=application/json`. A probe that follows
-redirects and checks only the status code concludes the API works. A probe that
-sends no `Accept` header concludes it is gone. Both are wrong.
-
-With the header, `AutoSuggest` also answers 200 `application/json`, carrying
-`lc`, `dnb` and `viafid`. `POST /api/search` answers 403 `{"message":"Forbidden"}`.
-
-**Three record paths are gone and one is not**, which the 2026-08-27 pass read
-as "the record endpoints are gone". `/viaf/<id>/viaf.json`,
-`/viaf/<id>/justlinks.json` and `/viaf/<id>/` **with** the trailing slash answer
-Kong's 103 byte `{"message":"no Route matched with those values"}`.
-`/viaf/<id>` bare answers **200 `application/json`, 401,483 bytes**, measured
-2026-08-28 on cluster 88919448. Recorded because a later reader would otherwise
-plan around an endpoint that answers, and because 401 KB for one person is a
-number any use of it has to start from: the same cluster through
-`search?query=local.viafID = <id>&recordSchema=BriefVIAF&maximumRecords=1` is
-**32,842 bytes** and carries the same 45 source files.
-
-**That paragraph used to end "none of it changed a line of this module", and the
-sentence after it is why that stopped being true.** The reasoning it recorded is
-sound and is kept: VIAF *aggregates* national authority files and mints nothing,
-the identifier this app already receives is a **GND**, and lobid carries the
-VIAF URI in `sameAs`, so as a route to a person VIAF is the indirect one.
-
-**That is right for resolution and wrong for enrichment, and the same fact
-supports both.** Aggregating nothing of its own is exactly what makes VIAF the
-only place the six national library numbers are reachable: measured 2026-08-28,
-a GND record's `sameAs` carries ISNI, LCNAF, VIAF and Wikidata and **no national
-file at all**, while the cluster it names carries BLBNB, ARBABN, BNE, PTBNP,
-ICCU and BNCHL. The question changed from "who is this person" to "what is this
-person called in Brazil", and only the second one needs an aggregator. See
-`national_identifiers`, which is the only caller.
-
-## What each supplier's terms permit, read rather than assumed
-
-lobid and Wikidata on 2026-08-27, both from a machine readable statement rather
-than a page that says so. VIAF on 2026-08-28, and its entry is shorter because
-there was less to read.
-
-**lobid.** Every response carries `describedBy.license` =
-`creativecommons.org/publicdomain/zero/1.0/`, maintainer `DE-101`, which is the
-DNB. Its usage policy asks for at most 6,000 simple lookups and 30 complex
-searches a minute, a meaningful and stable `User-Agent`, and bulk work off peak.
-
-**Wikidata.** `action=query&meta=siteinfo&siprop=rightsinfo` returns "All
-structured data from the main and property namespace is available under the
-Creative Commons CC0 License". It asks for a `User-Agent` too, and **not as a
-courtesy**: a request without one answers **403** with "Please set a user-agent
-and respect our robot policy".
-
-lobid's attribution is explicitly optional and explicitly welcomed. Wikidata's
-CC0 covers exactly the namespaces `wbgetentities` and `wbgetclaims` read.
-
-**That 403 is why `fetch._AGENT` exists.** It was added for lobid's written
-request and turned out to be a hard requirement for the second supplier.
-
-**VIAF publishes neither, and that is measured rather than assumed.**
-`viaf.org/robots.txt` is not served: with `Accept: text/plain` it answers the
-site's own 404 page, and with `Accept: application/json` it answers the
-gateway's. No endpoint used here carries a rights statement in its body, so
-there is nothing here of the kind the two entries above quote. What is taken is
-a bare identifier per authority file, which is a fact rather than a creative
-work, and the volume is one confirmation's worth: at most three requests **to
-VIAF**, and only when a Member confirms a record. The confirmation as a whole is
-up to eight across the three hosts: see `national_identifiers`.
+**lobid** states its licence in every response. **Wikidata** publishes CC0 through
+`rightsinfo`, and its 403 on a default user agent is why `fetch._AGENT` exists.
+**VIAF publishes neither**, which is measured rather than assumed and is one
+reason it stays out of the resolution path.
 
 ## The refusal this module is built around
 
-`docs/featurelist.md` refuses author biographies and portraits: the shelf knows
-a name and nothing else about a person, which is what keeps an author a derived
-fact. Wikidata is read here for **identity and disambiguation only**.
+**The only thing any of this can write is an identifier.** Not a name, not a
+date, not a description: a person's own record stays what a member typed, and an
+authority file can only ever attach a number to it.
 
-Both suppliers offer more, in fields that are right there in a response already
-parsed: lobid's `depiction` is a portrait and its
-`biographicalOrHistoricalInformation` reads
-"Lebte ab 1888 auf Westsamoa, starb in dem Dorf Vailima, nahe Apia, Samoa", and
-Wikidata's `props=claims` is a body of work. None of the three is read, and
-`tests/test_authority.py::TestTheRefusalsAreStructural` fails if one starts
-being, because a refusal a reviewer has to remember is a refusal that lapses.
+## The boundary
 
-**The only thing any of this can write is an identifier**, and it writes
-several. The one line description, the variants and the dates exist so a person
-can tell two same named people apart at the moment they confirm, and none of
-them has a column: there is nowhere to put a description and this module has no
-session. What reaches `author_identifiers` is the GND number a Member confirmed,
-the cross references `cross_references` reads off the same record, and the six
-national numbers `national_identifiers` reads off the VIAF cluster that record
-names, through `Authorship.confirm_identifier` and
-`Authorship.record_cross_references`.
-
-That sentence used to read "nothing this module returns is stored", which was
-true while `AuthorityScheme` had one member. It is replaced rather than deleted
-because the half that still binds is the half about the description: a
-biography is refused, and being able to store an identifier is not a step
-towards being able to store prose.
-
-## The boundary, which is every catalogue source's plus two
-
-* **Three fixed HTTPS hosts**, never a host from a response. `fetch.get` refuses
-  a cross host redirect on its own, and nothing here follows a `sameAs` link:
-  those are recorded and shown, never fetched. The VIAF cluster id is read
-  **out of** a `sameAs` URI by `_VIAF_URI` and then put into a URL this module
-  spells itself, which is the difference between using a value from a response
-  and following a link in one.
-* **The identifiers are validated before they reach a URL.** `_GND_NUMBER`,
-  `_ITEM_ID` and `_VIAF_CLUSTER` are anchored. Without the first, a hand edited
-  row holding `../search` is a path traversal inside lobid, and httpx will not
-  encode that away because a path separator in a formatted string is a path
-  separator. The third guards the same thing for `_VIAF_RECORD_URL`, and it is
-  checked again after `AutoSuggest` because that value comes from a response.
-* **The name is escaped before it reaches the query, and the query is not a
-  phrase.** Both halves are measured rather than chosen: a quoted
-  `preferredName` phrase cannot match, because this app stores a name in
-  reading order and the GND writes it in catalogue order, and an unescaped
-  Lucene query makes lobid answer **500** on an author's name containing `(`.
-  `_LUCENE_ESCAPED` and `_PERSON_FILTER` carry both measurements.
-* **Every lobid and Wikidata response is bounded well under
-  `fetch.MAX_RESPONSE_BYTES`**, and the reason is a measurement rather than
-  caution: `wbgetentities` with `props=claims` on one well documented person is
-  **243,864 bytes**, against 341 for the labels and descriptions this module
-  actually asks for. Asking for the default would be a quarter of a megabyte per
-  candidate. **A VIAF cluster is the exception and has its own bound**: a
-  canonical author's is 276,610 bytes through the cheap route and 781,687
-  through the expensive one, so `_VIAF_LIMIT` is separate from `_RESPONSE_LIMIT`
-  and carries its own measurements.
-* **Both branches are bounded, in count and in time, and the count alone was
-  not enough.** A name search costs one lobid request plus two Wikidata requests
-  per candidate, capped by `MAX_CANDIDATES`; a resolve costs four, because it
-  compares `P214` and `P213` where a search compares neither. The **resolve**
-  branch is one
-  candidate per stored identifier, which is one per spelling folded into a
-  person, so it had no ceiling at all: 40 spellings measured out at 160
-  outbound requests and a 1,600 second worst case, with a `DbSession` held
-  across every await. The router slices to `MAX_CANDIDATES` and every call in
-  one lookup shares one absolute `DEADLINE_SECONDS`.
-* **`national_identifiers` is bounded at three VIAF requests, or six Wikidata
-  ones instead of them, and is not on either branch.** It runs once per
-  confirmation rather than once per candidate, which is what keeps a read cheap:
-  `GET /authors/authority` can resolve five people and asks VIAF about none of
-  them. `certain` is what enforces that from inside the function rather than
-  from its caller. The six are the fallback and are paid **instead of** the
-  three rather than beside them, so the ceiling on one confirmation is fourteen
-  requests across three hosts and not twenty.
-
-**No cover host is added**, and none could be: `covers.COVER_HOSTS` is what the
-CSP's `img-src` is derived from, and nothing here returns an image. That is the
-same sentence as the `depiction` refusal above, arrived at from the other side.
+Every catalogue source's, plus lobid and Wikidata. **No cover host is added and
+none could be**: `covers.COVER_HOSTS` is what the CSP is derived from, so a host
+added here would widen what the browser may load.
 """
 
 import asyncio
@@ -1349,112 +1192,26 @@ async def national_identifiers(
     """The six national files' numbers for a person, which a GND record omits.
 
     **The half of the cross references that is not free.** A GND record's
-    `sameAs` carries ISNI, LCNAF, VIAF and Wikidata and `cross_references` reads
-    all four off a response already in hand. It carries **no national library
-    number at all**, and those are what a reader of Spanish, Portuguese,
-    Brazilian, Argentine, Italian or Chilean books actually wants. A VIAF cluster
-    carries them, so this is the one place this module pays for a request rather
-    than reading one it already made.
+    `sameAs` carries ISNI, LCNAF, VIAF and Wikidata, which `cross_references`
+    reads off a response already in hand. It carries **no national library number
+    at all**, and those are what a reader of Spanish, Portuguese, Brazilian,
+    Argentine, Italian or Chilean books wants. A VIAF cluster carries them, so
+    this is the one place the module pays for a request rather than reading one it
+    already made.
 
-    **VIAF is a discovery route and never an identity here.** Nothing this
-    returns is a VIAF cluster id: `cross_references` already stores that, from
-    lobid's assertion cross checked against Wikidata's `P214`. Cluster ids split
-    and merge, and #87 measured `Stevenson, Robert Louis` resolving to four of
-    them, so adopting one as identity would adopt its splits as identity events.
+    **VIAF is a discovery route and never an identity here.** Nothing returned is
+    a cluster id: cluster ids split and merge, and one author was measured
+    resolving to four of them.
 
-    ## The cluster is verified rather than trusted, in both directions
+    **The cluster is verified in both directions**: it must name the GND number
+    already in hand, rather than being trusted on a name.
 
-    A cluster's own `v:sid` list names the GND record it was built from, as
-    `DNB|118753711`. **So the cluster is only used when it names back the exact
-    identifier the Member confirmed.** Measured 2026-08-28 over six Romance and
-    Latin American authors: six of six clusters named their GND back.
+    **Wikidata is the fallback for this route and never a comparator**, asked only
+    where VIAF produced no cluster. One supplier speaks per confirmation.
 
-    That is the property this module already prizes for lobid and Wikidata,
-    applied to a third file: neither side was told the other's answer. It is
-    also what makes the `AutoSuggest` route safe, because the name is then how
-    the question is asked and not how the answer is chosen.
-
-    A cluster that names two different GND records fails the check by
-    construction, since `_viaf_sources` drops a code it sees twice. That is the
-    right outcome: a cluster holding two GND records is the merge case, and
-    picking one of them is adjudication.
-
-    ## What it refuses, and each refusal is a rule rather than caution
-
-    * **A candidate that is not `certain`.** A name search returns up to
-      `MAX_CANDIDATES` people and buys no comparison for any of them, so
-      `_cross_check` records that only `resolve` produces a candidate anything
-      may be written from. This is the one caller that makes outbound requests
-      per candidate, so it is where that is enforced rather than documented.
-    * **A candidate whose VIAF cluster the two files disagree about.** Asking
-      VIAF itself which of the two is right is adjudication by a third party,
-      and this feature reports a disagreement rather than settling it. The
-      identifier is still shown: `AuthorityCandidateOut.disagreements` carries
-      the conflict.
-    * **A cluster that does not name the confirmed GND back.** Logged, because
-      the alternative is a durable row asserting that a Chilean record is this
-      author's on the strength of a name.
-
-    ## When Wikidata answers instead, and when it deliberately does not
-
-    **Wikidata is the fallback for this route and never a comparator**, settled
-    by the owner on 2026-08-28. It is asked when **VIAF produced no cluster
-    record**, and that is the whole trigger:
-
-    | What happened | Wikidata asked |
-    |---|---|
-    | the request never got a status: timeout, DNS, refused | yes |
-    | a 403, a gateway 404, a 5xx whose bare record also failed | yes |
-    | a 200 carrying HTML rather than JSON | yes |
-    | a body that parsed and held no `VIAFCluster` | yes |
-    | `AutoSuggest` answered and matched no hit, or matched two | **no** |
-    | a cluster came back and named a different GND record | **no** |
-    | a cluster came back carrying none of the six | **no** |
-
-    The line is supply, not coverage. The bottom three are VIAF **answering**,
-    and two of them are answers this function refuses on a rule of its own;
-    asking a second file to overrule a refusal is the adjudication the whole
-    feature is built to avoid. `_national_from_wikidata` carries the rest.
-
-    ## The budget
-
-    One `AutoSuggest` call only where it is needed, one `BriefVIAF`, and the
-    bare record only on a 5xx. Measured worst case 2026-08-28: 2,975 + 276,610
-    + 781,687 bytes and 0.56 + 0.75 + 1.81 seconds, against `DEADLINE_SECONDS`,
-    which the whole lookup shares.
-
-    **Three is this function's share on the path that works, and not the
-    confirmation's total.** The `resolve` that produced the candidate was one
-    lobid request and four Wikidata ones, so `POST /authors/identifiers` is up
-    to **eight** across three hosts. That is the figure
-    `ratelimit.AUTHORITY_LIMIT` is sized against, and stating only the three
-    here is how an earlier version of that sizing came to count two hosts of
-    three. One client for all three, so the connection is reused rather than
-    reopened per step; that is why this uses `fetch.get` with a client of its
-    own rather than `fetch.get_once`.
-
-    **The fallback path is six more and they are the cheap ones**, so the
-    ceiling is **fourteen**: measured 2026-08-28, the six `wbgetclaims` for
-    `Q1512` are 1,942 bytes and 1.49 seconds together, against the 1,061,272
-    bytes the three VIAF calls reach at their worst. They are never paid beside
-    the VIAF ones, because they are paid instead of them.
-
-    **What that does to Wikidata's share is worth stating, because
-    `ratelimit.AUTHORITY_LIMIT` is sized against lobid's published figure and
-    names no second service.** At ten confirmations a minute, the ceiling that
-    limit allows, a VIAF outage turns four Wikidata requests per confirmation
-    into ten, so 40 a minute becomes 100. Measured 2026-08-28, roughly fifty
-    `wbgetclaims` from one address inside two minutes answered **429**, and kept
-    answering it for minutes afterwards. Nothing breaks when it does: a 429 is
-    an unreadable body to `_wikidata`, which logs and answers None, so the
-    national numbers are simply not stored. It is the ceiling that has moved
-    rather than the failure mode, and a reader re-sizing that limit should start
-    from these two numbers rather than from lobid's alone.
-
-    **The `Accept` header is set on the client rather than per request**, the
-    same shape `fetch.catalogue_client` uses for the user agent and the content
-    encoding, and it holds for everything this client is used for, which is
-    VIAF and nothing else.
+    **The budget is three requests on the path that works**, and six more on the
+    fallback, which are the cheap ones. A member is not waiting on this: it runs
+    after a confirmation rather than inside a lookup.
     """
     if not candidate.certain:
         return {}

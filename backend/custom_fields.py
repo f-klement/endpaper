@@ -1,164 +1,33 @@
-"""The facts a Library keeps about its Books that this schema does not know,
-and the only place a `custom_field_values` row is read or written outside
-`backup.py`.
-
-**That sentence is narrower than it wants to be, and the narrowing is the
-honest part.** `backup.py` reads and writes both tables through Core, because a
-backup that omitted a table would restore a library missing rows; it is the
-same third way past every rule in this backend that `shelf.py` documents.
-And a **definition** is Library wide, so a router holds one directly:
-`routers/books.py::_custom_field` does `db.get(CustomField, field_id)` to turn
-a path segment into a 404 or a row, exactly as it does for a Tag. Neither is a
-value, and neither is a Book query.
-
-The first concrete one, and the requirement the feature comes from: a link to
-the Book in a calibre-web instance. There is nowhere in `books` to put that,
-and adding a column would be wrong, because the next Library wants a different
-fact and a schema that grows a column per Household opinion is a schema nobody
-can migrate.
-
-So the Library defines a field once and a Book carries whichever have values.
+"""The facts a Library keeps about its Books that this schema does not know.
 
 ## The privacy rule, which is the whole review
 
-A value hangs off a Book, so **who may read it is decided entirely by who may
-read that Book**. There is no second rule here and deliberately no second copy
-of the first one.
+**Every reader and writer below takes `Book` objects, never book ids.** A caller
+that forgets gets a type error at the call site, before anything is read, which is
+what makes the rule structural rather than remembered: a `Book` in hand has
+already been through the Shelf.
 
-That is made structural rather than remembered by one signature choice:
-**every reader and writer below takes `Book` objects, never book ids.** A
-`Book` can only have been fetched, and `shelf.py` owns every many-Book query
-while `dependencies.py` owns the single-Book one, so a caller holding a `Book`
-has already passed `visible_to()`. A caller holding an id from a URL has not,
-and this module gives it nothing it can do with one.
-
-Compare the two shapes on the same table. `values_on(db, book)` cannot be
-handed somebody else's Private Book, because getting one is the thing that is
-impossible. A `values_of(db, book_ids)` beside it would compile, run, and
-answer with the values on every id passed, and the only thing standing between
-that and a leak would be each caller remembering where its ids came from. That
-is the arrangement `shelf.py` exists to have ended.
-
-**What a caller that forgets gets is a type error**, at the call site, before
-anything runs: `mypy` refuses `int` where `Book` is declared. There is nothing
-to remember, so there is nothing to omit.
-
-`rereading_filtered_rows` in `shelf.py` takes ids and says why: it re-reads
-rows a caller already filtered, to populate a relationship on objects in hand.
-This is not that case. These rows are read to be **published**, so the question
-of who may see them is live, and ids would answer it wrongly by default.
-
-**No `Shelf`, and that is the second half of the same decision.** A Shelf is
-for a query that returns or counts many Books. Nothing here does: the Books are
-already in the caller's hands, and what is queried is a child table keyed on
-them. Routing this through `Shelf.select()` would add a join to `books` and
-re-apply a predicate to rows that have already passed it, which reads like a
-second gate and is really the same gate twice. The house rule is unaffected:
-this module builds no query naming `Book`.
+**No `Shelf` here, and that is the second half of the same decision.** A Shelf
+narrows to a viewer; this module is handed rows that were already narrowed, so
+taking one would put the privacy rule in two places.
 
 ## Rendering a value as a link is an injection surface
 
-User story 3 wants a URL field to render as a link. A value is member supplied,
-and `<a href>` is one of the two places in a browser where a string becomes
-code: `javascript:`, `data:`, `vbscript:` and a scheme relative `//host` are
-all things a person can type into a text box.
+**The kind is declared, never detected**, so a value cannot become a link by
+looking like one.
 
-Two mechanisms, and the second is the one that matters.
+**The declaration is not the permission**: `link_target` re-reads the stored
+value on every read rather than trusting what a write accepted, so a row that
+arrived through a restore is held to the same rule.
 
-**The kind is declared, never detected.** `CustomFieldKind.URL` is a property
-of the field the Library defined, so a member typing prose that begins with
-`http` into a TEXT field gets text. Detection would make every field a possible
-link, which is a much larger surface for a much smaller feature.
-
-**The declaration is not the permission.** `link_target` re-reads the stored
-value on **every** serialisation and hands back a target only for `http` and
-`https` with a real host, no credentials and a parseable port. So a row that
-reached this table without passing the write check is served as text rather
-than as a link, and there is such a path: `backup.restore` inserts through
-Core, where no Pydantic model and no `@validates` fires. That is the same trap
-`models.Book._store_covers_over_https` records for `cover_url`, answered at the
-read end instead of asking one more writer to remember.
-
-`covers.is_renderable` is the neighbouring rule and is deliberately **not**
-reused. It exists to keep an `<img src>` inside `COVER_HOSTS`, because a cover
-is fetched by the page; a custom field is a link the reader chooses to follow,
-to a system this app has never heard of, so a host allowlist would refuse the
-one URL the feature was built for. What is shared is the shape of the check and
-one hard won line of it: `urlsplit(...).port` **raises** `ValueError` on a port
-past 65535, so a single stored `https://host:99999/x` would otherwise be a
-poisoned row that 500s every read of that Book, for good.
-
-`http` is allowed as well as `https`, unlike a cover. A link is a navigation
-rather than a subresource, so no browser blocks it as mixed content, and the
-calibre-web instance this exists for is on a LAN with no certificate.
-
-**The stored value for a URL field is rebuilt from the parse**, not kept as it
-was typed, so value and target are the same string and both name the host a
-browser will reach. That is not cosmetic. Python and a browser are two URL
-parsers, and three code points make them read a different host out of the same
-bytes: `_HOST_SEPARATORS` names them, with the measurement. A value carrying
-one is rewritten to the host the browser sees, and a value carrying whitespace
-or a backslash is refused outright, because those two cannot be reconciled at
-all.
-
-**That claim is bounded by what has been measured**, and saying otherwise would
-be the more dangerous sentence: only one of the two parsers implements WHATWG,
-so "both sides agree" holds for the divergences listed and is not a proof.
-The refusal that does not rest on it is the scheme test, which is the one that
-stops code running.
+**The stored value for a URL field is rebuilt from the parse**, not kept as typed,
+so what is stored is what the parser resolved.
 
 ## Two named ways past a Book
 
-Both are module functions and both touch `custom_field_values` without being
-handed a Book, which is exactly what the guard in `tests/test_custom_fields.py`
-enumerates and exempts by name. Neither is an escape hatch: they are two
-different rules.
-
-`remove()` deletes every value under one definition, across every Book in the
-Library, including Books the caller cannot see. That is what deleting a field
-**means**, so it cannot be scoped to a viewer without leaving rows nobody can
-reach; it is admin only for exactly that reason, and the route says so.
-
-`resolve_merge()` rewrites rows for Books nobody is currently looking at, for
-the reason `reading.resolve_merge` does: a merge deletes the losing rows, the
-cascade takes their values with them, and a Library would silently lose what it
-had typed on the Book that lost.
-
-`test_the_named_ways_past_a_book_have_the_callers_they_claim` is what makes a
-third one a decision rather than an edit.
-
-## The interface
-
-    definitions(db)                       # every field, in the order defined
-    define(db, name, kind)                # or the one that already has the name
-    rename(db, field, name)
-    remove(db, field)                     # and every value under it
-
-    values_on(db, book)                   # a Book, never an id
-    write(db, book, field, value)         # empty value clears the row
-
-    link_target(kind, value)              # the render time decision, pure
-
-**Ten public names over 106 statements, which is 10.6 per name**, against 19.0
-for `shelf.py` and 29.2 for `reading.py`. Measured 2026-08-27 with `ast`, and
-stated here rather than left to be noticed, because the line count says the
-opposite: this file and `shelf.py` are within twenty lines of each other and
-are not comparable at all. **The statement count is the stable one**, which is
-half the reason it is the one quoted here: prose moves the line count on every
-edit, and a number nothing recomputes is a number that is eventually wrong.
-
-Two things about that number. It barely moved when the batching class came
-out, because a class and a function are one name each, and taking the
-measurement anyway is what showed that the argument for removing it was never
-the ratio: `Values.of(db,
-books)` served a page of Books and there is no such caller, since these are
-served by their own route rather than on `BookOut`. And the modules it is
-compared against put a **scoped object** behind one name, so their operations
-are methods and do not count; here the scope is the `Book` handed in, so there
-is no object to construct and every operation is a function taking it.
-`dependencies.py`, which this repository treats as deep, sits lower still at
-8.3 for the same reason. So the ratio separates two module shapes rather than
-two depths, and a low one is a question to ask rather than a verdict.
+Both are named rather than commented, for the same reason `shelf.py` names its
+two: a table wide question cannot be scoped to a viewer without leaving rows
+nobody can reach.
 """
 
 import logging

@@ -1,118 +1,53 @@
 """Every query that returns or counts many Books, and the only place the privacy
 predicate is applied.
 
-A Book is visible to a Member when it is on the shelf and either public or one
-they added. `models.visible_to()` says that in SQL, and for most of this app's
-life every listing, search, export, count and index was expected to remember to
-apply it. What held that together was a test: `TestEveryBookQueryIsFiltered`
-walked the AST of every backend module, tracked scopes and bindings through
-`symtable`, and failed on a `query(Book)` or a `query(Book.<column>)` with no
-predicate in the same statement. It had five opt-out comments and a second test
-counting them.
+A Book is visible to a member when it is on the shelf and either public or one
+they added; `models.visible_to()` says that in SQL. **Visibility is applied by
+construction here**: there is no way to build a many-Book query through this
+module that is not narrowed.
 
-That guard was scar tissue over a missing seam, and this module is the seam.
-`dependencies.py` already owned the rule for **one** Book, which is why no
-handler has written its own 404 check since; there was no counterpart for many,
-which is exactly where the leaks were. `list_tags` counted Books without the
-filter and disclosed which Tags existed only on somebody's Private Books.
+That replaced a rule every listing, search, export, count and index had to
+remember, held together by an AST guard with five opt-out comments. The guard was
+scar tissue over a missing seam. `dependencies.py` already owned the rule for
+**one** Book; nothing owned it for many, which is exactly where the leaks were,
+and `list_tags` counted Books unfiltered and disclosed which tags existed only on
+somebody's private books.
 
-So visibility is applied **by construction** here. There is no way to build a
-many-Book query through this module that is not narrowed, and the two cases
-**in this module** that must read past a viewer are two named functions at the
-bottom of this file rather than a comment a reader has to notice. They are not
-the only ways past a viewer in the backend: see "What this module does not own"
-below, which names the third.
+**`seen_by_the_public` is a constructor with no viewer**, for a reader with no
+account, and it is not an exception. It applies a **stricter** predicate than
+`seen_by`, with no "or mine" arm at all, so a request routed through it by
+mistake sees less rather than more. `TestThePublicShelfHasNoOwnershipArm` pins
+that.
 
-Narrowed, rather than narrowed to a viewer, because since 2026-08-28 there is
-one constructor with no viewer: `seen_by_the_public`, for a reader who has no
-account and so has no id to compare a Book's owner against. It is not an
-exception to the rule and does not weaken it. It applies a **stricter**
-predicate than `seen_by` (public and on the shelf, with no "or mine" arm at
-all), so a request routed through it by mistake sees less rather than more, and
-the property the whole design rests on is pinned by
-`tests/test_shelf.py::TestThePublicShelfHasNoOwnershipArm`.
-
-## The interface, in the order a caller meets it
-
-    shelf = Shelf.seen_by(db, member.id)     # or trashed_by, for the trash
-    shelf = Shelf.seen_by_the_public(db)     # a reader with no account
-    shelf = shelf.where(Book.location == "study")
-    shelf = shelf.matching(filters)          # the listing's own filter chain
-    total = shelf.count()
-    books = shelf.all(load=Loading.SERIALISED)
-    books, total = shelf.page(paging, *order, load=Loading.SERIALISED)
-    rows = shelf.select(Book.location, func.count(Book.id)).group_by(...).all()
-
-`select()` is the way out to a query whose rows are not Books: an index, a
-count grouped by something else, or a join to another table that must still be
-scoped to what this Member may see. It anchors the FROM at `books` and applies
-the predicate before the caller sees it, so a join is written outward from Book
-rather than inward to it.
+**Two functions here read past a viewer** and they are named at the bottom of
+this file rather than left as comments: the table wide uniqueness check, and the
+re-read of rows a caller already filtered.
 
 **The anchoring fixes the join direction and nothing else.** It does not stop a
-caller forgetting the join: measured, `db.query(Tag.name).filter(visible_to(1))`
-compiles to `FROM tags, books` and `Shelf.seen_by(db, 1).select(Tag.name)`
-compiles to `FROM books, tags`, both two FROMs and both a cartesian product
-SQLite answers rather than refuses. `tests/test_shelf.py` pins that limit rather
-than leaving it to be discovered.
+caller forgetting the join: measured, both the filtered and the unfiltered
+spelling compile to two FROMs and a cartesian product SQLite answers rather than
+refuses. `tests/test_shelf.py` pins that limit rather than leaving it to be
+discovered.
 
 ## What this module does not own
 
-Two modules, both deliberate, both named in the house rule rather than left to
-pass quietly.
+`notifications.py` reads Books through `Loan` with no viewer predicate, because
+there is no viewer: the digest runs for the library rather than for a member, and
+its two halves **partition** on privacy rather than filter by it. A Shelf would
+have to mean both things at once.
 
-`notifications.py` reads Books through `Loan` and applies no viewer predicate at
-all, because there is no viewer: the overdue digest runs on a schedule for the
-Library rather than for a Member, and its two halves deliberately **partition**
-on privacy (`is_(False)` for the reminders, `is_(True)` for the count of what
-privacy held back) rather than filter by it. A Shelf would have to be told to
-mean both things at once, which is the mistake `in_trash_for` exists as a
-separate function to avoid.
-
-`backup.py` reads every row of every table, `books` included, through
-`db.query(model)` on a loop variable. A backup that silently omitted everyone
-else's Private Books would restore to a Library missing rows, which is the one
-thing a backup must never do, so it is unfiltered on purpose and admin only for
-that reason. It is also **invisible to every rule that reads the arguments to
-`query()`**, this module's included, which is why the house rule asserts it
-separately instead of counting on being able to see it.
+`backup.py` reads every row of every table through a loop variable. A backup that
+omitted everyone else's private books would restore a library missing rows, which
+is the one thing a backup must not do, so it is unfiltered on purpose and admin
+only for that reason. It is also **invisible to any rule that reads the arguments
+to `query()`**, which is why the house rule asserts it separately.
 
 ## The tables that belong only to a Book
 
 `classifications`, `custom_field_values` and `book_tags` carry a Book and no
 user, so they have no viewer of their own and their privacy is entirely the
-Book's. An **index** over one of them ("every DDC number in the Library, with a
-count") publishes a name and a count over every Member's Private Books, which
-is the `list_tags` disclosure again by a different door, and it names no `Book`
-anywhere, so nothing above sees it.
-
-`select()` is the door, **and going through it does not satisfy the guard**. It
-anchors the FROM at the filtered `books` and does not supply the join, exactly
-as its own docstring says: `Shelf.seen_by(db, bob).select(Classification.number,
-func.count())` compiles to `FROM books, classifications` with no join
-condition, and against a two-Book database Bob reads the DDC number of Alice's
-Private Book.
-
-`tests/test_shelf.py` therefore reports **every** statement that reads one of
-these tables, including the two correct indexes that exist,
-`routers/stats.py`'s Tag counts and `routers/books.py`'s Tag index. It used to
-try to recognise a correct join instead, in five successive versions, and each
-was demonstrated to leak by the next review round while the list of statements
-a person had checked did not move. So the judgement is a person's and is
-recorded once, in `BOOK_OWNED_READERS`, which holds ten statements across four
-modules with a reason each. Writing a new query over one of these tables turns
-that test red on purpose: the comment block above that list says what is being
-asked.
-
-Which tables count as children of `books` is derived from the foreign keys.
-Which of those children have a viewer of their own is **pinned**, because a
-foreign key to `users` does not answer it: `collections`, `author_aliases` and
-`author_identifiers` each carry a `created_by_user_id` that no query consults.
-A ninth child fails a test until somebody classifies it.
-
-Not `books.added_by_user_id`, which is the opposite case and is the column
-`visible_to` is built on. `books` is outside the derivation for being the
-parent table.
+Book's. Reading one outside this module is reading a Book's data without a Book,
+which is what the fourth house rule pass exists to report.
 """
 
 from collections.abc import Collection, Sequence
@@ -139,120 +74,39 @@ from models import Book, Classification, Tag, UserBook, in_trash_for, visible_to
 class Loading(Enum):
     """Which relationships to fetch with the rows, rather than per row.
 
-    An enum rather than an options list retyped at each call site. Measured at
-    `5559d16`, the `joinedload(added_by) + selectinload(tags)` pair was written
-    out verbatim **six** times (`dependencies.py:69,119`,
-    `routers/books.py:836,1748,2359,2515`), plus once more with
-    `joinedload(Book.collection)` beside it for the export, and a seventh caller
-    that forgot it got the N+1 back with no error anywhere.
+    An enum rather than an options list retyped at each call site: the same
+    eager loading pair was once written out six times, and a seventh caller that
+    forgot it got the N+1 back with no error anywhere.
 
-    `routers/loans.py` used to write the same pair through `Loan.book` and was
-    left alone, because it eager-loads from a Loan rather than from a Shelf and
-    so is not a call site this enum can reach. It writes only the `added_by`
-    half now: the tags half was deleted there on 2026-08-29 for the reason this
-    one was deleted here a day later, and the comment above `loans.py:141`
-    records that measurement.
+    Statement cost, which is the number that matters and which
+    `tests/test_shelf.py` pins for each:
 
-    Statement cost, which is the number that matters and the one
-    `tests/test_shelf.py` pins for each of the four:
+    * `NOTHING`: one.
+    * `SERIALISED`: one. `added_by` is a many to one and rides on the row.
+    * `EXPORTED`: two. `collection` joins; `tags` costs one for the whole page.
+    * `PUBLISHED`: three. Two collections, one statement each per page.
 
-    * `NOTHING`: one statement.
-    * `SERIALISED`: one. `added_by` is a many to one and rides on the row
-      itself, and nothing else is loaded.
-    * `EXPORTED`: two. `collection` is another many to one, so it joins rather
-      than adding a statement; `tags` is a collection and costs one more for
-      the whole page, not one per Book.
-    * `PUBLISHED`: three. `tags` and `classifications` are both collections and
-      cost one each for the whole page, and there is no many to one to ride on
-      the row: the public payload names no member, so `added_by` is not loaded.
+    **`SERIALISED` deliberately does not load `tags` and `EXPORTED` does.** A Book
+    fetched with `SERIALISED` and then serialised goes through `books_to_out`,
+    which reads the collection itself, so loading it here is a statement that can
+    never do work. The CSV export has no such second reader and reads `book.tags`
+    per row, so there the option is the only thing between it and an N+1.
 
-    **`SERIALISED` deliberately does not load `tags`, and `EXPORTED` does.**
-    That asymmetry is the whole of it, and what decides it is whether a second
-    reader exists. No caller fetching with `SERIALISED` reads a **page** of
-    tags outside `serialisation.books_to_out`, which re-reads the page with a
-    `selectinload(Book.tags)` of its own, so an option here loads a collection
-    that is loaded again a moment later and can never do work. The CSV export
-    has no such second reader: it reads `book.tags` per row itself, so there
-    the option is the only thing standing between it and an N+1.
+    **The stronger sentence is false**, and it was the one written here until it
+    was measured: "everything fetched with `SERIALISED` is serialised by
+    `books_to_out`" is falsified by **17 of the 33 routes** reaching
+    `book_for_read` or `book_in_trash`. **11** serialise a sub-resource and never
+    the book, **5** answer 204 and serialise nothing at all, and `add_copy`
+    serialises the copy rather than the book it read.
 
-    **The stronger sentence is false, and it was the one written here until
-    2026-08-30.** "Everything fetched with `SERIALISED` is serialised by
-    `books_to_out`" is falsified by **17 of the 33 routes** that reach
-    `book_for_read` or `book_in_trash`, all of them in `routers/books.py` and
-    nowhere else: **11** serialise a sub-resource and never the book (the
-    reads and writes under notes, quotes, progress and custom fields, plus
-    `GET /{id}/enrich/candidates`), **5** answer 204 and serialise nothing at
-    all (`DELETE /{id}`, `DELETE /{id}/permanent`, and the note, quote and
-    progress deletes), and `add_copy` serialises the **copy** rather than the
-    book it read. `list_duplicates` falsifies it a second way, fetching the
-    whole shelf and serialising only the rows that fell into a group.
+    **Those numbers are recomputed from the routers** by
+    `tests/test_shelf.py::TestTheRoutesThisDocstringCounts`, so they cannot go
+    stale quietly.
 
-    **Those numbers are recomputed from the routers by
-    `tests/test_shelf.py::TestTheRoutesThisDocstringCounts`, and the reason is
-    that two breakdowns were written before this one and both were wrong.**
-    First `19` with a split of `16/2`, because the enrichment **family** has
-    three routes and only `GET /{id}/enrich/candidates` fails to serialise its
-    book, so counting families rather than routes gave 19 where the answer is
-    17. Then `17` with a split of `14/2`, filing the note, quote and progress
-    deletes as sub-resource routes. The rule that settles it is one sentence
-    neither had: **a route that answers 204 serialises nothing, whether it
-    hangs off a book or off a note.**
-
-    Two critics reviewing independently agreed on the total and produced two
-    different splits of it, which is why each bucket is asserted apart rather
-    than summed.
-
-    The conclusion survives all of them, and the reason is the word **page**.
-    Every one of those 17 routes holds a single Book, where an eager load of one
-    row's collection and a lazy read of it cost one statement each. That is why
-    the measurement below shows `POST /{id}/copies` going 3 to 2 rather than
-    3 to 1: the option's statement was not saved there, it was replaced. Only a
-    caller that serialises a **page** by some route other than `books_to_out`
-    would turn this deletion into an N+1, and there is none.
-
-    Measured 2026-08-30 by counting the statements that read `book_tags`, at
-    all six call sites, at two lengths each, by a viewer who added none of the
-    books, with the owner's view taken beside it on three of the routes as a
-    control (identical, because a collection load is never answered from the
-    identity map). Option present to option absent: 2 to 1 on `GET /api/books`,
-    `/api/books/trash`, `/api/books/duplicates` and `/api/books/{id}`; 3 to 1
-    on `/api/books/{id}/copies` and `POST /api/books/{id}/restore`, which read
-    the shelf twice in one request; 1 to 0 on `/api/books/{id}/notes`, which
-    serialises nothing; 3 to 2 on `POST /api/books/{id}/copies` and on the
-    working arm of each `/api/books/{id}/tags/{tag_id}` route, which are the
-    three that read `book.tags` outside the serialiser and so replace the
-    statement rather than saving it; and unchanged at 1 on
-    `DELETE /api/books/{id}/permanent`, whose cascade loads the collection
-    either way.
-
-    **One arm of one route is dearer without the option, at both library sizes,
-    and nothing else in thirty scenarios is.**
-    `POST /api/books/{id}/tags/{tag_id}` where
-    the tag is already on the book: **11 statements with the option and 12
-    without**, at a library of 5 and of 25 alike. Neither of the two is a tag
-    load, and that is what identifies it. The handler calls
-    `db.get(Tag, tag_id)` before it reads `book.tags`, and the eager load had
-    already put that Tag in the identity map, so the `get` was answered without
-    a statement. The same route's working arm falls 15 to 14, and `DELETE` of
-    a tag that is present is flat at 14, trading the tag load for that same
-    `get`.
-
-    So the trade is one statement on one arm of one write, against one on every
-    listing the app serves. It is recorded rather than rounded away because
-    "nothing rose anywhere" is what this paragraph said until a second seat
-    measured the arms separately, and an absolute is the shape of claim this
-    repository keeps getting wrong.
-
-    Measured twice, in both directions, by two seats. The first run dropped the
-    option; the second added it back, which is the only direction still
-    available once it is gone, and reproduced every row. Neither direction is
-    sufficient alone: dropping it tells a redundant eager load apart from one
-    replaced by a lazy load, and adding it back proves no call site was left
-    paying for a load it needed.
-
-    A caller that serialises a page of Books by any route other than
-    `books_to_out` has to load the collection itself, or it pays one statement
-    per Book. That is the trap this paragraph exists to name.
+    **One arm of one route is dearer without the option**, because it reads a
+    collection already on the book: 12 statements against 11. The rule stands and
+    the absolute does not, which is why this says so rather than claiming nothing
+    rose anywhere.
     """
 
     NOTHING = "nothing"

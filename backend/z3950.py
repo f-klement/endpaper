@@ -1,65 +1,21 @@
 """One door for the Z39.50 requests this app makes, and every bound on them.
 
-**A second transport beside `fetch.py`, not an extension of it.** `fetch.py` is the
-single door for HTTP and everything it enforces is HTTP shaped: a cap counted on
-`aiter_raw` chunks, a per request deadline around a redirect walk, a refusal of any hop
-that leaves the host, and a refusal of a content encoding nobody asked for. Z39.50 has no
-redirects, no content encoding and no chunked reads, so two of those four have no
-equivalent here and the other two need building rather than importing.
+**A second transport beside `fetch.py`, not an extension of it.** Two of that
+module's four bounds have no equivalent here, because the protocol has no
+redirects and no content encoding; the other two had to be built rather than
+imported.
 
-What this module owes a caller is the property that makes `fetch.py` worth having: the
-bounds arrive **by construction**, so no call site has to remember to ask.
+**What this owes a caller is that the bounds arrive by construction**, so no call
+site has to remember to ask: a byte cap on record bytes, a record count, one
+absolute deadline held by the association, and a member's term that cannot change
+the query's shape.
 
-| `fetch.py` | Here |
-|---|---|
-| `MAX_RESPONSE_BYTES`, on raw chunks | `MAX_RESPONSE_BYTES`, on record bytes, and `MAX_RECORDS` |
-| `TIMEOUT_SECONDS` under one `asyncio.timeout` | one absolute deadline held by the association |
-| `MAX_REDIRECTS` and the same host walk | nothing: the protocol has no redirect |
-| `UnrequestedEncoding` | nothing: the protocol has no content encoding |
-| `catalogue_client()` | `association()` |
-| every refusal is an `httpx.HTTPError` | every refusal is a `Z3950Error` |
+**Three dispositions kept apart**: refused, unreachable, and answered nothing are
+three different facts about a catalogue, and the first target survey conflated two
+of them.
 
-**The client is behind a seam and is not chosen yet.** `Session` and `Client` are the
-whole of what a client has to be, and every bound is enforced on this side of them. The
-one client that exists today is `z3950_provisional.py`, and its name is the status it
-has: it exists so this module can be exercised and the Library of Congress control can be
-checked, not because a route has been picked.
-
-**Three dispositions, and the survey conflated two of them once already.**
-
-| Disposition | What it is | How it arrives |
-|---|---|---|
-| **unreachable** | nothing answered | `Unreachable` |
-| **refused** | the target answered, and said no | `Refused`, carrying the code |
-| **answered nothing** | the target answered, and held nothing | `Answer(hits=0, records=())` |
-
-The third is a value and not an exception, because a catalogue that does not hold a book
-is the ordinary case. Measured 2026-08-28, all three are live: `z3950.bne.es` accepts the
-association and refuses every search with `[101] Access-control failure`; `z3950.dbc.dk`
-answers `[2] Temporary system error, HTTP error: 400` behind all four database names it
-knows; `lx2.loc.gov/LCDB` returns 0 hits for an ISBN it does not hold.
-
-**A blocking client is the reason `Association` exists rather than a bare handle.**
-Z39.50 clients are synchronous, so every call runs off the event loop, and a thread cannot
-be cancelled. Three consequences, each of which has been measured as a real failure and
-each of which is answered by the association owning one worker thread and one lock:
-
-* an abandoned call is still using the connection, so **closing it from the loop thread
-  frees memory a live thread is reading**: measured, a 0.05s deadline on a search to the
-  Library of Congress left the process to be SIGKILLed at 40s where not closing returned
-  at 0.40s;
-* two coroutines sharing one association corrupt each other's result set, because a
-  `Session` holds one: measured over eight runs, five bogus `Unreachable`, two
-  `Answer(hits=0)` on a query that returns 444 serially, and one SIGSEGV;
-* a timed out open still produces a session, and nothing was holding it: measured,
-  `sessions built: 1, closed: [0]`, a connection and a socket for the life of the process.
-
-**There is no host allowlist and there is deliberately no SSRF guard.** The reasoning is
-`fetch.py`'s: a `Target` is built from module constants, never from anything a member
-supplies, so there is no host an attacker gets to choose and nothing an allowlist would
-refuse. **That property lives in the callers, not here**, and the day a `Target` is built
-from stored configuration or from a request body, this module needs the allowlist
-`covers.is_fetchable` already is for the other direction.
+The client is behind a `Session` and `Client` protocol and is not chosen yet. The
+bound by bound comparison with `fetch.py` is in `docs/decisions.md`.
 """
 
 import asyncio

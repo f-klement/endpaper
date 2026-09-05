@@ -9,69 +9,12 @@
 /**
  * Authority files a person's identifier may come from.
  *
- * Not `ClassificationScheme`, and the split is the point rather than tidiness.
- * Every member of that enum answers "what is this book about"; every member of
- * this one answers "which record in a file of *people* is this author". The
- * DNB writes both in the same MARC `$0`, which is exactly why they need two
- * closed sets: `4203576-4` is a subject heading and `118181505` is a person,
- * and one column holding both would make a heading and an author the same kind
- * of row.
+ * **A member here has to be a value some writer can produce.** A scheme nothing
+ * can read an identifier out of is a row that lies, which is why this is an enum
+ * rather than a table: adding one requires a reader.
  *
- * **Eleven members, and only one of them is ever the entry point.** GND is the
- * only scheme a catalogue writes here: the DNB is the only source this app
- * reads a person's identifier from (`100 $0` and `700 $0`), and K10plus
- * carries the same subfield and is deliberately not read for it, which
- * `_k10plus_record` records. The other ten arrive as cross references on a GND
- * record that a Member confirmed, four of them free in that record's `sameAs`
- * through `authority.cross_references` and six from the VIAF cluster it names
- * through `authority.national_identifiers`. None of them arrives on its own.
- * So a search still starts with a name and a GND.
- *
- * This docstring used to say "one member, and the count is the honest state of
- * the supply rather than a stub", and that sentence was true while nothing
- * stored a second scheme. Storing the cross references is what retired it, and
- * it is replaced rather than deleted because the reasoning is still the rule:
- * a member here has to be a value some writer can produce.
- *
- * **`ISNI` is the spine.** ISO 27729, deliberately language neutral, and it
- * identifies a person rather than a cluster of records about one, which is the
- * difference between it and `VIAF`. Measured 2026-08-28 over fourteen GND
- * records spanning Spanish, Portuguese, Brazilian, Argentine, Uruguayan and
- * Italian authors: all fourteen carried ISNI, LCNAF, VIAF and Wikidata in
- * `sameAs`.
- *
- * **`LCNAF` rather than `LC`**, because the file has a name and the
- * abbreviation for the library is not it: `id.loc.gov` serves several
- * authority files and this is the one about people.
- *
- * **The six national files are spelled as VIAF spells them**, in `v:sid` as
- * `BLBNB|000560509`, because that source code is what the parser matches on and
- * a second spelling here would be a second name for one fact. Lowercased for
- * the stored value, like every other member.
- *
- * ## Storing an identifier and resolving one are different acts
- *
- * This docstring used to argue the six out on the ground that "nothing in this
- * app can look one up, so a member for it would be a value no reader can use".
- * **That conflated two acts, and the correction is the reason they are members
- * now.** A scheme has to be a value some writer can produce, which was the rule
- * the old sentence was reaching for and which these pass: the identifier
- * arrives free from a VIAF cluster this app already has a reason to read.
- * Being able to *resolve* one is a separate and later question, and it is what
- * makes the argument run the other way: Brazil and Argentina answer 403 to
- * every agent tried and have no open Z39.50 port, so an adapter for them is
- * blocked on a transport rather than on this list, and the identifier stored
- * today is what makes that adapter cheap on the day the transport lands.
- *
- * So the closed set is still closed for the same reason: a member has to be
- * something a writer here produces. What changed is that six more things are.
- *
- * Adding a member costs one line here, one value in
- * `ck_author_identifiers_scheme`, and a migration to widen that constraint.
- * **`SUDOC` is deliberately still absent**, though a cluster carries it: it is
- * a French union catalogue rather than one of the six national files named
- * here, and nothing has asked for it. It goes in when somebody asks, in the
- * next migration.
+ * The roster, what each file is for and why the GND is the entry point are in
+ * `docs/decisions.md`.
  */
 export type AuthorityScheme =
   (typeof AuthorityScheme)[keyof typeof AuthorityScheme];

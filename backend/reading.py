@@ -1,117 +1,31 @@
 """One Member's reading of the Books in this Library, and the only place a
 `user_books` row is read or written.
 
-A Book is a shared fact and a reading of it is not. Status, rating, the two
-dates and the offer to talk about it are one person's, held in `user_books`,
-one row per (Member, Book). `shelf.py` owns which Books a Member may see;
-this module owns what that Member has done with them.
-
-It exists for the same reason `shelf.py` and `authorship.py` do. The rules were
-real and the code that applied them was scattered: **five** get-or-create sites
-in `routers/books.py` alone, all spelling the same query and the same `if None`
-by hand, plus a sixth in `importing.py` and two batch reads in
-`serialisation.py`. Three rules had no owner and were kept by everybody
-remembering them.
-
 ## The three rules, which are the whole reason this is a module
 
-**Absence means unread.** A row appears the first time somebody sets anything,
-so a Book nobody has touched has no row rather than an `unread` one. Every read
-has to treat a missing row as `ReadStatus.UNREAD`, and `Records.status_of` is
-the one place that does. Its sharper half is that a row **created in this
-request** has not been flushed, so the column default has not been applied and
-`status` is still `None`: that case is not hypothetical, it is the whole
-first-progress-on-a-new-Book path, and before it was handled the promotion in
-`begin()` never fired at all.
+**Absence means unread.** A row appears the first time somebody sets anything, so
+a book nobody has touched has no row and must still read as unread. A filter on
+the row alone reports an untouched shelf as having nothing unread.
 
-**A reading record is private to its Member.** Every query below filters on
-`user_id`, and it is applied by construction: a `Reading` is built from a
-member id and there is no method that takes a different one. The Book being
-visible says nothing about whose reading of it the caller may see, which is why
-this is a separate rule from the Shelf's rather than a consequence of it. Two
-Members reading the same public copy is the ordinary case here.
+**A reading record is private to its Member.** Every query filters on the member,
+which is a different rule from the Book's own privacy: two members may both have
+a record for one public book and neither may see the other's.
 
-**The dates are derived from the status transition, never typed in.**
-`_stamp_reading_dates` holds those rules and is private. Nobody fills in a date
-field; everybody moves a Book to "reading" when they start it.
-
-## Three writes, and only one of them is a reading event
-
-`mark`, `begin` and `mark_each` stamp. `rate` and `offer_to_discuss` create the
-row and deliberately **do not**, and that asymmetry is the thing a reader
-arrives here suspecting is a bug.
-
-It is not. Rating a Book is not a claim to have finished it just now, and
-offering to talk about one says nothing about having read it: a Member can rate
-a Book they abandoned years ago, and "ask me about this" is an invitation
-rather than a status. Both are pinned:
-`tests/routers/test_books_reading.py::TestRating::
-test_rating_does_not_touch_the_reading_dates` and
-`tests/routers/test_books_lending.py::TestAskMeAboutThisBook::
-test_it_leaves_the_reading_status_alone`.
-
-What they **do** share with the stamping writes is creating the row, because
-absence means unread rather than absence of a Member.
-
-## The interface
-
-    reading = Reading.by(db, member.id)
-
-    reading.mark(book.id, ReadStatus.READ)          # set a status, stamp the dates
-    reading.mark_each(book_ids, status)             # the same, for a selection
-    reading.begin(book.id)                          # promote from a standing start
-    reading.rate(book.id, 5)
-    reading.offer_to_discuss(book.id, True)
-
-    records = reading.of(book_ids)                  # one statement for a page
-    records = reading.everything()                  # this Member's whole record
-    records.status_of(book.id)                      # absence means unread
-    records.get(book.id)                            # the row, or None
-    records.open(book.id)                           # the row, created if absent
-
-    reading.finished_by_month(shelf)                # reporting, scoped to a shelf
-    reading.rating_summary(shelf)
-
-`by` is named like `Shelf.seen_by` and `Authorship.seen_by` and promises the
-same thing: everything below is scoped to one Member at construction rather
-than by each caller remembering to pass an id.
+**The dates are derived from the status transition, never typed in.** A client
+that could set them could report a book finished before it was started.
 
 ## Two named ways past a Member
 
-Both are module functions rather than methods, for the reason
-`whole_table_for_uniqueness` is: a way past the rule that is spelled as a
-method on the scoped object reads like part of the scoped interface.
-
-`discussers()` reads **everybody's** `wants_to_discuss`, which is the one
-column on the table meant to be read by other people. A reader browsing the
-shelf has to be able to see whose door to knock on, so this is the flag's
-purpose rather than a leak. What the **feature** discloses is usernames and
-nothing else, in particular not whether those Members have read the Book; what
-the **function** hands back is ORM `User` rows, and the narrowing to what may be
-published happens at its one call site. Its docstring says where.
-
-`resolve_merge()` rewrites **every** Member's rows when two Books turn out to
-be one. There is no viewer: the row belonging to somebody who is not the caller
-still has to end up pointing at the surviving Book, or it is cascade deleted
-with the loser and that Member silently loses their reading history.
-
-`tests/test_reading.py::test_the_named_ways_past_a_member_have_the_callers_they_claim`
-is what makes a third one a decision rather than an edit.
+Named rather than commented, the same arrangement `shelf.py` uses, so an exception
+is a function somebody has to call rather than a predicate somebody forgot.
 
 ## What this module does not own
 
-**Book queries.** `shelf.py` joins `user_books` in three places
-(`_with_read_status`, `_unrated`, `_offered_for_discussion`) because those
-narrow a listing of Books, and every query returning or counting Books goes
-through the Shelf. That is the house rule, and it is why `shelf.py` is the one
-other module allowed to import `UserBook`.
+**Book queries**, which are `shelf.py`'s: it joins `user_books` in three places
+and that is a read of this table through the Shelf rather than around it.
 
-**The import's fill-the-gaps rule.** `importing.py` writes a status, a rating
-and a finish date straight from a CSV row and never overwrites a local value,
-because an export from another service is older evidence than something the
-Member typed here. That is a different rule from this module's, so it stays
-there; what it takes from here is the record itself, through `everything()`
-and `Records.open`.
+**The import's fill the gaps rule**, which is `importing.py`'s, because deciding
+what an import may overwrite is a policy about imports rather than about reading.
 """
 
 from collections.abc import Collection, Sequence

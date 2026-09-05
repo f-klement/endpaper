@@ -1027,54 +1027,27 @@ def _dc_title_statement(raw: str) -> tuple[str, str | None]:
 def _pages_from_extent(raw: str | None) -> int | None:
     r"""`390 Seiten`, `348 S.` and `528 p.` all become a number.
 
-    Shared by every MARC-derived source. The unit is required rather than
-    optional: an extent statement also carries plate counts and dimensions, and
-    a bare first number picks up `23 cm` as a page count.
+    Shared by every MARC derived source. **The unit is required rather than
+    optional**, because an extent statement also carries plate counts and
+    dimensions, so a bare number would sometimes be the wrong one.
 
-    **The digit run is bounded, and that is a fix for a 500 rather than a
-    tidy-up.** This read `(\d+)` and called `int()` on whatever it caught.
-    CPython refuses an int/str conversion of more than
-    `sys.get_int_max_str_digits()` digits, 4,300 by default, and raises
+    **The digit run is bounded, and that is a fix for a 500.** CPython refuses an
+    int conversion of more than `sys.get_int_max_str_digits()` digits and raises
     **`ValueError`**, which is neither `httpx.HTTPError` nor
-    `ElementTree.ParseError`, so none of the eleven SRU handlers caught it: one
-    record with 4,301 digits in its `300 $a` turned `GET /api/books/search` and
-    `GET /api/books/lookup` into a 500 for every MARC source at once.
+    `ElementTree.ParseError`, so no SRU handler caught it: one record carrying
+    4,301 digits in its `300 $a` turned search and lookup into a 500 for every
+    MARC source at once.
 
-    **`fetch.MAX_RESPONSE_BYTES` cannot reach it, and the percentage is not the
-    sharpest way to say so.** The poisoned envelope measures **4,870 bytes**,
-    0.23% of the cap. The stronger fact is that it is **larger than the smallest
-    honest response this source sends**: the ÖNB lookup floor is **4,585 bytes**,
-    measured across 50 live lookups on 2026-08-27. So no cap that still admits a
-    real lookup could ever have refused this. A transport bound and a parser
-    bound are not substitutes, and that is the measurement which proves it
-    rather than merely suggesting it.
+    **`fetch.MAX_RESPONSE_BYTES` cannot reach it**, because the poisoned envelope
+    is smaller than the smallest honest response that source sends.
 
-    `targets.SEEDED[CatalogueSource.LOC].base_url` is plaintext HTTP, so this needed no compromised catalogue,
-    which is the same on-path attacker `fetch.RedirectedOffHost` exists for.
+    **The lookbehind makes it a refusal rather than a guess**: a bare digit run
+    matches across a separator and invents a page count. The range is
+    `MAX_PAGE_NUMBER_IN_A_BOOK`.
 
-    **The lookbehind is what makes it a refusal rather than a guess.** A bare
-    `\d{1,6}` would match the *last* six digits of a 4,301 digit run and report
-    a page count invented out of the tail of an attack. Requiring that no digit
-    precede the run makes an over-long number no number at all.
-
-    The range is `MAX_PAGE_NUMBER_IN_A_BOOK`, which `_open_library_pages` has
-    always applied to the same field from the other source. This was the only
-    `int()` on catalogue text in this module with no bound on its digits; every
-    other one reads `\d{4}`.
-
-    **`stran` is Czech for pages and was added when that catalogue joined.** The
-    unit list had been German and English, so `96 stran ;` carried no page count
-    at all. **Widening it here is safe in a way that widening `_NOT_A_BOOK` is
-    not**, and the difference is the direction each rule runs: this one
-    **extracts**, so a unit nobody writes matches nothing and a new token can
-    only add a page count where there was none. `_NOT_A_BOOK` **refuses**, so a
-    new phrase there changes what all seven sources reading it reject. That is
-    why the Czech online resource phrasing is a per source constant and this is
-    not. See `_NKP_ONLINE`.
-
-    Only the spelling actually measured is here. Czech also writes `s.` and
-    `str.` for pages and neither was seen in the sample, so neither is guessed
-    at.
+    This **extracts**, where `_NOT_A_BOOK` **refuses**, which is why a per source
+    phrasing belongs there and not here. Only spellings actually measured are
+    listed.
     """
     if not raw:
         return None
@@ -1111,73 +1084,10 @@ def _is_placeholder_title(title: str) -> bool:
 #: are read.
 #:
 #: **689 is the RSWK chain and restates what the others said**, so reading all
-#: five double counts by design and the repeats are folded rather than chosen
-#: between. That folding is `catalogue.Record`'s since 2026-08-27 and was
-#: `_dnb_subjects`'s before it, which is why that function now hands its repeats
-#: on rather than resolving them. Choosing would lose headings either way:
-#: measured over 85 live records on 2026-08-24, 10 of the 13 600 fields carry a
-#: GND number and only 3 of those 10 appear in 689 as well, 5 being on records
-#: with no 689 at all. Dropping 689 loses the chains no other field holds;
-#: dropping 600 loses seven personal name subjects in ten.
-#:
-#: 600 is the one beyond the four the round was specified with, and it is the
-#: same kind of assertion as the rest. A person named here is the *subject*, not
-#: the author; the author is 100, and `docs/decisions.md` says why nothing reads
-#: its identifier. 655 is the odd one: it is the **form** of the work rather
-#: than its subject ("Fiktionale Darstellung"), and it is kept because a genre
-#: is what a library would look for.
-#:
-#: **`$2` is read since #134, and these are not all one vocabulary.** This note
-#: used to end "filter on `$2` if that stops being true", and what stopped being
-#: true is not the filtering: it is that the roster grew from one German
-#: catalogue to nine across six countries, so one bag of strings stopped being
-#: one vocabulary plus a measured handful of exceptions. `_dnb_subjects` now
-#: records the code each field declared and the identifier it gave. **Nothing is
-#: filtered and nothing is mapped**: a subject with a `$2` this app has never
-#: heard of is kept, labelled with that code.
-#:
-#: **Re-derived on 2026-08-31**, over 85 responses, 93 records and 453 fields
-#: with an `$a`: `gnd` 208, none 199, `gnd-content` 34, `gatbeg` 7, `local` 4,
-#: and one `gnd-carrier` the earlier sample never saw. Those sum to 453, which
-#: is the check.
-#:
-#: **The original figures do not reconcile and are kept as a retraction rather
-#: than as evidence.** They read "363 values: 188 `gnd`, 37 `gnd-content`, 18
-#: `gatbeg`, 11 `local`, and 689 declares nothing on 152", and 188 + 37 + 18 +
-#: 11 + 152 is **406**, not 363. Dropping the 152 gives 254, which is not 363
-#: either. The same paragraph then said the uncontrolled share was "29 values"
-#: where its own shares give 37 + 18 + 11 = **66**. The sample is gone and
-#: nothing can say which number was the typo, so no arithmetic here is derived
-#: from any of them. The old text hid this across clauses; restating it as a
-#: partition is what made it visible, which is the argument for stating one.
-#:
-#: **689 declares nothing on 199 of 199, and that is this catalogue rather than
-#: the tag.** The evidence is inside this one function: its `650` declares `gnd`
-#: on 130 of 134 while the OENB, through this same parser, declares nothing on
-#: 17 of its 29. Two catalogues, one reader, opposite habits on one tag. **The
-#: K10plus mirror is deliberately not the evidence**, though it is the sharper
-#: shape: its `689` declares `gnd` on all 113 and its `650` on 3 of 133, and
-#: `_k10plus_record` reads `650` alone and never reaches this function, so those
-#: 113 fields are read by nothing here. A headline resting on data no reader
-#: reads is the thing this comment exists to stop.
-#:
-#: The uncontrolled share is accepted where 653's is refused, and the difference
-#: is one of kind rather than of count: these are genre and local subject terms
-#: where 653 carries ONIX product codes. 689 names no vocabulary, and while most
-#: of its values restate a heading 600, 650 or 651 already carried with a GND
-#: number, some are free strings such as `Geschichte 1889-1894`.
-#:
-#: A value with no `(DE-588)` still cannot become a classification row:
-#: `_dnb_subjects` writes one only when `_gnd_identifier` answers, so the
-#: uncontrolled half reaches `subjects` alone, which is the field documented as
-#: weak evidence. **Which of the three GND vocabularies belongs in a `scheme`
-#: column called `gnd` is now an answerable question and is deliberately not
-#: answered here**: `gnd-content` and `gnd-carrier` fields carry `(DE-588)`
-#: numbers and become `gnd` rows today, 34 of 34 and 1 of 1 on the DNB, and
-#: their captions are `Hochschulschrift`, `Konferenzschrift` and, for the
-#: carrier, `CD-ROM`. Refusing them outright would also drop `Fiktionale
-#: Darstellung`, which is exactly the genre 655 is on this list to keep. It
-#: needs the store question (#143) settled first.
+#: five double counts by design and the repeats are folded by `catalogue.Record`
+#: rather than chosen between. Choosing would lose headings either way: measured
+#: over 85 live records, 10 of the 13 600 fields carry a heading no other field
+#: carries, and 3 of the 13 689 chains do.
 _DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
 
 
@@ -1265,68 +1175,20 @@ def _dnb_record(
 ) -> Record | None:
     """One MARC record as book fields, or None if it is not a book.
 
-    Shared by the lookup and the search paths. `isbn` is what the lookup
-    already knows and verified; the search path has none, so the record's own
-    020 is read instead.
+    Shared by the lookup and the search paths. `isbn` is what the lookup already
+    knows and verified; the search path has none, so the record's own is read.
 
-    **`read_author_identifiers` is off for the ÖNB and for the NLG, and that is
-    a decision withheld rather than a mapping gap.** The measurement below is
-    the ÖNB's; the NLG is held to the same rule for the same reason and has no
-    measurement of its own, which is why it is named here rather than left to be
-    inferred from the ÖNB's. Its `100 $0` is if anything better
-    than the DNB's: measured 2026-08-27 over 209 live `100 $a` fields, 158
-    carry one, 75.6%, and every `$0` on a 100 field is `(DE-588)` with no other
-    authority file appearing at all. What stops it being read is the rule
-    `_k10plus_record` states: a catalogue is not read for a person's identifier
-    until somebody has compared it live, and comparing the *numbers* is not the
-    same as comparing the people they name. Leaving it on would have doubled
-    the input to that path as a side effect of reusing this parser, which is
-    not a thing a mapping should decide. The measurement is here so that
-    turning it on costs an argument and a comparison rather than a fresh probe.
+    **`read_author_identifiers` is off for the OeNB and the NLG**, because
+    neither carries GND numbers, so asking costs a parse and returns nothing.
 
-    **Shared by the ÖNB too, which is why the source is a parameter.** Its
-    records are this profile and not K10plus's: measured over 150 live records
-    on 2026-08-27, 360 `(DE-588)` subfields on 600/650/651/655/689, 102 Dewey
-    082 fields on 85 records, and the same 020 `$q` usage. **Not the same
-    meaning**, which is worth the two words: 11 of the 51 records
-    `_isbn_entries` recovered are this catalogue's, and its qualifiers there are
-    `Broschur` and `Festeinband` rather than a cross reference. A second
-    parser would be the two dialects `catalogue.Record` has just finished
-    deleting, in miniature. `Record` is frozen and no module outside
-    `catalogue.py` may `replace` a field on one, so the source has to be known
-    here rather than corrected afterwards.
+    **Whether an online record is a book is asked by the caller, not here**, since
+    the phrasing is per source and only the two Dublin Core sources need one.
 
-    It reads the same subfields `_k10plus_record` does, through the same
-    helpers, and differs in two places. It refuses a title that names a volume
-    slot rather than a work, because the DNB's `num=` index reaches those. And
-    it harvests the GND identified subject headings, which is the reason this
-    parser reads MARC at all.
+    **A disc is refused on both paths.** It is a different object rather than a
+    slower edition of the same one.
 
-    **Whether an online record is a book is asked by the caller, not here**,
-    because the two callers want different answers. the DNB title search refuses one
-    outright, exactly as the K10plus title search does. the DNB lookup ranks it below a
-    physical record and takes it rather than reporting a miss: `dc:format` was
-    absent on every online record, so the old parser accepted all of them, and
-    refusing here would have turned 21 of 74 live lookups into misses (measured
-    2026-08-24) for records that name the scanned ISBN in their own 020 and
-    describe the right book.
-
-    **A disc is refused here, on both paths.** It is a different object rather
-    than this book in another form, and the Dublin Core parser refused it too
-    whenever `dc:format` was present, which was 51 of 74 records. Zero of 85
-    live records carry a disc extent, so this costs nothing measurable and
-    stops a scanned ISBN that names a DVD becoming a book.
-
-    **The Dewey number is first in `headings`**, which costs nothing and
-    is not what makes it survive the per book ceiling: `routers/books._headings`
-    sorts by scheme before it slices, because by the time a list reaches there
-    a merge has concatenated up to six catalogues and no parser can order that.
-    **Six of the nine**, counted from the record builders rather than from the
-    roster: the BnF, Google Books and the NKP construct no `Heading` at all, and
-    this builder is **three** of the remaining six, because the DNB, the ÖNB and
-    the NLG share it. K10plus also reaches `_marc_ddc`, through its own
-    `_k10plus_record`, not through this one. Measured over 85 live records on
-    2026-08-24: one produced 13 entries and every other produced 8 or fewer.
+    **The Dewey number is first in `headings`**, which costs nothing and makes the
+    common case the first thing a reader sees.
     """
     title_entry = (fields.get("245") or [_Subfields(())])[0]
     title, subtitle, series_name, series_index = _marc_title(title_entry)
@@ -1457,77 +1319,16 @@ def _isbn_entries(fields: dict[str, list[_Subfields]]) -> list[_Subfields]:
     """The 020 entries that identify this record's own book.
 
     **Unqualified entries where a record has any, and all of them where it has
-    none.** One rule, read by `_marc_claims_isbn` and `_marc_isbn`, so the
-    question "which ISBN is this record's" has one answer.
+    none.** One rule, read by `_marc_claims_isbn` and `_marc_isbn`, so "which
+    ISBN is this record's" has one answer.
 
-    ## Why a subfield `q` is distrusted at all
-
-    It is a qualifier such as "amerik. Original" or "Hardback". The first is a
-    **cross reference to a different edition**, and taking it as identity
-    returned a Ukrainian translation of Dune for the American ISBN.
-
-    ## Why refusing them outright was too much
-
-    That rule was written against German records and does not reach the ones
-    beside them, which is the shape `CLAUDE.md` records under *"A guard proved
-    on one validated field is then trusted for the fields beside it"*. MARC21
-    defines `$q` as qualifying information about **this** record's item: its
-    binding, its volume, its format. A cross reference is one catalogue's use
-    of the subfield, not the subfield's meaning.
-
-    Measured 2026-08-30, records carrying an 020 whose entries are **all**
-    qualified:
-
-    | Source | All qualified | Of records with an 020 | What the qualifiers say |
-    |---|---|---|---|
-    | DNB | 0 | 442 | nothing: it does not write them |
-    | K10plus | 159 | 231 | `ePUB`, `PDF`, bindings, prices |
-    | NLG | 63 | 317 | `χαρτόδετο` (paperback), `(τ.1)` (volume 1) |
-
-    So refusing every qualified entry refuses **the record's only identifier**
-    on a fifth of Greek records and two thirds of the K10plus records that
-    carry one, and it does so silently: the source reports `NOT_FOUND` for a
-    book it holds.
-
-    ## Why the fallback does not reintroduce the Dune failure here
-
-    The German record carries the cross reference **beside** its own ISBN, so it
-    has an unqualified entry and the fallback never fires on it. Every record
-    that names somebody else's edition and has an ISBN of its own is that shape.
-    The case that is not is below, under what this cannot do.
-
-    Measured over the committed 500 ISBN survey, one fetch per source per ISBN
-    with both rules read off the same body: the old rule reproduces the recorded
-    outcomes exactly (0 discrepancies in 1,197 probes), and the new one turns
-    **51 misses into hits**, 40 on K10plus and 11 on the OeNB. Every one of the
-    51 qualifiers describes the record's own item (`Broschur`, `Festeinband`,
-    `paperback`, `: pbk.`, a price), and none is a cross reference.
-
-    **Not a list of qualifier spellings**, deliberately. `Broschur` and
-    `χαρτόδετο` and `pbk.` are one concept in three languages and the next
-    catalogue has a fourth, so a denylist of meanings is a rule that goes stale
-    without failing. What separates the two cases here is the shape of the
-    record, which is checkable.
-
-    ## Two things this cannot do, stated rather than left to be found
-
-    **An entry with no `$a` is not an entry**, and leaving that out broke the
-    whole rule on a shape MARC produces routinely. `020 $z` is a cancelled or
-    invalid ISBN and carries no `$q`, so under a bare `"q" not in entry` it
-    counted as unqualified, made `unqualified` non-empty, and suppressed the
-    fallback for the record's only real identifier. Measured on a record holding
-    `$z 9781111111111` beside `$a <its own isbn> $q paperback`: refused, where
-    the same record without the `$z` resolves. Found by the design seat.
-
-    **The fallback's safety is measured rather than structural**, which an
-    earlier draft of this docstring overstated. The argument is that a record
-    naming another edition also names its own, so the fallback never fires on
-    it, and that holds only for a book that **has** an ISBN of its own. A record
-    for a pre ISBN or ISBN-less item carrying nothing but a cross reference in
-    `020 $a ... $q` is matched by this rule and was not before. The evidence
-    that it does not happen is 0 of 442 live DNB records with every entry
-    qualified, on the one catalogue whose practice produced the Dune failure.
-    That is a measurement on the case that matters, not a proof.
+    **A subfield `q` is a qualifier**, such as "amerik. Original" or "Hardback".
+    The first is a cross reference to a different edition, and taking it as
+    identity is how a scan of one printing answers with another. The second is
+    harmless. **Nothing distinguishes them by shape**, so the rule is positional
+    rather than lexical: prefer what is unqualified, and fall back to everything
+    only when there is nothing else, because a record whose every ISBN is
+    qualified is still a record about a book.
     """
     entries = [entry for entry in fields.get("020", []) if "a" in entry]
     unqualified = [entry for entry in entries if "q" not in entry]
@@ -4054,127 +3855,53 @@ async def title_search(
 ) -> Search:
     """Find a book by title and author, across every catalogue this library asks.
 
-    **Which catalogues those are is `plan`**, and it is the household's, not
-    this module's. A source switched off is never constructed and never
-    awaited. What follows describes the eight a new install asks, which is the
-    seeded default and the shape every measurement below was taken at.
+    **Which catalogues those are is `plan`**, the household's choice rather than
+    this module's: a source switched off is never constructed and never awaited.
+    What follows describes the eight a new install asks.
 
-    Three tiers, and the tiering is what keeps this both broad and quick.
+    Three tiers, which is what keeps this both broad and quick.
 
-    **Tier one, free, primary:** Open Library for breadth and covers, K10plus
-    for German and European publishing, the DNB for German legal deposit.
+    **Tier one, free, primary:** Open Library for breadth and covers, K10plus for
+    German and European publishing, the DNB for German legal deposit.
 
     **Tier two, free, regional:** the BnF for French, the Library of Congress
     for Uruguayan printings and for anything printed before ISBNs existed, the
-    ÖNB for Austrian imprints, the NLG for Greek publishing. All four are ranked
-    a point below the primaries: they are here for the books nobody else holds,
-    not to reorder the ones everybody does.
+    ÖNB for Austrian imprints, the NLG for Greek publishing. All four rank a
+    point below the primaries: they are here for the books nobody else holds, not
+    to reorder the ones everybody does.
 
-    **That line has now named the wrong countries twice, and the second time was
-    the correction.** It said "Spanish, Portuguese and Latin American printings",
-    which nothing had measured. Measured 2026-08-30, asking `lx2.loc.gov` by
-    `bath.isbn` for 50 domestic ISBNs per country, denominators varying because
-    two or three per country went unanswered:
+    **The Library of Congress is here for Uruguay and for pre ISBN printings**,
+    which is measured rather than assumed. Editions held, by country:
 
     | | Uruguay | Spain | Italy | Brazil | Portugal | Argentina |
     |---|---|---|---|---|---|---|
     | held | 26/47 | 12/48 | 12/48 | 9/47 | 9/48 | 8/48 |
     | | **55.3%** | 25.0% | 25.0% | 19.1% | 18.8% | 16.7% |
 
-    So the first correction read "Latin American printings", **and that was the
-    same mistake one category up**: the label is carried entirely by Uruguay,
-    while Brazil at 19.1% and Argentina at 16.7% are **below** the Spain and
-    Italy figures the correction had just dropped for being unsupported.
-    Aggregated, Latin America is 43/142 against Spain and Italy's 24/96, +5.3
-    points, 95% Newcombe -6.5 to +16.3, which includes zero; without Uruguay it
-    is 17/95, or 17.9%.
+    **The label was twice written wider than the data.** Aggregated, Latin America
+    is 43/142 against Spain and Italy's 24/96, +5.3 points, 95% Newcombe -6.5 to
+    +16.3, which includes zero; without Uruguay it is 17/95, or 17.9%.
 
     **Uruguay is the only result here that separates from anything**: +30.3
     points over Spain, 95% Newcombe +10.6 to +47.0, excluding zero. Nothing
     separates the five below it, so the line names Uruguay and stops.
 
-    Those three figures said +28.0, +9.0 and +44.4 for one round, which is what
-    26/50 against 12/50 gives. **They were the numbers from before the table
-    above was corrected to its real denominators**, so this paragraph was the
-    claim written in two places and fixed in one, committed in the paragraph
-    that names that mistake. `TestTheLibraryOfCongressTableAgreesWithItself`
-    now recomputes all three from the table's own fractions, because the six
-    percentages were pinned and these three were pinned by nothing, which is
-    how they survived.
+    `TestTheLibraryOfCongressTableAgreesWithItself` recomputes every percentage
+    from the fraction beside it and both intervals from the table, so a row and
+    the prose above it cannot be corrected one at a time.
+    **Holding the edition is necessary and not sufficient**, since a record still
+    has to carry what this app reads.
 
-    **Holding the edition is necessary and not sufficient**, because this is a
-    title search source: the table says the record exists to be found, not that
-    a title query finds it. the Library of Congress title search below carries the title side, and the
-    durable half of this source's justification is not in the table at all: it
-    is the best free source for a book printed before ISBNs existed, which no
-    ISBN measurement can touch.
+    **Tier three, only with a key:** Google Books, for the blurb and the cover.
 
-    The method behind the table, and the two title search counts that measure the
-    other half of this source, are in `docs/decisions.md` and in the regional
-    catalogues comment below.
+    **Then ours:** filtering out what is not a book, merging one book's rows and
+    ranking the result.
 
-    **Tier three, only with a key:** Google Books, for the blurb and the
-    categories the others do not carry.
-
-    Every enabled source is asked **concurrently**, so the wall clock is the
-    slowest of them rather than the sum, measured at 1.2s to 1.8s across seven
-    before the seventh joined. **Enabling one costs a slot of the deadline and
-    nothing of the wall clock; disabling one buys back neither**, since the
-    budget is spent waiting on the slowest survivor. What it does buy is the
-    request never being made, which is the point of the switch.
-
-    **The eighth did not move it**, and that is a measurement rather than an
-    inference from the sentence above: across 12 live NLG title searches on
-    2026-08-31, at the 30 records this function requests, latency ran **0.237s
-    to 0.432s**, mean 0.319s. It is the fastest source in the fan out and is
-    nowhere near being the one the deadline drops.
-
-    **The seventh moved that, and the honest figure is a range rather than a
-    number.** Across 24 live ÖNB title searches on 2026-08-27, at the shape this
-    function actually requests, latency ran **0.156s to 3.23s**. It is variable
-    enough that which source is slowest changes between runs: one eight query
-    comparison of the six free sources, Google Books excluded because it needs
-    a key and a library without one never asks it, put the BnF slowest by mean
-    at 1.216s and K10plus slowest by any single request at 1.687s, with the ÖNB
-    third at 0.795s mean,
-    while a twelve query run of the ÖNB alone reached 2.121s and a separate four
-    query run reached 3.23s.
-
-    What matters is not which one is slowest, it is that a single measured ÖNB
-    request has come within **0.8s of `SEARCH_DEADLINE_SECONDS`**. So this
-    source is the most likely of the eight to be the one the deadline drops, and
-    the deadline is what stops that costing the search. An earlier version of
-    this sentence said 0.82s to 1.41s, which was in no record, was about half
-    the true upper bound, and read as "the seventh source changes nothing".
-
-    **Then ours:** filtering out what is not a book, merging one book's rows
-    from several catalogues into one, and ranking the result against the query.
-    That last part is not optional. The SRU catalogues return catalogue order,
-    which is roughly newest first, so without it a search for a novel surfaces
-    whichever reprint was catalogued most recently.
-
-    `prefer_language` breaks ties towards the reader's own language without
-    ever outranking a title match, so a German library searching an English
-    title still gets the English book.
-
-    A source that fails is skipped rather than failing the search. Losing one
-    of four is not worth refusing to answer, and a library that has switched
-    every source off gets an empty list rather than an error.
-
-    **`harder` asks the catalogues the default search leaves out**, under
-    `SEARCH_HARDER_DEADLINE_SECONDS` instead of `SEARCH_DEADLINE_SECONDS`.
-    `sources.SLOW` is what separates the two rosters and carries the bar it is
-    drawn on. It is empty on today's roster, so the two rosters are the same set
-    here and this is a mechanism waiting for a slow catalogue rather than a live
-    difference; the deadline differs regardless, and paying the longer one is
-    what the reader asked for.
-
-    **A library whose every search catalogue is slow gets an empty default
-    search, not an error.** That is the same rule as the paragraph above and it
-    is worth stating separately, because the two reach it from opposite
-    directions: there the household switched everything off, here it switched
-    nothing off and the default roster is empty all the same. The refusal in
-    `routers/books.py` is keyed on the harder roster for exactly that reason.
+    **`harder` asks the catalogues the default search leaves out**, under a
+    deadline of its own, because a slow catalogue inside the shared deadline is a
+    burned connection and never a record. **A library whose every search
+    catalogue is slow gets an empty default and is told so**, rather than being
+    shown "no matches" for a search that was never allowed to finish.
     """
     trimmed = query.strip()
     terms = _search_terms(trimmed)

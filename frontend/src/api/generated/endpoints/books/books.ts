@@ -1016,54 +1016,22 @@ export const getConfirmAuthorIdentifierUrl = () => {
 /**
  * Confirm that a candidate authority identifier is this author's.
  *
- * **This endpoint exists because a name is not a key.** An identifier on the
- * record a catalogue returned for a Book's own ISBN is a cataloguer's
- * assertion about that Book and is stored without asking, by `refresh` and
- * `enrich`. One found by searching an authority file by name is a candidate:
- * two authors share a name and one author has five spellings, so storing it
- * silently would merge two people behind somebody's back. It reaches the store
- * only through here, and the row records that a person chose it.
+ * **This endpoint exists because a name is not a key.** An identifier belongs
+ * to a person, and only a member can say that this spelling is that person.
  *
- * **409, not 422, where the spelling already carries a different value.** The
- * request is well formed and the state is what refuses it. Retyping an
- * identifier is the one operation this store has no verb for: correcting a
- * wrong one is `DELETE`, and a re-import may put it back.
+ * **409, not 422, where the spelling already carries a different value**: the
+ * request is well formed and the state refuses it.
  *
- * **Confirming a GND number stores the cross references that came with it.**
- * A person confirms a *record*, and that record already asserts this person's
- * ISNI, LCNAF number, VIAF cluster and Wikidata item. All four used to be
- * shown once by `GET /authors/authority` and dropped. They are re-read from
- * the record here rather than taken from the request, which is the only shape
- * that keeps a client from writing its own.
+ * **Confirming a GND number stores the cross references that came with it**,
+ * and the six national numbers, which cost the extra requests. A confirmation
+ * is up to eight outbound calls, which is why it is a deliberate action rather
+ * than something a lookup does on the way past.
  *
- * **And the six national library numbers, which cost the extra requests.** The
- * GND record carries none of them; the VIAF cluster it names carries all six.
- *
- * **A confirmation is up to eight outbound requests**, and the count is worth
- * stating because `ratelimit.AUTHORITY_LIMIT` is sized against it: one lobid
- * record, **four to Wikidata** (`resolve` compares `P214` and `P213` on this
- * branch, so `_cross_check` is the item lookup, the description and two
- * claims), and up to three to VIAF. Only the last three are new here; the
- * first five are what confirming already cost. The third VIAF call is paid
- * only on a 5xx, so the ordinary confirmation is seven.
- *
- * An earlier version of this paragraph said "one lobid request plus up to
- * three VIAF ones", which counted two of the three hosts. See
- * `authority.national_identifiers`, and `authority.DEADLINE_SECONDS` for the
- * time budget all of it shares.
- *
- * **Only for `gnd`.** It is the one scheme this app can resolve, and a
- * confirmation under any other is a number a Member typed with no record
- * behind it to read cross references off. Nothing is fetched for those and
- * `cross_references` comes back empty.
+ * **Only for `gnd`**, the one scheme this app can resolve.
  *
  * **A cross reference colliding with a stored value is reported, not raised.**
- * The confirmation succeeded and is what the Member asked for; refusing it
- * afterwards because a fact that arrived alongside it disagrees would undo the
- * thing they came to do. A collision on the confirmed identifier itself is the
- * opposite case and is the 409 above.
- *
- * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * The confirmation is already committed, so failing here would report a write
+ * that happened as one that did not.
  * @summary Confirm Author Identifier
  */
 export const confirmAuthorIdentifier = async (
@@ -1567,54 +1535,12 @@ export const getAuthorWikipediaUrl = (params?: AuthorWikipediaParams) => {
 /**
  * An outward Wikipedia link per author, in the reader's language.
  *
- * **Declared before `/authors/{...}` would be**, the same route ordering trap
- * the comment above records: FastAPI matches in declaration order.
+ * **Declared before `/authors/{...}` would be**, because FastAPI matches in
+ * declaration order and the literal path has to win.
  *
- * ## The gate is identity, not language
- *
- * One row per author that carries a **confirmed Wikidata identifier**, and no
- * row for anybody else. That is what makes "if it is available" a property of
- * the shelf rather than of the network, and it is the whole reason this is
- * safe: #87 measured two GND records spelled `Stevenson, Robert Louis` of
- * which only one has a Wikidata item, and a biography attached to the wrong
- * one is worse than no biography. `Authorship.listing()` is what filters the
- * identifiers by `visible_to`, so this cannot announce an author only visible
- * on somebody else's private book.
- *
- * ## `lang` is the app's locale and never the browser's
- *
- * A `Locale`, so the closed set is the server's and an unknown value is a 422
- * rather than a `sitefilter` this app did not write. It is what the reader
- * chose in Settings, which is the owner's first rule on #89 and is exactly
- * what `Accept-Language` would get wrong: a German browser reading the app in
- * English would be sent to German Wikipedia.
- *
- * The other locale follows it, so a reader gets their own language, then the
- * app's other one, then any edition at all, then the Wikidata item.
- *
- * ## What it costs, and it is bounded rather than proportional to the shelf
- *
- * **At most ten requests**, and the two halves are sized separately because
- * they are different shapes. Five filtered, `ceil(n / 50)` where `n` is the
- * confirmed authors capped by `authority.MAX_WIKIPEDIA_ITEMS` at 250: fifty
- * ids with `sitefilter=dewiki|enwiki` measured 15,034 bytes and 0.89s on
- * 2026-08-28. Five unfiltered, for the authors with no article in either app
- * locale, at two ids each because one unfiltered entity reaches 64,449 bytes,
- * which is `Q692` and 336 sitelinks. About **720 KB** all told. A library that
- * has confirmed nobody makes **no
- * request at all**, and the client is expected not to call this then.
- *
- * **The same limiter as the authority lookups, on purpose.** It is the counter
- * for "this member is asking authority services things", and sharing it means
- * somebody reloading this page cannot also be spending the confirmation
- * budget. The alternative, a counter of its own, would let the two add up
- * against one supplier.
- *
- * Never 503, and that is the difference between this and
- * `GET /authors/authority`. Nothing here is a supplier: a Wikidata outage
- * turns every row into a link to the Wikidata item, which still names the
- * right person, so the button is present either way. See
- * `authority.wikipedia_articles`.
+ * **At most ten requests**, and **the same limiter as the authority lookups on
+ * purpose**: it is the same host budget, so two counters would let a caller
+ * spend it twice.
  * @summary Author Wikipedia
  */
 export const authorWikipedia = async (

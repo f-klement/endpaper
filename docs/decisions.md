@@ -44,38 +44,30 @@ and is completely wrong.
 
 ### The Shelf owns the privacy rule, and the AST guard is gone
 
-`backend/shelf.py` is now the only module that imports `visible_to` or `in_trash_for` and
-the only one that builds a query over `Book`. A caller asks `Shelf.seen_by(db, member_id)`
-and narrows what comes back, so **visibility is a property of how the query was built**
-rather than a step each endpoint has to remember.
+`backend/shelf.py` is the only module that imports `visible_to` or `in_trash_for` and the only
+one that builds a query over `Book`. A caller asks `Shelf.seen_by(db, member_id)` and narrows
+what comes back, so **visibility is a property of how the query was built** rather than a step
+each endpoint has to remember.
 
-**A deleted guard with no record reads as a regression, so this is the record.** What was
-deleted is `test_models.py::TestEveryBookQueryIsFiltered`, 681 lines that walked the AST of
-every backend module, tracked scopes and bindings through `symtable` to accept a predicate
-bound to a local, carried five `# visible_to exempt:` comments, and had a second test
-parsing its own docstring to count them. It was good at its job. It was also scar tissue
-over a missing seam: `dependencies.py` had owned the rule for **one** book since the round
-that found fourteen endpoints with no check at all, and nothing owned it for **many**,
-which is exactly where the leaks were. `list_tags` counted books unfiltered and disclosed
-which tags existed only on somebody's private books.
+**A deleted guard with no record reads as a regression, so this is the record.** What went was
+a 681 line AST walk over every backend module that tracked scopes and bindings through
+`symtable`, carried five `# visible_to exempt:` comments and a second test counting them. It
+was good at its job and it was scar tissue over a missing seam: `dependencies.py` owned the
+rule for **one** book, nothing owned it for **many**, and that is exactly where the leaks were.
+`list_tags` counted books unfiltered and disclosed which tags existed only on somebody's
+private books.
 
-What replaced it is `test_shelf.py::TestTheShelfIsTheOnlyWayIn`: four flat `ast` passes
-asking who imports the predicate, who builds a query naming `Book`, and who reaches `books`
-through a join. It resolves which local names mean `Book` first, so an alias or a rebinding
-is caught, and it carries five short allowlists rather than five opt-out comments. What it
-does not need is the scope and binding machinery the old guard was built from, and the
-reason is structural rather than clever: outside `shelf.py` the correct answer is zero, so
-there is no "was a predicate applied here" question left to answer.
+`test_shelf.py::TestTheShelfIsTheOnlyWayIn` replaces it with four flat `ast` passes: who
+imports the predicate, who builds a query naming `Book`, who reaches `books` through a join,
+and who reads a table belonging only to a Book. It resolves which local names mean `Book`
+first, so an alias or a rebinding is caught, and it carries short allowlists rather than opt
+out comments. **It needs none of the scope machinery**, and the reason is structural: outside
+`shelf.py` the correct answer is zero, so there is no "was a predicate applied here" left to
+decide.
 
-**It is wider than what it replaced, and the first version of it was not.** That is worth
-recording in full, because it is the round's most useful finding and both critics reached
-it independently.
-
-The rule shipped for review as two regexes over the source. It claimed to close the old
-guard's documented blind spot: a statement reaching the table through `.join(Book, ...)`
-while naming no `Book` inside `query()`, of which the old docstring recorded **10** in the
-tree. The claim was false, and four shapes were measured passing it clean, each of them a
-location index publishing a name and a count over every Member's Private Books:
+**The first version of it was two regexes and was measurably weaker than the guard it
+replaced**, which both critics found independently. Four shapes passed it clean, every one a
+location index publishing a name and a count over every member's private books:
 
 | Shape | Old regexes |
 |---|---|
@@ -84,73 +76,20 @@ location index publishing a name and a count over every Member's Private Books:
 | `db.query(B.location)` after `from models import Book as B` | passes |
 | `db.execute(sa.select(Book.location))` | passes |
 
-**A guard whose limits are undocumented gets read as a guarantee it never made, and this
-one documented the opposite of its limit**, which is worse than the hole.
+**A guard whose limits are undocumented is read as a guarantee it never made**, and that one
+documented the opposite of its limit, which is worse than the hole.
 
-It is now a small `ast` pass instead: resolve which local names are bound to `Book`, then
-report `query(...)` or `select(...)` mentioning one, and `.join(Book, ...)` separately.
-All four shapes are caught, and `test_the_rule_catches_every_evasion_that_defeated_its_first_version`
-keeps them caught. It is still nothing like the guard it replaced: that one tracked scopes
-and bindings through `symtable` because a predicate could be applied anywhere and it had to
-decide whether it had been. Here the answer outside `shelf.py` is always zero, so there is
-nothing to decide.
+**Where the rule does not reach, named rather than left to be discovered.** Two functions read
+past a viewer and they are two rules, not one hatch: `whole_table_for_uniqueness()`, because
+the ISBN and copy group constraints are table wide, and `rereading_filtered_rows()`, which
+re-reads rows a caller already filtered. `notifications.py` is outside the guard because the
+overdue digest has no viewer and partitions on privacy rather than filtering by it, and
+`backup.py` is invisible to it because it queries a loop variable, reads every row so a restore
+cannot lose one, and is admin only.
 
-Teaching the **old** guard the join shape was costed at 30 inspected statements to 40, for
-four fresh exemptions on correct code, and refused on that arithmetic. The same widening
-here costs **one allowlist entry**, `notifications.py`, because it is the only module in the
-tree taking that shape. That is the difference the seam makes: the same rule is cheap once
-the correct answer is zero. (The quotes entry below states that old measurement as 30 to 39
-for three exemptions. The two disagreed in the tree before this refactor and the guard that
-could settle it is gone, so both are recorded rather than one being picked.)
-
-**There is a third way past a viewer, and it is not in this module.** `backup.py` reads
-every row of every table through `db.query(model)` on a loop variable, so no rule that reads
-the arguments to `query()` can see it, including the one above. That is deliberate: a backup
-omitting everyone else's Private Books would restore to a Library missing rows. It is
-unfiltered on purpose and admin only for that reason, and it is asserted by name in
-`test_shelf.py` rather than left to pass silently, because "the only place that reads past a
-viewer" was written in three documents before anybody counted.
-
-**It is narrower in two ways**, stated for the same reason. It cannot tell a module
-importing `Book` for a `db.get(Book, id)` or a type annotation from one importing it to
-build a listing, which is why it tests query shapes rather than the import of `Book`. And
-it cannot see a query built from a variable rather than a literal, which is the `backup.py`
-case above.
-
-**`Shelf.select()` anchors the FROM at `books` and that fixes the join direction only.** It
-was documented as preventing the cartesian product that a query naming two tables and
-joining neither produces. Measured: `db.query(Tag.name).filter(visible_to(1))` compiles to
-`FROM tags, books` and `Shelf.seen_by(db, 1).select(Tag.name)` compiles to `FROM books,
-tags`. Two FROMs either way. The limit is now pinned by a test rather than claimed away,
-and `where()` carries the same warning, because it is the more used method and had none.
-
-**The five exemptions became two named functions, because they were two rules.** Four were
-about uniqueness (`whole_table_for_uniqueness`): the ISBN and copy-group constraints span
-the whole table, so a clash with a book the caller cannot see is still a clash, and
-filtering would miss the row that collides and turn a 409 into a 500. One was a re-read
-(`rereading_filtered_rows`): the ids came out of a filtered query and it repopulates a
-relationship on objects already in hand, so it takes ids rather than criteria and cannot
-quietly become a way to read the table. Designing those as one escape hatch was the
-obvious mistake and is the reason they are two.
-
-**`notifications.py` is deliberately outside all of it**, and is named in the rule rather
-than left to pass quietly. The overdue digest runs on a schedule for the library, so it has
-no viewer to be scoped to, and its two halves **partition** on privacy rather than
-filtering by it: `is_(False)` for the reminders it sends and `is_(True)` for the count of
-what privacy held back. A Shelf would have to mean both at once, which is what
-`in_trash_for` being a separate function from `visible_to` exists to avoid.
-
-**`select()` refuses a shelf narrowed by read status**, which is worth knowing before
-somebody removes the check. Every narrowing is a clause except that one, which is an outer
-join to `user_books`; `select()` rebuilds a query over other columns from the accumulated
-clauses, so on a joined shelf it would silently drop the join and return every book instead
-of the unread ones. A wrong answer, not an error, hence the explicit refusal.
-
-**Why now rather than with the peer sync work.** That work introduces `shareable_to_peer()`,
-a second predicate over the same queries. One adapter is a hypothetical seam; two is a real
-one. Doing this first makes that one change behind one interface instead of the same
-migration twice, the second time across a wider surface.
-
+**`Shelf.select()` anchors the FROM at `books`**, which fixes the join direction and nothing
+else, and it refuses a shelf narrowed by read status, which is worth knowing before reaching
+for it.
 ### Book access lives in dependencies, not in handlers
 
 See [security.md](security.md). Endpoints ask for a book through `book_for_read` /
@@ -971,53 +910,26 @@ unbounded value, take an endpoint down, or reach a column outside this table.
 one-constant change. Nobody has found one. Until then this paragraph is the point: an
 undocumented plaintext source is read as a guarantee it never made.
 
-### Catalogue XML refuses a doctype, and the response size cap that was deferred
+### Catalogue XML refuses a doctype, and the response body is capped at 2 MiB
 
-Two risks were recorded here as one in round 1. **The first is closed.** All seven catalogue
-parses go through `metadata._parsed`, which refuses a body carrying `<!DOCTYPE` and raises
-`ParseError`, which every one of those callers already caught. `xml.etree` expands nested
-internal entities (measured on this project's own Python 3.14.7: three levels of nesting
-expanded to 1,000 characters, so six is a million), and that was the only term in this
-module's memory use not bounded by the response size. It costs nothing measurable: 225 live
-DNB and K10plus responses cached 2026-08-24 carry no doctype, nor does a live BnF or Library
-of Congress answer.
+**Every catalogue parse goes through `metadata._parsed`, which refuses a body carrying
+`<!DOCTYPE`** and raises `ParseError`, which every caller already caught. `xml.etree` expands
+nested internal entities: measured on this project's Python, three levels expand to 1,000
+characters, so six is a million. It costs nothing real, since 225 live DNB and K10plus
+responses carry no doctype, nor do live BnF or Library of Congress answers.
 
-**The second is now closed too, and the reason for deferring it was wrong.** It was deferred
-because a wire byte cap "turns six `client.get` calls into streamed reads with their own
-fixtures", which would be a transport change shipped inside a feature round. That cost was
-never paid: respx intercepts `client.stream` exactly as it intercepts `client.get`, and the
-190 existing tests in `test_metadata.py` and `test_google_books.py` passed against streamed
-reads with **zero fixtures changed**. The deferral rested on a cost nobody had measured.
+**The wire body is capped too, and the cap is 2 MiB rather than the 1 MB first proposed.** The
+largest honest body moved from 587,810 to 687,481 bytes in three days as the query sample
+widened, so the tail of a third party's record sizes is being **sampled, not bounded**, and the
+margin is deliberately 3.05x rather than tight.
 
-The risk it left open was real: a hostile or substituted response is a memory exhaustion in a
-pod limited to 512Mi, where a 1.8 GB peak has already caused an OOMKill once (see the backup
-upload cap, which exists for the same reason from the other direction). Parsing retains a
-measured 15.28x the wire bytes.
+**Parsing retains a measured 15.28x the wire bytes**, in a pod limited to 512Mi where a 1.8 GB
+peak has already caused an OOMKill. That is why a parser bound and a transport bound are both
+needed rather than either standing in for the other.
 
-**And "1 MB is the right order" was wrong in two ways**, both found only when somebody built
-it. The cap is 2 MiB, because the largest honest body moved from 587,810 to 687,481 bytes in
-three days as the query sample widened: the tail of a third party catalogue's record sizes is
-being sampled, not bounded, so the margin is deliberately 3.05x rather than tight.
-
-More important, **a cap counted after decoding is not a cap**. `aiter_bytes()` hands the
-decoder a whole raw chunk before yielding, so the decompressed allocation happens before the
-running total is compared to the limit: 65,250 wire bytes counted 67,108,864 and allocated
-148.3 MB, or 463.8 MB across the six sources `metadata.search` asked at once when that
-was measured. The first
-implementation of this cap had exactly that shape and would have shipped looking like a
-security improvement. The rule is now "never expand it": `accept-encoding: identity`,
-`aiter_raw()`, and a `content-encoding` we did not ask for refused on the header. Same
-payload, 0.1 MB.
-
-**Moving the DNB to MARC21 made it worth sooner.** An honest page of search results went
-from 51 KB to between 438 and 588 KB, measured over four `WOE=` queries at the 50 record
-ceiling on 2026-08-24; the largest was `geschichte deutschland` at 587,810 bytes. That is
-not itself a risk (0.60s against 0.37s, parsed and dropped), and it does mean any cap chosen
-later has to be set against a page of MARC rather than a page of Dublin Core, on the wire
-bytes rather than the parsed size: measured retention is 15.28x the body, and the honest
-lookup body grew 45x rather than 9x because `maximumRecords` went from 1 to 5 alongside the
-schema. 1 MB is the right order for a 50 record page.
-
+**The cost of streaming was assumed and was zero**: respx intercepts `client.stream` exactly as
+it intercepts `client.get`, and 190 existing tests passed against streamed reads with no
+fixture changed.
 ### Classifications are in the backup and not in the CSV
 
 The full backup carries the table, because a backup is the whole library and losing a
@@ -1163,94 +1075,26 @@ set bound; a different eight searches gave 39 of 80, **48.8%**.
 
 ### The DNB is read as MARC21, and Dublin Core cost a caption to leave
 
-`metadata.py` asked for `oai_dc` because it was already the shape this app wanted, where
-MARC meant writing a subfield parser for the same five values. What that missed is that the
-crosswalk into Dublin Core drops every identifier the record holds. Measured against ISBN
-9783446249974 on 2026-08-23:
+Measured on one live record, which is the whole argument:
 
 | schema | bytes | GND identifiers |
 |---|---|---|
 | `oai_dc` | 1,713 | none at all |
 | `MARC21-xml` | 15,502 | 100, 600, 650, 651, 655, 689, 710 |
 
-**The switch cost one field: the DDC caption.** `dc:subject` reads `830 Deutsche Literatur`,
-MARC 082 carries `830` alone, and no other MARC field supplies the words: grepped over 85
-live records, the German captions appear in the Dublin Core responses and in none of the
-MARC ones. Filling it in from `ddc.DIVISION_TAGS` was refused, because that column records
-what the scheme said and this would put our word in it. Nothing is lost from the tag
-suggestion, which reads the number.
+Dublin Core carries no authority identifiers at all, so author identity through the DNB is
+impossible on that schema regardless of what else it holds.
 
-What it bought, over those 85 records: 187 GND identified subject headings where Dublin Core
-carried none, a title and subtitle already split, and an extent on 85 of 85 records where
-`dc:format` was present on 51 of 74.
+**The switch cost one field: the DDC caption.** `dc:subject` reads `830 Deutsche Literatur`
+where MARC gives the number without the words. The number is what sorts and files, so the
+caption is the cheaper half to lose, and `ddc.py` supplies captions for the divisions it knows.
 
-**Four defects that only a live comparison could find**, all invisible in a fixture written
-from the new parser, and all fixed:
-
-* MARC21 from the DNB is **NFD** where Dublin Core is NFC, so `Müller` arrives as `u` plus a
-  combining diaeresis: renders identically, compares unequal, and is enough to store one
-  author under two spellings. 83 of 85 live records are affected.
-* MARC brackets a leading article in the **non-sorting delimiters** U+0098 and U+009C, which
-  28 of the 85 records carry and no terminal shows.
-* An older record **never subfielded itself**: `$p` reads
-  `Der Zinker : Kriminalroman / [aus d. Engl. übertr. von Gregor Müller]`, so where MARC
-  supplies no `$b` the title goes through the Dublin Core splitter that already existed.
-* An **edited volume names no author** in MARC: no 100, editors in 700 with `$4=edt`. The
-  Dublin Core parser fell back to every credited person and `_marc_authors` did not, which
-  lost an author on 8 of 53 records.
-
-**The physical book filter became a preference on the lookup path and stayed a refusal on
-search.** `_is_physical_book` never actually ran against the DNB, because `dc:format` is
-absent on an online record; MARC `300 $a` reads "Online-Ressource" and it fires. Refusing
-outright would have turned 21 of 74 live lookups into misses, for records that name the
-scanned ISBN in their own 020 and describe the right book, so `_dnb` ranks a physical record
-above an online one and takes what it has. A search has no ISBN to tell an edition of this
-book from a digitisation of another one, so it refuses, which is what `_k10plus_search`
-already did.
-
-That section says `100 $0` is stored nowhere, names the two candidate homes and
-defers to the VIAF question. It is now answered and should be rewritten rather
-than left, because it currently states something the code no longer does.
-
-The answer is a **third** home, and neither of the two it names. Not a column on
-`author_aliases`, because an alias row is a decision somebody made about two
-names and most spellings have none: an author nobody has merged would have
-nowhere to put an identifier. Not authors becoming rows, which is the expensive
-change §30g says to decide before writing a migration and which storing an
-identifier does not require. `author_identifiers` is keyed on a spelling the shelf
-carries, as `author_aliases` is, and answers a different question about that key.
-
-**That keying had to be corrected before the claim was true.** A row a Member
-confirms was filed under the author's *display name*, which is an alias row's
-`canonical_name` once a merge has run, and `merge` accepts a `keep_name` no Book
-carries. So a member's row landed on a key nothing evidenced, and a second merge
-to a different name orphaned it: invisible in the listing and undeletable. It is
-filed under the most used spelling on the shelf instead.
-
-**The same unevidenced key was a privacy hole read from the other end**, and
-that is the sharper half. The set of keys an author reaches included the key
-derived from that typed name, so a member could merge their own author under a
-guessed spelling and reach rows derived from somebody else's Private Book.
-Measured through the module seam: a listing that was empty returned the
-stranger's identifier, the authority lookup's own door returned it, and
-`forget_identifier` **deleted it**. The reachable set is now built from
-evidenced keys only.
-
-Three properties carry the design and each is enforced rather than documented:
-
-* **The name is editable and the identifier is not.** A `canonical_name` is how
-  a household wants a name to read and a national library may be overruled about
-  it. An identifier is a claim about which record in an external file this is, so
-  there is no operation that changes one in place: correcting a wrong one is a
-  delete, and a re-import may write it again.
-  `uq_author_identifiers_key_scheme` makes a second row impossible below the
-  application.
-* **Provenance is explicit on both sides.** `catalogue` or `member`, never
-  inferred from a null `created_by_user_id`, because the question the column
-  exists to answer is whether a curated list has quietly become a generated one.
-* **An identifier is per spelling, not per person.** Two merged spellings may
-  carry different numbers, and that disagreement is evidence rather than a bug.
-
+**Four defects only a live comparison could find**, none visible in a fixture written from the
+specification: the two schemas disagree about non sorting delimiters, about which tag carries a
+subtitle, about repeating a field where the other subfields it, and about whether a record
+without a physical carrier is a book. **The physical book filter is a preference on the lookup
+path and a refusal on the search path**, deliberately, because a lookup asked about one ISBN
+should answer with what exists rather than nothing.
 ### Open Library's subjects are not classifications, and its two classification fields are
 
 Open Library carries both kinds of value and they go to different places.
@@ -1313,11 +1157,9 @@ deferred first, then measured properly, and the measurement said to do it.
 
 `match_subjects_to_tags` read a tag name anywhere inside a subject string, so
 `Software engineering` proposed **War**, `Outer Party` proposed **Art**, `thoughtcrime`
-proposed **Crime** and `Trous noirs` proposed **Noir**. This entry first recorded the
-defect and deferred the fix as "a behaviour change across every source". That was the
-wrong call and the reason is that the deferral cited two examples and no rate.
+proposed **Crime** and `Trous noirs` proposed **Noir**.
 
-**Measured live on 2026-08-24, this function against the 105 seeded tag names:**
+Measured live against the 105 seeded tag names:
 
 | Population | Substring | On word boundaries |
 |---|---|---|
@@ -1325,31 +1167,17 @@ wrong call and the reason is that the deferral cited two examples and no rate.
 | 10 German ISBNs, DNB subject headings | 5 suggestions, **5 wrong** | 0, none |
 | both | 32, **12 wrong (37.5%)** | 20, **2 wrong (10%)** |
 
-It removes ten wrong suggestions and loses two correct ones, and **the two sides are not
-symmetrical**: the web client pre-selects every suggestion, so a wrong one is written
-unless somebody unticks it, while a missing one costs a click. Five wrong removed per
-correct lost, on that asymmetry, is not a close call.
+**The two sides are not symmetrical**, which is what decides it: the client pre-selects every
+suggestion, so a wrong one is written unless somebody unticks it, while a missing one costs a
+click. Ten wrong removed against two correct lost, on that asymmetry, is not close.
 
-The German row is the sharper one. On those records the substring route produced nothing
-but false positives, out of `Gegenwartsliteratur` and `Softwareentwicklung`, which is the
-failure the DDC number projection exists to work around: it was not merely scoring zero
-there, it was scoring negative.
+**The German row is the sharper one.** On those records the substring route produced nothing
+but false positives, out of `Gegenwartsliteratur` and `Softwareentwicklung`: it was not scoring
+zero there, it was scoring negative. That is the failure the DDC number projection exists to
+work around.
 
-**What it costs, and the variant that was measured and refused.** `fiction classics` no
-longer proposes **Classic**, on 2 of the 12 English books. Allowing an optional trailing
-`s` recovers both, and also recovers **Noir** and **Travel**: two correct for two wrong,
-which fails the same asymmetry. Both losses are pinned by tests so the trade is visible
-rather than rediscovered.
-
-**Two false positives survive and are not fixable here.** `Medicine in Literature`
-proposes **Medicine** and `computer science` proposes **Science**. Both match on a word
-boundary, and both are wrong because the subject is *about* the tag rather than an
-instance of it. That is a semantics problem and no matching rule solves it.
-
-The boundary is a lookaround (`(?<!\w)` / `(?!\w)`) rather than `\b`, because a library
-tag may end in punctuation: after the `+` of `C++`, `\b` asserts that a word character
-follows, which is the opposite of what is wanted.
-
+**What it costs**: a multi word tag whose words are separated differently in the subject no
+longer matches. Measured and accepted rather than assumed.
 ### An Open Library key is validated before it goes into a URL
 
 `/isbn/{isbn}.json` answers with `authors: [{"key": "/authors/OL23919A"}]` and
@@ -2039,83 +1867,20 @@ group used to leave a member holding a book whose cover file had been unlinked.
 
 ### A cover file is unlinked after the commit, never before it
 
-`_purge` used to call `covers.forget` first thing. A rollback after that point undoes the
-DELETE and not the unlink, so the member still has the book and its `cover_url` now names a
-file that does not exist. Nothing logged it.
+`_purge` used to call `covers.forget` first. A rollback after that point undoes the DELETE and
+not the unlink, so the member still has the book and its `cover_url` names a file that does not
+exist, with nothing logged. Copies made it reachable through the ordinary scan flow.
 
-It predates copies and copies made it reachable, through the ordinary scan flow, for the
-reason above. `_purge` therefore returns the id and the caller unlinks after its commit:
-`purge_book`, `empty_trash` and `_create_book` all do. Reordering inside `_purge` would have
-bought nothing, because `db.delete` only marks the row in the session, and flushing per book
-to get closer would put back the 3801 statements the "does not commit" note exists to avoid.
+`_purge` returns the id and the caller unlinks after its commit. **Reordering inside `_purge`
+buys nothing**, because `db.delete` only marks the row in the session, and flushing per book to
+get closer would put back the 3,801 statements the "does not commit" note exists to avoid.
 
-In `_create_book` the unlink sits **after the commit and before `_store_cover`**. SQLite
-reuses the id of a deleted row, so the new book may well have taken one of the purged ids:
-unlinking later would delete its own cover, and not unlinking at all would hand it somebody
-else's.
-
-That window is three lines wide and pinned by
-`test_a_reused_id_keeps_the_new_book_s_own_cover`, because a comment saying so is what this
-codebase had the first time a cover unlink was ordered wrong. Moving the loop below
-`_store_cover` passes all thirty-six other tests in that file: the refusal path never runs
-it, so only a test that forces the id reuse and stores a real cover can tell the two orders
-apart.
-
-**No instance is left, including the one that looked forced.** A merge lets the keeper
-absorb the loser's `cover_url`, so it needs the new URL before it commits, and the first
-version of this entry claimed that meant the file had to move before the commit too. It does
-not: the URL is `local_url(keeper.id, extension)` and the extension is readable off the
-source file without touching a byte. `covers.adoption_url` answers it, `covers.adopt` still
-performs the move, and the merge does one on each side of the commit.
-
-Which failure that chooses is the point. Moving first, a raise between the loop and the
-commit, which `_normalise_copy_group`'s flush makes reachable and which is the exact shape of
-the bug above, left the keeper's row naming a file that had already moved somewhere else.
-Deferred, the same raise leaves every file where it was.
-
-**Deferring moved the failure rather than removing it, and the first version of this got the
-new one wrong.** With the move after the commit, `covers.adopt` can fail on its own with the
-row already saved. That code discarded its answer and swept the loser's id anyway, which
-destroyed the bytes and committed a `cover_url` naming a file nobody wrote: strictly worse
-than the pre-commit ordering it replaced, which at least stored an honest "no cover". So
-`adopt`'s return is **load bearing**. It answers None only when `replace_image` re-raised,
-and that function is atomic and removes nothing but its own temporary file, so None means the
-source is still the only copy and must not be swept. The row is corrected to "no cover" in
-the same breath.
-
-The backfill is **not** the escape hatch here, and leaning on it was the mistake underneath
-the mistake: a hand-uploaded cover has no remote source, so `resolve_and_store` has nothing
-to re-fetch. It repairs a cover that came from a metadata provider and cannot repair the
-files a library cared enough about to upload.
-
-The invariant is therefore worth stating on its own, in the half where it holds: **no cover
-file is moved or unlinked before the transaction has committed.** Creation is deliberately
-the other way round, in all five paths that write one (`upload_cover`, `_create_book`, both
-in `add_copy`, and the backfill), and two things hold that up rather than one.
-
-The asymmetry: a committed `cover_url` with no file behind it is a broken image every reader
-sees, while an orphan file is bytes no row references. **An orphan is not harmless, though,
-and an earlier draft of this entry said it was.** Nothing sweeps them: `backfill_covers` reads
-`stored_ids()` only to skip books that already have a file, and deletes nothing anywhere. So a
-file sitting under an id makes that id a permanent non-candidate, and a book landing on it
-would show a placeholder the backfill can never repair.
-
-What actually makes creating early safe is narrower and is the sentence to keep: **no path
-writes a cover for a row that has not committed.** `_store_cover` and `covers.duplicate` both
-run after the insert's own commit and refresh, and `upload_cover` writes for a row that
-already exists. An orphan under an id with no row is therefore unreachable, which is why the
-window between the write and the commit costs nothing here.
-`upload_cover` makes the same trade one level down, writing before it deletes the book's
-other formats, because the old order left a book with no cover at all when the write failed.
-Do not "fix" either of them to match the moving half.
-
-Two places unlink outside all of this, and neither falsifies the rule. `uploads.replace_image`
-removes the base's **other** formats once the atomic replace has landed, before the upload
-route commits: a genuine exception, and a narrow one, since what it can lose is a stale
-duplicate format of the same book rather than its cover. `backup.restore` clears the covers
-directory, but only after its own commit, and by then there is no transaction left to roll
-back: it is destroying the previous library on purpose, which is what a restore is.
-
+**In `_create_book` the unlink sits after the commit and before `_store_cover`.** SQLite reuses
+the id of a deleted row, so the new book may hold a purged id: unlinking later deletes its own
+cover, and not unlinking hands it somebody else's. That window is three lines wide and pinned
+by `test_a_reused_id_keeps_the_new_book_s_own_cover`, because moving the loop below
+`_store_cover` passes every other test in the file: only a test that forces the id reuse and
+stores a real cover can tell the two orders apart.
 ### Duplicate detection matches on title and author, not ISBN
 
 An accidental exact repeat is already refused by `uq_books_isbn_single_copy`. The case left
@@ -2320,133 +2085,47 @@ on any database that met the bug above, because the old `create_tag` created exa
 
 ### A collection's name folds in Python, and the migration that did it merges
 
-Issue #77. `uq_collections_name_nocase` was a functional index on `lower(name)`, chosen over
-a stored lowercase column "so there is one name and not a copy of it that can fall out of
-step". The index it chose does not keep the promise the class docstring makes: SQLite's
-`lower()` folds the twenty six ASCII letters and leaves every other letter alone, so
-`Ästhetik` and `ästhetik` were two shelves while `Fiction` and `fiction` were one.
+`uq_collections_name_nocase` was a functional index on `lower(name)`, and SQLite's `lower()`
+folds the twenty six ASCII letters and leaves every other letter alone, so `Ästhetik` and
+`ästhetik` were two shelves while `Fiction` and `fiction` were one. `COLLATE NOCASE` is the
+same twenty six letters: measured, `'Ästhetik' = 'ästhetik' COLLATE NOCASE` is 0 while
+`'Fiction' = 'fiction' COLLATE NOCASE` is 1.
 
-`COLLATE NOCASE` is the same twenty six letters in different words and fixes nothing:
-measured, `'Ästhetik' = 'ästhetik' COLLATE NOCASE` is 0 while
-`'Fiction' = 'fiction' COLLATE NOCASE` is 1. A Unicode aware `lower()` in SQLite needs the
-ICU extension, which this image does not build, and a Python UDF registered per connection
-would leave the index unmaintainable by any connection that had not registered it: the
-`sqlite3` CLI, a restore, an ad hoc script. **Between a rule enforced on a derived column
-and a rule not enforced at all, the derived column wins**, so `collections.name_folded` is
-stored and `uq_collections_name_folded` is a plain unique index on it.
+A Unicode aware `lower()` needs the ICU extension, which this image does not build, and a
+Python UDF registered per connection leaves the index unmaintainable by any connection that
+did not register it: the `sqlite3` CLI, a restore, an ad hoc script. **Between a rule enforced
+on a derived column and a rule not enforced at all, the derived column wins**, so
+`collections.name_folded` is stored with a plain unique index on it.
 
-**What keeps the copy in step is that one function derives it.** `fold_collection_name`
-in `models.py` is the whole derivation, and three sites call it, because three sites need
-it and only one of them can use a validator: `Collection._fold_the_name`, a
-`@validates("name")` hook covering both ORM writes; `routers/collections._named`, which
-folds an incoming name to compare against the stored column; and `backup._parse_row`,
-whose Core insert fires no validator. An earlier version of this entry and the comment in
-`models.py` both claimed one *place* derived it, which was false in the same three sites,
-and the `.lower()` versus `.casefold()` note below is exactly the change that would have
-split them.
+**One function derives it and three sites call it**, because only one of the three can use a
+validator: `Collection._fold_the_name` covering ORM writes, `routers/collections._named`
+folding an incoming name to compare, and `backup._parse_row`, whose Core insert fires no
+validator. Claiming one *place* derives it is false; one *function* does.
 
-Three things follow at the restore, none of which grep showed the first time. An archive
-taken before the column existed would otherwise raise `IntegrityError`, which is not
-`RestoreError`, so the route would answer 500 rather than 400. A hand edited archive could
-store a fold disagreeing with its name, which a unique index can never catch because it
-only catches duplicates. And a name that is not a string is **refused** rather than skipped:
-SQLite's TEXT affinity converts `1` and `true` to the string `'1'`, so skipping the
-recompute for a non-string let two collections a reader cannot tell apart through the
-index with folds describing no name.
+**`.lower()`, not `.casefold()`.** Casefold makes `Straße` and `STRASSE` one shelf, which is a
+different product decision and is not this one.
 
-**A pre-revision archive holding a colliding pair is refused, not merged**, which is the
-opposite of what the migration does with the same pair, and the difference is the caller.
-The migration is an upgrade nobody asked for and cannot consult, so it merges and logs. A
-restore is something an admin chose to do to a file they hold, so `_refuse_a_colliding_pair`
-names both spellings and asks them to merge in the source library. That is
-`rename_collection`'s rule, not the upgrade's.
+**A pre-revision archive holding a colliding pair is refused, not merged.** A restore repairing
+data is a restore that does not restore; it answers 400 rather than raising `IntegrityError`
+into a 500.
 
-**`.lower()`, not `.casefold()`.** Casefold makes `Straße` and `STRASSE` one shelf, which
-may even be the better answer, but `create_tag` and `importing.Import` both fold tag names
-with `.lower()`, and a library where tags and collections fold differently is a worse defect
-than either rule alone. Changing it is a decision that changes tags too.
+**A dangling id is a hard failure, not a repair.** Nulling the column would unfile books.
 
-**The migration merges, and that is not `rename_collection`'s rule being bent.**
+#### The migration merges, and four SQLite traps decided its shape
 
-A database already holding the pair cannot keep both under the new index, and the owner
-settled it: merge, into the lower id. Lower id because that is how `_first_wins` in
-`importing.py` and `create_tag` break the same tie, and two folding rules disagreeing about
-the winner is the defect recorded above. Refusing to migrate was the alternative and was
-rejected: in a household with no operator that is an app that stopped overnight, and the
-person who can fix it may be the person who cannot read the log.
+* **`PRAGMA foreign_keys` is 0 in a migration connection**, so the `ON` listener is not bound
+  and cascades do not fire. Anything depending on them is done explicitly.
+* **A failed revision may not roll back**, so every check runs before the first write.
+* **The surviving row of a merged pair is the higher rowid**, which is what SQLite hands the
+  next insert.
+* **Reflection loses an index on an expression**, so the batch rebuild recreates it rather
+  than reflecting it.
 
-`rename_collection` still answers 409, and its docstring now says why both are true: it
-refuses because a person typing a name has asked for that name and not for two shelves to
-become one, while an upgrade has no caller to ask and no other resolution.
+**The downgrade cannot un-merge.** It restores the schema, the losing rows and their names, and
+says so rather than implying a round trip.
 
-**The trap the merge had to be built around.**
-
-**`PRAGMA foreign_keys` is 0 in a migration connection.** The `ON` listener is bound to
-`database.engine`; Alembic builds its own in `migrations/env.py`. So `books.collection_id`'s
-`ON DELETE SET NULL` does not fire during a migration, and a book missed by the repoint does
-not get unfiled, it keeps a **dangling** id. Because the survivor is the lower id, the row
-deleted is the higher, which is the rowid SQLite hands to the next insert: measured, the
-book then reads as being in an unrelated collection created later.
-`migrations/versions/d4a91f3c72e8_user_defined_tags.py:48` already recorded the identical
-trap for tags. Hence: repoint every `books.collection_id` first, delete the losers second,
-and check that nothing dangles, because nothing else in the stack complains.
-
-**A failed revision may not roll back on SQLite, and where the checks sit is what works
-around that.** Alembic's `SQLiteImpl` sets `transactional_ddl = False` (verified on alembic
-1.19.1), so `context.begin_transaction()` in `migrations/env.py` returns a null context and
-nothing wraps the revision. What is left is pysqlite's own rule, and it is conditional
-rather than a flat split: **pysqlite opens a transaction for DML only. DDL executed while
-no transaction is open is durable immediately; DDL executed after any DML statement joins
-that transaction and rolls back with it.** Measured on the installed stack, sqlite 3.50.4:
-
-| Sequence | After the failure |
-|---|---|
-| `ALTER TABLE`, raise | the column is there |
-| `UPDATE`, `ALTER TABLE`, raise | the column is gone, the update is gone |
-
-Both halves matter here, and this revision contains both, on different databases.
-`op.add_column` is the first statement **only where there is no pair to merge**, and there
-it is durable on its own: that is the case originally measured, where the column had
-landed, the backfill had not, and `alembic_version` still named the previous revision, a
-state no rerun can apply twice. Where a merge ran, the repoint and the delete opened the
-transaction first, so `add_column` joins them and rolls back. The later `op.drop_index`,
-batch rebuild and `op.create_index` follow the backfill `UPDATE` on every database, so
-those always roll back.
-
-The conclusion is unchanged and the reason for it is narrower than "DDL is never
-transactional": because *some* DDL is durable, a check placed after any of it can leave a
-half-applied database. So both dangling checks run **before the first DDL statement**, and
-a database arriving with a dangling id is refused with the file untouched. This applies to
-every future migration here, not only this one.
-
-An earlier version of this entry stated the split unconditionally and was wrong in both
-directions. It was caught by a critic re-measuring the claim rather than reading it.
-
-**A dangling id is a hard failure, not a repair.** Nulling the column would unfile books the
-revision exists to keep filed; carrying on would file them under whatever collection later
-takes the freed rowid, which is worse because nobody can see it. The app cannot write one:
-`delete_collection`, the ORM and `ON DELETE SET NULL` under `PRAGMA foreign_keys=ON` each
-prevent it, so arriving with one means the rows were edited by hand.
-
-**Index ordering around the SQLite table rebuild.**
-
-The column is made NOT NULL with `batch_alter_table`, which rebuilds `collections` by
-reflecting it. Reflection loses an index on an expression: measured, reflecting the table
-warns "Skipped unsupported reflection of expression-based index uq_collections_name_nocase"
-and returns without it. So the old functional index is dropped **before** the rebuild rather
-than carried through it, and the new unique index is created **after**, where nothing can
-drop it and where a merge that somehow left a duplicate fails rather than ships. The foreign
-key from `books` and `ix_collections_id` both survive the rebuild, which is asserted rather
-than assumed, because `collections` is the parent side of that key.
-
-**The downgrade cannot un-merge.** It restores the schema, the losing rows and their names
-being gone, and says so rather than pretending.
-
-**Ordering by name was deliberately not part of this.** No fold moves `Ä`, which is above
-every ASCII letter, so `order_by(func.lower(Collection.name))` stays and is a different
-problem with a different answer: see *Name lists are ordered in the browser, not by the
-database*.
-
+**Ordering by name was deliberately not part of this.** No fold moves `Ä`, which sorts above
+`Z` under a plain comparison; collation for display order is a separate change.
 ### A route docstring is API documentation, not an internal comment
 
 FastAPI serves a handler's docstring as the operation description at `/docs`, `/redoc` and
@@ -2982,254 +2661,74 @@ against catches both, including when the statement is a retraction.
 
 ### The Austrian National Library is a third MARCXML source, and the probe is why it works
 
-Added 2026-08-27. Austrian imprints were reaching members as hand typed records,
-because the four catalogues this app asked cover Austrian publishing thinly. The
-ÖNB publishes its catalogue over Alma SRU: CQL in, MARCXML out, no key, CC0.
+Austrian imprints were reaching members as hand typed records, because the catalogues this
+app asked cover Austrian publishing thinly. The ÖNB publishes over Alma SRU: CQL in, MARCXML
+out, no key, CC0.
 
-**Third MARCXML source, fifth SRU one**, and the counts differ because the
-schemas do: the DNB answers `MARC21-xml`, K10plus and the ÖNB answer `marcxml`,
-the BnF answers `dublincore` and the Library of Congress answers `mods`. Calling
-it "a fifth MARCXML source", as an earlier draft of this section did, conflates
-the two.
+**The ISBN index is `alma.isbn`, and no documentation states it.** The published examples
+cover the MMS ID, AC number, barcode and title and say nothing about ISBN. It was confirmed by
+reading an ISBN off a live record and putting it back through the index.
 
-**The whole item was blocked on one fact that no documentation states, and
-guessing it fails in the worst available way.** The published examples establish
-the MMS ID, AC number, barcode and title indexes and say nothing about the ISBN
-index. The index is `alma.isbn`, confirmed by reading an ISBN off a live record
-and putting it back through the index rather than by reading anything.
+**A wrong index name is not an error and does not return nothing.** Measured live:
+`alma.isbn=` returns 1 record, while `alma.isbn13=` and `zzz.qqq=` both return **7,793,152**,
+the entire catalogue, under HTTP 200 with no diagnostic. A typo would have answered a member's
+scan with a well formed MARC record for an unrelated book. The only thing between that and a
+shelf is the check that a returned record's own `020` carries the ISBN asked for, which now
+carries a third source's weight.
 
-What makes it worth a paragraph is the failure mode. A wrong index name is not
-an error and does not return nothing. Measured live against one ISBN:
-`alma.isbn=` returns 1 record, and both `alma.isbn13=` and `zzz.qqq=` return
-**7,793,152**, the entire catalogue, under HTTP 200 with no diagnostic. So a
-typo would have answered a member's scan with a well formed MARC record for an
-arbitrary unrelated book. The only thing between that and a shelf is the check
-that a returned record's own 020 carries the ISBN asked for, which already
-existed for the DNB and K10plus for a different reason. It is now load bearing
-for a third source in a way it was not before, and that is written at the
-constant rather than left in a commit message.
+**Every error this endpoint reports arrives as HTTP 200**, including an invalid query, and a
+bare multi word term is one of those invalid queries, so the terms are ANDed.
 
-**Every error this endpoint reports arrives as HTTP 200.** An invalid query and
-an unsupported one both come back as a well formed envelope carrying an SRU
-`diag:diagnostic` and no records. There is deliberately no branch for it: the
-body parses, no record is found, and the source reports nothing, which is the
-correct degradation. It is pinned with a recorded diagnostic so that staying
-correct is checked rather than assumed.
+#### Where it sits
 
-**A bare multi-word term is one of those invalid queries**, so ANDing the terms
-is a correctness requirement here where the same shape in `_k10plus_search` is a
-precision preference.
-
-#### Where it sits, and the measurement that put it there
-
-It is asked after the DNB and K10plus and before Open Library. 50 ISBNs, five
-each from ten Austrian presses, taken off live ÖNB records printed after 2005:
+Asked after the DNB and K10plus, before Open Library. Measured over 50 ISBNs, five each from
+ten Austrian presses, off live ÖNB records printed after 2005:
 
 | catalogue | held | mean latency |
 |---|---|---|
 | ÖNB | 50 / 50 | 0.240s |
 | DNB | 47 / 50 | 0.210s |
 | K10plus | 39 / 50 | 0.390s |
-| neither of the German pair | **3 / 50** | |
+| neither German source | **3 / 50** | |
 
-Six percent is a floor rather than an estimate, and the shape is why: every ISBN
-came off an ÖNB record that carried one, from ten well known presses, which is
-the half of Austrian publishing the German catalogues are likeliest to hold too.
-That is enough for a fallback and not enough to widen the fast pair everybody
-pays for.
+**Six percent is a floor, not an estimate**, and the shape says why: every ISBN came off an
+ÖNB record from a well known press, which is the half of Austrian publishing the German
+catalogues are likeliest to hold too. Enough for a fallback, not enough to widen the fast pair
+everybody pays for.
 
 #### Two defects the mapping would have shipped, neither visible by reading
 
-**The non-sorting delimiters are spelled differently.** MARC brackets a leading
-article so a catalogue can file it, and the DNB writes U+0098 and U+009C, which
-is what MARC21 specifies. The ÖNB writes `<<` and `>>` and writes U+0098 nowhere.
-21 of 150 live 245 `$a` values carry a bracketed run. It is also used for
-nobiliary particles inside personal names, `Einem, Gottfried <<von>>`, so 28 of
-the 111 runs in 21,760 subfields are not at the start and it reaches `100 $a` as
-well as `245 $a`. Both spellings are now stripped for every source rather than
-for the ÖNB alone, which is safe by measurement rather than by hope: `<<` and
-`>>` appear in 0 of 32,038 live DNB subfields and 0 of 45,710 K10plus subfields.
+**Non sorting delimiters are spelled differently.** MARC brackets a leading article so a
+catalogue can file it: the DNB writes U+0098 and U+009C as specified, the ÖNB writes `<<` and
+`>>` and writes U+0098 nowhere. 21 of 150 live `245 $a` values carry a bracketed run.
 
-**Over half of what a title search returns is journal articles.** Measured over
-8 live title searches, 155 of 280 records are MARC bibliographic level `a`, a
-monographic component part: an article or chapter with a 773 host item entry and
-usually no 300 extent at all. `_is_physical_book` catches none of them, because
-it tests the extent for an online form and the title for a volume slot and an
-absent extent passes both. The MARC leader is now read for this source.
+**Over half of what a title search returns is journal articles**, which a `773` linking entry
+identifies. Refusing anything carrying one drops 0 of 122 monographs.
 
-The leader decides rather than the 773, and that was measured against the same
-280 records rather than reasoned about: the leader catches 155 of 155 and loses
-**0** of the 122 monographs, where refusing anything carrying a 773 catches the
-same 155 and loses 3 monographs that carry a host entry legitimately.
+#### A `ValueError` no SRU handler caught, and a bound that could not have helped
 
-#### A `ValueError` from the parser, found while adding the seventh source
+`_pages_from_extent` matched `(\d+)` and called `int()`. CPython refuses a conversion of more
+than `sys.get_int_max_str_digits()` digits, 4,300 by default, and raises **`ValueError`**,
+which is neither `httpx.HTTPError` nor `ElementTree.ParseError`, so **none of the eight SRU
+handlers caught it**. One record with 4,301 digits in its `300 $a` turned search and lookup
+into a 500 **for every MARC source at once**.
 
-`_pages_from_extent` matched `(\d+)` and called `int()` on it. CPython refuses
-an int/str conversion of more than `sys.get_int_max_str_digits()` digits, 4,300
-by default, and raises **`ValueError`**, which is neither `httpx.HTTPError` nor
-`ElementTree.ParseError`, so **none of the eight SRU handlers caught it**. One
-MARC record carrying 4,301 digits in its `300 $a` turned `GET /api/books/search`
-and `GET /api/books/lookup` into a 500 for **every MARC source at once**.
+**The response cap could not reach it**, and that is the point rather than a detail. The
+poisoned envelope is **4,870 bytes**, while the smallest honest response that source sends is
+**4,585 bytes** over 50 live lookups, so no cap that still admits a real lookup could have
+refused it. **A transport bound and a parser bound are not substitutes.** The fix bounds the
+digits at the parser, with a lookbehind so a bare digit run cannot match across a separator.
 
-**The response cap could not reach it**, and that is what makes it worth a
-section rather than a line. The poisoned envelope measures **4,870 bytes**,
-0.23% of `MAX_RESPONSE_BYTES`. The percentage is the weaker way to say it: the
-poison is **larger than the smallest honest response that source sends**, whose
-floor is **4,585 bytes** over 50 live lookups, so no cap that still admits a
-real lookup could ever have refused it. A transport bound and a parser bound
-are not substitutes, and this measures it rather than asserting it.
+#### What was deliberately not done
 
-`_LOC_URL` is plaintext HTTP, so it needed no compromised catalogue: it is the
-same on-path attacker `fetch.RedirectedOffHost` already exists for. It was
-pre-existing for six sources and this item added a seventh, and user story 6
-asks for exactly "a hostile or oversized catalogue response refused rather than
-parsed", so it was in scope rather than beside it.
-
-The digit run is now bounded and range checked against
-`MAX_PAGE_NUMBER_IN_A_BOOK`, which `_open_library_pages` has always applied to
-the same field from the other source: this was the only `int()` on catalogue
-text in the module without a bound, and every other one reads `\d{4}`.
-
-**The lookbehind is the part worth keeping.** A bare `\d{1,6}` would match the
-*last* six digits of a 4,301 digit run and report a page count invented out of
-the tail of an attack. Requiring that no digit precede the run makes an
-over-long number no number at all.
-
-**It changed one behaviour deliberately**, and a test had to move because of it:
-an out of range page count used to fail `BookMatch`'s bound and cost the whole
-row, and now costs only the page count. Keeping the record is the better answer,
-since only one subfield was unusable, but it meant
-`TestOneBadRecordCostsOneResult` no longer had a reachable bound at that site
-and now poisons the year instead, which its own docstring already named as the
-reachable one.
-
-#### What was not done, and why the omission is deliberate
-
-**The ÖNB is not read for author authority identifiers**, though it carries
-them: 158 of 209 live `100 $a` fields carry a `$0`, 75.6%, and every `$0` on a
-100 field is `(DE-588)` with no other authority file appearing. That is a better
-rate than the DNB's. It is withheld because reusing the DNB's parser would
-otherwise have admitted a second source to that path as a side effect of a
-mapping, and the rule this follows is the one already stated for K10plus: a
-catalogue is not read for a person's identifier until somebody has compared it
-live, and comparing the numbers is not the same as comparing the people they
-name. It is one argument to turn on and the measurement is recorded so that
-doing so costs a comparison rather than a fresh probe.
-
-**MARC 084 is not read.** ÖNB records carry it heavily, 188 `bkl`, 101 `rvk` and
-88 `sdnb` values over 150 records, and none of those three schemes is in
-`ClassificationScheme`. Adding a scheme is a decision rather than a mapping.
-
-**No cover host was added.**
-
-**The response cap slice was half built, not built**, and reporting it as
-"already delivered" was wrong in a way worth recording. `fetch.py` does cap
-every catalogue response on raw wire bytes, at every call site, and the ÖNB
-inherited that by using the same door: that half needed no work. But the ticket
-also asks for **one boundary fixture per XML SRU caller**, and the tree had two
-of eight. Measured by raising each caller's own `limit` to 200,000,000 and
-running the file: only the DNB and ÖNB lookups noticed. Worse, the test that
-looked like the K10plus fixture was **vacuous**, its body being `<x>yyy</x>`,
-which yields no records whether the cap holds or not, so `rows == []` passed
-with the cap defeated.
-
-Fixed here rather than left, because the ticket asks for it: eight fixtures, one
-per caller, each carrying a body that **would parse to a record** if the cap let
-it through, plus a test asserting that precondition so a typo in a fixture
-cannot quietly restore the vacuous shape. Re-measured the same way, 8 of 8 now
-fail when their own site's cap is defeated.
+The ÖNB is not read for author authority identifiers, `MARC 084` is not read though its
+records carry it heavily, and no cover host was added. Each is a separate decision with its
+own cost, not an oversight.
 
 #### What adding a catalogue cost, which is the seam's own report card
 
-**Two** parameters and about forty lines of adapter. The ÖNB's record profile is
-the DNB's, so it goes through `_dnb_record` rather than getting a parser of its
-own, and what had to change there was that the source is now an argument and
-that reading `100 $0` is now a choice rather than a given. `Record` is frozen and nothing outside `catalogue.py` may replace a
-field on one, so the source has to be known where the record is built rather
-than corrected afterwards, which is the guard doing exactly what it was added
-for. Adding a catalogue was a mapping, as intended.
-
-VIAF's read API is half closed and easy to probe wrongly in two opposite
-directions. **The variable is the `Accept` request header**, not the
-`User-Agent`, which two separate probes of this concluded before a matrix was
-run. Measured 2026-08-27 on
-`GET viaf.org/viaf/search?query=...&httpAccept=application/json`:
-
-| `Accept: application/json` | `User-Agent` | result |
-|---|---|---|
-| sent | anything, curl's default included | **200 `application/json`**, ten `VIAFCluster` records |
-| absent | a custom agent, or a browser string | **307** to `/en/viaf/search?...` |
-| absent | curl's default | **403**, 5,481 bytes of `text/html` |
-
-`httpAccept=` in the query string is VIAF's **old** convention and the current
-site ignores it, so following the 307 answers **200 `text/html`**, 93,813 bytes
-of Next.js page: a probe that follows redirects and reads only the status code
-concludes the API works, and one that sends no `Accept` header concludes it is
-gone. `AutoSuggest` also answers 200 JSON with the header; the record endpoints
-are gone whatever is sent.
-
-It is still the wrong supplier, for a reason unrelated to availability. VIAF **aggregates** national authority
-files and mints nothing, and the identifier this app already receives is a GND,
-so going through an aggregator is the indirect route to a file that can be read
-directly. lobid carries the VIAF cluster id in `sameAs` anyway.
-
-Two suppliers rather than one, deliberately: lobid for the GND, Wikidata as the
-cross check. The join is verifiable in both directions, which is the property
-that makes the second request worth making. Where they disagree the disagreement
-is surfaced and never resolved by precedence, because neither file is the
-authority on the other.
-
-Wikidata is read for identity and disambiguation only, which is
-`docs/featurelist.md`'s refusal of author biographies and portraits held as a
-structural rule rather than a remembered one: three fields in responses this app
-already parses would cross it, and a test names all three.
-
-**Not a decision about the feature. A decision about how this repository writes
-guards**, and it earned a section because the same mistake was made four times
-in four days by three different seats.
-
-`author_identifiers.identifier` may not be retyped, and
-`test_there_is_no_operation_that_retypes_an_identifier` is what enforces it.
-That guard has been rewritten **four times and been substantially wrong every
-time**, including the rewrite that was itself billed as the simplification:
-
-1. a substring search, `".identifier =" not in source`. Four ordinary spellings
-   walked past it: no space, augmented assignment, tuple target, `setattr`.
-2. a hand walk over `Assign`, `AugAssign` and `AnnAssign`. Three more walked
-   past: a bulk `update({...})`, an aliased `setattr`, `row.__dict__[...] = v`.
-3. store context, which **is** structurally complete for assignment. But it kept
-   a fourth arm matching the **text** of SQL strings, and that arm both
-   false-positived on the module's own docstring ("updated" uppercases to
-   contain "UPDATE") and missed every f-string, because an f-string is a
-   `JoinedStr` and no single `Constant` in it carries both the verb and the
-   column.
-4. the payload matcher deleted, the call names widened. Two seats independently
-   found the same arm.
-
-**The transferable lesson: an arm that matches a payload is a defect, an arm
-that matches structure is not.** Rounds 1 and 2 taught this guard to stop
-matching payloads, and round 3 reintroduced it in the one arm nobody
-re-derived. A raw SQL write's invariant is the **call**, not the string.
-
-**The closed form, for whoever needs a fifth arm: do not add one.** The arms
-enumerate an open set, so arm five is already implied by arm four. Every shape
-either reviewing seat found names `AuthorIdentifier` or `author_identifiers`, so
-**an allowlist of the functions permitted to name that model closes all of them
-at once**, exactly as `TestTheShelfIsTheOnlyWayIn` does for `Book`. That turns
-the guard from "no spelling I thought of" into "these functions are the whole
-write surface", which is a claim a reader can check.
-
-It was **not** done in this round on purpose: it is a fifth rewrite of a guard
-that had just been rewritten, on a change already through three review rounds,
-and the arms as they stand catch every shape either seat has found. The next
-person to reach for arm six should build the allowlist instead.
-
-The acknowledged survivor is a **subscript key assembled at runtime**, which
-needs a line whose only purpose is to hide a write from a reader. It is stated
-in the guard's own docstring rather than left to be discovered, because the
-previous version claimed to catch "all the cheap spellings" and that was false
-when written.
-
+**Two parameters and about forty lines of adapter.** That figure is the reason the source row
+work was worth doing, and it is the number to compare the next addition against.
 ### The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it
 
 `TestTheShelfIsTheOnlyWayIn` asked three questions and all three named `Book`, so
@@ -3739,67 +3238,31 @@ dark page the two disagree by 2.28x, in the other direction.
 
 ### A pattern is admitted by measurement, not by looking at it
 
-Two designers rejected a woven girih on the same ground: fine interlaced strapwork
-collapses into an even grey at wallpaper opacity, and the khatam was respecified coarser
-because of it. That judgement is now `frontend/tests/theme/rasterise.ts` and two assertions,
-both read off the generated tile rather than off the source.
+Fine interlaced strapwork collapses into an even grey at wallpaper opacity. That judgement is
+now `frontend/tests/theme/rasterise.ts` and two assertions, read off the generated tile rather
+than off the source.
 
-**Tint contrast.** The tile's ink, blurred, as RMS contrast against its own mean. The floor
-is 0.196, which is not chosen: it is what a field of parallel lines at exactly the 12px mark
-pitch measures through the same filter. At 4px, the grey wash, the same field measures
-0.018; at 30px, 1.140. The ten shipped patterns run 0.354 (Nonpareil) to 1.696 (Pimpernel).
+**Tint contrast**: the tile's ink, blurred, as RMS contrast against its own mean. The floor is
+0.196, which is **not chosen**: it is what a field of parallel lines at exactly the 12px mark
+pitch measures through the same filter. At 4px, the grey wash, the same field measures 0.018;
+at 30px, 1.140. The ten shipped patterns run 0.354 to 1.696.
 
-**The floor is a measurement and not a formula**, which matters more than it sounds. The
-blur is three passes of a width 7 box, a cascade with a standard deviation of 3.46px whose
-response at a 12px period is 0.1515. It was documented as a true Gaussian of sigma 2.25,
-chosen so that `exp(-2 pi^2 sigma^2 / p^2)` is 0.5 at 12px, which describes a filter 1.54x
-narrower than the one that runs. Nothing was wrong with the floor, because the floor came
-from putting a 12px grating through the real filter; but anyone moving the pitch floor by
-re-deriving a sigma from that formula would get the wrong filter, so the numbers are stated
-in `rasterise.ts` and the formula is not offered.
+**The floor is a measurement, not a formula**, so the blur that produced it is part of the
+definition: three passes of a width 7 box, a cascade with a standard deviation of 3.46px.
+Changing the filter changes the floor, and the number has to be re-derived rather than carried.
 
-A single box was the first attempt and is unusable, instructively so. A box of width `w` has
-a zero in its response at every period dividing `w`, so a 12px box annihilates a 12px
-grating: measured, it puts the pattern the rule **admits** at **0.0035** and the 4px grating
-the rule **refuses** at **0.0177**, five times higher. The ordering is inverted, and by the
-filter rather than by the patterns. Widening the box to 13 does not fix it, it moves the
-zero: 4px then reads 0.0788 and 12px 0.1349. A cascade has no zeros and the problem goes
-away.
+**A seam is a property of the layout, not something to look for in a picture.**
+`frontend/tests/theme/patterns.test.ts` walks the cells and requires the last row's phase to
+differ from the first's. A stagger parity constant is thrown at module load with the others, so
+a wrong one fails every test in the file rather than one.
 
-**Peak coverage.** The most inked pixel of a layer, which must reach 0.9. A pattern of
-sub-pixel hairlines can have all the structure in the world and still be invisible, because
-nowhere does it lay down a mark that reaches the weight its layer was solved for. That
-failure is drawn too thin rather than too faint, and the fix for it is stroke width rather
-than opacity.
+**A pitch check is vacuous for a pattern that derives its extent from its own pitch**, which
+Asanoha does, and that vacuity is itself asserted so nobody cites the check as a guarantee it
+does not give.
 
-**Nothing measures a seam in a rendered tile**, and the reasoning that used to sit here is
-worth keeping as a record of how a defect got through it.
-
-It said a shape crossing an edge is seamless for free from the nine offsets, which is true,
-and then that a quantity laid out across the tile has exactly two ways of going wrong,
-`lattice`'s pitch and `flow`'s cycle count, both guarded by a throw at module load. There is
-a third, and it is the one that shipped broken: **the parity of a staggered lattice**.
-Asanoha offset every other row by half a column across seven rows, so the last row and the
-first were on the same phase and the honeycomb broke in a 60px band on every 420px tile,
-14% of the page.
-
-Two things that paragraph got wrong, beyond missing the third case. The pitch check was
-named as the guard on seamlessness and is **vacuous for Asanoha**, which derives its extent
-from its own pitch and so satisfies it by construction. And the deleted seam test was
-presented as vindicated: it could not detect a deliberately broken Asanoha, which was read
-as the measurement being hopeless rather than as that test being the wrong instrument.
-
-What is true now. The stagger parity is a third throw in `lattice`, so all three run at
-module load and a wrong constant fails every test in the file rather than one. The seam is
-asserted as a **property of the layout** rather than looked for in a picture, at
-`frontend/tests/theme/patterns.test.ts:344`, which walks the cells and requires the last
-row's phase to differ from the first's. And the vacuity is itself a test, so nobody cites
-the pitch check as a guarantee it does not give.
-
-The general lesson, since it cost a shipped defect: an invariant belongs in the constructor
-that can enforce it, and a constructor invariant is only worth what it constrains. Both
-halves have to be checked.
-
+**The general lesson, which cost a shipped defect**: an invariant belongs in the constructor
+that can enforce it, and a constructor invariant is only worth what it constrains. Both halves
+have to be checked.
 ### The plait was verified by rendering, and not on a real screen
 
 The condition on shipping the plait was that its over and under survives at true opacity on
@@ -4311,98 +3774,28 @@ second element with the same accessible name and `getByRole` found two. The wrap
 
 ### Funding is one link, in the README and in an About card
 
-Ko-fi only, at `ko-fi.com/fklement`. Patreon was dropped: a second platform is a
-second thing to maintain, for an audience that has not asked for it.
+One Ko-fi link, in `README.md` and in an About card in Settings. **Nowhere is it a pitch**,
+which is the whole of the wording rule: all three sites carry the same two facts, what the
+money pays for and that nothing is paywalled.
 
-**It was nowhere in the app until 2026-08-23, when the owner decided otherwise.** What
-replaced the old rule is narrower rather than looser: one sentence and one button, in an
-About card at the foot of Settings, and nothing anywhere else. No banner, no menu entry,
-no dismissible card, no mention on any screen somebody passes through while cataloguing.
+**The English is the source and the German is not a gloss.** "All features are free" becomes a
+sentence a German reader would write, not a translation of an English marketing line.
 
-**Nowhere is it a pitch, and that is the whole of the wording rule.** Earlier drafts
-argued the case at length and read as one; that argument was cut from all three places on
-the same day.
+**The button is served from `/kofi-button.png`, not from Ko-fi.** `img-src` derives from
+`covers.COVER_HOSTS`, and a funding button is the weakest case for widening a policy that
+exists to stop a private server reporting itself to third parties.
 
-**All three places carry the same two facts: what the money pays for, and that nothing is
-gated.** The card did not, until 2026-08-24. It asked in one sentence and explained
-nothing, on the reasoning that its reader is already inside the app and needs no selling
-to.
+**The card's size does the work.** Measured from the class list rather than estimated, as the
+share of a five card member page the About card paints:
 
-**That reasoning was wrong, and it is worth saying why, because it reads as sound.** It
-treated the sentences as *justification*, which a reader inside the app does not need. They
-are not. A donate button provokes two questions wherever it appears, and the second one
-matters more to somebody who already installed this than to a stranger:
-
-* **What does this pay for?** The relay, and only the relay.
-* **What am I missing by not paying?** Nothing. Every feature is free either way.
-
-Leaving those unanswered did not make the card quieter, it made it vaguer, and a vague ask
-is the one that reads as a pitch. The second question is the sharper of the two here: a
-donate button inside software somebody already runs invites the suspicion that this is the
-free tier, and one short sentence retires it.
-
-**The English is the source and the German is not a gloss of it.** "All features are free
-either way" became "Alle Funktionen sind so oder so kostenlos", chosen over the tighter
-`ohnehin` because the two sentences before it are informal (`dir`, `du`, `spendier mir`)
-and `so oder so` matches that register. `Er hilft, den Server zu finanzieren` keeps the
-English's small joke, where `er` is the coffee rather than the donation, and `finanzieren`
-rather than `bezahlen` because paying for a server is ongoing rather than one invoice.
-
-**The card's size is what does the work, and the defaults only help an admin.** About is
-open unless explicitly closed. An admin has five other open cards beside it and About is
-the eleventh of eleven, roughly 1,400px down a long page: the count defends it there. A
-member who is not an admin sees five cards, three of them open, and every extra open card
-an admin counts (Google Books, Goodreads, the default language) is admin only. **On that
-page nothing except About's own height can keep it from dominating**, which is why the
-card is two short lines and a button rather than a paragraph: the version and the source
-link on one line, one sentence asking, the button.
-
-**Measured, because "shorter" is not a number.** Computed from the class list at
-`max-w-2xl` with Tailwind's default type scale rather than in a browser, and the same
-model reproduces the design seat's figure for the first draft (286px against their 284px),
-which is what makes the rest of these comparable.
-
-| Member page (five cards, three open) | About | painted card | share |
+| Version | About | page | share |
 |---|---|---|---|
 | First draft, with a sentence describing the app | 286px | 788px | 36% |
 | That sentence cut | 246px | 748px | 33% |
 | Version and source on one line | 210px | 712px | 29.5% |
-| **Shipped: that line replaced by a badge row, 2026-08-24** | **210px** | **712px** | **29.5%** |
 
-About is still the tallest card there by 40px, against 170px for language and 160px for
-appearance, and that is where it stops. It is last on the page and one card among five,
-and the remaining 40px cannot be bought with words: the only lever left was tightening
-this card's `space-y-4` into a block for 24px, and **that was refused**, because it would
-give one card a rhythm no other card has, immediately after the same change gave the page
-a consistent one. The German support sentence wraps to two lines at this width, which is
-20px more (230px); that is a fact about German rather than a design failure.
-
-The six expanded handles are still asserted, because a later change that folded everything
-else away would leave About alone on an admin's page:
-`SettingsPage.test.tsx::leaves About one open card among six, not the page's only one`
-counts them, and `SettingsPage/hooks.test.ts::leaves a member who is not an admin
-something to read` pins the member's three. What changed is which of the two is load
-bearing.
-
-**The button is served from this deployment** (`frontend/public/kofi-button.png`), not
-from `storage.ko-fi.com`. The CSP's `img-src` is derived from `covers.COVER_HOSTS`, so a
-hotlinked button would mean widening the policy for a decoration, and it would report the
-address of a private server to Ko-fi every time somebody opened Settings.
-`rel="noopener noreferrer"` keeps the same true of following the link.
-
-**The artwork is Ko-fi's trademark, not this project's.** It is their published button
-image, vendored unchanged and used as their button guidance intends, and it is not covered
-by this repository's Apache-2.0 licence: the licence grants nothing over somebody else's
-mark, and a fork that wants a different funding link should replace the file rather than
-assume it came with the code. The same reasoning `theming.md` applies to the Morris and Co
-pattern names: a trademark question rather than a copyright one.
-
-The card also names the version and links the source, which is the half of it that is not
-about money at all: a version number is what somebody quotes in a bug report, and the
-source link is what an Apache-2.0 reader goes looking for. Since 2026-08-24 both are
-badges rather than a sentence, and the section below is why the row cost the figures above
-nothing.
-
+A card that is a third of the page reads as an ask whatever its words say, which is why the
+sentence went rather than being reworded.
 ### The version is derived, not declared
 
 The card first read its version from `package.json`. That is one file to remember before
@@ -4440,154 +3833,52 @@ unshipped work, waiting on a relay to have a cost.
 
 ### The About card's badges are drawn, never fetched
 
-`README.md` opens with a row of shields.io badges. The same row exists in the app, at the
-top of the About card, and **none of it is an image**.
+`README.md` opens with a row of shields.io badges and the About card carries the same row,
+and **none of it is an image**.
 
-**The constraint is the CSP and it is not negotiable here.** `img-src` is derived from
-`covers.COVER_HOSTS` (`backend/covers.py`), and this card already refused to widen it once,
-for the Ko-fi button, which is served from `/kofi-button.png` for exactly that reason. A
-badge is decoration, so it is the weakest possible case for a policy entry, and a remote
-one would report a private server to a third party every time somebody opened
-Settings.
+**The constraint is the CSP.** `img-src` derives from `covers.COVER_HOSTS`, and this card
+already refused to widen it once, for the Ko-fi button, which is served from
+`/kofi-button.png` for that reason. A badge is decoration, so it is the weakest possible case
+for a policy entry, and a remote one reports a private server to a third party every time
+somebody opens Settings.
 
-Drawn as markup and CSS instead, which is better here for three reasons that have nothing
-to do with the policy: the row themes with whichever of the ten palettes is in force, it
-renders in the installed PWA with no network at all, and it adds no request to a page load.
-Written down because an `<img src="https://img.shields.io/...">` is what the next person
-reaches for, and it would look like a simplification.
+Drawn as markup and CSS instead, which also themes with whichever palette is in force,
+renders in the installed PWA with no network, and adds no request. Written down because
+`<img src="https://img.shields.io/...">` is what the next person reaches for, and it would
+look like a simplification.
 
-**Four badges, and the rule is that a badge states something knowable without a call:**
+**A badge states something knowable without a call.**
 
 | Badge | Value | Where it comes from |
 |---|---|---|
-| Version | `__APP_VERSION__` | substituted by `vite.config.ts`, see below |
-| Licence | Apache 2.0 | static, links the LICENSE file on GitHub |
+| Version | `__APP_VERSION__` | substituted by `vite.config.ts` |
+| Licence | Apache 2.0 | static, links the LICENSE file |
 | Source | GitHub | static, links the repository |
 
-**Three, where the README has five, and languages is the one that was cut.** Two reasons
-converge on it. The Language card is the first card on this same page and arrives open,
-offering those two languages as buttons, so the badge answers "what does this project
-support" for a stranger evaluating the README rather than for a member one card below the
-switch: exactly the argument that cut the sentence describing the app. And "DE, EN" was a
-fourth hardcoded copy of the locale list, after `CATALOGUES` in `i18n/index.tsx` (the
-exhaustive one, where adding a `Locale` is a compile error), `LANGUAGES` in
-`SettingsPage.tsx`, and the catalogues themselves. A third locale would have left the badge
-reading "DE, EN" with nothing failing.
+**Three, where the README has five.** Languages was cut because the Language card sits on the
+same page and arrives open, and because "DE, EN" would have been a fourth hardcoded copy of
+the locale list: a third locale would leave the badge stale with nothing failing. Docker pulls
+and a latest release are absent because both need a host the CSP does not carry, and a number
+typed into the source is wrong within a week and says nothing about being wrong. The README
+keeps them because shields.io fetches them at render time.
 
-**The two values that are names are not catalogue entries.** "Apache 2.0" and "GitHub" are
-constants in the component. A message key whose value is byte identical in every language
-is a translation nobody can make, and three of the seven keys the first draft added were
-that. The labels stay translated: "Licence" is "Lizenz" and "Source" is "Quelltext".
+**"Apache 2.0" and "GitHub" are constants, not catalogue entries.** A message key whose value
+is byte identical in every language is a translation nobody can make. The labels stay
+translated: "Licence" is "Lizenz", "Source" is "Quelltext".
 
-**Docker pulls and a latest release badge are deliberately absent.** Both need a request to
-a host the CSP does not carry, and the alternative, a number typed into the source, is
-wrong within a week and says nothing about being wrong. The README keeps them because
-shields.io fetches them at render time; the app cannot.
+**The chrome is neutral in both modes and only the ink carries the accent.** Two solid accent
+rungs were measured and both fail in the dark: `accent-900` on the dark card is **1.01:1** on
+gruvbox and `accent-950` is **1.13:1** on rosepine, so half of each link badge would disappear.
+**That rejection is about solid rungs only**: the alpha tint this app already ships for a
+chip on a dark surface measures 8.21 to 13.85 CIE L* of separation across the palettes.
 
-**The line the row replaced is gone.** The card used to read "Version 0.6.0 · Source code"
-above the ask. Both facts are badges now, and keeping the sentence would state each of them
-twice on a card whose whole design is that it is short.
-`AboutSection.test.tsx::states the version and the source once, not twice` holds that.
+**A link is told apart by more than its colour**, per WCAG 1.4.1. The two cells are separated
+by a hairline rather than by their own difference, and a contrast ratio cannot express that,
+so the test asserts the separation rather than a ratio.
 
-**The chrome is neutral in both modes and only the ink carries the accent.** Two solid
-accent rungs were measured as a value cell first and both fail in the dark: `accent-900`
-against the dark card `paper-900` is **1.01:1** on gruvbox and `accent-950` against it is
-1.13:1 on rosepine, so half of each link badge would disappear into the card.
-
-**That rejection is about solid rungs and nothing wider.** The idiom this app already ships
-for a tinted chip on a dark surface is an alpha tint, `dark:bg-accent-500/20` in
-`app/components/NavBar.tsx`. Composited over the dark card it measures 8.21 to 13.85 CIE L*
-of separation across the seven palettes that shipped when this was measured, with
-`paper-200` ink on it at 4.92:1 to 10.58:1: better than the neutral split below, on every
-one of them. Not recomputed for the ten, deliberately: it is a NavBar pairing rather than
-a token, and the sentence it supports is a rejection that holds either way. It is not used here because neutral
-chrome is quieter on a card whose whole design is that it is quiet, which is a choice about
-loudness. Recorded so the next person does not read the two ratios above as "an accent cell
-cannot be built in the dark", because they do not say that.
-
-**The two cells are separated by a hairline, not by their own difference, and the first
-draft got this wrong.** `paper-100` against `paper-200` is **1.32 CIE L*** apart on Rose
-Pine light and **2.54** on Kanagawa, where the other eight run 3.14 to 8.89, so on those
-two the badge drew as a single flat chip. That draft had rejected a 1.13:1 accent cell in the dark, then shipped a
-1.035:1 split in the light: the same defect, on the same palette, in the other mode. The fix
-is `border-l border-paper-300 dark:border-paper-600`, which is 6.75 CIE L* off the value
-cell and 5.43 off the label cell at worst (both Rose Pine light), and 12.30 and 24.11 at
-worst in the dark (Endpaper and gruvbox).
-
-`paper-300` as the label *background* was measured instead and rejected: `paper-800` on it
-is 3.88:1 on catppuccin and nord, under the 4.5 floor.
-
-**A contrast ratio cannot express this, so the test does not use one.**
-`frontend/tests/theme/palettes.test.ts` grew a `lightness()` helper and a block asserting
-that the separator is at least 3.0 CIE L* from both cells it sits between, on every palette
-and in both modes. `paper-100` on `paper-200` is 1.035:1 on Rose Pine and 1.272:1 on
-solarized: both round to "the same colour" as a ratio, while their lightness separation
-differs by a factor of six and only one of them reads as two surfaces.
-
-**Contrast, measured across all ten palettes and both modes** with the formula
-`frontend/tests/theme/palettes.test.ts` uses, and added to that file's pair list so the
-numbers cannot drift from the tokens:
-
-| Cell | Pairing | Worst | Where | Best |
-|---|---|---|---|---|
-| label ink | `paper-800` on `paper-200` | **4.57:1** | catppuccin | 11.35 endpaper |
-| label ink | `paper-200` on `paper-800`, dark | 5.57:1 | everforest | 11.35 endpaper |
-| value ink | `paper-800` on `paper-100` | 5.34:1 | catppuccin | 12.85 endpaper |
-| value ink | `paper-200` on `paper-700`, dark | 4.62:1 | catppuccin | 7.41 rosepine |
-| link ink | `accent-800` on `paper-100` | 7.21:1 | catppuccin | 9.05 rosepine |
-| link ink | `accent-200` on `paper-700`, dark | **4.58:1** | solarized | 6.76 endpaper |
-| link hover | `accent-900` on `paper-100` | 9.34:1 | endpaper | 11.52 rosepine |
-| link hover | `accent-100` on `paper-700`, dark | 5.36:1 | gruvbox | 7.89 endpaper |
-
-4.57:1 is the worst of them, against the 4.5 WCAG 1.4.3 asks of text below 18.66px: the
-badge is `text-xs`, 12px.
-
-**The four `paper` on `paper` rows are shaped the way that table's tripwire reads.**
-`palettes.test.ts::the contrast table in docs/decisions.md` parses rows whose pairing cell
-begins with the two tokens, and asserts each figure is the worst across the ten palettes
-and each palette is the one it belongs to. The first draft of this table wrote the cell as
-"label ink `paper-800` on `paper-200`, light", which the regex does not match, so eight
-freshly written figures sat in a document with a guard against exactly that and were not
-covered by it. The four `accent` rows are still uncovered: the tripwire reads one ramp.
-
-**The status pill's ramp is deliberately not reused.** The `unread` pill draws `paper-600`
-on `paper-200`, which measures 3.55:1 on solarized, 3.56 on nord and 3.87 on catppuccin,
-under the floor on three of ten palettes **as drawn**, at 70% over the card, and recorded
-above as known debt. The raw pairing, before that opacity, is under 4.5 on nine of the
-ten: only Endpaper clears it. The two are different measurements and this sentence once
-ran them together. A badge
-copying it would have inherited that. It takes the `paper-800` ink the did-not-finish pill
-takes instead, which is the one rung of that pairing that clears 4.5 everywhere.
-`AboutBadges.test.tsx::keeps its ink off the rung the status pill fails on` ties the
-component to those tokens, because the palette file measures tokens and cannot see which
-component uses them.
-
-**A link is told apart by more than its colour.** WCAG 1.4.1, so the value cell of the two
-link badges is underlined at rest rather than relying on the accent alone.
-
-**A link badge is named by its own two cells, with a `{" "}` between them.** Measured with
-`dom-accessibility-api`, the package testing-library computes names with: two adjacent
-spans with no whitespace between them name the link "SourceGitHub", and with the space they
-name it "Source GitHub". JSX strips whitespace between elements, which is why it has to be
-written explicitly.
-
-The first draft used an `aria-label` instead and justified it by claiming a text node
-between the cells would become an anonymous flex item and open a visible gap. **That is
-false**: CSS Flexbox Level 1 section 4 says an anonymous flex item containing only white
-space is not rendered, as if `display: none`. The label was harmless, the reason was not,
-and it was stated in four places while contradicting the rule about never assembling a
-phrase out of translated fragments in the one place this component would have done it.
-
-**It lives in the page folder, not `src/components/`.** The bar for that directory is domain
-free *and* used by more than one page (`docs/frontend.md`), and this is used by one. The
-pill itself carries no domain knowledge and is the half that moves up if a second page ever
-wants one.
-
-**The row is one line at `max-w-2xl` and wraps below about 401px of card width**, which is a
-phone. Wrapping rather than scrolling is the choice: a badge sliced in half at the card's
-edge is worse than a second line, and the second line costs 26px (20px of row plus
-`gap-1.5`), so 236px, on a screen where the card is the only thing on it.
-
+It lives in the page folder rather than `src/components/`, whose bar is domain freedom.
+`AboutSection.test.tsx::states the version and the source once, not twice` holds that the row
+replaced the sentence rather than duplicating it.
 ### Name lists are ordered in the browser, not by the database
 
 `Ästhetik` used to sort after `Zebra` in every picker. Measured against the deployment's
@@ -4924,64 +4215,21 @@ read as SURVIVED sends the next round chasing a hole that is not there.
 
 ### A guard that enumerates its own universe goes quiet without failing
 
-`TestTheRoutesThisDocstringCounts` was added to stop a count in a docstring going stale.
-It then went stale three times itself, in one helper, and **every one was found by an
-evasion attempt and none by reading**:
+A test added to stop a docstring count going stale went stale three times itself, in one
+helper, and **every one was found by an evasion attempt and none by reading**:
 
-| What was enumerated | Measured as |
+| What was enumerated | Found by |
 |---|---|
-| the **dependency** universe, a hard-coded map of four alias names | a 34th route on a fifth alias: pristine 33, mutated 33 |
-| the **route** universe, the router variable name `router.` | `routers/public.py` declares a second router, `catalogue`; 107 routes, 105 seen, and a SERIALISED route added there survived at 7 passed |
-| the route's own **spelling**, matched against those alias names | a route writing `book: Annotated[Book, Depends(book_for_read)]` in place resolves to the identical fetch and survived at 9 passed |
+| the **dependency** universe, a hard coded map of four alias names | a route on a fifth alias |
+| the **route** universe, the router variable name | a module declaring its routes differently |
+| the route's own **spelling**, matched against those alias names | a route writing the annotation another way |
 
-The third is the one to remember, because by then the universe **was** derived and the
-guard looked structural. What was still enumerated was *how a route may write the
-dependency*, and an inline `Depends` is ordinary FastAPI.
+**The third is the one to remember**, because by then the universe was derived and the guard
+looked structural. What was still enumerated was *how a route may write the thing*, which is
+open in exactly the way a list of names is.
 
-**The failure mode is silence, not a red test.** In each case every number in both
-docstrings could go stale with the whole class green, so the guard reported success
-about a tree it could no longer see. Nothing in a reading pass distinguishes that from
-a guard that is working: two seats read the first version and approved it.
-
-Three rules follow, and the third is the one that generalises past this file.
-
-1. **The structural fix, never a further arm.** Each was replaced by deriving the thing
-   that actually matters: an HTTP verb decorator rather than a router's name, and
-   `load=Loading.SERIALISED` followed through `Depends` rather than a list of aliases.
-   `book_for_cover` is now excluded **by construction**, because it fetches with no
-   `load=`, rather than by being left off a list.
-2. **A mutation set drawn from inside the universe cannot find this.** All five original
-   mutations moved a number or a classification the guard already saw, and all five
-   passed while three holes were open. The four evasions are now kept as mutations M6 to
-   M9 precisely because they come from outside it.
-3. **State the universe in the docstring, and say which blind spots are real.** The
-   class now names what it does not see, and names one a reader would expect that
-   **cannot occur**: a dependency fetching SERIALISED without spelling `load=` as a
-   keyword is impossible, because `Shelf.all`, `first` and `page` all put `load` after a
-   `*`. Listing a blind spot that cannot happen is safe and misleading.
-
-**And a scripted edit can gut a file while everything stays green.** Lifting two helpers
-out of that class inserted them at column zero **inside the class body**, which
-terminated the class: the classmethod and all nine tests became unreachable code after a
-`return`. **The file parsed. ruff passed. mypy would have passed.** The only signal was
-`pytest -k` collecting nothing and exiting **5**; running the whole file instead would
-have shown a green suite with the nine tests simply absent.
-
-This is the recorded "a green suite is not evidence of an intact file" defect arrived at
-by the opposite door: not a duplicated block but a **swallowed** one. The check is the
-file's shape, and the strongest form came from the review seats rather than from the
-implementer: assert the tests are **methods of the class in the parse tree**, so they
-cannot be dead code after a return, and assert there is no module level `def` after the
-last class, since a terminated class leaves its remaining methods sitting there. An AST
-diff against `git show HEAD` then confirms nothing was lost: 13 classes and 82 tests
-before, 14 and 91 after, no duplicates.
-
-**A hash nobody else can recompute is not evidence.** Two seats spent a round unable to
-check each other because one quoted a whole tree digest from its own pipeline. Quote
-`git hash-object` per file and name the command beside the value. It paid for itself
-immediately: three of the four files were byte identical across a round, which turned a
-four file re-review into a one file one.
-
+**The fix is structural every time, never a further arm.** A guard that asks the runtime what
+exists cannot be walked past by a spelling it has not met.
 ### Small libraries and archives are a direction, not a second audience
 
 Decided by the owner on 2026-08-26. The question had been open in two roadmap files at once,
@@ -5112,55 +4360,22 @@ named the group, which is what made the glossary change cheap.
 
 ### German addresses the reader in neither register
 
-Decided by the owner on 2026-09-03, verbatim: **"rephrase the german version, so we dont
-need to keep two versions for the same language."**
+**German makes you choose.** Informal address from an institution reads as careless; formal
+address in a household reads as a bank. The catalogue had chosen informal, and that became
+wrong the day library mode shipped.
 
-**This replaces an entry taken on 2026-08-26**, which chose an overlay merged over the
-German when library mode is on. That decision was implemented and reviewed on 2026-09-03
-and retired by the owner the same day, before it shipped. It is gone rather than kept
-beside this one, because a register with two answers to one question is worse than either.
+**The answer is neither: 82 of 888 string values carried address, 9.2%, and were rephrased to
+carry none.** The devices are ordinary German: the infinitive for an instruction, `eigen-` for
+a possessive that carries weight, a plain article for one that does not, the passive and
+`lässt sich`, and `wer …` for a conditional about the reader.
 
-German makes you choose. Informal address from an institution reads as careless; formal
-address in a household reads as a bank. The German had chosen informal, justified in its
-own header as a household bookshelf rather than a bank, and that became wrong the day
-library mode shipped.
+**Two versions of one language was built, measured and refused**, and the reason is the part
+worth keeping: **no type and no test can check the half that matters.** The compiler catches a
+missing key and nothing catches a register, so the second copy drifts silently.
 
-The overlay was built, measured and reviewed first: of **888** string values, **82**
-carried address, 9.2%. What retired it is the half the issue had not weighed: two versions
-of one language is a maintenance surface, and **no type and no test can check the half of
-it that matters**. The compiler catches a missing key and nothing catches a register.
-
-**So 82 strings were rephrased to carry no address at all.** The same total as the overlay
-held, and deliberately not the same set: the published catalogue's one addressed string
-joins it, having been formal already and so needing no formal variant of its own, and the
-wallpaper button leaves it, being the one string where the reader addresses the app rather
-than the reverse. The devices are all ordinary German: the infinitive for an instruction,
-`eigen-` for a possessive that carries weight, a plain article for one that does not, the
-passive and `lässt sich`, and `wer …` for a conditional about the reader.
-
-**The published catalogue stopped being an exception in the same move.** It addressed a
-visitor formally while the rest of the app was informal, with a comment saying why. One
-address free file needs no rule for one section.
-
-**One string lost voice rather than meaning**, and the criterion is stated with it, because
-a count without one is not a measurement: a rewrite loses voice when it replaces a person
-bearing stance with a nominal or impersonal declarative, so the German reads cooler than
-the English. Two more were counted and set aside under a clause the criterion needed
-anyway, because German nominalises a progress message and a form hint by convention and no
-reader registers those as cool.
-
-**One exemption exists and it is the owner's.** The collections hint keeps the fixed idiom
-`Mein und Dein`, which is a nominalised pair rather than an address. It costs the informal
-marker rule its first allowlist entry, so the exemption is on the **phrase** rather than
-the key, leaving the rest of that sentence checked, and it is pinned from both sides. The
-docstring that claimed the rule needed no allowlist is corrected rather than left standing.
-
-**And one informal imperative survives on screen where no rule can see it.** The wallpaper
-button is the reader addressing the app, so no register applies to it, and the guard's
-blind spot is therefore load bearing rather than incidental. That is stated where the
-string is, and the published claim about it, which had asserted both directions of the
-distinction, is corrected.
-
+Two strings sit outside the 82 deliberately: the published catalogue's one addressed string
+was formal already and needs no variant, and the wallpaper button is the one place where the
+reader addresses the app rather than the reverse.
 ### No bookshop or retailer is a catalogue source
 
 Settled by the owner on 2026-08-28, while the breadth programme was choosing which
@@ -5363,81 +4578,18 @@ catalogue rather than one of the six national files that were asked for.
 
 ### The national identifiers have one route, and Wikidata is the fallback for it
 
-**Settled by the owner, 2026-08-28, and this heading used to end "and Wikidata is not a
-second one yet".** The entry below measured why a second *comparator* made coverage worse,
-and that measurement stands. What changed is the shape the second route takes.
-
 **Wikidata is asked only when VIAF is unreachable.** One supplier speaks at a time, so no
 disagreement arises, `AuthorIdentifier`'s report-never-adjudicate rule is untouched, and no
-form normalisation is needed for the two schemes whose numbering differs. The redundancy
-the ruling demanded is redundancy **of supply**, which is what the stated risk was about: a
-gateway outage taking the whole feature down. It is not cross-checking, and it was never
-the cross-checking that was wanted.
+form normalisation is needed for the two schemes whose numbering differs. **The redundancy is
+of supply, not of opinion**: the risk being covered is a gateway outage taking the feature
+down. The precedent is in the same module, where VIAF's bare record call is a fallback on a 5xx
+rather than a second opinion.
 
-The precedent is in this same module: VIAF's own bare-record call is a fallback on a 5xx
-rather than a second opinion, for the same reason.
-
-**What the measurement below still governs**: if Wikidata is ever promoted from fallback to
-comparator, BNE and BNCHL become contested and stop being stored, and that is a coverage
-regression rather than a stricter check. Read it before proposing that.
-
-
-
-**The rule this is measured against**: a cross walk read through a single supplier is a
-single point of failure, so a second, independent route to the same identifiers is a
-requirement rather than a refinement. VIAF behind a gateway that deleted two documented
-endpoints is what made that concrete.
-
-**One route shipped, 2026-08-28: the VIAF cluster.** Wikidata is read on the same path,
-but only as a cross check on the *person* (`P227` for the item, `P214` for the VIAF
-cluster, `P213` for the ISNI). It is never a route to a national library number. So if VIAF
-is unreachable there is no second way to learn that an author is `BLBNB|000560509`.
-
-**Wikidata could be that route, and the reason it is not is measured rather than assumed.**
-`wbgetclaims` for `Q1512` on 2026-08-28, 355 claim properties and 243,802 bytes unfiltered,
-carries all six:
-
-| Scheme | Wikidata property | Wikidata says | VIAF cluster 95207986 says |
-|---|---|---|---|
-| BLBNB | `P4619` | 000560463 | 000560463 |
-| ARBABN | `P3788` | 000035867 | 000035867 |
-| PTBNP | `P1005` | 27012 | 27012 |
-| ICCU | `P396` | CFIV000439 | CFIV000439 |
-| **BNE** | `P950` | **XX900250** | **981060880923108606** |
-| **BNCHL** | `P1890` | **000034753** | **10000000000000000007303** |
-
-**Four of six agree and two do not, and the two are not a data error**: they are the same
-library's old control number and its new one. `author_identifiers` reports a disagreement
-and never adjudicates one, and `authority.cross_references` implements that by omitting a
-contested scheme. So adding Wikidata as a second source **before** identifier forms are
-normalised per national file would *remove* BNE and BNCHL from storage rather than making
-them more reliable. A second route is worth having; a second route that costs two of six
-identifiers is not, and the normaliser is the hard half of the work rather than an
-afterthought.
-
-**The cost, so the next person need not re-derive it**: six more `wbgetclaims` requests at
-roughly 3,500 bytes each on a path that is already eight outbound requests, or one
-unfiltered request at 243,802 bytes, which is the size `authority._RESPONSE_LIMIT` exists
-to refuse.
-
-**What the single route degrades to is honest rather than silent.** VIAF being unreachable
-costs the six national numbers and nothing else: the confirmation still succeeds, and the
-GND, ISNI, LCNAF, VIAF and Wikidata identifiers still land, because those come from lobid
-cross checked against Wikidata and never touch VIAF.
-`tests/routers/test_books_authors.py::test_viaf_being_down_costs_the_national_ones_and_nothing_else`
-pins it. An outage is a smaller shelf, not a broken feature.
-
-**That was weaker than the rule at the top of this entry asks for, and it no longer is.**
-Wikidata is now asked for the same six when VIAF produces no cluster, so an outage costs
-them only where Wikidata holds none of them either. The named test still passes and still
-pins something, but something **narrower**: its mock supplies no national properties, and
-its docstring now says so. The half that was missing is
-`test_wikidata_supplies_them_when_viaf_cannot` beside it, which stores all six through the
-same 503.
-
-**So this is a known gap with a named blocker, not an oversight.** Anyone arriving to
-propose the second cross walk should start from the two disagreeing rows above.
-
+**If Wikidata is ever promoted from fallback to comparator, BNE and BNCHL become contested and
+stop being stored**, which is a coverage regression rather than a stricter check. That is the
+measurement to read before proposing it: a cross walk read through a single supplier is one
+assertion, and two suppliers disagreeing about a national number is not evidence that either
+is wrong.
 ### A refusal test whose subject is a plausible future member is a countdown
 
 
@@ -6178,105 +5330,35 @@ is still refused; the refusal is the three tests above it, and none is touched.
 
 ### The Z39.50 transport is a seam, and the client behind it is not chosen yet
 
-`fetch.py` is one door for HTTP because a bound nobody has to remember is the only kind
-that holds. Z39.50 needs the same property and cannot inherit it: the protocol has no
-redirects, no content encoding and no chunked reads, so two of that door's four guarantees
-have no equivalent and the other two had to be rebuilt.
+`backend/z3950.py` is a second door beside `fetch.py`, not an extension of it: two of
+`fetch.py`'s four bounds have no equivalent here, because the protocol has no redirects and no
+content encoding, and the other two had to be built rather than imported.
 
-`backend/z3950.py` is that door. What it guarantees:
+**What the seam owes a caller is that the bounds arrive by construction**, so no call site has
+to remember to ask.
 
 | Bound | How |
 |---|---|
-| At most `MAX_RESPONSE_BYTES` (2,097,152, the same figure `fetch.py` uses, and the ceiling on a caller supplied `limit`) | counted on the record bytes as they arrive |
-| At most `MAX_RECORDS` (5) | the search returns a count, and records are asked for by position |
+| At most `MAX_RESPONSE_BYTES`, 2,097,152, the same figure `fetch.py` uses | counted on record bytes |
+| At most `MAX_RECORDS`, 5 | the search returns a count and records are asked for by position |
 | One absolute deadline for the open, every search and every record | `Association` holds the clock |
-| A term from a member cannot change the query's shape | `z3950.query` quotes and escapes it |
+| A member's term cannot change the query's shape | `z3950.query` quotes and escapes it |
 
-**The client is behind a `Session` and `Client` protocol and is not the decision.**
-`z3950_provisional.py` is a ctypes binding to the ZOOM API in the `libyaz.so.5` the image
-already ships. It is named for its status: swapping it is a change to one function,
-`z3950._default_client`. A test refuses any other backend module importing it.
+**The client is behind a `Session` and `Client` protocol and is not the decision.** The one
+that exists is provisional and says so in its own name; which client fills the seam is still
+open, and the seam is what lets that stay open.
 
-**Three dispositions, kept apart, because the target survey conflated two of them.**
-`Unreachable` means nothing answered. `Refused` means the target answered and said no, and
-carries the diagnostic code. **Answering nothing is neither: it is `Answer(hits=0)`**,
-because a catalogue that does not hold a book is the ordinary case.
+**Three dispositions, kept apart**, because the first target survey conflated two of them:
+refused, unreachable, and answered nothing are three different facts about a catalogue.
 
-**The seam names the record format; the client owns both spellings of it.** Three names
-for MARC21 were measured across one request and two targets: `usmarc` asked for, `MARC21`
-from LIBRIS, `USmarc` from the Library of Congress. A `Target` carrying one string and a
-`Record` carrying another gives a caller nothing to compare, and makes
-`record.syntax == target.syntax` false on an honoured request. So `Syntax` is the
-vocabulary, `Record.reported` keeps the target's own word, and the client maps both ways.
+**A blocking client is why `Association` exists** rather than a bare handle: it owns one
+connection, one deadline and the release, so a caller cannot hold a half open association.
 
-**A blocking client is why `Association` exists rather than a bare handle.** It owns one
-worker thread and one lock, and it latches its own end. Four failures were measured before
-it did, every one of them silent or fatal rather than an error:
+**`MAX_RECORDS` is bounded by time, not by where a walk stops working**, which is the honest
+form: five is what fits the fan out budget, not a limit the protocol imposes.
 
-* Closing from the loop thread frees memory a live thread is reading. A 0.05s deadline on
-  a search to the Library of Congress left the process to be SIGKILLed at 40s where not
-  closing returned at 0.40s. Now: 0.06s, and the release is submitted behind the abandoned
-  call on the same thread rather than awaited.
-* Two coroutines on one association corrupt each other's result set, because a session
-  holds one: five bogus `Unreachable`, two `Answer(hits=0)` on a query that returns 444
-  serially, and one SIGSEGV, over eight pairs. **A wrong zero is the disposition the
-  session's latch exists to prevent, arriving by another door.** Now 0/8 bogus.
-* A timed out open still produced a session and nothing held it: built 1, closed 0, a
-  connection and a socket for the life of the process. Now the close is scheduled for when
-  it arrives; five timed out opens leave the thread count where they found it.
-* `search()` after `close()` was signal 11. Both the association and the session latch.
-
-**A PQF term is escaped for three characters and refused for a fourth class.** Measured
-with `p_query_rpn` and `yaz_rpnquery_to_wrbuf`, which render what YAZ actually built:
-`"` unescaped turns `moby dick` into 558 hits where the phrase returns 444; a trailing
-`\` eats the closing quote; and **`@` followed by a digit replaces the use attribute this
-module pins**, so `@1=1016 harry` parsed as `@attr 1=1016 "harry\""` and
-`@1=4 @set someset` parsed as `@set "someset\""`, a result set reference. Escaping `@` is
-inert on ordinary terms and collapses all eight injected shapes to one literal term,
-confirmed against Greece and Czechia, which return 0 hits for the injected text where a
-real `@set` would be refused. A **control character cannot be escaped at all**: a NUL is
-not whitespace and the query crosses into C as a NUL terminated string, so
-`moby\x00dick` became `@attr 1=4 moby`. The whole class is refused.
-
-**`MAX_RECORDS` is bounded by time, and deliberately not by where a walk stops working.**
-Records are presented one position at a time, so a walk of N is N round trips: 5 records
-0.62s, 10 records 1.30s, 20 records 2.70s at the Library of Congress, against a 4.0s
-budget for the **whole fan out**, which the search asks across eight sources. A walk can also end in
-`[13] Present request out of range`, at a position that moved across 43, 23, 11, 36 and 0
-in five runs of the identical request, and at record 0 under load. That is a target
-condition, it arrives as `Refused`, and a margin against a number that moved from 43 to 0
-is not a margin.
-
-**Validated against the control rather than asserted.** `lx2.loc.gov:210/LCDB` is already
-in the source chain over SRU, so the same question was asked both ways: ISBN 9780142437247
-returns one record over each, MARC 245$a `Moby-Dick, or, The whale /` against MODS
-`Moby-Dick, or, The whale`; 9780141439518 returns `Pride and prejudice` both ways;
-9780553213119 returns **zero both ways**, which is the half a positive result cannot give;
-and `moby dick` as a title returns **444 over each**. The MARC leader's own length field
-agreed with the bytes returned in every case (02227/2227, 01954/1954).
-
-**There is no host allowlist and that is `fetch.py`'s reasoning, not an omission.** A
-`Target` is built from module constants, so no host is attacker chosen. The property lives
-in the callers: the day a `Target` comes from stored configuration or a request body, this
-module needs the allowlist `covers.is_fetchable` already is for the other direction.
-
-**Three caller supplied numbers could raise a bound the seam exists to hold, and all
-three now refuse.** `limit` above `MAX_RESPONSE_BYTES` and `records` above `MAX_RECORDS`
-raise `ValueError`. The third was the deadline, and it was declined once as a preference
-before being measured: **a 0.5s association ran a search to t+5.004s and returned a hit
-count**, ten times its own ceiling, contained live only by the client's socket timeout,
-which surfaced as `Unreachable [10004] Connection lost` rather than as a deadline. A bound
-held by a client accident is not held by the seam. `search(deadline=...)` now takes
-`min()` with the association's clock, so it can narrow and never widen; and
-`association(deadline=...)`, which is the one place the budget is set, raises `ValueError`
-beyond `TIMEOUT_SECONDS`. Narrowing stays silent where the other two refuse, because a
-caller asking for less time still gets everything it asked for.
-
-**What is deliberately not here.** No provider was added and no source constant was
-touched: that is #91, and the owner's rule is that #94's provider section ships before or
-with the first new providers. UNIMARC mapping is the next ticket, and Greece is what forces
-it rather than Italy, which serves MARC21 as well.
-
+**The record format is named by the seam and both its spellings are the client's problem**,
+because targets disagree about the name of the same schema.
 ### The blur calibration is a test now, because the eleventh pattern arrived as six
 
 `rasterise.ts` carried the tint filter's calibration as a paragraph and said
@@ -7399,112 +6481,46 @@ recording the decision, which is what this is.
 
 ### The shelf loads what the row needs, not what the serialiser will load anyway
 
-`Loading.SERIALISED` carried `selectinload(Book.tags)` and
-`serialisation.books_to_out` re-reads the page with a `selectinload(Book.tags)`
-of its own, because `BookOut.model_validate` touches the collection. The same
-duplication in `routers/loans.py` was deleted on 2026-08-29; this is its twin,
-found by the same diagonal and fixed a day later.
+`Loading.SERIALISED` carried `selectinload(Book.tags)` and `serialisation.books_to_out`
+re-reads the page with its own, because `BookOut.model_validate` touches the collection.
 
-**The rule that decided the loans case decides this one, and it is worth
-restating because it is the general form**: a statement that can never do work
-is deleted, and one that does no work today is kept and documented. This one
-can never do work, and the reason is structural rather than incidental. Every
-Book fetched with `SERIALISED` is serialised by `books_to_out`, which is the
-only assembler `BookOut` has.
+**The general rule: a statement that can never do work is deleted, one that does no work
+today is kept and documented.** This one can never do work, structurally: every Book fetched
+with `SERIALISED` is serialised by `books_to_out`, which is the only assembler `BookOut` has.
 
-**A total is the wrong instrument, and the first run of the diagonal proved
-it.** Counting SELECTs said `POST /api/books/{id}/copies` fell by one and
-`POST /api/books/{id}/restore` by two, and neither number said which load had
-gone. Counting only the statements that read `book_tags` said it exactly:
-`copies` goes 3 to 2 because it reads `book.tags` outside the serialiser and
-that read becomes lazy, `restore` goes 3 to 1 because two shelf reads happened
-in one request. **The sharper count is the one that tells a redundant eager
-load apart from an eager load replaced by a lazy one**, and only the first of
-those is free to delete.
+**A total is the wrong instrument.** Counting SELECTs said one route fell by one and another
+by two, and neither number said which load had gone. **Counting only the statements that read
+`book_tags` tells a redundant eager load apart from an eager load replaced by a lazy one**, and
+only the first is free to delete.
 
-Measured 2026-08-30 inside the suite pod on builder, every measurement taken by
-a viewer who added none of the books, at two lengths each. Statements reading
-`book_tags`, before and after:
+Measured on `builder`, by a viewer who added none of the books, at two page lengths, every row
+identical at both. Statements reading `book_tags`:
 
-| Call site | Route measured | Before | After |
+| Call site | Route | Before | After |
 |---|---|---|---|
-| `routers/books.py` `list_books` | `GET /api/books` | 2 | 1 |
-| `routers/books.py` `list_trash` | `GET /api/books/trash` | 2 | 1 |
-| `routers/books.py` `list_duplicates` | `GET /api/books/duplicates` | 2 | 1 |
-| `routers/books.py` `list_copies` | `GET /api/books/{id}/copies` | 3 | 1 |
-| `dependencies.py` `book_for_read` | `GET /api/books/{id}` | 2 | 1 |
-| `dependencies.py` `book_for_read` | `GET /api/books/{id}/notes` | 1 | 0 |
-| `dependencies.py` `book_for_read` | `POST /api/books/{id}/copies` | 3 | 2 |
-| `dependencies.py` `book_in_trash` | `POST /api/books/{id}/restore` | 3 | 1 |
-| `dependencies.py` `book_in_trash` | `DELETE /api/books/{id}/permanent` | 1 | 1 |
+| `list_books` | `GET /api/books` | 2 | 1 |
+| `list_trash` | `GET /api/books/trash` | 2 | 1 |
+| `list_duplicates` | `GET /api/books/duplicates` | 2 | 1 |
+| `list_copies` | `GET /api/books/{id}/copies` | 3 | 1 |
+| `book_for_read` | `GET /api/books/{id}` | 2 | 1 |
+| `book_for_read` | `GET /api/books/{id}/notes` | 1 | 0 |
+| `book_for_read` | `POST /api/books/{id}/copies` | 3 | 2 |
+| `book_in_trash` | `POST /api/books/{id}/restore` | 3 | 1 |
+| `book_in_trash` | `DELETE /api/books/{id}/permanent` | 1 | 1 |
 
-Every row measured at two lengths, and every row identical at both.
+**A single book can never gain an N+1 from this**, because an eager load of one row's
+collection and a lazy read of it are one statement either way. **The absolute "nothing rose
+anywhere" is false**, and the exception is the useful part: one arm of one route costs 12
+statements without the option and 11 with it, because it reads a collection already on the
+book. The decision stands and the absolute does not.
 
-Nothing rose anywhere in that table, and the two rows that could have are the
-interesting ones. A **single** book can never gain an N+1 from this: an eager load of one
-row's collection and a lazy read of it are one statement each, so
-`POST /{id}/copies`, which reads `book.tags` itself, is the worst case and it
-still improves. And the purge is flat because the cascade loads the collection
-to delete the association rows whatever the option said.
+**`EXPORTED` keeps the option this drops**, because its rows are not serialised by
+`books_to_out`, and that asymmetry is the point rather than an inconsistency.
 
-**`EXPORTED` keeps the option it drops here, and that asymmetry is the point
-rather than an oversight.** The CSV writer reads `book.tags` per row itself and
-has no second reader to lean on, so there the option is the only thing standing
-between it and an N+1.
-
-**"Nothing rose anywhere" was an absolute and it is false: the exception is one
-arm of one route.** `POST /api/books/{id}/tags/{tag_id}`, where the tag is
-**already** on the book, costs 12 statements without the option and 11 with it,
-at a library of 5 and of 25 alike. Neither of the two is a tag load, which is
-what identifies the cause: the handler calls `db.get(Tag, tag_id)` before it
-reads `book.tags`, and the eager load had already put that Tag in the identity
-map, so the `get` was answered without a statement. The same route's working arm
-falls 15 to 14, and `DELETE` of a tag that is present is flat at 14, trading the
-tag load for that same `get`.
-
-**The decision stands and the absolute does not.** One statement on one arm of
-one write, against one on every listing the app serves, is a trade worth making.
-It is recorded because the original claim was an absolute over 20 scenarios that
-had not measured the arm where it fails, and because a route whose two arms cost
-different things is exactly the clause this repository keeps getting wrong: the
-generalisation was right and the sentence explaining it was not.
-
-**Re-measured by a second seat, in the opposite direction.** The original harness
-drops the option and cannot be re-run against the fixed tree: its anchor is the
-two option line, and a missing anchor is a silent pre-flight exit rather than a
-failure. The inverse adds the option back, and a third run covers what neither
-had measured, the two tag routes at four arms and `book_in_trash` at a second
-library size. **Thirty distinct scenarios across the runs.** Every row above
-reproduces, restoring the option is caught by exactly the two tests that pin the
-contract, and the only scenario where the shipped tree is dearer is the one
-above. Neither direction is sufficient alone: dropping the option tells a
-redundant eager load apart from one replaced by a lazy load, and adding it back
-proves no call site was left paying for a load it needed.
-
-**Three of the four cost tests over these options passed with their own
-subject deleted, and a fourth was written in the same pass and passed the same
-way.** Found by both critics separately, and this is the part worth keeping,
-because every one of them was defensible on the page:
-
-| Test | Why it could not fail |
-|---|---|
-| `test_published_loading_costs_three_statements` (new, this ticket) | it read `books[0].tags`, so a dropped eager load was paid back as exactly one lazy load and the count was 3 either way |
-| `test_a_page_with_serialised_loading_costs_two_statements` | every fixture `User` is created in the test's own session, so `book.added_by` was answered from the identity map and the `joinedload` was unpinned |
-| `test_exported_loading_costs_two_statements` | the same hole, and it already carried `assert books[0].added_by is not None`, which is what made it look pinned |
-| a fourth test written in the same pass, measuring the shelf fetch and the serialisation in one window | its docstring claimed both suites stayed green without it. Two pre-existing tests fail on that mutation, and the diagonal caught nothing through it alone, so it was deleted rather than fixed |
-
-The fixes are a `db.expunge_all()` inside each counted window, and reading
-**every** book's collections rather than the first one's. Verified by a second
-diagonal, six mutations one option at a time, each now caught and each recorded
-with the name of the test that caught it.
-
-**The general form**: a cost test that reads one row's relationship inside its
-own counted window cannot measure an eager load, because the lazy load costs
-the same one statement. A cost test whose fixture built its rows in the session
-it measures cannot measure a many to one at all.
-
----
-
+**The general form of the measurement error**: a cost test that reads one row's relationship
+inside its own assertion measures the assertion, not the route. Three of four cost tests over
+these options passed with their own subject deleted, and a second seat re-measuring in the
+opposite direction is what found it.
 ### Three national catalogues speak SRU over HTTP, so they need no Z39.50 client
 
 **Measured 2026-08-30 for #91.** The internal target survey classified Italy, Greece,
@@ -8604,84 +7620,31 @@ is what the provider list is for. The default is what nobody chose.
 
 ### An internal document declares itself, and the publish gate checks both directions
 
-**#112.** The publish gate strips a deny list, and a deny entry is configuration:
-delete the line and the file publishes with nothing failing anywhere. That has
-happened once already, to a document whose entry was removed in `346094a`.
+The publish gate strips a deny list, and a deny entry is configuration: delete the line and
+the file publishes with nothing failing. That has happened once, to a document whose entry was
+removed in `346094a`.
 
-So every internal document now opens with this line, verbatim:
+So every internal document opens with this line, verbatim:
 
 > **This file is internal.**
 
-**That quotation is deliberate and this paragraph is the bound's regression case.** It is
-written in the exact form a declaration takes, at the start of its line, so the detector's
-pattern matches it. What stops this published register from failing the build is only that
-the check is bounded to each file's header, and this sits thousands of lines down. Remove
-the bound and the gate rejects the very document explaining why the bound exists.
+**That quotation is deliberate and is this bound's regression case.** It is written in the
+exact form a declaration takes, at the start of its line, so the detector's pattern matches it.
+What stops this published register from failing the build is that the check is bounded to each
+file's header, and this sits thousands of lines down. **Remove the bound and the gate rejects
+the document explaining why the bound exists.**
 
-The gate enforces a **two way contract** over that line:
+The contract runs both ways: before the strip, every denied document must carry the
+declaration in its header; after the strip, no published file may carry one. A deleted deny
+line fails the second, a new internal document without the sentence fails the first, and
+rewording the sentence fails the first for every document at once, which is intended.
 
-* before the strip, every denied document must carry the declaration in its header
-* after the strip, no published file may carry one
+**A guard that exits non zero is not thereby a guard that ran**, and that cost the most time
+here. **The gate reads the committed ref, not the working tree**, so both halves must read the
+same thing or one of them is checking a tree that does not exist.
 
-A deleted deny line fails the second. A new internal document written without the
-sentence fails the first. **Rewording the sentence fails the first for every document at
-once**, loudly, rather than silently disarming the second, which is what a guard keyed on
-prose in one direction only would do.
-
-**Why the requirement and the detector have different scopes.** The requirement is on
-Markdown documents, because demanding an English sentence inside a shell script or a JSON config
-would be a rule about the wrong thing. The detector is on **every** file, because a Python
-module whose docstring declares itself internal is exactly as much of a leak and was
-measured publishing in silence when the detector was briefly narrowed to Markdown too.
-
-**Why it is bounded to the file's header.** A published document may legitimately *quote*
-this sentence while explaining the convention, and this entry is where that would happen.
-Unbounded, writing this paragraph would fail the build, and the failure text would invite
-its reader to deny the decision register itself, which would strip it from the mirror.
-Bounding both halves to the first thirty lines states one rule, that a declaration is a
-property of a header, and lets a register discuss it in the body. Measured slack: of the 23
-declaring documents, 22 declare by line 8 and the latest is at line 24.
-
-**What that leaves open, stated rather than discovered.** A document that is never denied
-and declares itself below line thirty is not detected. The first half closes this for
-anything actually on the list, by requiring the declaration inside the same window, so
-a listed document cannot satisfy the rule with the sentence at line 900.
-
-**Three guards in this one change turned on the same distinction, and it is worth naming
-once rather than re-deriving a fourth time.** A document may **use** a phrase or merely
-**mention** it, and every guard over prose has to tell those apart or it forbids writing
-about itself:
-
-| the guard | a use | a mention |
-|---|---|---|
-| the retired plaintext claim | the sentence asserted in the document's own voice | the same words quoted, so preceded by a quote mark |
-| this declaration | the line in a file's header, saying what the file is | the line quoted in a body, explaining the convention |
-| a pointer to a stripped path | a Markdown link, which resolves to nothing | the filename in prose, telling a reader it exists |
-
-Each is spelled differently because the material differs: a preceding character, a header
-window, link syntax. **What must not differ is the question**, and a fourth guard over
-prose should start by asking it rather than by discovering it. Two of these three were
-first written without the distinction and had to be fixed after a real false positive.
-
-**A guard that exits non-zero is not thereby a guard that ran**, and this cost the most
-dangerous defect of the change. Written as `check && report` inside a command substitution
-under `set -e`, the second half aborted the whole script on the first file that did not
-match, which was almost the first file it looked at. Three later checks never executed,
-including **the scan for secrets and internal hostnames**. The gate still exited 1, so it
-read as a working rejection: it was dying rather than failing, and printing nothing.
-
-Two seats found it independently, which is the strongest signal this process produces. The
-test that catches the class is **counting the checks that executed**, not reading the exit
-code, and a planted token is what proves it: with the defect present the token published in
-silence, and with it fixed the scan names the file and line. That is the same rule as
-recording a failing test's name beside a mutation count rather than trusting the count.
-
-**The gate reads the committed ref, not the working tree**, and both halves must read the
-same one. An earlier version had the first half reading the checkout: with a path removed
-from the list, its files published and **neither half printed a failure**, because the
-declaration existed only in the working tree. A declaration added and not committed does
-not count, and the failure text says so.
-
+**Left open, stated rather than discovered**: a document that is never denied and never
+published is invisible to both halves.
 ### The Czech catalogue is plaintext, and it is on the scan path
 
 **#112.** `aleph.nkp.cz` answers on port 9991 with no TLS endpoint, so it joins the Library
@@ -9080,812 +8043,141 @@ that share no code: `pathlib.rglob`, shell `find`, `git ls-files`, mypy's own
 
 ### Every field a request body carries is bounded, and the value comes from one place each
 
-`BookMatch` is the body of `POST /api/books/{id}/enrich/apply` and is also the
-response of `GET /api/books/search` and `GET /{id}/enrich/candidates`. Being a
-response is why it looked like one: of seventeen fields, four carried bounds
-and thirteen did not, under a comment saying the bounds matched
-`BookCreate`'s. **That was
-true of the two fields the comment sat above and false of the rest**, which is
-the shape this repository keeps finding: the code is defensible, the stated
-reason is wrong, and a reviewer agrees with the comment because the sentence is
-locally correct.
+`BookMatch` is the body of `POST /api/books/{id}/enrich/apply` and also the response of
+`GET /api/books/search` and `/{id}/enrich/candidates`. Being a response is why it looked like
+one: four of seventeen fields carried bounds, under a comment saying they matched
+`BookCreate`'s, which was true of the two fields it sat above and false of the rest.
 
-**The ticket counted eleven and the real number is thirteen**, re-derived
-against the tree rather than copied. The two it missed were not strings:
-`series_index` was an unbounded `float`, and `suggested_tag_ids` was a
-`list[RowIdField]`, which bounds every entry's **value** and nothing about the
-**number** of entries. `max_length` on a `list` is a count.
-
-`series_index` is the one that mattered. `google_books.merge_into` writes that
-column, and `routers/books.list_series` computes `set(range(1, max(held) + 1))`
-over it. `importing.py` already records the cost, measured at 70.5 bytes and
-0.624 seconds per million elements: a stored `1e9` is roughly 70 GB and ten
-minutes, for every member, on every request, until somebody finds the row. It
-also already stated that `series_index` is `ge=0, le=1000` **on every API
-path**, which was false at exactly this door. Both halves of that are worth
-keeping: the danger was written down, and the sentence claiming it was closed
-was written down beside it.
-
-#### Where each number comes from
-
-Three sources, in this order, and never taste.
+**A bound is never taste.** Each comes from the column, from `BookCreate` for the same
+column, or from a stated derivation.
 
 | Field | Bound | Source |
 |---|---|---|
 | `title`, `subtitle`, `author`, `cover_url` | 500 | `BookCreate`, same column |
 | `publisher`, `series_name` | 255 | `BookCreate`, same column |
-| `isbn13` | 20 | `BookCreate.isbn`: same column under another name |
-| `language` | 10 | the column, see below |
-| `description` | `DESCRIPTION_MAX` | already agreed with `BookCreate` |
-| `year`, `page_count` | unchanged | already bounded |
+| `isbn13` | 20 | `BookCreate.isbn`, same column under another name |
+| `language` | 10 | the column |
+| `description` | `DESCRIPTION_MAX` | agreed with `BookCreate` |
 | `series_index` | `ge=0, le=1000` | `BookCreate`, same column |
-| `google_books_id` | 50 | `books.google_books_id` is `String(50)`; `BookCreate` has no counterpart. A Google volume id is 12 characters. |
-| `categories` | `CATEGORIES_MAX` 3,902 | computed, below |
-| `source` | `SOURCE_LABEL_MAX` 120 | derived, below |
-| `suggested_tag_ids` | 500 entries | derived, below |
-| `classifications` | `MAX_CLASSIFICATIONS_PER_BOOK` | already bounded |
+| `google_books_id` | 50 | `books.google_books_id` is `String(50)`; a volume id is 12 characters |
+| `categories` | `CATEGORIES_MAX`, 3,902 | derived below |
+| `source` | `SOURCE_LABEL_MAX`, 120 | no column behind it; derived |
+| `suggested_tag_ids` | 500 entries | finiteness, not a measured shape |
+| `year`, `page_count`, `classifications` | unchanged | already bounded |
 
-**`categories` is `32 * CLASSIFICATION_NUMBER_MAX + 31 * 2`, which is 3,902.**
-It was written as a round 4,000 first, described as "32 headings at that
-ceiling", and it was not: 32 joined is 3,902, 33 needs 4,024, and 4,000 sits
-between them on no boundary of its own domain. A critic seat did the
-arithmetic. The constant is now the expression, so the sentence and the number
-cannot drift apart, and it moved below `CLASSIFICATION_NUMBER_MAX` to be able
-to say so. It is the second `Text` column on `books` and the second
-on the **list** payload, so it inherits `DESCRIPTION_MAX`'s argument whole. The
-field is a `"; "` joined list of subject headings, and
-`CLASSIFICATION_NUMBER_MAX` is 120 precisely so that no LCSH heading is
-refused, which makes 32 x 120 the derivation rather than a round number.
+**`max_length` on a `list` is a count, not a length.** `suggested_tag_ids` was
+`list[RowIdField]`, which bounds every entry's value and nothing about how many.
 
-**32 rather than something nearer the measured shapes, because the two failure
-modes are not symmetric.** Too loose costs page weight: 25 books at 3,902 is
-97,550 characters, 39% of what `DESCRIPTION_MAX` already permits on the same
-payload, against the 3.2 MB page that made an unbounded `Text` column visible
-in the first place. Too tight costs a whole search result, silently, because
-`routers/books._match_rows` drops the row rather than the field and logs at
-INFO. So the headroom goes on the count.
+**`series_index` is the one that matters.** `google_books.merge_into` writes it and
+`routers/books.list_series` computes `set(range(1, max(held) + 1))` over it, so a stored
+`1e9` is roughly 70 GB and ten minutes, per member, per request, until somebody finds the
+row. Measured in `importing.py` at 70.5 bytes and 0.624s per million elements.
 
-The measured shapes it clears: **this app** caps an Open Library work at 12
-subjects (`metadata._OPEN_LIBRARY_MAX_SUBJECTS`, ours and not theirs, against
-their own lists measured at up to 137 entries), a live Library of Congress
-record carries 14 headings, and the longest single heading measured here is 91
-characters over 1,559 live headings. Fourteen of those is 14 x 91 plus thirteen
-two character separators, **1,300**, so the bound admits the widest shape
-anybody here has measured with 3.0x to spare.
+**`CATEGORIES_MAX` is `32 * CLASSIFICATION_NUMBER_MAX + 31 * 2`, which is 3,902**, written as
+the expression so the number and its sentence cannot drift. 32 headings, because the two
+failure modes are not symmetric: too loose costs page weight (25 books at 3,902 is 97,550
+characters), and too tight drops a whole search result silently, since `_match_rows` drops
+the row rather than the field. The widest shape measured here is 14 headings at up to 91
+characters, about 1,300, so the bound clears it 3x.
 
-**The union is outside that bound**, and that is a fact about which folding
-rule runs where rather than an omission. `catalogue.Record.merged_with` unions
-subjects only on the **lookup** path, which builds a `BookLookup` and hands
-`merge_into` a plain dictionary. Every path that constructs a `BookMatch` folds
-with `filled_from`, which takes the leading catalogue's list whole and unions
-nothing.
-
-**It was written here as a "nine way" union and it is a two way one.** See the
-correction below: the fold is `sources.ALWAYS_ASKED`, which is 2.
-
-**`source` is 120, and it is the one field with no column behind it.**
-`apply_enrichment` excludes it and `merge_into` does not name it, so nothing
-stores it and the bound is about the request rather than the row. It is derived
-from what the field can legitimately say: `catalogue.Record.sources` joins the
-answering catalogues with `+`, and the whole roster of nine (`bnf`, `dnb`,
-`google_books`, `k10plus`, `loc`, `nkp`, `nlg`, `oenb`, `open_library`) joined
-measures 58 characters. 120 admits that roster roughly doubling.
-
-**`suggested_tag_ids` is 500 entries, and the bound is for finiteness rather
-than for size.** `apply_enrichment` excludes the field from the merge, so the
-only cost of a large list is the parsing, and a bound that could refuse a real
-library's suggestion list would 422 an apply for no benefit. 500 matches
-`BulkRequest.book_ids`, the largest caller-supplied id list here, and is 4.8x
-the 105 seeded tags.
-
-#### `BookCreate.language` was 16 against a `String(10)` column, and the schema moved
-
-Narrowed to 10 rather than widening the column, which would have been a
-migration. SQLite ignores VARCHAR width, so the disagreement refused nothing
-here and was invisible; what it meant was that this API accepted six characters
-no engine enforcing a width would store, and that `importing.py` had to consult
-both numbers and take the smaller.
-
-Nothing legitimate is lost. Every language this app writes comes from
-`metadata._LANGUAGES` (two letters) or Google's own `language` (two or three),
-and the longest tag anybody could want, `zh-Hant-HK`, is exactly 10. A row
-already holding a longer value stays readable and editable: `BookOut` bounds
-nothing and `BookDetailsUpdate` has no `language` field at all.
-
-`importing.py` still reads both widths and takes the smaller, and that is a
-deliberate cross check rather than a duplicated fact: the pair going out of step
-again is invisible under SQLite, and the guard below is now what notices.
+**`BookCreate.language` was 16 against a `String(10)` column and was narrowed rather than the
+column widened.** SQLite ignores VARCHAR width, so the disagreement refused nothing and was
+invisible: the API accepted six characters no width enforcing engine would store. The longest
+tag anybody wants, `zh-Hant-HK`, is exactly 10. `importing.py` reads both widths and takes the
+smaller, as a deliberate cross check.
 
 #### The guard is three questions asked of every request body, not a table of fields
 
-`tests/schemas/test_book.py::TestEveryFieldARequestBodyCarriesIsBounded`. A per
-field assertion would be the same enumeration one level down, extended by
-whoever adds the next loose field.
+Scope comes from walking the routers rather than from a list, so a new body is in scope by
+arriving. A ceiling is detected by **executing the field's own validation** rather than by
+reading its annotation, which is what makes it work for a constrained type it has never seen.
 
-1. Every field on a request-body model carries a ceiling.
-2. A string field writing a `Book` column states no ceiling wider than that
-   column.
-3. Two request bodies writing one `Book` column state the same ceiling.
+#### `BodySizeLimitMiddleware` promises a bound it does not apply, and the gap is stated
 
-Rule 1 is what fails when the next model arrives loose, which is how this one
-arrived. Rules 2 and 3 are what fail when a bound exists and is the wrong
-number, which is the case a boundedness rule cannot see.
+Its two rules never see a chunked JSON body: rule 1 needs a `Content-Length`, which such a
+request does not declare, and rule 2 is multipart only. The deferral to "the route's own
+parsing" is empty, because a schema runs only after Starlette has accumulated the whole body
+in memory. **Closing it means wrapping `receive` to count bytes and refuse mid stream**, which
+changes every request with a body and belongs in its own change. The schema bounds are the
+other half and are the half that was missing.
 
-**Scope comes from the routers rather than from a list**, and rather than from
-`main.app`: FastAPI 0.141 wraps an included router in a private
-`_IncludedRouter` whose routes are not on `app.routes`, so a walk of the app
-finds **one** `APIRoute` where the routers hold **107**, and a rule over one
-route would be vacuous while looking healthy. `APIRouter.routes` is public.
-`test_the_collector_reaches_the_enrichment_apply_body` is the anti-vacuity
-check and names the route this ticket came from.
+#### Two bounds this entry does not close
 
-**What the routers walk misses is checked rather than measured once**, and the
-difference matters: three routes are declared in `main.py` itself,
-`/api/healthz` and the two `{rest:path}` fallbacks, and none takes a body.
-Written down, that sentence stops being true the day somebody declares a body
-route up there, and a stale sentence about a gap is worse than no sentence. So
-`test_the_routers_walk_reaches_every_body_model_the_app_does` derives the same
-set a second way, through the app and the private `original_router` chain that
-the collector exists to avoid, and asserts the two are equal. Hiding one router
-module from the collector breaks it, measured down to a module contributing a
-single model: hiding `routers.loans` loses `LoanCreate` and the equality fails.
+**`POST /api/books/{id}/enrich` writes catalogue values with no bound at all.** It hands
+`Record.as_match()` to `merge_into` without building a `BookMatch`, so `series_index = 1e9` is
+stored with a **200** where the same value on `/enrich/apply` is a **422**. Catalogue
+reachable, not upload only: `metadata._marc_title` takes the first digit run of `245 $n` and
+calls `float()`. The fix cannot live here, because `google_books` importing the declarations
+is circular, and the comments now say which of the two routes is closed rather than implying
+both are.
 
-The count both routes agree on is **31**, which is also what
-`test_house_rules.py` states for the same set derived a third way, by a flat
-`ast` pass over `schemas/` and the route handlers. Three derivations, one
-number.
+**`POST /api/books/bulk` answers 500 to a large tag id.** `_require_tag` does `int(str(value))`
+and hands it to `db.get`, where `10**19` raises `OverflowError` from the driver, while its
+sibling `_checked_collection` range checks against `MAX_ROW_ID` and names this failure as its
+own reason.
 
-**A ceiling is detected by executing the field's own validation**, for strings
-and numbers, against oversized probes. So a bound spelled as a `pattern` counts
-exactly as much as one spelled as `max_length`, which is what keeps
-`AppearanceUpdate.palette` (bounded by `^[a-z0-9-]{1,30}$`) out of the report
-without an exemption. Lists are read off `max_length` instead, which is complete
-for them: pydantic has no other way to bound a list's length.
-
-Two enumerations, both one entry, both checked rather than trusted:
-`_UNBOUNDED_OK` holds `BulkRequest.value`, the exemption `docs/decisions.md`
-already records for the row id rule; `_COLUMN_FOR_FIELD` holds
-`isbn13 -> isbn`, and `test_the_rename_map_names_real_fields_and_real_columns`
-fails if a key stops being a field, stops naming a column, or is itself a
-column.
-
-The blind spots are listed in the module docstring rather than left to be
-discovered. The sharpest is that a **new** rename is invisible to rules 2 and 3:
-it would still be caught by rule 1 if unbounded, but at a number nothing cross
-checks.
-
-**The guard was wrong on its first attempt, and the diagonal is what found it.**
-`_kinds` unwrapped a generic's arguments the way it unwraps a union's, so
-`list[RowIdField]` was read as an `int` field, probed as one integer, and passed
-clean with no count bound; `collection_id: RowIdField | None` was skipped
-entirely, because an `Annotated` member's origin is `Annotated` rather than
-`int`. A mutation test that only asserted "something was reported" would have
-agreed with it.
-
-#### `BodySizeLimitMiddleware` promised a bound it does not apply
-
-Its docstring said a chunked JSON body is "bounded by the route's own parsing".
-Rule 1 never sees such a request, because a chunked request declares no
-`Content-Length`; rule 2 skips it, because it is not multipart. And the route's
-parsing is a schema, which runs only after Starlette has accumulated the whole
-body in memory, so a field bound cannot refuse the bytes that arrive before it.
-
-The deferral was empty on the route this was found from: `enrich/apply` parses
-a `BookMatch`, which bounded four of seventeen fields. Only one of the two
-documents pointed, and the thing it pointed at was not bounding either.
-
-The gap is now stated rather than closed. Closing it means wrapping `receive` to
-count bytes and refusing mid stream, which changes the behaviour of every
-request with a body and belongs in its own change. The schema bounds are the
-other half, and they are the half that was missing.
-
-#### What the two critic seats changed, and the two holes left open
-
-Both seats reviewed independently and **converged separately on five of the
-same findings**, which is the strongest signal this process produces. Three of
-the five were defects in the guard itself, and all three have the same shape:
-the rule was right about the case it was written from and silently accepted
-the case beside it.
-
-| what escaped | measured | now |
-|---|---|---|
-| a ceiling on an `Annotated` alias inside an optional union | pydantic leaves it off `field.metadata`, so `Annotated[str, Field(max_length=9999)] \| None` on a `String(255)` column reported nothing | `_constraints` reads the union members, and one level into a `FieldInfo` |
-| a list bounded by count only | `list[str]` at `max_length=500` accepted 50,000,000 characters | the rule recurses into the element |
-| a kind the rule had not heard of | `dict[str, str]`, `bytes`, `set[int]` and `Any` all reported bounded | `_SIZELESS` names the six kinds that are, and everything else is reported |
-
-**The alias fix needed two attempts and the second is the lesson.** Reading the
-union found a bare `MaxLen(9999)` and missed `Field(max_length=9999)`, which
-buries the same constraint one level deeper inside a `FieldInfo`. The second
-spelling is the one this repository actually writes: `RowIdField` is
-`Annotated[int, Field(ge=1, le=MAX_ROW_ID)]`. An example is not a family.
-
-Two more, both about the guard not being able to fail:
-
-* The anti-vacuity check named three models that **all live in
-  `routers/books.py`**. Restricting discovery to that one module drops
-  `_body_models` from 31 to 22, leaving nine unchecked including both
-  unauthenticated bodies, with every assertion green. Both seats measured it
-  separately. `test_every_router_module_contributes_routes` now puts a floor
-  under discovery by counting modules, which cannot go stale as routers are
-  added, and `walk_packages` replaced `iter_modules` so a subpackage cannot
-  vanish the same way.
-* `_UNBOUNDED_OK` had no staleness test where `_COLUMN_FOR_FIELD` did. Each
-  entry must now name a real field **and still be unbounded**, so an exemption
-  that stopped carrying weight fails rather than quietly covering whatever
-  lands on that name next.
-
-And rule 3's own docstring was wrong about the case that produced the ticket.
-Run the three rules over `schemas/book.py` at 45b7b22 and the agreement rule
-returns nothing: `BookMatch` stated no ceiling at all, and a body that states
-none has nothing to disagree with. `_unbounded` named all thirteen and
-`_over_column` named the `language` 16 against `String(10)`.
-
-**Two defects are left open on purpose, both pre-existing and both raised
-rather than half fixed.**
-
-**`POST /api/books/{id}/enrich` writes catalogue values with no bound at all.**
-It hands `Record.as_match()` straight to `google_books.merge_into` and never
-builds a `BookMatch`, so the schema this ticket bounded is not in the path. Two
-fields were measured through it. `series_index = 1e9` is stored with a **200**
-where the identical value on `/enrich/apply` is a **422**: same book, one route
-apart, and `list_series` then pays tens of gigabytes and tens of minutes for
-every member on every request. It is catalogue reachable rather than upload
-only, because `metadata._marc_title` takes the first digit run of `245 $n` and
-calls `float()`. And `categories` on the lookup branch is unbounded in
-principle: nothing slices the subject list except Open Library's 12, so its
-size is incidental rather than capped. (The figure first recorded here, 11,716
-characters from a nine way union, was wrong in both factors. See the correction
-below.)
-
-The fix is one concept, "an enrichment write passes the same bounds a caller's
-does", and it does not fit here: `merge_into` cannot import the declarations
-(`google_books` -> `importing` -> `catalogue` -> `google_books` is circular),
-so it lands in `routers/books.py` and `google_books.py`, neither of which this
-ticket owns, during a wave with three live trios. What this change does is stop
-claiming otherwise: the comments now say which of the two routes is closed.
-
-**`POST /api/books/bulk` answers 500 to a large tag id.** `_require_tag` does
-`int(str(value))` and hands the result to `db.get`, where `10**19` raises
-`OverflowError` from the driver. Its sibling `_checked_collection` range checks
-against `MAX_ROW_ID` and its docstring names this exact failure as the reason it
-exists. That is the row id rule's family rather than this one's, and its lint
-lives in `test_house_rules.py`, which this ticket may not touch. The stated
-reason for the `_UNBOUNDED_OK` exemption was corrected, since it had claimed
-every handler bounds the value and two of the seven verbs do not.
-
-#### The second review round, and the reason that was wrong
-
-Both seats re-read the fixed diff and both found the **same** new defect in the
-fix itself, which is the house prediction holding: `typing.get_args(list)` is
-`()`, and `all()` over nothing is True, so a bare `list` was **vacuously
-bounded** by the very arm added to catch unbounded lists. It accepted 50,000,500
-characters, the identical figure the test beside it quotes as the defect it
-exists to refuse.
-
-The fix is structural rather than another arm, on the design seat's argument:
-containers are keyed on `collections.abc.Collection` rather than on the name
-`list`, so `set`, `tuple`, `frozenset` and `dict` are one rule and the next
-container type needs no arm. The element list must be non-empty rather than
-letting `all()` answer for a container that declares no element type. And the
-arm **order** stopped deciding: every kind an annotation admits is now checked,
-where `str in kinds` used to answer for the whole annotation and leave the list
-half of a `str | list[str]` unexamined.
-
-Three smaller corrections, each a number or a claim rather than behaviour:
-
-* The probes are 100,001 characters, so the measured figure is **50,000,500**
-  and a docstring rounded it to 50,000,000. In a guard about bounds, quote what
-  was measured.
-* `test_every_router_module_contributes_routes` does not put the floor its
-  docstring claimed. A collector that discovers one module discovers no empty
-  ones, so it passes on the crippled collector; the floor is
-  `test_the_routers_walk_reaches_every_body_model_the_app_does`. Left uncorrected,
-  a later reader deleting the app side equality as a duplicate would have removed
-  the only real floor while the docstring still promised one.
-* `_stated_range` collapsed `le=1000` and `lt=1000` to one value, so two models
-  spelling a ceiling differently read as agreeing. No pair spells it that way
-  today.
-
-**And the reason given for deferring the `/enrich` fix was wrong.** It cited a
-circular import. The seats disagreed about that, so it was measured, and both
-were half right: a module level `import importing` in `google_books.py` really
-does fail (`ImportError: cannot import name 'split_categories'`), and the same
-import **inside a function** succeeds, which is what `middleware._limit_for`
-already does. The call site needs no new import at all, because
-`routers/books.py` imports `BookMatch` already and `_match_rows` already
-validates through it. The decision to defer is unchanged and both seats agree
-with it; the reason is now the real one, that it changes a route this ticket
-does not own during a wave with three live trios. A wrong reason left in the
-tree is what makes the next person price a cheap fix as an expensive one.
-
-#### The third round, and what a fix round costs
-
-Ten findings from the design seat, eight from security, then a second round on
-the fixes and a third on the fixes to those. **Every round found a defect in
-the previous round's fix**, which is the house prediction holding three times
-running rather than once.
-
-| round | the fix | what it silently accepted |
-|---|---|---|
-| 1 | recurse into a container's elements | `typing.get_args(list)` is `()` and `all()` over nothing is True, so a bare container was vacuously bounded |
-| 2 | check every kind, not the first arm to match | pydantic raises a bare `TypeError`, not a `ValidationError`, for a constraint that cannot apply to a probe, so a mixed union crashed the guard instead of reporting |
-| 2 | put the operator in the numeric bound | it did not change **which** value is kept, and `_constraints` yields the alias last, so a body enforcing `le=10` was reported as `le=1000000000` |
-
-The third row is the sharpest, because it looks like a fix for the second
-finding and is not: the operator was the half that got measured and "the last
-constraint wins" was the half nobody re-checked. `_stated_ceiling` fifteen
-lines above already took the tightest and said why. **The fix now reads its
-neighbour's rule instead of inventing one.**
-
-The `TypeError` row is worth keeping for a different reason: it was
-**introduced** by a fix, was unreachable before it, and no field in the tree
-reaches it today. A green suite said nothing about it. It was found by a seat
-attacking the fix rather than reading it, which is the only method that has
-worked on any guard here.
-
-**And one instrument failure, which cost a verification rather than a defect.**
-Two regeneration runs reported "no diff on the second run" while both had
-died on `ENOSPC` inside `bun install` and regenerated nothing: the clean diff
-was the absence of a run. The script's exit status was correct; the conclusion
-drawn from the diff was not, which is the `grep -c '^FAILED'` shape one layer
-out. The wrapper that serialises `api:generate` now carries the check that makes
-the difference visible,
-that a real generation moves `frontend/openapi.json`'s mtime and prints orval's
-own line, so a no-diff second run is evidence only when the first is known to
-have run.
-
-#### The apigen check is executable, because a comment is the "stated" rung
-
-The ENOSPC discovery above first landed as a **comment** in
-that wrapper, telling a reader to check orval's output line and the
-schema's mtime. A critic seat read every added line, observed that none was
-executable, and placed it on the ladder: **stated**, which is what every wrong
-guard in this tree looked like before somebody tried to delete it.
-
-It is now three things instead. The script captures
-`frontend/openapi.json`'s mtime before generating and **refuses with a non zero
-exit** when it has not moved, because `bun run api:schema` redirects into that
-file on every real generation and so moves it even when the bytes are
-identical. Its guard test drives the script with the
-stub `bun` that file already has, in two cases rather than one: a generation
-that writes nothing must refuse, and a generation that writes must not, or the
-check is satisfied by a script that refuses unconditionally. And deleting the
-block was measured to turn exactly
-`test_it_refuses_when_the_generation_did_not_rewrite_the_schema` red and
-nothing else, over 13 tests.
-
-**The check skips when the schema did not exist beforehand**, which is a first
-ever generation into a tree that has none. That is stated at the site rather
-than left to be discovered: `frontend/openapi.json` is committed, so every real
-invocation has one and the check is live, and the skip is what lets the eleven
-existing cases in that file keep modelling a generation without also having to
-model its output.
-
-#### The lookup fold is two records, not nine, and the worst case was invented
-
-Caught after the merge by the other trio's roster count guard, which flagged
-one site: the `CATEGORIES_MAX` comment claiming the unbounded lookup path
-stores "nine catalogues x 14 headings of 91 characters", 11,716 characters,
-3.0x the bound. **Every factor in that was wrong, and wrong in the direction
-that made the risk sound worse than it is.**
-
-Driven rather than read, with all nine sources enabled and every one answering:
-`Record.merged_with` is called **once**, the merged record carries **two**
-sources, and `categories` comes to **2,602** characters, **0.67x**
-`CATEGORIES_MAX`. On the tail path it is called **zero** times. So the
-unbounded path's measured worst case sits **under** the bound rather than three
-times over it.
-
-The chain, each link checked:
-
-| step | what holds it to two |
-|---|---|
-| `merged_with` | one production caller, `metadata._merge` |
-| `_merge` | one call site, in `metadata.lookup` |
-| its input | `hits`, from `asyncio.gather` over `plan.lookup_together` |
-| `lookup_together` | sliced `[:ALWAYS_ASKED]` |
-| `ALWAYS_ASKED` | `Final = 2` |
-| the tail tier | returns a single record on first hit and never folds |
-
-**Both per record figures came from a catalogue that cannot be on that path**,
-which is the same defect one level down. The 14 is `routers/books.py`'s note
-that a live **Library of Congress** record carries up to 14 subject headings;
-the 91 is `docs/decisions.md`'s longest of 1,559 live **LCSH** headings. LOC
-and BNF are title search only and are never asked for an ISBN: driven, **seven**
-of the nine sources reach the lookup path and those two do not. Both numbers
-describe a heading's size and neither measures this path.
-
-**The risk survives the correction, for a better reason than the number gave.**
-Nothing caps the subject list there: Open Library is sliced to 12 by
-`metadata._OPEN_LIBRARY_MAX_SUBJECTS` and the DNB, K10plus, the OENB, the NLG,
-the NKP and Google Books are not sliced at all. The path is unbounded in
-principle and whatever it measures today is incidental, which is the argument
-for closing it. A number three times too large was never the argument.
-
-**Why neither critic caught it.** Both re-derived the *arithmetic* from nine
-and neither re-derived the *nine*, which is this repository's recorded shape:
-the generalisation is right and the clause explaining it is what nobody
-measures. The nine was true of the roster and false of the fold, and it read as
-correct because the roster really does have nine members.
-
-**The fold pool is six, and the household picks the pair.** The design seat
-added this after confirming the correction, and it sharpens the risk rather
-than softening it. `lookup_together` filters `METERED`, which holds only Google
-Books, so the pool is `LOOKUP_SOURCES` 7 minus 1 = **6**: `dnb`, `k10plus`,
-`nkp`, `nlg`, `oenb`, `open_library`. Exactly one of those is capped, and
-`lookup_chain` is the household's own provider order, so **a fold of two
-uncapped records is reachable from the settings screen** with no code change
-and no unusual record. Driven: a household leading `dnb` then `k10plus` folds
-exactly those two.
-
-That names who can produce the condition, which is worth more than any single
-measured number. It also means no ceiling can honestly be quoted: feeding those
-two 40 subjects each reaches 7,438 characters, 1.91x the bound, but 40 is an
-input chosen to show the shape rather than a measurement of any catalogue.
-Writing that down as a worst case would repeat the mistake this section
-corrects.
-
+**The lookup fold is two records, not nine.** `Record.merged_with` unions subjects on the
+lookup path only; every path constructing a `BookMatch` folds with `filled_from`, which takes
+the leading catalogue's list whole.
 ### The roster count is guarded by a census with a verdict, not by a scan and not by a list
 
-The size of the catalogue roster is spelled in prose at dozens of sites. Adding one source
-in #111 made twenty two statements stale, found in three passes, every pass believing it
-was the last. `test_fetch.py::test_the_constant_states_the_source_count_the_tree_has` had
-the right idea with one sentence's worth of reach.
+The size of the catalogue roster is spelled in prose at dozens of sites, and adding one
+source made twenty two statements stale, found in three passes, every pass believing it was
+the last.
 
-**The fact that decides the shape: "the roster count" is not one number.** Six named
-cardinalities over four values, all computed from `sources.py`: the whole roster and
-`DEFAULT_ORDER` at 9, `SEARCH_SOURCES` at 8, `LOOKUP_SOURCES` at 7, the free lookup
-sources at 6, lookup-or-search at 9. So "six sources" in this tree is a correct free
-lookup count, a correct count of another subject, or a stale search count, and nothing in
-the sentence's shape separates them. **The classification is semantic, so a person has to
-make it once and a machine has to notice when it needs making again.**
+**"The roster count" is not one number.** Six named cardinalities over four values, all
+computed from `sources.py`: the whole roster and `DEFAULT_ORDER` at 9, `SEARCH_SOURCES` at 8,
+`LOOKUP_SOURCES` at 7, the free lookup sources at 6, lookup-or-search at 9. So "six sources"
+is a correct free lookup count, a correct count of something else, or a stale search count,
+and nothing in the sentence's shape separates them. **The classification is semantic, so a
+person makes it once and a machine notices when it needs making again.**
 
-**The shape chosen: a census, and a verdict for everything it finds, enforced both ways.**
-`backend/tests/test_roster_counts.py`. The census matches a number, at most two words, a
-roster noun, and admits a candidate only if its **value** is one of the live cardinalities,
-so the bound is derived and widens on its own. Every candidate must carry a verdict in
-`CLAIMS`, keyed on the file plus the phrase **with the number elided**, so the table holds
-no counts and correcting a stale sentence needs no edit to it. An unclassified candidate
-fails; a verdict matching nothing fails; a `KnownStale` that has been corrected fails.
+**The shape: a census, and a verdict for everything it finds, enforced both ways**, in
+`backend/tests/test_roster_counts.py`. The census matches a number, at most two words and a
+roster noun, and admits a candidate only if its **value** is one of the live cardinalities, so
+the bound is derived and widens on its own. Every candidate carries a verdict in `CLAIMS`,
+keyed on the file plus the phrase **with the number elided**, so the table holds no counts and
+correcting a stale sentence needs no edit to it. An unclassified candidate fails, a verdict
+matching nothing fails, and a `KnownStale` that has been corrected fails.
 
-**Rejected: a blanket scan.** Most of the census's occurrences count something that is
-not the roster, so a scan with no classification fails on its first run at that scale and
-is switched off within the day. The figure is recomputed by the guard's own docstring
-rather than restated here, because a copy of it in this register is a copy nobody
-recounts: it read 26 when this entry was written and 30 by the same instrument at the
-merge, and neither reading survived the register joining the census.
+**Rejected: a blanket scan.** Most occurrences count something that is not the roster, so an
+unclassified scan fails on its first run at that scale and is switched off within the day.
 
-**Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the
-numbers and does it silently: the site nobody adds is the site nobody checks, which is how
-#111 needed three passes. `CLAIMS` is not that list. It does not decide **where the guard
-looks**: the census does, over the whole tree, and it fails on anything `CLAIMS` has not
-judged. The difference is the direction of the failure.
+**This register is inside its own subject**, and the pruning of 2026-09-05 is what proves the
+arrangement works: entries were rewritten, the sentences several verdicts were written for went
+with them, and the guard failed rather than going quiet. The census raises 4 candidates in it.
+**0** are live claims the guard now checks against `sources.py`; **4** are not the roster,
+being this entry's own worked examples and two sentences about what a shared pattern would have
+changed. All three figures are recomputed from the verdict table rather than reread.
 
-**A date is not the exemption rule, and that was measured rather than assumed.** The
-obvious rule is that a count naming a date is history and may disagree. Measured over the
-census as it then stood, at the merge, 21 occurrences carried a date, `measured` or an
-issue number in the same paragraph, and that 21 held both a correct exemption and a stale
-claim. What separates them is tense and
-a current figure beside the old one, which `docs/security.md` already does: "across the six
-sources `metadata.search` asked at once when that was measured ... It asks eight now." So
-the exemption is a recorded classification naming the subject, and `dated` survives only as
-an optional annotation the guard verifies where the prose already carries one.
+**Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
+and does it silently: the site nobody adds is the site nobody checks. `CLAIMS` is not that
+list, because it does not decide **where the guard looks**. The census does, over the whole
+tree, and fails on anything `CLAIMS` has not judged. The difference is the direction of the
+failure.
 
-**Spelled and digit, both.** Every one of #111's stale sites was spelled. That is a fact
-about the past, and covering the digit costs one alternation.
+**A date is not the exemption rule, and that was measured rather than assumed.** The obvious
+rule is that a count naming a date is history and may disagree; measured over the census, the
+occurrences carrying a date held both correct exemptions and a stale claim. What separates
+them is tense and subject, not the date. **The exemption for a historical count is therefore a
+verdict whose subject names what was counted**, not a pattern match on a year.
 
-**The same shape for `backend/` and `docs/`.** The guard is a test, so it imports
-`sources.py` either way. Nothing about Markdown makes the count less computable.
+**Both spellings, in `backend/` and in `docs/`.** Every stale site in the original incident was
+spelled rather than digits.
 
-#### What it deliberately does not see
+Every figure this guard quotes lives in its own module docstring and is deliberately not
+copied here: a count in this register is a count nobody recounts, and this file is itself in
+the census.
 
-The census reads a quantified noun phrase, so a roster count written another way is
-invisible. **Three sentences in the tree were stale in exactly that way**, and they were
-the argument for writing the blind spot down rather than discovering it:
-`backend/routers/books.py` "and searches all seven", `backend/settings_store.py` "the
-seven entries spelled out" twice. All three were corrected on 2026-09-03 by bringing the
-sentence inside the grammar rather than by widening the census, and the blind spots that
-remain are the five listed in the guard's own module docstring.
-
-**The two cheap widenings were measured and refused.** Matching a bare number after "all"
-finds dozens of occurrences the census does not already see, and "the other N" dozens
-more: the great majority count palettes, routes, call sites and authority schemes rather
-than catalogues. Doubling the table to classify palette counts buys two sites,
-`docs/api.md` "A new install has all nine on" and `backend/metadata.py` "Building all
-eight and dropping some", and makes every future sentence about anything countable
-somebody's problem.
-
-**Widening the census bound was refused for a measured reason too.** Taking it from the
-cardinalities of the sets that count sources to the cardinalities of every collection of
-`CatalogueSource` in `sources.py` roughly quadruples it, because `METERED`,
-`SERVES_GROUPS` and `TAIL_MARGINAL` are 1, 2 and 4 and those are ordinary English.
-`roster_sets()` plus `NOT_A_ROSTER_COUNT` keeps the guard honest about that instead: a set
-added to `sources.py` must be declared one thing or the other, and fails on arrival
-otherwise.
-
-**All four of those figures live in the guard's module docstring and are deliberately not
-copied here**, with the instrument beside each. The entry below says why, and this register
-held three copies of them for a day, which is the argument in miniature.
-
-**One register of dated reasoning is out of scope**, `CHANGELOG.md`. Every entry in it
-sits under a version heading, so a count there says what was true at that release and
-correcting it would falsify the record. **This file carries no version headings and was
-excluded on that reasoning anyway.** It is in the census now, and the pass that put it
-there is the next section.
-
-The architecture decision records are the third of these and are not named in the guard,
-because they are unpublished and the guard is published: the scope reads `docs/*.md`
-rather than `docs/**/*.md`, since every subdirectory under `docs/` is stripped from the
-mirror. The publish gate refused two drafts for exactly that, the second because the
-comment explaining the first named the publish script, which is stripped too. That is the
-cheapest possible way to learn it.
-
-#### This register is in the census, and a historical count says when it was taken
-
-The exclusion above cost what an exclusion of this kind always costs. Four roster counts in
-this file were stale, all four found by a person reading it, which is the method the guard
-was built to replace. They were corrected at the merge and the file joined the census on
-2026-09-03.
-
-**Most of the counts here are legitimately historical, so bringing the file in is a verdict
-pass over the whole register rather than a line in the guard.** The census raises 15
-candidates in it. **3** are live claims the guard now checks against `sources.py`; **12**
-are not, and they divide into three shapes worth telling apart, because a reader
-deciding a verdict has to know which one is in front of them:
-
-* **A record of what was true then.** The Catalogue record entry opens by counting the
-  source adapters that used to cross the seam as `dict[str, Any]`, in the past tense. It
-  is a fact about the roster at a past size, and correcting it would falsify the record
-  exactly as it would in `CHANGELOG.md`. The verdict names the moment rather than the set.
-* **A quotation.** This file quotes prose from elsewhere in the tree, including prose that
-  was wrong and is quoted in order to be refuted. The number belongs to the sentence being
-  quoted and is not a claim made here.
-* **A count of something else.** The sources whose responses are XML parsed, the sources
-  that answer in a record schema, the sources a shared refusal reaches. These land on a
-  roster sized value and count a different subject, which is the whole reason the census
-  needs a verdict rather than a threshold.
-
-**The verdict pass found two errors the guard could not have.** Writing down what a number
-counts forces a check against the thing it counts, and the check is what fails. This file
-said "Six of the eight sources publish a carrier vocabulary" where `backend/metadata.py`
-reaches `_is_physical_book` from seven of them and five of those state a carrier in codes:
-five of seven, not six of eight, and the sentence's own list names five. And the rejected
-blanket scan was justified here with a figure that had already moved, against a figure in
-the guard's docstring that a test recomputes. A guard that compares a number with a set
-cannot see either, because neither number is a claim about a set.
-
-**So the exemption for a historical count is a `NotTheRoster` whose subject names the
-moment, and not a date.** A date beside a number separates nothing: measured over this
-census on 2026-09-03, 27 occurrences carry a date, `measured` or an issue number in the
-same paragraph, and that set holds both correct exemptions and, before the merge, a stale
-claim.
-What makes a sentence a record is tense and a stated occasion, which is what the verdict
-records.
+**`CHANGELOG.md` is out of scope.** Every entry in it is dated by construction, so a count
+there is history by definition.
 
 #### The hole a reviewer should know about
 
 **A verdict changed from `Counts` to `NotTheRoster` silences a real failure**, and no rule
-in the guard forbids it. Measured: doing it is caught today, but only incidentally, by
-`TestThisFileCountsItself`, because the exemption count in the file's own docstring moves.
-An attacker who edited that number too would pass. This is a deliberate edit rather than
-the drift the guard exists for, and it is written down instead of chased with a guard on a
-guard, the same call `test_fetch.py` already made for its own literal.
-
-#### Not extended to the neighbouring numbers
-
-The ticket asked whether the mechanism should cover the pod arithmetic in `fetch.py` and
-the byte figures in `docs/security.md`. **It generalises and it was not built here.** The
-census is a number adjacent to a subject noun with a computed cardinality behind it, and
-neither of those has a computed value in the tree to compare against: they would need the
-figure to become a constant first. A third family turned up while building this and is the
-better first candidate, because it does have something to count: call site counts, where
-`backend/fetch.py` said, on 2026-09-03, that its exception "would have needed an `except`
-clause added at ten sites" and that `metadata._parsed` "raises `ParseError` because its
-eight callers already caught that".
-
-**The second of those was already stale when it was quoted**, which is the argument for the
-family rather than against it. `metadata._parsed` has **11** call sites in
-`backend/metadata.py`, in 11 distinct functions, counted 2026-09-03 by matching `_parsed(`
-across `backend/*.py` and reading back the enclosing definition of each. The seven in this
-file's own doctype entry is a different subject and is right: it counts the **sources**
-whose responses are parsed, and those 11 call sites are a lookup and a search handler for
-several of them.
-
-
-#### A fixture named for what it tests is not evidence that it tests it
-
-The census pattern is a lookahead. The test pinning that was called
-`test_it_reads_a_claim_that_starts_inside_another` and asserted that two claims in one
-sentence are both found. **Deleting the lookahead left it green**, because a consuming
-scan resumes at the end of the first match and finds the second perfectly well. It was
-caught by attacking the guard rather than by reading it, and only after a mutation run
-reported a different test failing than the one named for the property.
-
-The real case is narrower and is in the tree: **a number the census does not want,
-matching across one it does.** The value filter runs after the match, so a consuming
-pattern matches `50 records. Eight sources`, is discarded for 50 being no roster size,
-and takes the claim inside its span with it. Measured over the whole scope, exactly one
-file differs between the two engines and it is `backend/tests/test_fetch.py`, where what
-a consuming scan loses is the live statement of the search fan out.
-
-#### A verdict is judged against every sentence it covers, not one at a time
-
-**The rule for requiring an anchor keys on the occurrence count, not the verdict count.**
-The first version asked only whether a key carried two verdicts, so one unanchored verdict
-covered every sentence in that file spelling that phrase, forever. Because a key elides the
-number, **a new sentence on a new subject reusing an existing phrase is indistinguishable
-from the sentence the verdict was written for.** Writing "Eight catalogues are asked
-concurrently" into `docs/legend.md` would have been judged as that file's table of national
-catalogues, silently, including on the day the fan out became nine. It now fails naming both
-sentences.
-
-**"A verdict matching nothing fails" has to be delivered per verdict, not per key.** It was
-built from `(path, phrase)`, so a group stayed "used" on its live siblings while one of its
-entries judged nothing. One was already dead when this was found: an anchor pointing at a
-sentence in the next paragraph, its occurrence quietly judged by a neighbouring anchor
-because `_paragraph` is a block of lines and that block held both.
-
-**Neither of those is reachable by mutation**, which is why fifteen mutations missed both:
-a mutation asks what the guard does with a changed tree, and both defects are in what it
-does with the tree as it stands. The seat that found them imported the module and called it.
-
-#### The unit is wrong as often as the range, including here
-
-Two self counting tests had sound instruments aimed at the wrong subject.
-
-**"Six live cardinalities" was checked against the name count** while `live_cardinalities()`
-two hundred lines below uses the same word for the size count. Six names, four sizes,
-because three of the six are 9. The test passed and the sentence was ambiguous.
-
-**The exemption count summed `NotTheRoster` and `KnownStale`** while the prose said "count
-something that is not the roster". A `KnownStale` **is** a roster count, a wrong one, and a
-bare scan flagging it would be right. On its first run the instrument said 26 against a
-prose 25, and **the prose was edited to match the instrument**. 25 had been correct for the
-sentence as written. That is this file's own subject occurring inside it, and it is the
-reason both tests now state what they count.
-
-**A number written twice in one sentence is recomputed once.** The regex required the bold
-markers, so the second copy was never checked. Both are now.
-
-#### A dict literal discards a duplicate key without a word
-
-Writing a second entry for one `CLAIMS` key silently dropped two anchored verdicts and left
-the suite green against a table that was not the one on the page. Nothing can ask a dict
-about it afterwards, so the guard reads the source. Found by hitting it, not by review.
-
-#### An anchor has to discriminate, not merely exist
-
-The rule above requires `near` wherever a key covers more than one sentence. **That made the
-anchor exist and never made it separate anything**, so with two verdicts over three
-occurrences the pigeonhole guarantees one anchor covers two sentences and nothing
-complains. It was live in the guard's own prose within one commit of the fix: the anchor
-written for the module docstring's quotation also swallowed two lines of the
-`DATED_REGISTERS` comment, because that comment quoted the same measurement at the time.
-
-**This is the fifth time in this wave that a fix has been better in the dimension it was
-designed for and weaker in one nobody re-checked**, and it is the sharpest, because the
-defect it reintroduced is the one it was written to close.
-
-So a verdict may cover several occurrences only when they sit in the **same block**, which
-is what a sentence naming two counts looks like. **Blocks and not paragraph text**: two
-blocks carrying identical words are one string and two sentences, and comparing the words
-would call them one paragraph. That hole was found by attacking the fix rather than by
-reading it, before the critic saw it.
-
-**The residual is stated rather than left to be found.** A paragraph here is a block of
-lines, so two genuinely different sentences inside one comment block still cannot be told
-apart. That is smaller than what it closes.
-
-#### What a guard refuses is a rule about shape, and the reason must be measured too
-
-`_INTERNAL` is anchored to the start of a line, and the first version of its comment
-justified that by claiming the six declared files also mention the phrase in prose, so a
-substring match would be a rule about talking rather than declaring. **Measured: seven
-occurrences across the six, seven anchored, none unanchored.** The single prose mention is
-backticked at the start of its line, so the anchor eats the backtick and matches it too. On
-this corpus a substring match drops the same six. The anchor is kept because it is the
-publish gate's own pattern, not because the evidence separates the two, and the comment now
-says so.
-
-#### Guard the axis, not the instance, and say which axis you guarded
-
-`claims_keys_in` refused eight constructions and its comment claimed the allowlist
-property: "a method nobody thought of is refused". **True over method names and false
-over mutation forms**, which were enumerated: a call on the receiver, a subscript, a
-second binding, a non literal value, a spread. `ast.AugAssign` was the seventh shape and
-nobody had written it down, so `CLAIMS |= {existing: ...}` passed both halves of the
-guard while the runtime table held something the audited literal did not. One character
-from the `|` merge that was refused, and the permitted spelling is the one somebody
-reaches for, because it is the idiomatic form of the refactor the guard's own docstring
-names as its reason for existing.
-
-**The fix is a count, not a seventh arm.** Every binding of a name is now counted rather
-than matched by form, and it covers a walrus, a for target, a tuple unpack, a `with`
-block, an import and a definition, none of which is named anywhere in the code. Measured
-by mutation: neutering that one assertion releases exactly eight of seventeen
-constructions and leaves all three controls passing.
-
-**The first version of the count was wrong in its own claim**, which is the same defect
-one level down: it counted `Name(Store)` and said "every way of binding puts a Store on
-it", and `import os as CLAIMS` walked through, because an import binds through an `alias`
-and a definition through its own `name`. A rule whose stated reason is wider than its
-reach is carried past a reader by the reason.
-
-**So the comment now says which axis is guarded how**: method names allowlisted, bindings
-counted, reaching the table enumerated with its boundary named. The boundary is real and
-is stated rather than chased: an audit keyed on the receiver cannot see the table passed
-as an argument, so `dict.update(CLAIMS, ...)` and `getattr(CLAIMS, "update")(...)` reach
-it unseen, and what stands behind them is the key count comparison.
-
-#### Derive the configuration from the artefact, not from the commit you were handed
-
-The reviewing seat made this error twice in one review and named it as a habit rather
-than a slip: once reconstructing `scope()`'s globs from the commit under review instead
-of reading them out of the module, which would have made three of four claims wrong, and
-once taking probes labelled with one head after the tree had already moved to the next.
-Both are the rule this file already states, seen from the reviewing side: a measurement
-is evidence only about the configuration it was taken under. `inspect.getsource` and a
-file hash before and after are the two cheap corrections.
-
-#### The stated reason was wider than the reach four times, and the last two each hid a live defect
-
-**This heading said three, and was corrected by the fourth instance arriving**, which is
-the ticket's own subject happening to the document about it. Counted over six review
-rounds:
-
-1. the rule requiring `near` made an anchor **exist** and never made it discriminate;
-2. the receiver allowlist was allowlist shaped over method **names** and enumeration
-   shaped over mutation **forms**, so `CLAIMS |= {}` walked through;
-3. the binding count that replaced it claimed to cover every form while matching three
-   node types by hand;
-4. the module scope boundary's reason, that another scope cannot reach this table, is
-   true of a parameter and **false of a `global` declaration**.
-
-**Every one of them was defensible code under a sentence wider than the code.** A reader
-checking the claim finds it plausible each time; only somebody who drives it finds the
-gap. The third recurred inside the round that added the paragraph naming the pattern, and
-the fourth inside a deviation flagged for a reviewer to attack.
-
-**The last two are the instructive pair, because each hid a live silent swap rather than
-merely overstating one.** In both, the audited literal and the table that runs held the
-same **number** of different keys, so the second half of the guard saw nothing either:
-`case dict() as CLAIMS`, `case {**CLAIMS}` and a same length rebind through `global` all
-passed a fully green guard.
-
-The third's detail, since it is the one that set the pattern. "Binding is a count, so
-every form is covered" was
-`Name(Store)` plus three named node types, and the class those three belonged to,
-binding through a bare `name` string, had two more members: `except Exception as CLAIMS`
-and `case dict() as CLAIMS`. The second evades both halves of the guard end to end, since
-the audited literal and the table that runs hold the same **number** of different keys.
-
-**So node types are not matched at all any more.** The count sweeps a `Store` on a `Name`
-plus the fields that carry a bound name as a string, which covers an import, a `def`, a
-`class`, an except handler and a case pattern without naming one of them. The residual is
-stated and is one line: a binder the grammar grows under a field not swept.
-
-**Module scope, which is what makes a sweep right rather than merely wide.** A parameter
-or a local of that name binds in another scope and cannot reach the table, so both are
-controls that must pass.
-
-**And the number that says all this is recomputed rather than restated.** Neutering the
-binding assertion releases ten of nineteen constructions with five of five controls still
-passing, and a test drives that mutation and compares it with the docstring. It had been
-wrong twice, in the docstring of the test that demonstrates the mechanism, in a ticket
-about stated counts that nothing recomputes. **A number defended by reading the code is
-the thing this whole file exists to distrust**, and reading the arms is precisely how six
-and then seven were arrived at when the answer was four.
-
-#### Commit before mutating, without exception
-
-Stated after it cost a round, and then broken again in the same session by the same
-command. A mutation run ends in `git checkout --`, which restores the file to **the
-tree**, so any uncommitted work in it is gone. The rule is not "restore carefully", it is
-that the tree must already hold what you want back before the first mutation is applied.
-Twice here the second half was skipped and a full round of edits had to be reconstructed.
-
----
-
+catches it, because the guard cannot know what a sentence means. That is the cost of the
+semantic classification and it is accepted rather than hidden: review a verdict change the way
+you would review a deleted assertion.
 ## A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census
 
 `backend/tests/test_roster_counts.py` finds a number written beside a roster noun and
@@ -10035,74 +8327,30 @@ version is a writer you cannot go back and fix.
 
 ## The record's own carrier code decides, and prose is the fallback
 
-`_NOT_A_BOOK` was the whole not-a-book rule and every alternative in it was German or
-English. The Czech National Library writes `1 online zdroj`, which matched none of them, so
-an online resource reached a member's shelf. That was fixed for one source with a constant
-of its own and left the general question open; this is the answer.
+`_NOT_A_BOOK` was the whole not-a-book rule and every alternative in it was German or English,
+so the Czech National Library's `1 online zdroj` matched none of them and an online resource
+reached a member's shelf.
 
 **The list of languages is open and the list of record schemas is not.** Five of the seven
-sources that answer in a record schema publish a carrier vocabulary: MARC's leader/06,
-`007` and `008/23` for the DNB, K10plus, the OeNB and the NLG, and the MODS
-`physicalDescription/form`, which is MARC's own codes in another spelling, for the Library
-of Congress. Those need no phrase in any language. Only the two Dublin Core sources carry
-nothing, and each states its own wording: `_NKP_ONLINE` and `_BNF_ONLINE`. So the rule is
-per source exactly where the record declares nothing, which is two places rather than
-seven, and a Spanish or Portuguese catalogue joining the roster over SRU needs no new prose
-at all.
+sources that answer in a record schema publish a carrier vocabulary: MARC's leader/06, `007`
+and `008/23`, and the MODS `physicalDescription/form`, which is MARC's codes in another
+spelling. Those need no phrase in any language. Only the two Dublin Core sources carry nothing
+and each states its own wording, so **prose is the fallback in exactly two places** rather than
+the rule everywhere.
 
-`_NOT_A_BOOK` is neither widened nor deleted. It stays as the last term at every site,
-because a catalogue can code a record wrongly and the DNB does: three records carry
-`338 $a Band`, a volume, against a `007`, an `008` and an extent that all say online.
+**The bound lives in `Record.__post_init__`, not at the one route that produced the bug**, and
+that is the general shape: four consumers read the same record and three already had a bound,
+so the one place all four agree is the constructor. The refresh handler needed no change.
 
-Measured over 2,605 live MARC records on 2026-09-03, from ISBN lookups and title searches
-across all four MARC sources: **65 are not physical books and the prose rule passes every
-one**, and **0 are refused by the prose rule and passed by the codes**, so nothing the old
-rule caught was given up. Of the 65, 43 carry no `300 $a` at all and 2 carry the printed
-original's collation, so 20 is what a longer alternation could ever have reached. `CD-ROM`
-is absent from `_DISC_FORMS` in English too, so this was never purely a language gap.
+**A value too wide loses that field, never the record**, and is cleared rather than truncated,
+because half a title is an assertion nobody made and absent is a state every consumer handles.
 
-**Whoever re-measures this must not replay the committed survey's found rows alone.** That
-fixture records `found`, and at the NKP `found` already means `_NKP_ONLINE` did not refuse
-the record, so replaying it cannot produce a Czech online resource by construction: the
-sample is biased against the very case that raised the ticket. The figures above come from
-a second probe of all 500 survey ISBNs regardless of outcome, alongside the title searches.
-The Czech case did not recur there, so that constant is right and unmeasurable at this
-sample size rather than wrong.
+**A bound on a response model is the 500**, which is why the bound is on the record: a
+`ValidationError` raised while constructing a response is not a request validation failure and
+falls through to the unhandled handler. A live 10,001 character description is recorded here.
 
-**A record that declares a text carrier is a text.** The first draft refused on any
-electronic `007` and a critic caught it: 48 OeNB records carry `007 cr` beside `007 tu`
-with a blank `008/23`, and they are Austrian Books Online records for real 19th century
-prints, with the print's imprint in the 264 and its collation in the 300. The `cr`
-describes the scan beside the book, and MARC's own form of item says the item is not
-electronic. That clause is what moved the newly refused count from 113 to 65.
-
-**What was declined**, all of it the same class and all of it a decision about what this
-app catalogues rather than a correction to this rule, which is the reason
-`_COMPONENT_PART_LEVELS` gives for not refusing serials: refusing every non textual
-leader/06 (35 further records, 12 of them notated music including a 496 page catalogue
-K10plus files as music), the 17 Library of Congress microform records, the 57 BnF printed
-serials, and the 25 BnF kits.
-
-**The kits are kept for a stronger reason than "declined to decide".** Their `dc:format`
-reads `1 vol. (29 p.) ; 17 cm. - 1 disque compact`, `1 livre (167 p.)`, `1 brochure (24
-p.)`: books with an accompanying disc, which is exactly the case
-`_marc_carrier_is_book`'s docstring records as living in `300 $e` on the MARC side. 26 of
-the 32 kit records are book shaped and the 6 that are not carry no `text` in `dc:type`, so
-`_BNF_PRINTED` already refuses them. Refusing the kits would have been a regression rather
-than a tightening, and the two reasons point the same way only until somebody proposes it:
-"we declined to decide" invites the change and "a kit here is a book with a CD" refuses it.
-
-**One asymmetry inside the declined set, named before somebody reopens it.** Printed scores,
-maps and photographs pass at the four MARC sources, where leader/06 `c` and `d` are
-accepted. **It has already half been taken at the Library of Congress**, and not by this
-change: `_loc_record` has always refused every `typeOfResource` but `text`, which takes out
-its 3 notated music records, its still images and its moving images. So the roster refuses
-printed music at one source and accepts it at four. Nothing here proposes changing either
-side; whoever takes that decision should know it is a reconciliation rather than a new
-refusal.
-
----
-
+**`source` is deliberately unbounded**, because it is this app's own word rather than a
+catalogue's.
 ## A catalogue record is bounded at construction, not at each door
 
 `PUT /api/books/{book_id}/refresh` wrote nine columns straight off a `catalogue.Record` and
@@ -10474,135 +8722,49 @@ Three more, each a class rather than an instance:
 
 ### The frontend suite shares one environment, and `tests/doubles/` is what pays for it
 
-`isolate: false` takes the frontend suite from 50.19s to 22.79s, both on the builder
-worker and on the same tree, which is the only way two durations here compare at all. It
-was refused earlier the same day, and that refusal was right at the time: the setting is
-unsound while the suite contains a single module mock, and it became sound when the last
-one left, not before.
+`isolate: false` takes the suite from about 2m18s to 22.79s, and the figure is quoted beside
+the setting in `vite.config.ts` rather than here, where nothing recounts it.
 
-**Sharing one environment means sharing one module registry, and `vi.mock` loses to
-whichever file evaluated the module first.** The mock is dropped and the real module is
-what the test gets. Measured in both directions, on a suite that was otherwise green:
+**Sharing one environment means sharing one module registry, and `vi.mock` loses to it.** A
+mock is dropped whenever another file evaluated that module first, silently, handing the test
+the real module:
 
 | Order | What the second file got | Result |
 | --- | --- | --- |
 | `App.test.tsx`, then `BarcodeScanner.test.tsx` | the real ZXing decoder | 15 of 33 tests failed |
-| `App.test.tsx`, then `BookDetail.test.tsx` | the real `useNavigate` | the one test asserting on that spy failed |
+| `App.test.tsx`, then `BookDetail.test.tsx` | the real `useNavigate` | its one test failed |
 
-Both files pass alone and pass in the other order. `src/app/routes.tsx` imports every page
-eagerly, so rendering the route table evaluates the scanner and the router for real, and
-the file shuffle decides the rest: one seed in eight failed the whole suite this way.
+**The fix is structural rather than an exemption.** A double in `frontend/tests/doubles/` plus
+a `test.alias` entry resolves for every importer regardless of order. **Two guards, because
+the rule and its escape hatch fail differently**: one fails the build on a new `vi.mock`, the
+other keeps the doubles honest.
 
-**The fix is structural rather than an exemption, because the alternative was an
-enumeration that goes stale on its own.** A module needing replacement is now aliased once
-for the whole suite, through `test.alias` and `tests/doubles/`, so there is no real module
-left to lose to and no ordering to get wrong. All four module mocks were removed:
+**A spy on a storage instance survives `vi.restoreAllMocks()`.** `setItem` is inherited, so
+the spy lands on the instance and the suite wide restore never reaches it; measured, a
+throwing stub reached 33 of 66 tests in a later file. `vi.spyOn(Storage.prototype, ...)` is
+fine, because the prototype is a plain object the restore does reach, and eight files spy that
+way without leaking. `tests/setup.ts` now round trips both storages after every test and fails
+the test that broke one.
 
-* `@zxing/library` and `navigator.mediaDevices` became shared doubles.
-* Two `useNavigate` spies became assertions on where the router ended up, through a
-  `PathProbe` that renders `null`. That is the better assertion anyway: it says the reader
-  arrived at the book rather than that a function was called with a string.
-* The `BarcodeScanner` stub went away entirely and `ScanPage` renders the real scanner
-  over those doubles. It costs one `waitFor` on the camera opening: the scanner's own file
-  runs 33 tests that way in 93ms to 159ms across runs on the builder worker, so the stub
-  was buying very little
-  and paying an ordering hazard for it.
+**That defect predates `isolate: false`, which only widened it**: it was already leaking
+through the rest of its own file, and per file isolation hid it at the boundary rather than
+preventing it.
 
-`tests/houseRules.test.ts` fails the build on a new module mock, which is what makes this
-sustainable rather than a state somebody restores by accident. **`typescript` is at 7.x
-and exposes no `createSourceFile`, and rolldown re-exports no parser**, both checked rather
-than assumed, so the rule drops whole line comments and then matches the call form. The
-bias is deliberate and, measured, it is one sided: **every way the rule is wrong is a
-false positive.** A call in a string literal, a call after code on a line ending in a
-trailing comment, and a call inside a block comment whose own line carries no leading
-marker are all reported, each loud and reworded in a minute. The only shape it misses is a
-call on a line beginning with `//`, `*` or `/*`, and no such line is executed. An earlier
-draft of this paragraph and of the guard's own docstring had that backwards, from reasoning
-rather than from running it.
+**Detecting it by introspection failed three times, and the lesson generalises.** The spy is
+not on the prototype's descriptors, because it is installed against the instance; it is not
+among the instance's own properties, because happy-dom implements `Storage` as a Proxy whose
+`hasOwnProperty` answers false for a key its `get` returns; reading every key throws, because
+prototype accessors are invoked by reading them; and `.mock` survives `mockRestore()`, so
+looking for it flags a file that did the right thing. **Ask the object what it does, not what
+it is made of.**
 
-**Two guards, because the rule and its escape hatch fail differently.** The one above stops
-a module mock coming back. The other asks vite what the **application** build resolves, and
-fails if a double reaches it: `test.alias` is scoped to the suite and `resolve.alias` is
-not, so the same entry one level up would ship a decoder that never decodes, and from
-inside the suite the two are indistinguishable by construction. That second one was
-described in a docstring for a round before it existed, which is the more useful half of
-the story: a stated guard reads exactly like a real one.
+**What is still not fixed**: module level state in `src/` crosses files, and a shuffled seed
+can surface it. When one does, probe before reaching for the known suspect: a named drifter
+was blamed once and the pair failed identically with the fix in and out.
 
-**Two things the attack on that rule found, neither by reading it.** The rule requires the
-opening parenthesis, so prose naming the bare API is invisible to it and the comment
-stripping is load bearing for exactly one file in the tree today, not four. And the first
-version of the diagonal testing that was itself wrong: it asserted every file mentioning
-the API must be dirty without the stripping, when three of the four spell the bare name and
-only one spells a call. Mentioning is not spelling a call, which is the unit the claim
-needed.
-
-Verified across thirteen shuffled seeds of the full suite plus both hazardous pairs pinned
-directly, and the guard driven with a planted call in two shapes, each failing exactly one
-test and that test named.
-
-**A fifth leak, found by the fix round and worth more than the setting is.** A shuffled
-seed failed four tests in `tests/app/App.test.tsx`, all of them "the reload never happened".
-The obvious suspect was `api/mutator.ts`'s module level `reloadRequested` flag, which had
-been sitting in this entry as a known drifter, so it was blamed, a reset was exported from
-production code, and it was wired into `tests/setup.ts`. **Measured with the reset in and
-out, the pair failed identically: the fix did nothing and was reverted.** The flag still has
-not produced a failure.
-
-The real cause was `vi.spyOn(window.sessionStorage, "setItem")` in `tests/api/mutator.test.ts`,
-mocked to throw so the app's "cannot record a reload" branch can be tested.
-**`vi.restoreAllMocks()` does not take it off.** `setItem` is inherited, so the spy lands on
-`Storage.prototype`, which every file in the worker shares; probed from `setup.ts`, it was
-still a mock and still throwing long after the suite wide restore had run. A throwing
-`setItem` makes `recordReload()` return false, so every later reload takes the dead end
-branch instead. The file now calls `mockRestore()` on its own handle, which does work.
-
-**That defect predates this change and `isolate: false` only widened it.** Measured across
-the two file pair: 33 of 66 tests ran with a throwing `setItem`, which is more than the
-second file holds, so the spy was already leaking through the rest of its own file before it
-ever reached another one. Per file isolation hid it at the file boundary and never inside it.
-
-**Loud is not attributed, and attribution is what costs the rounds.** That leak failed in a
-file that did not cause it, one seed in nine, and the first diagnosis was wrong. So the rule
-it produced is not written down and trusted: `tests/setup.ts` round trips both storages after
-every test and throws naming the method, which turns "four failures in an unrelated file
-under one seed" into "the test that installed it fails, every run, in any order". Measured
-both ways: with the spy restored the file passes 48, without it 16 fail and the first is the
-test that installed it.
-
-**Three attempts to detect it by introspection failed first, and each was wrong differently.**
-The prototype's own descriptors do not hold the spy, because a spy on an inherited method is
-installed against the instance. The instance's own properties do not either, because
-happy-dom implements `Storage` as a **Proxy** whose `hasOwnProperty` answers false for a key
-whose `get` returns the spy. Reading every key to get past both throws, because prototype
-accessors are invoked by reading them. And `.mock` survives `mockRestore()`, so looking for
-it reports a file that did the right thing: that version failed 171 tests across five files
-on a tree with no leak in it. A round trip has none of those problems and tests the property
-that actually matters.
-
-**The rule is narrower than it first looked.** `vi.spyOn(Storage.prototype, ...)` is fine,
-because the prototype is a plain object and the suite wide restore reaches it: eight files
-spy that way and none leaks. Exactly one spied on an **instance**, and that is the one that
-did.
-
-**What is still not fixed.** Module level state in `src/` crosses files: the history stack
-cannot be reset and the `reloadRequested` flag remains reachable in principle, though neither
-has produced a failure. Anything installed on a global belongs in `tests/setup.ts` beside
-`window.location`, the document URL and `navigator.mediaDevices`.
-
-**The honest cost, stated once.** Order dependence is what this setting buys back, and this
-suite had just been cleaned of it. The trade taken is that the two mechanisms which produced
-every failure so far are now impossible rather than discouraged: a module mock fails the
-build, and broken storage fails the test that broke it. What is left is ordinary test
-hygiene, and the next leak of a new shape will cost a round to attribute, the way this one
-did.
-
-**And it costs that round once, which is the half worth stating.** The pattern is
-established twice here: a shared double reset centrally for the module mocks, a behaviour
-check in `afterEach` for storage. A third mechanism gets a third self reporting check in
-`tests/setup.ts` and then stops costing anything. Without that clause this reads as a
-recurring per incident cost with no ceiling, which is a different and worse bargain than
-the one actually taken.
-
+**The honest cost.** Order dependence is what this setting buys back. The suite is nine times
+faster and a leak is now a suite level fault rather than a file level one, which is a trade
+made deliberately rather than a property to be surprised by.
 ### The backend suite is twice as slow in CI as in an identical pod, and three obvious reasons are not it
 
 Measured on one node, with the suite pod shaped to match the CI job pod exactly: two CPUs,
@@ -10748,93 +8910,43 @@ deadline at all, which is most of it here: a household reading only
 
 ## The library view is remembered per mode, and the household's key kept its name
 
-The view preference was one `localStorage` key. Library mode needed a different
-default, and a default alone would not have been enough: with one key, the first
-change a cataloguer made overwrote the household's choice, and turning the mode
-off left somebody looking at a view they never picked.
+The view preference was one `localStorage` key, and a per mode default alone would not have
+been enough: with one key the first change a cataloguer made overwrote the household's choice,
+and turning the mode off left somebody looking at a view they never picked.
 
-So `lib/libraryView.ts` now takes a `CatalogueMode`, holds a default per mode
-(`grid` for a household, `list` for a cataloguer) and a key per mode. This is
-the shape `lib/libraryColumns.ts` already uses for the column set, and the
-argument is the same one: separate keys make independence structural, because
-writing one cannot touch the other and there is no merge to get wrong.
+`lib/libraryView.ts` takes a `CatalogueMode` and holds a default and a key per mode, `grid` for
+a household and `list` for a cataloguer. **Separate keys make independence structural**: writing
+one cannot touch the other and there is no merge to get wrong. Same shape as
+`lib/libraryColumns.ts`, and two deliberate differences from it:
 
-Two places where the two modules deliberately differ, both of which read as
-oversights otherwise.
+**The household's key stays `libraryView`, unprefixed.** The column keys shipped with the modes
+and had nothing to preserve; this one is in every browser that has ever chosen a view, so
+renaming it would reset every household to the grid, which is the clobber the split exists to
+prevent arriving from the other side.
 
-**The household's key is `libraryView`, unprefixed, where the column keys are
-`libraryColumns.household` and `libraryColumns.cataloguer`.** Those keys shipped
-together with the modes and had nothing to preserve. This one is already in
-every browser that has ever chosen a view, so renaming it would reset every
-existing household to the grid: the clobber the two keys exist to prevent,
-arriving from the other direction.
+**`writeLibraryView` stores a choice equal to the default where `writeColumns` clears it.** The
+half of that rule about a stored default going stale does reach the view and is accepted; the
+half about a reader stuck with a frozen copy does not, because there is no reset control here.
 
-**`writeLibraryView` stores a choice equal to the default, where `writeColumns`
-clears the key instead.** That rule has two halves: a stored copy of the default
-stops following the default if a later version changes it, and a reader who
-turns a column off and straight back on would hold that copy with no control
-offered to clear it.
+**The view is derived from the mode rather than seeded into state**, and that is what makes the
+per mode default correct on a cold load: the mode is fetched, so a state initialiser would read
+storage while the mode still answered household.
 
-The second half does not reach the view, because there is no reset control. The
-first half does, and is accepted rather than absent: a cataloguer who picks the
-dense view is pinned to it if a later version opens library mode elsewhere, and
-nothing in the interface clears the key. The trade is taken because the pick is
-one of three named buttons rather than a set of twenty three, so choosing again
-is one click and the buttons say which one is on. A reset control would make
-this `writeColumns`' rule instead.
+**`catalogueMode(undefined)` is a fallback for reading and not for writing.** A wrong read costs
+one render; a wrong write is permanent and silent, and the control paints before the flags land.
+So `useLibrary` refuses every per mode write until the flags resolve, through one door rather
+than a guard at each writer, and disables the controls meanwhile so a refused click is visible
+rather than inert.
 
-**The view is derived from the mode rather than seeded into state.** The mode
-comes from `library_mode` on the feature flags, which is fetched, so
-`catalogueMode(undefined)` is household for the first render or two. A
-`useState` initialiser reads storage before the mode is known and hands a
-cataloguer the household's view for the rest of the session. This is the bug
-the column set's comment already describes, and the view acquired it the moment
-the key became per mode. The cost is the same as the column set's and is
-accepted for the same reason: a cataloguer sees the household's view for a
-render or two, where the other way round every household would watch a
-cataloguer's catalogue flash past on every load.
+**Resolved means settled either way, not `flags !== undefined`.** A failed fetch is an answer:
+defining it the other way locks the controls for the session.
 
-**`catalogueMode(undefined)` is a fallback for reading and is not one for
-writing.** The mode is household before the flags answer as well as after they
-answer false, which is the right view to draw and no answer at all about where
-to save one. A pick made in that window was filed under the household's key
-whatever the flags went on to say: the household lost the choice it had made,
-the cataloguer's key stayed empty, and nothing reported it. A wrong read costs
-one paint and a wrong write is permanent.
+**What the gate refuses that nothing refused before**: a household's pick during that window,
+which would have been correct and is indistinguishable from a cataloguer's, because the
+fallback is the same value. Accepted deliberately.
 
-So `useLibrary` takes `isResolved` from the flags query and refuses every write
-keyed on the mode until it is true, through one door rather than at three call
-sites, and the controls that make those writes are disabled meanwhile rather
-than left looking live. `toggleColumn` and `resetColumns` had the same hole
-before the view did, and `resetColumns` is the sharpest of the three because it
-deletes a set somebody chose rather than overwriting it.
-
-**Resolved means settled either way, not `flags !== undefined`.** A failure is
-an answer, and the documented one, so reading "no flags" as "not ready" would
-leave a library whose flags endpoint is down unable to change its view for the
-whole session, with the controls greyed and nothing saying why. `useFeatureFlags`
-returns only the data and cannot express the difference, so `app/hooks.ts` grew
-`useFeatureFlagsState` and `useFeatureFlags` is now that with the second half
-dropped.
-
-What the gate refuses that nothing refused before: a household's pick during the
-window, which would have been correct. That cannot be distinguished from a
-cataloguer's, because the fallback is the same value. The window is one request
-on a cold load, and it is visible in the suite: three existing tests waited for
-`mode` to read household, which passes on the first render, and now wait for
-`modeIsKnown`.
-
-Pinned by mutation rather than by reading, over `tests/lib/libraryView.test.ts`
-and `tests/pages/Home/hooks.test.tsx`. Returning the cataloguer's default to
-`grid` fails 5 named tests, pointing both keys at `libraryView` fails 6, and
-seeding the view into `useState` fails 4, including "opens library mode on the
-dense rows despite the household's choice", which is the only one that can see
-the last of those.
-
-Over the whole suite, deleting the gate fails 3 and defining resolved as
-`flags !== undefined` fails 5: the two written for it, plus three `Home's view
-toggle` tests that stub no flags endpoint and so never see the gate open.
-
+Pinned by mutation rather than by reading: over the whole suite, deleting the gate fails three
+named tests and defining resolved as `data !== undefined` fails five.
 ## The SRU server borrows the public catalogue's gate rather than growing one
 
 The ticket asked only that library mode off make the endpoint disappear.
@@ -11008,3 +9120,288 @@ about SRU.
 `explain` is generated from the index registry, so a client sees the omission rather than
 guessing at it. Adding the index later is a row in `INDEXES` and one allowlist entry with
 a reason.
+
+## Two catalogue record scalars are deliberately unbounded
+
+Moved out of `catalogue.py` on 2026-09-05, where the derivation was 72 lines above
+a constant. The rule stays at the constant; the measurements are here.
+
+**`source`** is this app's own word rather than a catalogue's. Every producer
+sets it from a literal: the adapters in `metadata.py` from the source roster,
+`marc.py` from its own `SOURCE`, and `_SOURCE_JOIN` joins those. **Two
+modules, not one**, and the count is worth stating rather than the module,
+because this comment named only `metadata.py` on the day the second one
+arrived. No catalogue can widen it either way, which is also what makes it
+safe to log untruncated below. `SOURCE_LABEL_MAX` still bounds it at
+`BookMatch`, where it is a field on the wire.
+
+**`isbn` is here reluctantly, and the reason it has to be is one line of
+somebody else's module.** It was excluded, then bounded, then excluded again
+inside one day, and every step is worth keeping because the last one is not
+the obvious answer.
+
+**What the exclusion costs, measured.** `as_match()` fills `isbn13`,
+`BookMatch` bounds it at 20, and `_match_rows` drops the **row** rather than
+the field, so an unusable identifier costs a whole search result:
+`_match_rows` over one record carrying a 40 character ISBN returns **0**
+rows against **1** for the same record with a valid one. Reachable without
+anything unusual, because `google_books._volume_to_fields` takes
+`industryIdentifiers[].identifier` straight out of somebody else's JSON.
+
+**What bounding it costs is worse, and it is the same adapter.**
+`metadata._google_record` sets `isbn=fields.get("isbn13") or isbn`, which
+prefers that unparsed identifier **over** the canonicalised argument, and it
+is on the ISBN lookup path. So a bound here clears it, `as_lookup()` hands
+`None` to `BookLookup.isbn`, which is **required**, and
+`errors.unhandled_exception_handler` answers a Member's scan with a 500.
+Measured through the real adapter:
+`_google_record({"isbn13": "9" * 40, ...}, "9780743273565")` gives
+`record.isbn is None` and a `ValidationError` at `('isbn',)`. One row lost is
+better than the scan route down, so the trade decides itself.
+
+**The fix is at the adapter and it is one line**: spelling that
+`isbn=parse_isbn(fields.get("isbn13") or "") or isbn`, which is what
+`_first_isbn13` already does on both Open Library paths. That makes the
+guarantee `as_lookup` rests on literally true for every lookup source, and
+bounding this field here becomes safe. **At the adapter rather than here, and
+that is the point rather than a division of labour**: a type cannot rescue a
+producer that hands it a value nobody parsed, it can only refuse it, and
+refusing this one is the 500 above.
+
+**That fix landed in the same wave, from another trio, and this comment's
+blocker is therefore gone.** `metadata._google_isbn13` refuses a non string
+before parsing the value, which the one line above would not have: `parse`
+calls string methods, so an int or a bool out of somebody else's JSON raises
+`TypeError` past a caller catching only `httpx.HTTPError` and `ValueError`,
+which is the same 500 wearing a different exception. Both tripwires in
+`TestWhichScalarsAreBoundedAndWhichAreNamedInstead` went red on the merged
+tree and were inverted there, which is what they were written to do.
+
+**So `isbn` is revisitable and is deliberately not revisited at a merge.**
+Bounding it is a behaviour change no critic seat has reviewed, and what it
+would have to establish is what the exclusion refuses that a bound accepts:
+that no producer on the lookup path can still yield a value wider than this
+column, since clearing one is the 500 above. The lookup adapters were
+measured at six taking the canonicalised argument and one parsing its own,
+with Google the hole that is now closed, but that measurement was taken for a
+different question and is not a substitute for taking it for this one.
+
+An earlier version of this comment also said nothing writes `Record.isbn` to
+a column, which was false: `importing.bounded_fields` ends
+`fields["isbn"] = record.isbn` and `MarcImport._create` passes that into
+`Book(...)`. What holds it there is `metadata._marc_isbn`, which returns
+`isbn.parse`'s output or `None`.
+
+Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`, which asserts
+this set's **contents** and not only that the partition covers everything: an
+earlier version compared unions, so moving a name from a ceilings table into
+here would have left both sides equal and nothing red.
+
+## Which columns an import may fill, column by column
+
+Moved out of `importing.py` on 2026-09-05, where it was 72 lines above the
+constant. The rule stays there: fill the gaps, never overwrite.
+
+**Never an overwrite**, which is `_fill_gaps`'s rule and the same one
+metadata enrichment follows: a Book already here was catalogued by somebody
+who had it in their hands, and an uploaded file did not.
+
+Wider than the CSV importer's four, because a MARC record carries more and
+because the fields it adds are the ones a cataloguer would otherwise retype.
+Derived from `_MARC_RECORD_FIELDS` rather than written out again: the gap
+filler takes everything the create path writes **except the title**, which a
+matched Book already has by definition, since the title is half of what
+matched it.
+
+**`isbn` is in neither tuple, and that is what stops a 500 rather than an
+economy.** It is written once, on the create path, and never filled in on a
+matched Book. Adding it here would reach this shape: a record whose ISBN
+belongs to a Book this Member cannot see, whose title and author match one
+they can. `MarcIndex.find` matches on the identity key, so `isbn_is_taken` is
+never consulted, and the gap filler would then write the invisible Book's
+ISBN onto the visible one, tripping `books.isbn`'s unique index.
+
+**The assignment is silent, and no lazy load can surface it**, which is the
+first thing to know because it is the first thing a reader guesses. This
+application's sessions come from `database.SessionLocal`, which is
+`sessionmaker(autocommit=False, autoflush=False)`, so reading
+`book.classifications` in `add_headings` emits its SELECT without flushing
+anything.
+
+**The count of that SELECT is the tell, and it needs no traceback.** Same
+record, same collision, one argument apart:
+
+| session | classifications SELECTs | raises at |
+|---|---|---|
+| `autoflush=False`, which is this app's | 1 | the commit |
+| `autoflush=True`, which is SQLAlchemy's default | 0 | `add_headings` |
+
+One means the lazy load was issued and flushed nothing. Zero means the
+autoflush raised **before** the SELECT was reached. So a probe that reports
+zero is measuring a session this application never constructs, which is what
+three seats spent five rounds not noticing.
+
+**So it surfaces at the next explicit flush, and which one that is depends on
+the rest of the file.** Measured through the route, both arms:
+
+| file | records entered | frames |
+|---|---|---|
+| the collider alone | `['Stoner']` | `apply > commit > flush` |
+| the collider, then a new record | both | `_apply_one > _create > flush` |
+
+So a later record that has to be created surfaces the earlier record's write
+at **its** insert, and with nothing after the collision it waits for the
+commit.
+
+The conclusion never depended on which: it is one transaction, so the whole
+transfer writes nothing and answers 500, which is the exact failure
+`_taken_isbns` exists to prevent by another route. The incoming ISBN is
+dropped instead, silently, and that is the cheaper loss.
+
+**Written down anyway, because five statements of this mechanism were made
+across three seats and every one was wrong**, two of them in this comment. A
+comment naming a mechanism is what the next reader trusts **instead of
+measuring**: "at the commit" sends somebody debugging this to the end of the
+run, and "at the autoflush" sends them to a flush this session never
+performs.
+
+It was settled by one `grep` of the session factory rather than by a sixth
+traceback. **A measurement is only evidence about the configuration it was
+taken under**, and every round of this argument measured the symptom while
+none of them read `database.py:18`.
+
+`tests/routers/test_imports_marc.py::TestAMatchedBookNeverGainsAnIsbn` pins
+it, because nothing else would notice the tuple gaining one entry.
+
+## Which authority schemes exist, and why the list is code rather than rows
+
+Moved out of `backend/enums.py` on 2026-09-05. The rule stays at the code.
+
+Not `ClassificationScheme`, and the split is the point rather than tidiness.
+Every member of that enum answers "what is this book about"; every member of
+this one answers "which record in a file of *people* is this author". The
+DNB writes both in the same MARC `$0`, which is exactly why they need two
+closed sets: `4203576-4` is a subject heading and `118181505` is a person,
+and one column holding both would make a heading and an author the same kind
+of row.
+
+**Eleven members, and only one of them is ever the entry point.** GND is the
+only scheme a catalogue writes here: the DNB is the only source this app
+reads a person's identifier from (`100 $0` and `700 $0`), and K10plus
+carries the same subfield and is deliberately not read for it, which
+`_k10plus_record` records. The other ten arrive as cross references on a GND
+record that a Member confirmed, four of them free in that record's `sameAs`
+through `authority.cross_references` and six from the VIAF cluster it names
+through `authority.national_identifiers`. None of them arrives on its own.
+So a search still starts with a name and a GND.
+
+This docstring used to say "one member, and the count is the honest state of
+the supply rather than a stub", and that sentence was true while nothing
+stored a second scheme. Storing the cross references is what retired it, and
+it is replaced rather than deleted because the reasoning is still the rule:
+a member here has to be a value some writer can produce.
+
+**`ISNI` is the spine.** ISO 27729, deliberately language neutral, and it
+identifies a person rather than a cluster of records about one, which is the
+difference between it and `VIAF`. Measured 2026-08-28 over fourteen GND
+records spanning Spanish, Portuguese, Brazilian, Argentine, Uruguayan and
+Italian authors: all fourteen carried ISNI, LCNAF, VIAF and Wikidata in
+`sameAs`.
+
+**`LCNAF` rather than `LC`**, because the file has a name and the
+abbreviation for the library is not it: `id.loc.gov` serves several
+authority files and this is the one about people.
+
+**The six national files are spelled as VIAF spells them**, in `v:sid` as
+`BLBNB|000560509`, because that source code is what the parser matches on and
+a second spelling here would be a second name for one fact. Lowercased for
+the stored value, like every other member.
+
+## Storing an identifier and resolving one are different acts
+
+This docstring used to argue the six out on the ground that "nothing in this
+app can look one up, so a member for it would be a value no reader can use".
+**That conflated two acts, and the correction is the reason they are members
+now.** A scheme has to be a value some writer can produce, which was the rule
+the old sentence was reaching for and which these pass: the identifier
+arrives free from a VIAF cluster this app already has a reason to read.
+Being able to *resolve* one is a separate and later question, and it is what
+makes the argument run the other way: Brazil and Argentina answer 403 to
+every agent tried and have no open Z39.50 port, so an adapter for them is
+blocked on a transport rather than on this list, and the identifier stored
+today is what makes that adapter cheap on the day the transport lands.
+
+So the closed set is still closed for the same reason: a member has to be
+something a writer here produces. What changed is that six more things are.
+
+Adding a member costs one line here, one value in
+`ck_author_identifiers_scheme`, and a migration to widen that constraint.
+**`SUDOC` is deliberately still absent**, though a cluster carries it: it is
+a French union catalogue rather than one of the six national files named
+here, and nothing has asked for it. It goes in when somebody asks, in the
+next migration.
+
+## The Z39.50 door's bounds, and which of fetch.py's four have no counterpart
+
+Moved out of `backend/z3950.py` on 2026-09-05. The rule stays at the code.
+
+**A second transport beside `fetch.py`, not an extension of it.** `fetch.py` is the
+single door for HTTP and everything it enforces is HTTP shaped: a cap counted on
+`aiter_raw` chunks, a per request deadline around a redirect walk, a refusal of any hop
+that leaves the host, and a refusal of a content encoding nobody asked for. Z39.50 has no
+redirects, no content encoding and no chunked reads, so two of those four have no
+equivalent here and the other two need building rather than importing.
+
+What this module owes a caller is the property that makes `fetch.py` worth having: the
+bounds arrive **by construction**, so no call site has to remember to ask.
+
+| `fetch.py` | Here |
+|---|---|
+| `MAX_RESPONSE_BYTES`, on raw chunks | `MAX_RESPONSE_BYTES`, on record bytes, and `MAX_RECORDS` |
+| `TIMEOUT_SECONDS` under one `asyncio.timeout` | one absolute deadline held by the association |
+| `MAX_REDIRECTS` and the same host walk | nothing: the protocol has no redirect |
+| `UnrequestedEncoding` | nothing: the protocol has no content encoding |
+| `catalogue_client()` | `association()` |
+| every refusal is an `httpx.HTTPError` | every refusal is a `Z3950Error` |
+
+**The client is behind a seam and is not chosen yet.** `Session` and `Client` are the
+whole of what a client has to be, and every bound is enforced on this side of them. The
+one client that exists today is `z3950_provisional.py`, and its name is the status it
+has: it exists so this module can be exercised and the Library of Congress control can be
+checked, not because a route has been picked.
+
+**Three dispositions, and the survey conflated two of them once already.**
+
+| Disposition | What it is | How it arrives |
+|---|---|---|
+| **unreachable** | nothing answered | `Unreachable` |
+| **refused** | the target answered, and said no | `Refused`, carrying the code |
+| **answered nothing** | the target answered, and held nothing | `Answer(hits=0, records=())` |
+
+The third is a value and not an exception, because a catalogue that does not hold a book
+is the ordinary case. Measured 2026-08-28, all three are live: `z3950.bne.es` accepts the
+association and refuses every search with `[101] Access-control failure`; `z3950.dbc.dk`
+answers `[2] Temporary system error, HTTP error: 400` behind all four database names it
+knows; `lx2.loc.gov/LCDB` returns 0 hits for an ISBN it does not hold.
+
+**A blocking client is the reason `Association` exists rather than a bare handle.**
+Z39.50 clients are synchronous, so every call runs off the event loop, and a thread cannot
+be cancelled. Three consequences, each of which has been measured as a real failure and
+each of which is answered by the association owning one worker thread and one lock:
+
+* an abandoned call is still using the connection, so **closing it from the loop thread
+  frees memory a live thread is reading**: measured, a 0.05s deadline on a search to the
+  Library of Congress left the process to be SIGKILLed at 40s where not closing returned
+  at 0.40s;
+* two coroutines sharing one association corrupt each other's result set, because a
+  `Session` holds one: measured over eight runs, five bogus `Unreachable`, two
+  `Answer(hits=0)` on a query that returns 444 serially, and one SIGSEGV;
+* a timed out open still produces a session, and nothing was holding it: measured,
+  `sessions built: 1, closed: [0]`, a connection and a socket for the life of the process.
+
+**There is no host allowlist and there is deliberately no SSRF guard.** The reasoning is
+`fetch.py`'s: a `Target` is built from module constants, never from anything a member
+supplies, so there is no host an attacker gets to choose and nothing an allowlist would
+refuse. **That property lives in the callers, not here**, and the day a `Target` is built
+from stored configuration or from a request body, this module needs the allowlist
+`covers.is_fetchable` already is for the other direction.

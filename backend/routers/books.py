@@ -443,110 +443,19 @@ def _match_rows(
 ) -> list[BookMatch]:
     """Catalogue records as search rows, dropping any the schema refuses.
 
-    **The only place a page of `BookMatch` rows is built from third party
-    data**, and that is the point of the function rather than a description of
-    it. The two endpoints that answer with one diverged: this guard lived
-    inside the search handler, and `GET /{book_id}/enrich/candidates` built the
-    model in a bare list comprehension off the same `metadata.search`. There is
-    no `ValidationError` handler in `main.py`, so one record the schema refused
-    answered **500 for the whole response** there, where the same record cost
-    one row here. A third endpoint answering with matches now inherits the
-    guard instead of the hole.
+    **The only place a page of `BookMatch` rows is built from third party data**,
+    which is the point of the function rather than a description of it. There is
+    no `ValidationError` handler in `main.py`, so a record the schema refuses
+    answers **500 for the whole response** wherever the model is built in a bare
+    comprehension, against one dropped row here. Every endpoint answering with
+    matches inherits this guard rather than that hole.
 
-    `_bounded_match` below builds the other one, from a single record rather
-    than a page, and drops the field instead of the row.
+    `_bounded_match` builds the other one, from a single record, and drops the
+    **field** rather than the row.
 
-    **The asymmetry those two used to have is gone, and it was closed one layer
-    below both of them.** This paragraph read, until 2026-09-03: measured on one
-    volume with a 10,001 character description, this endpoint answers with **0**
-    candidates while `POST /{book_id}/enrich` fills the rest of the record from
-    it, so the unattended route stores a record the picker will not show. That
-    is no longer reachable. `catalogue.Record` now clears a scalar the column
-    cannot hold at construction, so the same volume reaches both endpoints with
-    its description absent and its other fields intact: the candidate count is
-    **1**, not 0, and the two routes agree about the book.
-
-    **`title` is the one field where a record is still lost whole, and it is
-    lost before it gets here.** `metadata._merge_matches` skips a row with no
-    title, because a search result nobody can read is not a result, so a title
-    the column cannot hold costs the row on both of these endpoints: 0
-    candidates and `found=False`, measured together in
-    `tests/routers/test_books_google.py::TestTheTwoRoutesAgreeAboutOneVolume`.
-    They still agree, which is the property that matters, and the rule doing it
-    has nothing to do with a ceiling. The refresh route is unaffected: it writes
-    `record.title or book.title`.
-
-    **Deliberately no count of the fields the other route fills**, and the
-    reason outlived the asymmetry that prompted it: that count is a property of
-    the Book it starts from rather than of the record, and an earlier draft
-    quoted one of three such numbers and then explained it with a configuration
-    that does not produce it. The starting Book was never recorded beside the
-    measurement, so the explanation was reconstructed, and a reconstructed
-    input is a guess wearing a measurement's clothes.
-
-    **What is left here is narrower than it looks, and naming it is the point.**
-    Every scalar `as_match()` fills is bounded before it arrives, and
-    `match_headings` plus `bounded_headings` bound the classifications by count
-    and by width. Three fields can still cost a whole row and two of them are
-    reachable:
-
-    * `isbn13`, held to 20, and it is the one that matters.
-      `google_books._volume_to_fields` takes `industryIdentifiers[].identifier`
-      straight out of somebody else's JSON: measured, one record with a 40
-      character ISBN answers **0** rows here against **1** for the same record
-      with a valid one. It is deliberately not bounded on the record, and
-      `catalogue._UNBOUNDED` carries the measurement showing that bounding it
-      today 500s the scan route instead, through the same adapter, so one lost
-      row is the cheaper of the two.
-    * `categories`, held to `CATEGORIES_MAX`, which is built here from the
-      record's subject list rather than carried on it, so no ceiling at
-      construction sees the value this model refuses.
-    * `source`, held to `SOURCE_LABEL_MAX`, which is unbounded on the record
-      because every producer sets it from a literal. Joining every source name
-      this tree has, the MARC upload's included, comes to **63** characters
-      against 120, so nothing reaches it without a new source whose own name is
-      57 characters long. Deliberately no count beside that, because a roster
-      sized number in prose is a number that rots.
-
-    An earlier version of this paragraph said `categories` was the only one, and
-    a later one said `isbn13` had stopped mattering. A design critic seat found
-    both, by reading what `as_match` fills rather than what the ceilings table
-    covers, which is the check worth copying: **this docstring is downstream of
-    two tables and agrees with neither by construction.**
-
-    Dropping the row rather than the field is a deliberate difference rather
-    than an oversight: a page is several answers and losing one of them is
-    honest, where a single record is the answer. Making the two one policy means
-    building these rows through `_bounded_match` too, which changes three
-    endpoints and is still filed rather than done here.
-
-    **One bad record costs one result, not the response.** `BookMatch` is a
-    bounded model built straight from third party data, and a single record
-    tripping any bound would throw away every other row on the page. Reachable
-    without any classification: `year` comes from a four digit match against
-    `MAX_YEAR` 2200, and 9999 is MARC's own open ended date for a continuing
-    resource.
-
-    **`bounded_headings` is still called here although `Record.match_headings` bounds
-    the count**, and the two are not the same job. That bound stops a ninth
-    heading; this drops an entry the column could not hold, so a 400 character
-    caption costs its own heading rather than the row. What it no longer does
-    on this path is the count: `match_headings` has already sliced, so on the
-    search path the parser's own order decides what survives and not
-    `classifications.SCHEME_ORDER`.
-    Two parsers now have to keep that true, not one. `_dnb_record` emits its
-    Dewey number ahead of its GND headings, and `_loc_record` emits its
-    `<classification>` elements ahead of its LCSH ones, which is where the
-    slice actually bites: a live Library of Congress record carries up to 14
-    subject headings against at most two classifications. This is the sentence
-    that goes wrong first if a third parser emits a subject vocabulary ahead of
-    a shelf one. The sort still decides for a merged book, which is where
-    several catalogues meet.
-
-    `all_tags` is None where the caller already has a book. The enrichment
-    candidates are other editions of a book that exists, so a tag suggestion
-    there answers a question nobody asked, and `BookMatch.suggested_tag_ids`
-    documents that it is left empty.
+    **`title` is the one field where a record is still lost whole**, and it is
+    lost before it reaches here: `metadata._merge_matches` skips a row without
+    one, because a match with no title is not a candidate a member could pick.
     """
     rows: list[BookMatch] = []
     for match in matches:
@@ -577,66 +486,11 @@ def _match_rows(
 def _bounded_match(fields: dict[str, Any]) -> BookMatch:
     """One catalogue record as a bounded match, dropping what the columns cannot hold.
 
-    The door `POST /{book_id}/enrich` goes through. It used to hand
-    `google_books.merge_into` the raw `Record.as_match()` dictionary, so every
-    ceiling on `BookMatch` applied to `enrich/apply` and to neither half of
-    this route: same book, same column, one route apart, a 422 against a stored
-    value. `merge_into` now takes the model, so this is the only way to reach
-    it from a catalogue.
-
     **The field rather than the record, which is the opposite of `_match_rows`
-    above.** A search answers with a page,
-    so a row the schema refuses costs one result out of several and dropping it
-    whole is honest. Enrichment answers with the one record the catalogues
-    returned, so refusing it whole would report `found=False` about a book a
-    catalogue did find and lose eleven good fields to one bad one. Eleven
-    because `merge_into` writes twelve columns, derived from its eleven loop
-    names plus the `cover_url` assigned below them, and one of the twelve is
-    the refused one.
-
-    Driven by pydantic's own error locations rather than by a list of field
-    names here, so a bound added to `BookMatch` later is enforced on this path
-    with nothing to remember and nothing to keep in step.
-
-    **`catalogue.Record` now bounds the scalars before they get here, and that
-    narrows this rather than retiring it.** Every field `as_match()` carries off
-    the record has already met its column, **except the two `_UNBOUNDED` names**,
-    so what still reaches this loop is `isbn13`, `source`, `categories`, which
-    is built from the record's subject list rather than carried on it, and any
-    bound a later `BookMatch` grows that the record has no field for. That is
-    the reason it stays driven by the error locations: the set it has to cover
-    is not the set anybody would write down today, and an earlier version of
-    this paragraph proved that by writing down a set that was missing `isbn13`.
-
-    **Three things make it total, and the first two are about a `BookMatch`
-    this tree does not have yet.** The intersection with `kept` is what keeps
-    `del` on a key the record holds: pydantic reports a **missing** required
-    field at a `loc` naming a key the record never supplied, and deleting that
-    raises. Measured on the stub the test uses, with the intersection removed:
-    `KeyError: 'name'`, not a slow pass and not a loop that repeats. Every
-    refused set either meets `kept`, in which case the record shrinks, or does
-    not, in which case the old code raised: **there is no stalling shape**, and
-    saying there was is the wrong reason this docstring carried for one round.
-
-    The fallback builds the empty match **without validating**, because a
-    required field also makes `BookMatch()` itself raise, which would turn the
-    safe answer into a 500 on the one path that exists to avoid one. On today's
-    model the two are the same object, measured:
-    `BookMatch.model_construct() == BookMatch()`.
-
-    The third is the loop bound, and it is about the guards rather than about
-    the model. Every pass returns or deletes at least one of the record's keys,
-    so `len(kept) + 1` passes is a ceiling nothing can legitimately reach. It
-    is written as a bound rather than as `while True` because a later edit
-    breaking that invariant then fails an assertion instead of hanging, and a
-    hang is the one failure a test cannot see: measured, two mutations of this
-    function that a bounded loop reports by name were a suite that never
-    finished.
-
-    All three are unreachable as the tree stands and are written rather than
-    assumed, which is the difference between a defence and a comment.
-    `tests/routers/test_books_google.py::TestBoundingOneRecord` drives each of
-    them, two through a stub model with the shape `BookMatch` does not have.
+    and is deliberate.** A search page can afford to lose one row of many; an
+    enrichment answer is about the book in hand, so losing it whole would answer
+    "nothing found" for a book the catalogue does hold. A cleared field is a gap
+    the member can see and fill; a dropped record is a question answered wrongly.
     """
     kept = dict(fields)
     for _ in range(len(kept) + 1):
@@ -1670,54 +1524,12 @@ async def author_wikipedia(
 ) -> list[AuthorWikipediaOut]:
     """An outward Wikipedia link per author, in the reader's language.
 
-    **Declared before `/authors/{...}` would be**, the same route ordering trap
-    the comment above records: FastAPI matches in declaration order.
+    **Declared before `/authors/{...}` would be**, because FastAPI matches in
+    declaration order and the literal path has to win.
 
-    ## The gate is identity, not language
-
-    One row per author that carries a **confirmed Wikidata identifier**, and no
-    row for anybody else. That is what makes "if it is available" a property of
-    the shelf rather than of the network, and it is the whole reason this is
-    safe: #87 measured two GND records spelled `Stevenson, Robert Louis` of
-    which only one has a Wikidata item, and a biography attached to the wrong
-    one is worse than no biography. `Authorship.listing()` is what filters the
-    identifiers by `visible_to`, so this cannot announce an author only visible
-    on somebody else's private book.
-
-    ## `lang` is the app's locale and never the browser's
-
-    A `Locale`, so the closed set is the server's and an unknown value is a 422
-    rather than a `sitefilter` this app did not write. It is what the reader
-    chose in Settings, which is the owner's first rule on #89 and is exactly
-    what `Accept-Language` would get wrong: a German browser reading the app in
-    English would be sent to German Wikipedia.
-
-    The other locale follows it, so a reader gets their own language, then the
-    app's other one, then any edition at all, then the Wikidata item.
-
-    ## What it costs, and it is bounded rather than proportional to the shelf
-
-    **At most ten requests**, and the two halves are sized separately because
-    they are different shapes. Five filtered, `ceil(n / 50)` where `n` is the
-    confirmed authors capped by `authority.MAX_WIKIPEDIA_ITEMS` at 250: fifty
-    ids with `sitefilter=dewiki|enwiki` measured 15,034 bytes and 0.89s on
-    2026-08-28. Five unfiltered, for the authors with no article in either app
-    locale, at two ids each because one unfiltered entity reaches 64,449 bytes,
-    which is `Q692` and 336 sitelinks. About **720 KB** all told. A library that
-    has confirmed nobody makes **no
-    request at all**, and the client is expected not to call this then.
-
-    **The same limiter as the authority lookups, on purpose.** It is the counter
-    for "this member is asking authority services things", and sharing it means
-    somebody reloading this page cannot also be spending the confirmation
-    budget. The alternative, a counter of its own, would let the two add up
-    against one supplier.
-
-    Never 503, and that is the difference between this and
-    `GET /authors/authority`. Nothing here is a supplier: a Wikidata outage
-    turns every row into a link to the Wikidata item, which still names the
-    right person, so the button is present either way. See
-    `authority.wikipedia_articles`.
+    **At most ten requests**, and **the same limiter as the authority lookups on
+    purpose**: it is the same host budget, so two counters would let a caller
+    spend it twice.
     """
     authority_limiter.check(current_user.username)
     items: dict[str, str] = {}
@@ -1985,46 +1797,18 @@ def _identifier_out(row: AuthorIdentifier, spelling: str) -> AuthorIdentifierOut
 async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
     """What the confirmed GND record says this person is called elsewhere.
 
-    **Resolved by the server, never read off the request body.** The rule
-    `Authorship.record_catalogue_assertions` states, applied here because this
-    is the other write that can reach `author_identifiers`: a client that could
-    post its own cross references would launder typed numbers into rows that
-    read like a national library's assertion. `payload.identifier` is the only
-    thing the caller contributes and it is a key, so exactly one record can
-    answer to it.
+    **Resolved by the server, never read off the request body**, so a caller
+    cannot name a record it did not confirm.
 
-    **Two sources, and the second is the one that costs a request.** The GND
-    record's own `sameAs` carries ISNI, LCNAF, VIAF and Wikidata, which
-    `authority.cross_references` reads off a response already in hand. It
-    carries **no national library number**, so the six that a reader of Spanish,
-    Portuguese, Brazilian, Argentine, Italian or Chilean books wants come from
-    the VIAF cluster that record names, through
-    `authority.national_identifiers`.
+    **Two sources, and the second costs a request.** The GND record carries some
+    of it; the rest is fetched.
 
     **The two are disjoint, and the `|` below is only a merge while they are.**
-    `_CROSS_REFERENCE_URIS` holds four schemes and `_NATIONAL_SOURCES` the other
-    six, and `national_identifiers` never returns a VIAF cluster id, so no key
-    can appear on both sides.
-    `tests/test_authority.py::TestTheEnumAndTheParserDescribeOneSet` pins that
-    rather than leaving it to be noticed.
+    That is load bearing rather than tidy: `|` takes the right hand value on a
+    collision, which would silently prefer the fetched one.
 
-    **It is load bearing rather than tidy, because Python's `|` gives the right
-    operand priority and the right operand is the wrong one to prefer.** An
-    overlap would let the VIAF cluster's value silently overwrite the one lobid
-    asserted and Wikidata confirmed, which is resolution by precedence in favour
-    of the only source of the three that was never cross checked. An earlier
-    version of this paragraph said "the free ones win a collision", which is the
-    operand order backwards: they are on the left.
-
-    **Never raises, and an empty mapping is an ordinary answer.** The
-    confirmation is already committed by the time this runs and it is what the
-    Member asked for; the cross references are what came with it. A lobid
-    outage, a VIAF outage, a superseded number, or a record carrying none of
-    them all produce the same nothing, and none of them is a reason to fail a
-    write that succeeded.
-
-    One deadline for both, so a slow VIAF cannot buy itself the resolve's unused
-    budget on top of its own.
+    **Never raises, and an empty mapping is an ordinary answer**, because a
+    person with no other names is not an error.
     """
     deadline = authority.deadline_from_now()
     try:
@@ -2051,54 +1835,22 @@ async def confirm_author_identifier(
 ) -> ConfirmedIdentifierOut:
     """Confirm that a candidate authority identifier is this author's.
 
-    **This endpoint exists because a name is not a key.** An identifier on the
-    record a catalogue returned for a Book's own ISBN is a cataloguer's
-    assertion about that Book and is stored without asking, by `refresh` and
-    `enrich`. One found by searching an authority file by name is a candidate:
-    two authors share a name and one author has five spellings, so storing it
-    silently would merge two people behind somebody's back. It reaches the store
-    only through here, and the row records that a person chose it.
+    **This endpoint exists because a name is not a key.** An identifier belongs
+    to a person, and only a member can say that this spelling is that person.
 
-    **409, not 422, where the spelling already carries a different value.** The
-    request is well formed and the state is what refuses it. Retyping an
-    identifier is the one operation this store has no verb for: correcting a
-    wrong one is `DELETE`, and a re-import may put it back.
+    **409, not 422, where the spelling already carries a different value**: the
+    request is well formed and the state refuses it.
 
-    **Confirming a GND number stores the cross references that came with it.**
-    A person confirms a *record*, and that record already asserts this person's
-    ISNI, LCNAF number, VIAF cluster and Wikidata item. All four used to be
-    shown once by `GET /authors/authority` and dropped. They are re-read from
-    the record here rather than taken from the request, which is the only shape
-    that keeps a client from writing its own.
+    **Confirming a GND number stores the cross references that came with it**,
+    and the six national numbers, which cost the extra requests. A confirmation
+    is up to eight outbound calls, which is why it is a deliberate action rather
+    than something a lookup does on the way past.
 
-    **And the six national library numbers, which cost the extra requests.** The
-    GND record carries none of them; the VIAF cluster it names carries all six.
-
-    **A confirmation is up to eight outbound requests**, and the count is worth
-    stating because `ratelimit.AUTHORITY_LIMIT` is sized against it: one lobid
-    record, **four to Wikidata** (`resolve` compares `P214` and `P213` on this
-    branch, so `_cross_check` is the item lookup, the description and two
-    claims), and up to three to VIAF. Only the last three are new here; the
-    first five are what confirming already cost. The third VIAF call is paid
-    only on a 5xx, so the ordinary confirmation is seven.
-
-    An earlier version of this paragraph said "one lobid request plus up to
-    three VIAF ones", which counted two of the three hosts. See
-    `authority.national_identifiers`, and `authority.DEADLINE_SECONDS` for the
-    time budget all of it shares.
-
-    **Only for `gnd`.** It is the one scheme this app can resolve, and a
-    confirmation under any other is a number a Member typed with no record
-    behind it to read cross references off. Nothing is fetched for those and
-    `cross_references` comes back empty.
+    **Only for `gnd`**, the one scheme this app can resolve.
 
     **A cross reference colliding with a stored value is reported, not raised.**
-    The confirmation succeeded and is what the Member asked for; refusing it
-    afterwards because a fact that arrived alongside it disagrees would undo the
-    thing they came to do. A collision on the confirmed identifier itself is the
-    opposite case and is the 409 above.
-
-    An author nobody can see is **404, not 403**, exactly as a private book is.
+    The confirmation is already committed, so failing here would report a write
+    that happened as one that did not.
     """
     # The same limiter the search route uses, because this request now reaches
     # lobid too: without it, a client posting the same confirmation in a loop

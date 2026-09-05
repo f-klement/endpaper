@@ -1350,113 +1350,16 @@ CLASSIFICATION_LABEL_MAX = 200
 
 #: The longest subject list a client may write into `books.categories`.
 #:
-#: The second `Text` column on this table and the second one on the **list**
-#: payload, so it inherits `DESCRIPTION_MAX`'s argument whole: an oversized
-#: value here is paid for on every page of every listing, and the column stays
-#: `Text` so this bounds new writes without making a stored row unreadable.
+#: The second `Text` column on this table and on the **list** payload, so it
+#: inherits `DESCRIPTION_MAX`'s argument whole: an oversized value is paid for on
+#: every page of every listing, and the column stays `Text` so this bounds new
+#: writes without making a stored row unreadable.
 #:
 #: **Computed rather than chosen, so the arithmetic cannot drift from the
-#: sentence.** This field is a `"; "` joined list of subject headings, and this
-#: app already states how wide one heading may be: `CLASSIFICATION_NUMBER_MAX`
-#: is 120, set so that no LCSH heading is refused. So the ceiling is exactly 32
-#: of those joined, **3,902**, and 33 would need 4,024.
-#:
-#: **Half of that expression is a named constant and half is the literal `2`**,
-#: which is the width of `google_books.CATEGORY_SEPARATOR`. That module is the
-#: only place allowed to know the separator, by its own docstring, so importing
-#: it here would make this a second place that knows. The literal is pinned by
-#: a test instead:
-#: `tests/schemas/test_book.py::test_the_categories_ceiling_assumes_the_separator_it_is_derived_from`.
-#: A critic seat raised it because the comment below claims the arithmetic
-#: cannot drift, and one of its two terms could.
-#:
-#: It was written as a round 4,000 first, described as "32 headings at that
-#: ceiling". It was not: 32 joined is 3,902 and 4,000 admits 32 and refuses 33,
-#: landing on no boundary of its own domain. That is the tell this repository
-#: records for a number whose instrument stopped somewhere arbitrary, and the
-#: fix is to let the expression state it.
-#:
-#: 32 rather than something nearer the measured shapes, because **the two
-#: failure modes are not symmetric**. Too loose costs page weight, which the
-#: arithmetic below bounds. Too tight costs a whole search result, silently:
-#: `routers/books._match_rows` drops the row rather than the field, and logs at
-#: INFO. So the count carries the headroom.
-#:
-#: The measured shapes it has to clear: **this app** caps an Open Library work
-#: at 12 subjects (`metadata._OPEN_LIBRARY_MAX_SUBJECTS`, ours and not theirs,
-#: against their own lists measured at up to 137), a live Library of Congress
-#: record carries 14 headings, and the longest single heading measured here is
-#: 91 characters over 1,559 live headings (see `CLASSIFICATION_NUMBER_MAX` in
-#: `docs/decisions.md`). Fourteen of those is 14 x 91 plus thirteen two
-#: character separators, **1,300**, so this admits the widest shape anybody has
-#: measured with 3.0x to spare.
-#:
-#: The page cost: 25 books at 3,902 is 97,550 characters, 39% of what
-#: `DESCRIPTION_MAX` already permits on the same payload, against the 3.2 MB
-#: page that made an unbounded `Text` column visible in the first place.
-#:
-#: **It bounded what a caller can store and not what a catalogue could, and
-#: that gap closed on 2026-09-03.** `catalogue.Record.merged_with` unions
-#: subjects, only on the lookup path, which used to hand `merge_into` a plain
-#: dictionary and never build a `BookMatch`. Every path that constructs a
-#: `BookMatch` folds with `filled_from`, which takes the leading catalogue's
-#: list whole and unions nothing, so this bound was the whole of what a request
-#: body could carry and none of what the lookup path could. `merge_into` now
-#: takes a `BookMatch`, so both paths pass this number.
-#:
-#: **What that changed is the failure, not the fold.** Everything measured
-#: below still describes what the union can assemble; what an oversized union
-#: now costs is the `categories` field on that one enrichment, dropped by
-#: `routers/books._bounded_match` and logged at INFO, rather than a row stored
-#: past its column for ever.
-#:
-#: **How large that other path can get is not known, and the figure that used
-#: to stand here was invented.** It read, in full and now retired: "nine
-#: catalogues x 14 headings of 91 characters joined by 125 separators, that
-#: path stores 11,716 characters, 3.0x this bound". Every part of that is
-#: wrong, and wrong in the direction that made the risk sound worse.
-#:
-#: The fold is **two** records, not nine. `merged_with` has one production
-#: caller, `metadata._merge`, which has one call site, which reduces over
-#: `plan.lookup_together`, and that is sliced to `sources.ALWAYS_ASKED = 2`.
-#: The tail tier returns a single record on its first hit and folds nothing.
-#: Driven rather than read, with all nine sources enabled and every one
-#: answering: `merged_with` is called **once**, the record carries two sources,
-#: and `categories` comes to **2,602** characters, **0.67x** this bound. On the
-#: tail path it is called zero times.
-#:
-#: And both per record figures came from a catalogue that cannot be on that
-#: path. The 14 is `routers/books.py`'s note that a live Library of Congress
-#: record carries up to 14 subject headings; the 91 is `docs/decisions.md`'s
-#: longest of 1,559 live **LCSH** headings. LOC and BNF are title search only,
-#: so neither is ever asked for an ISBN: seven of the nine sources reach the
-#: lookup path and those two do not. Both numbers illustrate a heading's size;
-#: neither measures this path.
-#:
-#: **The reason the size is unknowable is the reason worth keeping**, and it is
-#: why the bound is applied rather than the fold capped. Nothing caps the
-#: subject list on that path: `metadata._OPEN_LIBRARY_MAX_SUBJECTS = 12` is the
-#: only slice in the module, and nothing truncates downstream either.
-#: `CATEGORIES_MAX` is still read in exactly one place, `BookMatch.categories`,
-#: and neither `join_categories` nor `merge_into` applies it itself: what
-#: changed is that the lookup path now goes through that one place too.
-#:
-#: **And the pair that gets folded is chosen from the settings screen.** The
-#: pool is six, not seven: `lookup_together` filters `METERED`, so Google Books
-#: can never be in the folded pair and reaches this column only through the
-#: tail, where nothing folds. Of those six, `open_library` is the one that is
-#: capped and `dnb`, `k10plus`, `nkp`, `nlg` and `oenb` are not, and
-#: `lookup_chain` is the household's own order. Driven: a household leading
-#: `dnb` then `k10plus` folds exactly those two, both uncapped, with no code
-#: change and no unusual record.
-#:
-#: So there is no ceiling to quote here, and that is the finding rather than a
-#: gap in it. Feeding those two 40 subjects each reaches 7,438 characters,
-#: 1.91x this bound, but **40 is an input chosen to show the shape**, not a
-#: measurement of any catalogue, and writing it down as a worst case is exactly
-#: the mistake the retired sentence above made. That is also why a fold with no
-#: ceiling can be left alone: an unquotable size needs a bound at the column
-#: rather than a guess at the source.
+#: sentence**: 32 headings at `CLASSIFICATION_NUMBER_MAX` plus their separators.
+#: 32 because the failure modes are asymmetric: too loose costs page weight, too
+#: tight drops a whole search result silently, since a row is dropped rather than
+#: a field. The widest shape measured here is 14 headings, so it clears 3x.
 CATEGORIES_MAX = 32 * CLASSIFICATION_NUMBER_MAX + 31 * 2
 
 
@@ -1863,129 +1766,17 @@ def in_trash_for(user_id: int) -> ColumnElement[bool]:
 class CatalogueTarget(Base):
     """One catalogue source as a row: its address, transport, indexes and bounds.
 
-    **Seeded and, today, read by nothing at runtime.** `targets.SEEDED` is what
-    `metadata` asks, and it is a module constant. That is deliberate rather than
-    unfinished: `fetch.py` and `z3950.py` both argue they need no host allowlist
-    because a target's address is a module constant, and #127's decision D2 sends
-    a member supplied host to its own ticket with its own review. Reading an
-    address off this table is that decision, not this one.
+    **Seeded and read by nothing at runtime.** `targets.SEEDED` is what
+    `metadata` asks, and it is a module constant. That is deliberate: `fetch.py`
+    and `z3950.py` both argue they need no host allowlist **because** a target's
+    address is a module constant, so reading an address off this table is a
+    security decision with its own ticket rather than a refactor.
 
-    So what the table is for is the tickets it unblocks, each of which owns one
-    column that is inert here: #130 makes a row editable and reads `rank`, #132
-    enforces `timeout_seconds`, and #32 adds the institution's hard filter. The
-    rule separating a column that is kept from one that is not is that a column
-    reserved for a **named** ticket is kept and a column reserved for a
-    hypothetical target is not, which is why `encoding` is absent: nothing in the
-    roster needs one, `fetch.Fetched.text` resolves the charset off the response,
-    and no ticket is waiting for it.
-
-    **A refused row answers 500 on the restore route rather than 400**, which is
-    the fourth instance of something `backup.py` already records at three sites:
-    an `IntegrityError` is not a `RestoreError`. Worth knowing before somebody
-    meets one and goes looking for the bug, and not worth widening the handler
-    for on its own.
-
-    **Every constraint that matters is a `CheckConstraint` and not a
-    `__post_init__`**, because `backup.restore` writes through Core. An admin is
-    not a reason to trust a file: it may have come from another deployment or
-    have been edited by hand, and `docs/security.md` records what one restored
-    row did to `custom_fields.kind`. Three of them are worth reading:
-
-    * `ck_catalogue_targets_isbn_claim` states the one measured exception to the
-      ISBN identity check. At the OENB that check is the whole defence against a
-      mistyped index, which answers HTTP 200 with 7,793,152 records and no
-      diagnostic, so a boolean flipped on a restored row would put an arbitrary
-      record on a member's shelf from a scan.
-    * `ck_catalogue_targets_transport` refuses `z3950`, which is the refusal
-      `targets.Target.__post_init__` makes and which #129 lifts in both places
-      at once.
-    * `ck_catalogue_targets_indexes` admits only `targets._INDEX`'s repertoire,
-      letters, digits, a dot and an underscore, or the empty string the BnF and
-      the Czech National Library legitimately carry. **It was a denylist of ten
-      characters and that was measured wrong.** A critic ran 25 index shapes
-      against both spellings: they agreed on 10 and **disagreed on 15**, and
-      seven of the fifteen carry a CQL token separator the list did not name,
-      TAB, LF, CR, VT, FF, NBSP and U+3000. `dc.title<TAB>and` as a title index
-      builds a two clause boolean through the column whose constraint exists to
-      refuse exactly that. The negated class is the same 25 probes at **1 gap**,
-      an embedded NUL, which SQLite's pattern matcher stops at; `_INDEX` refuses
-      it in Python and no path writes an index from anything but a literal.
-
-      **The lesson is the one this repository already bought**, one query
-      language along: split on the repertoire rather than forbidding one
-      spelling and allowing the others.
-
-      **"1 gap" is a repertoire figure and not an equality**, which is worth
-      saying because the next reader will take it for one. A CHECK has no way to
-      spell "one dot, not two", so the constraint is a character test where
-      `_INDEX` is a grammar. Measured over 19 shapes: **0** that `_INDEX` accepts
-      and the CHECK refuses, which is the direction that matters for a restore
-      and which is structural rather than lucky, since `_INDEX`'s repertoire is
-      a subset of the CHECK's; and **6** the other way, `.foo`, `1abc`, `a..b`,
-      `___`, `a_b` and `x.`. Every one of the six is character safe: none can
-      carry a separator, a relation character or a quote, so none can be more
-      than a name the target does not know.
-
-      **A twentieth shape makes that six a seven, and the seventh is the NUL
-      already counted one paragraph up.** Anybody recomputing this with an
-      embedded NUL in their probe set gets seven and has to work out which
-      register the extra belongs to, so: it is the residual of the 1 gap
-      above and is deliberately not one of these six. Two figures, one shape,
-      and the six are what a CHECK cannot express rather than what it cannot
-      see.
-    * `ck_catalogue_targets_use_attribute` is `targets._USE_ATTRIBUTES` in SQL.
-      Without it the whole PQF attribute rule lived in `__post_init__` and
-      `z3950.query`, which are the two places a Core insert does not reach.
-
-      **`typeof` is redundant given the `IN`, which is not the same as dead**,
-      and this paragraph has now been wrong in both directions. It first credited
-      `typeof` with catching the float; it then said `typeof` catches nothing. A
-      critic ran the three spellings separately over seven values against a
-      column declared INTEGER:
-
-      | probe | `typeof` alone | `IN` alone | shipped |
-      |---|---|---|---|
-      | NULL | accepts | accepts | accepts |
-      | `7` | accepts | accepts | accepts |
-      | `4` | accepts | **refuses** | refuses |
-      | `True` | accepts | **refuses** | refuses |
-      | `'7'` | accepts | accepts | accepts |
-      | `7.0` | accepts | accepts | accepts |
-      | `'7 @and @attr 1=4 x'` | **refuses** | **refuses** | refuses |
-
-      So `typeof` refuses exactly one, the injection payload, and everything it
-      refuses the `IN` refuses too: the `IN` alone and the shipped pair give
-      identical verdicts on all seven. `'7'` and `7.0` are accepted and stored
-      **as the integer 7**, because INTEGER affinity converts a well formed
-      integer literal before either half is evaluated, so a reader meeting those
-      two in a probe should not file them as gaps.
-
-      `typeof` is kept for what it pins rather than for what it uniquely catches:
-      the **stored** type is what `z3950.query` will be handed, the `IN` is a
-      value test where this is a type test, and affinity's conversion is SQLite's
-      behaviour rather than a guarantee this project controls. Anybody deleting
-      it should re-run that table first. The Python side is a separate layer and
-      is not redundant: `Target.__post_init__` uses `type(...) is not int`, which
-      refuses a float `7.0` that never reaches affinity.
-
-    **A restore empties this table and refills it only from the archive**, so an
-    archive written before this revision leaves it empty. That does not break a
-    lookup, because nothing reads the table; it would hand #130 a screen with no
-    rows on it. `main.seed_catalogue_targets` runs at startup and reconciles
-    every row carrying `is_seeded` against `targets.SEEDED`, which makes a
-    restore self healing.
-
-    **Reconciled rather than only inserted, and that is where this departs from
-    `seed_tags`.** That function inserts what is missing and never updates,
-    because a tag a library renamed is theirs. A seeded target is not: nothing
-    reads these rows, so a corrected constant would leave the table holding an
-    old index name with no symptom anywhere, until #130 handed somebody a screen
-    editing rows that disagree with the code the request actually uses. A design
-    critic found that the drift is created by this ticket's scope rather than by
-    its diff. `is_seeded` is `seed_tags`' `is_predefined` for the same job one
-    step further on: it says which rows the application still owns, so #130 can
-    clear it on a row a household edits and the reconciliation will leave that
-    row alone from then on.
+    The table exists for the tickets it unblocks, each owning one column that is
+    inert here: making a row editable and reading `rank`, enforcing
+    `timeout_seconds`, and the institution's hard filter. **A column is kept only
+    where a named ticket reads it**, so this is a schema waiting for callers
+    rather than a place to park fields.
     """
 
     __tablename__ = "catalogue_targets"

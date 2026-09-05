@@ -1,96 +1,32 @@
 """What an outside catalogue asserted about one book, as a type rather than a dict.
 
-Every source in `metadata.py` used to hand its answer across this seam as a
-`dict[str, Any]`. Six adapters invented their own keys, three consumers guessed
-which of them were present, and nothing in the type system told an assertion
-somebody else's institution made from a fact this Library holds. ADR 0004 says
-those are different things; the code said `dict`.
+Every source used to hand its answer across this seam as a `dict[str, Any]`: six
+adapters inventing their own keys, three consumers guessing which were present,
+and nothing distinguishing an assertion somebody else's institution made from a
+fact this library holds. ADR 0004 says those are different things.
 
-## The two dialects this replaces
+**It replaces two dialects, not one.** A lookup record carried `isbn` and a list
+of `subjects`; a search match carried `isbn13`, a `source`, a `google_books_id`
+and those subjects joined into one string, with two translators existing only to
+cross between them, one of them inside a route handler. `as_lookup()` and
+`as_match()` are the two schemas one `Record` fills.
 
-There were **two** shapes, not one, and telling them apart was left to whoever
-was reading. A lookup record carried `isbn` and a list of `subjects`; a search
-match carried `isbn13`, a `source`, a `google_books_id` and `categories`, the
-same subjects joined into one string. Two translators existed only to cross
-between them: `metadata._as_match` in one direction and
-`routers/books._enrichment_fields` in the other, the second of which was in a
-route handler. Both are gone. One `Record` carries the facts, and `as_lookup()`
-and `as_match()` name the two schemas it fills.
+**What a caller stops having to know:**
 
-## What a caller stops having to know
+* That a heading may repeat inside one record. One live record's `082 $a` read
+  `['100', '610', '610']`, and a duplicate spends one of a book's eight heading
+  slots saying nothing. The union runs at construction.
+* That a caption is filled from wherever it exists and never overwritten by a
+  later source: the number decides identity, the caption is what most sources
+  omit.
+* That an **empty list means absent** when one record fills another's gaps. That
+  was a live defect rather than a hypothetical.
 
-* That a heading may repeat inside one record. One live K10plus record's 082
-  `$a` values read `['100', '610', '610']` (measured 2026-08-23), and a
-  duplicate spends one of a Book's eight heading slots saying nothing. The
-  union runs at construction, so a parser that repeats itself costs nothing and
-  no parser has to remember.
-* That a caption is filled in from wherever it exists and never overwritten by
-  a later source. The number decides identity; the caption is the half most
-  sources omit.
-* That an **empty list means absent** when one record fills another's gaps.
-  This was a live defect rather than a hypothetical: `classifications` was the
-  one list valued key in the old match dictionaries, a source that found no
-  heading wrote `[]`, `[]` is not `None`, so it beat a populated list from the
-  next source. Measured over 30 live title searches, 6 of 10 merged rows whose
-  Library of Congress half carried LCSH lost every heading. Here the scalars
-  and the three collections are separate fields with separate rules, so the
-  trap cannot be written.
-* Which fields make a record worth preferring (`completeness`).
-* That several catalogues answering for one book are recorded as one row naming
-  all of them (`sources`).
-* **That every scalar it holds fits the Book column that stores it.** Four
-  consumers write those columns and three of them had a bound;
-  `PUT /api/books/{id}/refresh` wrote nine of them off a record through no model
-  at all. The bound is now at construction, so a fourth consumer inherits it.
-  See `_TEXT_CEILINGS`.
-
-## Two producers, and they differ about one thing
-
-Everything above is written for `metadata.py`, which builds a record out of a
-catalogue's answer over the network. **`marc.py` is the second producer** and
-builds one out of a file somebody uploaded, which is the same kind of evidence
-and a different kind of trust. The one place that matters is an over-wide
-string: a catalogue's is dropped, because half an assertion overwriting a good
-stored value is worse than nothing, and an uploaded file's is cut, because
-`books.title` is `NOT NULL` and a dropped title costs the row rather than the
-field. `Record.from_upload` is that door and is the only difference between
-them.
-
-## Two ways to fold two records together, and they are two rules
-
-`merged_with` is the **lookup** path. Every record it folds describes the same
-printing, because they were all found by the same verified ISBN, so their
-subjects and their headings are several catalogues' assertions about one book
-and unioning them is right.
-
-`filled_from` is the **search** path. Two rows meet there because they share a
-title, an author and a year, which is a guess rather than proof, so the leading
-catalogue's own lists are taken whole and the other's fill only what is
-missing. There is a second reason it must not union: a search row is bounded at
-`MAX_CLASSIFICATIONS_PER_BOOK` before it becomes a `BookMatch`, and `BookMatch`
-refuses a ninth entry, so unioning two full rows would cost the row rather than
-the heading.
-
-They are named separately instead of one function with a flag, so that reading
-a call site tells you which rule ran.
-
-## What is deliberately not here
-
-**No wire schema.** This module returns plain dictionaries keyed to
-`BookLookup` and `BookMatch` rather than building them, because those are
-request bodies as much as responses: the bounds a client's own payload has to
-pass belong to the schema, and `routers/books._headings` is where an unusable
-heading is dropped rather than allowed to 422 a member's request.
-
-**No headings inside `as_lookup()` or `as_match()`.** Both return the scalar
-facts and nothing else, and the omission is ADR 0006 expressed as a type.
-Automatic enrichment and Refresh Metadata write from those dictionaries, and
-neither may add a Classification: a heading reaches a Book only when a Member
-picks a record and confirms the whole of it. Because the dictionaries carry
-none, an unattended writer has nothing to write even by mistake.
-
-**No `visible_to`, no session, no Book.** A Record is evidence about a book,
-never a Book. Nothing here touches the database.
+**What is deliberately not here.** No wire schema, so this returns plain
+dictionaries keyed to the schemas rather than importing them. No headings inside
+`as_lookup()` or `as_match()`, which return scalars only. **No `visible_to`, no
+session, no `Book`**: a Record is evidence about a book and never a book, which
+is what keeps this module outside the privacy rule rather than exempt from it.
 """
 
 import dataclasses
@@ -337,76 +273,19 @@ _NUMBER_RANGES: Final[dict[str, tuple[float, float]]] = {
 
 #: The two scalars deliberately left unbounded, each for its own reason.
 #:
-#: **`source`** is this app's own word rather than a catalogue's. Every producer
-#: sets it from a literal: the adapters in `metadata.py` from the source roster,
-#: `marc.py` from its own `SOURCE`, and `_SOURCE_JOIN` joins those. **Two
-#: modules, not one**, and the count is worth stating rather than the module,
-#: because this comment named only `metadata.py` on the day the second one
-#: arrived. No catalogue can widen it either way, which is also what makes it
-#: safe to log untruncated below. `SOURCE_LABEL_MAX` still bounds it at
-#: `BookMatch`, where it is a field on the wire.
+#: **`source`** is this app's own word rather than a catalogue's, so there is no
+#: outside value to bound.
 #:
-#: **`isbn` is here reluctantly, and the reason it has to be is one line of
-#: somebody else's module.** It was excluded, then bounded, then excluded again
-#: inside one day, and every step is worth keeping because the last one is not
-#: the obvious answer.
+#: **`isbn` is here reluctantly.** Bounding it would refuse a record over a
+#: malformed identifier the adapter should have normalised, which costs more than
+#: it saves; the fix belongs at the adapter and is one line there. Revisitable,
+#: and deliberately not revisited at a merge, because it is a behaviour change no
+#: critic seat has reviewed.
 #:
-#: **What the exclusion costs, measured.** `as_match()` fills `isbn13`,
-#: `BookMatch` bounds it at 20, and `_match_rows` drops the **row** rather than
-#: the field, so an unusable identifier costs a whole search result:
-#: `_match_rows` over one record carrying a 40 character ISBN returns **0**
-#: rows against **1** for the same record with a valid one. Reachable without
-#: anything unusual, because `google_books._volume_to_fields` takes
-#: `industryIdentifiers[].identifier` straight out of somebody else's JSON.
+#: The measurements behind both, and what bounding `isbn` was measured to cost,
+#: are in `docs/decisions.md`.
 #:
-#: **What bounding it costs is worse, and it is the same adapter.**
-#: `metadata._google_record` sets `isbn=fields.get("isbn13") or isbn`, which
-#: prefers that unparsed identifier **over** the canonicalised argument, and it
-#: is on the ISBN lookup path. So a bound here clears it, `as_lookup()` hands
-#: `None` to `BookLookup.isbn`, which is **required**, and
-#: `errors.unhandled_exception_handler` answers a Member's scan with a 500.
-#: Measured through the real adapter:
-#: `_google_record({"isbn13": "9" * 40, ...}, "9780743273565")` gives
-#: `record.isbn is None` and a `ValidationError` at `('isbn',)`. One row lost is
-#: better than the scan route down, so the trade decides itself.
-#:
-#: **The fix is at the adapter and it is one line**: spelling that
-#: `isbn=parse_isbn(fields.get("isbn13") or "") or isbn`, which is what
-#: `_first_isbn13` already does on both Open Library paths. That makes the
-#: guarantee `as_lookup` rests on literally true for every lookup source, and
-#: bounding this field here becomes safe. **At the adapter rather than here, and
-#: that is the point rather than a division of labour**: a type cannot rescue a
-#: producer that hands it a value nobody parsed, it can only refuse it, and
-#: refusing this one is the 500 above.
-#:
-#: **That fix landed in the same wave, from another trio, and this comment's
-#: blocker is therefore gone.** `metadata._google_isbn13` refuses a non string
-#: before parsing the value, which the one line above would not have: `parse`
-#: calls string methods, so an int or a bool out of somebody else's JSON raises
-#: `TypeError` past a caller catching only `httpx.HTTPError` and `ValueError`,
-#: which is the same 500 wearing a different exception. Both tripwires in
-#: `TestWhichScalarsAreBoundedAndWhichAreNamedInstead` went red on the merged
-#: tree and were inverted there, which is what they were written to do.
-#:
-#: **So `isbn` is revisitable and is deliberately not revisited at a merge.**
-#: Bounding it is a behaviour change no critic seat has reviewed, and what it
-#: would have to establish is what the exclusion refuses that a bound accepts:
-#: that no producer on the lookup path can still yield a value wider than this
-#: column, since clearing one is the 500 above. The lookup adapters were
-#: measured at six taking the canonicalised argument and one parsing its own,
-#: with Google the hole that is now closed, but that measurement was taken for a
-#: different question and is not a substitute for taking it for this one.
-#:
-#: An earlier version of this comment also said nothing writes `Record.isbn` to
-#: a column, which was false: `importing.bounded_fields` ends
-#: `fields["isbn"] = record.isbn` and `MarcImport._create` passes that into
-#: `Book(...)`. What holds it there is `metadata._marc_isbn`, which returns
-#: `isbn.parse`'s output or `None`.
-#:
-#: Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`, which asserts
-#: this set's **contents** and not only that the partition covers everything: an
-#: earlier version compared unions, so moving a name from a ceilings table into
-#: here would have left both sides equal and nothing red.
+#: Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`.
 _UNBOUNDED: Final = frozenset({"source", "isbn"})
 
 #: Which strings an uploaded file may have cut to fit, and which it may not.
