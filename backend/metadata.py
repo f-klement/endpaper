@@ -48,13 +48,14 @@ from rapidfuzz.distance import Levenshtein
 
 import covers
 import ddc
+import decoders
 import fetch
 import google_books
 import sources
 import targets
 import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
-from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
+from enums import AuthorityScheme, Capability, CatalogueSource, ClassificationScheme
 from isbn import parse as parse_isbn
 from isbn import registration_group
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
@@ -2369,11 +2370,20 @@ def _nkp_record(record: ElementTree.Element, isbn: str) -> Record | None:
 #: tables are: a reader is what a row names.
 #:
 #: `metadata.resolve` is what stops a row naming a reader that is not in here.
+#: The bespoke lookup **adapters**, by `decoders.Reader`, and the word is not
+#: decoration.
+#:
+#: **These fetch as well as decode, and they are the one place in the roster
+#: where the two are still welded.** Splitting them is a rewrite of two JSON
+#: adapters rather than a seam over what is there, so it is out of this ticket's
+#: scope. The decoder is already separate inside each: `_open_library_edition`
+#: and `_google_record` take parsed JSON and return a `Record`, and neither
+#: mentions a request. What is missing is only the registry entry for them.
 _BESPOKE_LOOKUPS: Final[
-    dict[targets.Reader, Callable[[str, str], Awaitable[Lookup]]]
+    dict[decoders.Reader, Callable[[str, str], Awaitable[Lookup]]]
 ] = {
-    targets.Reader.OPEN_LIBRARY: _open_library,
-    targets.Reader.GOOGLE_BOOKS: _google_books,
+    decoders.Reader.OPEN_LIBRARY: _open_library,
+    decoders.Reader.GOOGLE_BOOKS: _google_books,
 }
 
 #: Bookland registration group for German-language publishing.
@@ -3374,9 +3384,9 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
 
 
 def _marc_nodes(
-    root: ElementTree.Element, target: targets.Target
+    root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[ElementTree.Element]:
-    """Every MARC record in a response that this target wants read.
+    """Every MARC record in a response that this decoding wants read.
 
     **An SRU diagnostic needs no branch of its own**, and it is worth saying
     because these endpoints answer every error with HTTP 200. An invalid query
@@ -3391,15 +3401,17 @@ def _marc_nodes(
     measurements behind it are in those sources' blocks above.
     """
     nodes = root.iter(f"{_MARC}record")
-    if target.refuses_component_parts:
+    if decoding.refuses_component_parts:
         return [node for node in nodes if not _is_component_part(node)]
     return list(nodes)
 
 
 def _marc_build(
-    target: targets.Target, fields: dict[str, list[_Subfields]], isbn: str | None
+    decoding: decoders.Decoding,
+    fields: dict[str, list[_Subfields]],
+    isbn: str | None,
 ) -> Record | None:
-    """One MARC record as book fields, through the reader the row names.
+    """One MARC record as book fields, through the reader the decoding names.
 
     **Two MARC readers and not one**, which is where this diverges from the
     ticket's "four readers cover all nine". `_dnb_record` harvests GND identified
@@ -3408,18 +3420,18 @@ def _marc_build(
     Folding them would change answers rather than restructure code, which is the
     class of thing `add_xslt` was refused over.
     """
-    if target.reader is targets.Reader.MARC_PLAIN:
-        return _k10plus_record(fields, isbn, source=target.source.value)
+    if decoding.reader is decoders.Reader.MARC_PLAIN:
+        return _k10plus_record(fields, isbn, source=decoding.source)
     return _dnb_record(
         fields,
         isbn,
-        source=target.source.value,
-        read_author_identifiers=target.reads_author_identifiers,
+        source=decoding.source,
+        read_author_identifiers=decoding.reads_author_identifiers,
     )
 
 
 def _marc_lookup(
-    root: ElementTree.Element, isbn: str, target: targets.Target
+    root: ElementTree.Element, isbn: str, decoding: decoders.Decoding
 ) -> Lookup:
     """The best MARC record in a response for the ISBN that was asked about.
 
@@ -3437,19 +3449,19 @@ def _marc_lookup(
     it the fullest. `sorted` is stable, so records that tie keep the catalogue's
     own order and its first answer wins.
     """
-    name = target.source.value
+    name = decoding.source
     books = [
         (node, fields, record)
-        for node in _marc_nodes(root, target)
+        for node in _marc_nodes(root, decoding)
         for fields in [_marc_fields(node)]
-        for record in [_marc_build(target, fields, isbn)]
+        for record in [_marc_build(decoding, fields, isbn)]
         if record is not None
     ]
     if not books:
         logger.info("%s matched %s only as a cross reference or a non-book", name, isbn)
         return Lookup(Outcome.NOT_FOUND, source=name)
 
-    if target.requires_isbn_claim:
+    if decoding.requires_isbn_claim:
         claimed = [book for book in books if _marc_claims_isbn(book[1], isbn)]
         if not claimed:
             return Lookup(Outcome.NOT_FOUND, source=name)
@@ -3468,7 +3480,7 @@ def _marc_lookup(
 
 
 def _dublin_core_bare_lookup(
-    root: ElementTree.Element, isbn: str, target: targets.Target
+    root: ElementTree.Element, isbn: str, decoding: decoders.Decoding
 ) -> Lookup:
     """The best un-namespaced Dublin Core record for the ISBN that was asked about.
 
@@ -3476,11 +3488,11 @@ def _dublin_core_bare_lookup(
     roster. `_nkp_claims_isbn` is this format's `_marc_claims_isbn`: it has no
     020 to read and tests the record's own identifier elements instead.
     """
-    name = target.source.value
+    name = decoding.source
     parsed = [
         record
         for node in _nkp_records(root)
-        if not target.requires_isbn_claim or _nkp_claims_isbn(node, isbn)
+        if not decoding.requires_isbn_claim or _nkp_claims_isbn(node, isbn)
         for record in [_nkp_record(node, isbn)]
         if record is not None
     ]
@@ -3494,7 +3506,7 @@ def _dublin_core_bare_lookup(
 
 
 def _marc_search(
-    root: ElementTree.Element, target: targets.Target
+    root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[Record]:
     """Every book in a MARC response, non-books refused.
 
@@ -3503,9 +3515,9 @@ def _marc_search(
     tell an edition of this book from a digitisation of another one.
     """
     results: list[Record] = []
-    for node in _marc_nodes(root, target):
+    for node in _marc_nodes(root, decoding):
         fields = _marc_fields(node)
-        record = _marc_build(target, fields, None)
+        record = _marc_build(decoding, fields, None)
         if record is None or not record.title:
             continue
         if not _marc_is_physical_book(node, fields, record.title):
@@ -3515,10 +3527,10 @@ def _marc_search(
 
 
 def _dublin_core_search(
-    root: ElementTree.Element, target: targets.Target
+    root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[Record]:
     """Every book in a namespaced Dublin Core response. The BnF's shape."""
-    del target  # The selector is the format's, not the row's.
+    del decoding  # The selector is the format's, not the row's.
     return [
         record
         for node in root.findall(f".//{_DC}title/..")
@@ -3528,10 +3540,10 @@ def _dublin_core_search(
 
 
 def _mods_search(
-    root: ElementTree.Element, target: targets.Target
+    root: ElementTree.Element, decoding: decoders.Decoding
 ) -> list[Record]:
     """Every book in a MODS response. The Library of Congress's shape."""
-    del target
+    del decoding
     return [
         record
         for node in root.iter(f"{_MODS}mods")
@@ -3540,35 +3552,42 @@ def _mods_search(
     ]
 
 
-#: Which reader reads a lookup response, by `targets.Reader`.
+#: Which decoder reads a lookup response, by `decoders.Reader`.
 #:
 #: **Keyed on the reader and not on the source**, which is the whole change:
-#: three sources share `MARC_GND` and a fourth would add no entry here. A reader
+#: four sources share `MARC_GND` and a fifth would add no entry here. A reader
 #: absent from this table is a target that answers a lookup with nothing able to
 #: parse the answer, and `resolve` is what turns that into a failure at load
 #: rather than a `KeyError` on the path that adds a book.
+#:
+#: **The value type is the seam, and it is enforced by the type rather than by a
+#: comment.** A decoder takes a parsed record and a `decoders.Decoding`; a
+#: `targets.Target` here would put an address and a query grammar inside a
+#: parser and weld every format to the one way this application currently
+#: reaches it. mypy refuses the weld, which is the strongest rung available:
+#: nothing has to remember the rule.
 _LOOKUP_READERS: Final[
     dict[
-        targets.Reader,
-        Callable[[ElementTree.Element, str, targets.Target], Lookup],
+        decoders.Reader,
+        Callable[[ElementTree.Element, str, decoders.Decoding], Lookup],
     ]
 ] = {
-    targets.Reader.MARC_GND: _marc_lookup,
-    targets.Reader.MARC_PLAIN: _marc_lookup,
-    targets.Reader.DUBLIN_CORE_BARE: _dublin_core_bare_lookup,
+    decoders.Reader.MARC_GND: _marc_lookup,
+    decoders.Reader.MARC_PLAIN: _marc_lookup,
+    decoders.Reader.DUBLIN_CORE_BARE: _dublin_core_bare_lookup,
 }
 
-#: Which reader reads a title search response, by `targets.Reader`.
+#: Which decoder reads a title search response, by `decoders.Reader`.
 _SEARCH_READERS: Final[
     dict[
-        targets.Reader,
-        Callable[[ElementTree.Element, targets.Target], list[Record]],
+        decoders.Reader,
+        Callable[[ElementTree.Element, decoders.Decoding], list[Record]],
     ]
 ] = {
-    targets.Reader.MARC_GND: _marc_search,
-    targets.Reader.MARC_PLAIN: _marc_search,
-    targets.Reader.DUBLIN_CORE: _dublin_core_search,
-    targets.Reader.MODS: _mods_search,
+    decoders.Reader.MARC_GND: _marc_search,
+    decoders.Reader.MARC_PLAIN: _marc_search,
+    decoders.Reader.DUBLIN_CORE: _dublin_core_search,
+    decoders.Reader.MODS: _mods_search,
 }
 
 
@@ -3598,7 +3617,7 @@ async def _sru_lookup(target: targets.Target, isbn: str) -> Lookup:
     ):
         logger.warning("%s lookup failed for %s", name, isbn, exc_info=True)
         return Lookup(Outcome.UNAVAILABLE, source=name)
-    return _LOOKUP_READERS[target.reader](root, isbn, target)
+    return _LOOKUP_READERS[target.reader](root, isbn, target.decoding)
 
 
 async def _sru_search(
@@ -3628,7 +3647,7 @@ async def _sru_search(
             "%s search failed for %r", target.source.value, query, exc_info=True
         )
         return []
-    return _SEARCH_READERS[target.reader](root, target)
+    return _SEARCH_READERS[target.reader](root, target.decoding)
 
 
 def resolve(target: targets.Target) -> None:
@@ -3639,7 +3658,7 @@ def resolve(target: targets.Target) -> None:
     compared two dispatch tables against `sources`, which was the right guard
     while a source was a Python constant: a source in one and not the other was a
     `KeyError` on the path that adds a book. Both tables are keyed on
-    `targets.Reader` now and one reader serves three sources, so the comparison
+    `decoders.Reader` now and one reader serves several sources, so the comparison
     cannot be restated; this asks the question it was really asking, one row at a
     time.
 
@@ -3658,7 +3677,7 @@ def resolve(target: targets.Target) -> None:
     the invariants it can see on one row on its own. This is the half that needs
     to know what code exists.
     """
-    if target.answers_lookup:
+    if target.can(Capability.ANSWERS_ISBN):
         table = (
             _LOOKUP_READERS
             if target.transport is targets.Transport.SRU
@@ -3668,11 +3687,11 @@ def resolve(target: targets.Target) -> None:
             raise ValueError(
                 f"{target.source}: answers a lookup and {target.reader} reads none"
             )
-    if target.answers_search:
-        readers: Collection[targets.Reader]
+    if target.can(Capability.ANSWERS_TITLE_SEARCH):
+        readers: Collection[decoders.Reader]
         if target.transport is targets.Transport.SRU:
             readers = _SEARCH_READERS.keys()
-        elif target.metered:
+        elif target.can(Capability.METERED):
             readers = _METERED_SEARCHES.keys()
         else:
             readers = _FREE_SEARCHES.keys()
@@ -3695,7 +3714,7 @@ async def _search_one(
     """Ask one target for title matches, through whichever door its row names."""
     if target.transport is targets.Transport.SRU:
         return await _sru_search(target, query, limit)
-    if target.metered:
+    if target.can(Capability.METERED):
         return await _METERED_SEARCHES[target.reader](query, limit, api_key)
     return await _FREE_SEARCHES[target.reader](query, limit)
 
@@ -4102,9 +4121,9 @@ async def title_search(
 #: handed to `_within_deadline`, and it broke the moment the fan out stopped
 #: being a literal. A table a test can import cannot go stale that way.
 _FREE_SEARCHES: Final[
-    dict[targets.Reader, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
+    dict[decoders.Reader, Callable[[str, int], Coroutine[Any, Any, list[Record]]]]
 ] = {
-    targets.Reader.OPEN_LIBRARY: _open_library_search,
+    decoders.Reader.OPEN_LIBRARY: _open_library_search,
 }
 
 
@@ -4140,9 +4159,9 @@ async def _google_search(query: str, limit: int, api_key: str) -> list[Record]:
 #: is exactly one of them. `resolve` is what stops a metered row naming a reader
 #: that is not in here.
 _METERED_SEARCHES: Final[
-    dict[targets.Reader, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
+    dict[decoders.Reader, Callable[[str, int, str], Coroutine[Any, Any, list[Record]]]]
 ] = {
-    targets.Reader.GOOGLE_BOOKS: _google_search,
+    decoders.Reader.GOOGLE_BOOKS: _google_search,
 }
 
 

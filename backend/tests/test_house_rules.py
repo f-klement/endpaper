@@ -2450,7 +2450,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
     **The successor to `TestTheProviderRosterIsOneList`, and the shape of the
     question changed with it.** That test compared `metadata`'s two dispatch
     tables, keyed on `CatalogueSource`, against the sets in `sources`. Both
-    tables are keyed on `targets.Reader` now and one reader serves three sources,
+    tables are keyed on `decoders.Reader` now and one reader serves several sources,
     so the comparison cannot be restated: which sources answer what is a field on
     a row, and `sources.LOOKUP_SOURCES` and `SEARCH_SOURCES` are derived from
     those fields rather than written beside them, so there is nothing left for
@@ -2644,7 +2644,7 @@ class TestNoModuleHardCodesASourceOrder:
       the thing to notice rather than this one's arrival: `metadata._lookup_one` and
       `metadata._FREE_SEARCHES` were dispatch tables keyed on a source, and there
       is no such table any more. Both are keyed on `targets.Reader` now, one
-      reader serves three sources, and a dict of four readers is not an order of
+      reader serves several sources, and a dict of readers is not an order of
       sources in any spelling, so the guard no longer reports them and an
       exemption for them would have no subject.
     * `sources.TAIL_MARGINAL`, how many books the leading tier missed that each

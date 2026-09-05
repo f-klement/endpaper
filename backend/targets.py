@@ -14,19 +14,20 @@ National Library were each a day of adapter code.
 **Data**: everything above, plus the capabilities, whether the target is metered
 and whether it needs a credential.
 
-**Code**: the parser. A `Reader` names one, and the reader keeps refusals a row
-could not express: `_marc_claims_isbn`, `_is_placeholder_title`,
-`_is_physical_book`, the non sorting bracket conventions, `_isbn_entries`. Koha
-makes this half data too, with `add_xslt`, and this project deliberately does
-not: a stylesheet cannot refuse a digitisation that shares an ISBN with the book.
+**Code**: the parser. A row names a `Reader` and nothing here knows what one
+does. What a decoder is, why there are seven of them for five serialisations,
+and why a stylesheet could not stand in for one, are `decoders.py`'s subject.
+`Target.decoding` is the whole of what this module hands it, and the whole of
+what it may hand it: an address or a query grammar reaching a decoder is the
+weld that module exists to refuse.
 
-**There are six readers and not the four the ticket names**, because MARC21 is
-two profiles here rather than one. `metadata._dnb_record` harvests GND identified
-headings across five tags and refuses a title that names a volume slot;
-`metadata._k10plus_record` joins `650 $a` and `$x` into one subject, reads no
-author identifiers and refuses no volume slot. Folding them would be a behaviour
-change dressed as a refactor, and the class of thing it would lose is the class
-`add_xslt` was refused over.
+## What a row can be asked for
+
+**One declaration in one vocabulary, `enums.Capability`**, read through
+`Target.can`; everything downstream asks the capability rather than a column.
+The vocabulary is shared with the other source family, so "answers no ISBN" is
+one statement rather than one per family. What the columns underneath still cost
+and who reads them is on `Target.capabilities`, once.
 
 ## The query is built here and nowhere else
 
@@ -55,7 +56,15 @@ from typing import Final
 from urllib.parse import urlsplit
 
 import z3950
-from enums import CatalogueSource
+
+# `Reader` is aliased to itself deliberately: `Target.reader` is typed on it, so
+# it is part of this module's surface even though the decoder registry is
+# `decoders.py`'s, and the redundant alias is what says so to mypy under
+# `no_implicit_reexport`. Spelling it `targets.Reader` at a call site is not a
+# mistake; building a decoder from anything but `Target.decoding` is.
+from decoders import MARC_READERS, Decoding
+from decoders import Reader as Reader
+from enums import Capability, CatalogueSource, SourceFamily
 
 
 class Transport(StrEnum):
@@ -116,37 +125,6 @@ class TitleQuery(StrEnum):
     QUOTED_PHRASE = "quoted_phrase"
     #: `index all "term term"`.
     QUOTED_ALL = "quoted_all"
-
-
-class Reader(StrEnum):
-    """The parser a target's records are read with.
-
-    Closed, and adding a member is the only part of adding a source that is
-    still code. See the module docstring for why MARC21 is two of these.
-    """
-
-    #: MARC21 through `metadata._dnb_record`: GND identified headings, volume
-    #: slot titles refused.
-    MARC_GND = "marc_gnd"
-    #: MARC21 through `metadata._k10plus_record`.
-    MARC_PLAIN = "marc_plain"
-    #: Namespaced Dublin Core, `metadata._bnf_record`.
-    DUBLIN_CORE = "dublin_core"
-    #: Un-namespaced Dublin Core, `metadata._nkp_record`. The Czech National
-    #: Library writes `<record-list><dc-record><title>` with no namespace, so
-    #: the BnF's selector returns zero against it.
-    DUBLIN_CORE_BARE = "dublin_core_bare"
-    #: MODS, `metadata._loc_record`.
-    MODS = "mods"
-    #: Open Library's own JSON.
-    OPEN_LIBRARY = "open_library"
-    #: The Google Books volumes API.
-    GOOGLE_BOOKS = "google_books"
-
-
-#: The readers that read MARC21, so the three MARC only knobs can be refused on
-#: a row that does not read MARC at all.
-MARC_READERS: Final = frozenset({Reader.MARC_GND, Reader.MARC_PLAIN})
 
 
 #: The SRU parameters `Target.sru_params` writes itself, which a row's own query
@@ -533,6 +511,57 @@ class Target:
         if self.refuses_component_parts or self.reads_author_identifiers:
             raise ValueError(f"{self.source}: a MARC knob on a reader that reads no MARC")
 
+    @property
+    def capabilities(self) -> frozenset[Capability]:
+        """What this source can be asked for, as one statement.
+
+        **The single reading surface on the asking side**, which is what this
+        buys and is less than it first appears. `sources.py` and
+        `metadata.resolve` ask `can`; the columns are read here, by
+        `main.seed_catalogue_targets` writing the table, and by the tests that
+        pin the storage against that table and against the roster.
+
+        **What a fifth capability still costs, stated because the tidier
+        sentence was measured false.** An enum member, an arm here, a `bool`
+        field, a value on every seeded row, a column on `models.CatalogueTarget`
+        and a line in the seeder. What it no longer costs is a module constant
+        in `sources.py` and a second spelling at every call site, which is the
+        part `enums.Capability` removes.
+
+        **The declaration is still four columns and this is a projection over
+        them**, deliberately: making it the stored field changes this class's
+        keyword surface, which the seam ticket's scope refuses. The argument for
+        taking it later, and what it would cost, is in `docs/decisions.md`.
+        """
+        declared = {
+            Capability.ANSWERS_ISBN: self.answers_lookup,
+            Capability.ANSWERS_TITLE_SEARCH: self.answers_search,
+            Capability.METERED: self.metered,
+            Capability.NEEDS_A_CREDENTIAL: self.needs_key,
+        }
+        return frozenset(name for name, held in declared.items() if held)
+
+    def can(self, capability: Capability) -> bool:
+        """Whether this source can be asked for that."""
+        return capability in self.capabilities
+
+    @property
+    def decoding(self) -> Decoding:
+        """What a decoder is told about this source, and it is never how to reach it.
+
+        **The only place in the application that builds a `Decoding` from a
+        catalogue row**, which is what keeps the projection one sided: a decoder
+        cannot reach back for an address it was never given. Everything omitted
+        here is omitted on purpose, and `decoders.Decoding` says which and why.
+        """
+        return Decoding(
+            source=self.source.value,
+            reader=self.reader,
+            refuses_component_parts=self.refuses_component_parts,
+            requires_isbn_claim=self.requires_isbn_claim,
+            reads_author_identifiers=self.reads_author_identifiers,
+        )
+
     def isbn_query(self, value: str) -> str:
         """The query that asks this target about one ISBN.
 
@@ -582,6 +611,13 @@ class Target:
     def search_records(self, limit: int) -> int:
         return min(limit * self.search_multiplier, self.search_cap)
 
+
+#: Which family `SEEDED` is the registry for.
+#:
+#: Named rather than left implicit so a guard has a line to read:
+#: `tests/test_decoders.py::TestTwoFamiliesMeanTwoRegistries`. The consequence
+#: is on `enums.SourceFamily`.
+FAMILY: Final = SourceFamily.CATALOGUE
 
 #: The ten catalogues this application ships knowing about.
 #:

@@ -21,7 +21,7 @@ from typing import Any, Final
 
 import isbn
 import targets
-from enums import CatalogueSource
+from enums import Capability, CatalogueSource
 
 
 @dataclass(frozen=True)
@@ -281,7 +281,9 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
 #: a different question, and `metadata.resolve` is where it went: whether the
 #: reader a row names can actually read what the target answers with.
 LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.answers_lookup
+    target.source
+    for target in targets.SEEDED.values()
+    if target.can(Capability.ANSWERS_ISBN)
 )
 
 #: The sources that can answer a title search.
@@ -318,10 +320,12 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
 #: would have to encode the exception anyway. That was true while the alternative
 #: was deriving it from `DEFAULT_ORDER` minus a special case. It is not true of
 #: this derivation, because the exception is now the thing being read:
-#: `targets.SEEDED[CatalogueSource.NKP].answers_search` is False, on the row,
-#: with the measurement beside it.
+#: `targets.SEEDED[CatalogueSource.NKP]` does not declare
+#: `Capability.ANSWERS_TITLE_SEARCH`, on the row, with the measurement beside it.
 SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.answers_search
+    target.source
+    for target in targets.SEEDED.values()
+    if target.can(Capability.ANSWERS_TITLE_SEARCH)
 )
 
 #: Catalogues whose title search does not fit the default deadline, so the
@@ -339,7 +343,7 @@ SLOW_SEARCHES: Final[frozenset[CatalogueSource]] = frozenset()
 #: Sources that cost money per request, so asking one for a book another source
 #: already answered is a bill for nothing. See `Plan.lookup_together`.
 METERED: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.metered
+    target.source for target in targets.SEEDED.values() if target.can(Capability.METERED)
 )
 
 #: Sources that need a credential the household supplies, so an install without
@@ -365,7 +369,9 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.needs_key
+    target.source
+    for target in targets.SEEDED.values()
+    if target.can(Capability.NEEDS_A_CREDENTIAL)
 )
 
 #: How many enabled lookup sources are asked **together** before the rest are

@@ -1,6 +1,8 @@
 """The catalogue targets: what a row may say, and what the seeded nine do say."""
 
+import ast
 import dataclasses
+import pathlib
 import re
 
 import pytest
@@ -8,7 +10,7 @@ import pytest
 import sources
 import targets
 import z3950
-from enums import CatalogueSource
+from enums import Capability, CatalogueSource
 
 
 def _seeded(**overrides: object) -> targets.Target:
@@ -361,3 +363,62 @@ class TestTheIndexPatternIsExact:
             for index in (target.isbn_index, target.title_index):
                 if index:
                     assert re.fullmatch(targets._INDEX.pattern, index)
+
+
+class TestARowDeclaresWhatItCanBeAskedForInOneStatement:
+    """`Target.capabilities`, and the columns under it are storage.
+
+    The values the roster declares are pinned once, in
+    `test_house_rules.py::test_the_derived_sets_are_the_rows`. These are about
+    the declaration rather than about the roster: that the vocabulary is whole,
+    and that every member of it means something on this roster.
+    """
+
+    def test_the_projection_has_an_arm_for_every_capability(self):
+        """A member with no arm is a capability that reads False everywhere and
+        says nothing about it.
+
+        **Derived from the enum and read off the source**, so a member added
+        later is covered by being added rather than by being remembered. Read
+        with `ast` off `Target.capabilities` alone, because a name that appears
+        anywhere else in the module would satisfy a text search on a property
+        that never mentions it.
+        """
+        module = ast.parse(
+            pathlib.Path(targets.__file__).read_text(encoding="utf-8")
+        )
+        [row] = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.FunctionDef) and node.name == "capabilities"
+        ]
+        named = {
+            node.attr
+            for node in ast.walk(row)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "Capability"
+        }
+
+        assert named == {member.name for member in Capability}
+
+    @pytest.mark.parametrize("capability", list(Capability))
+    def test_every_capability_is_declared_by_some_row(self, capability):
+        """A member no catalogue holds is a vocabulary word for nothing here.
+
+        **Only one direction is asserted.** A capability every catalogue holds
+        is still worth having, because the vocabulary is shared with the other
+        source family and an importer may be the one that lacks it. A capability
+        **no** row holds is the one that cannot be right, since nothing on
+        either side has yet been measured against it.
+        """
+        assert [
+            target for target in targets.SEEDED.values() if target.can(capability)
+        ], capability
+
+    def test_a_row_can_lack_one(self):
+        """The control: the row above would pass on a projection that answered
+        True for everything."""
+        assert not targets.SEEDED[CatalogueSource.NKP].can(
+            Capability.ANSWERS_TITLE_SEARCH
+        )

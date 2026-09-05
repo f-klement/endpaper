@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  One MARC21 record on its own, with no SRU envelope around it, because the
+  point of this file is that a decoder written for a catalogue does not know it
+  was ever fetched from one. It is read off disk by
+  `tests/test_decoders.py::TestADecoderWorksOnAFile`.
+
+  Synthetic rather than captured: the captured responses this suite uses live
+  inline in `test_metadata.py` beside the source they came from, and a second
+  copy of one here would be a fixture that stops being re-derived.
+-->
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+ <record>
+  <leader>00000nam a2200000uc 4500</leader>
+  <datafield tag="020" ind1=" " ind2=" ">
+   <subfield code="a">9780743273565</subfield>
+  </datafield>
+  <datafield tag="041" ind1=" " ind2=" ">
+   <subfield code="a">eng</subfield>
+  </datafield>
+  <datafield tag="100" ind1="1" ind2=" ">
+   <subfield code="a">Fitzgerald, F. Scott</subfield>
+   <subfield code="4">aut</subfield>
+  </datafield>
+  <datafield tag="245" ind1="1" ind2="0">
+   <subfield code="a">The Great Gatsby</subfield>
+  </datafield>
+  <datafield tag="264" ind1=" " ind2="1">
+   <subfield code="b">Scribner</subfield>
+   <subfield code="c">1925</subfield>
+  </datafield>
+  <datafield tag="300" ind1=" " ind2=" ">
+   <subfield code="a">218 S.</subfield>
+  </datafield>
+ </record>
+</collection>

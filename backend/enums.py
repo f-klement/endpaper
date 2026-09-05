@@ -738,3 +738,63 @@ class CatalogueSource(StrEnum):
     #: The Biblioteca Nacional de España. Alma SRU on the OPAC hostname, MARC21,
     #: and the ÖNB's profile exactly. #91.
     BNE = "bne"
+
+
+class SourceFamily(StrEnum):
+    """Which kind of thing a source is, and there are two of them.
+
+    **The consequence, which is what belongs here.** Each family has its own
+    registry, and one registry would let a member's imported library be selected
+    as a source answering another member's ISBN scan. `CatalogueSource` is the
+    catalogue registry's key space and every door onto the lookup path is keyed
+    on it, so the refusal is by construction rather than by a check.
+    `targets.FAMILY` names which family that registry is, and
+    `tests/test_decoders.py::TestTwoFamiliesMeanTwoRegistries` is the guard.
+
+    **What the two families share is a contract rather than a registry**: one
+    output type, `catalogue.Record`; one failure rule, that a bad record fails
+    alone and never the batch; and one capability vocabulary, `Capability`.
+
+    Why they are two rather than one, on trust, direction, where they run and
+    cardinality, is in `docs/decisions.md`.
+    """
+
+    CATALOGUE = "catalogue"
+    IMPORT = "import"
+
+
+class Capability(StrEnum):
+    """What a source can be asked for, in one vocabulary across both families.
+
+    **One vocabulary and not one per family**, because a catalogue that answers
+    no ISBN and an OPDS server that serves no ISBN are the same statement. A
+    member only one family could ever have is a sign the split is being papered
+    over rather than a reason to add one.
+
+    **Declared as a set rather than grown one boolean at a time**, which is the
+    shape taken from Calibre's metadata `Source`: capabilities are a frozenset
+    on the provider there, and have been across a large number of providers for
+    years. The test of the shape is that a reader of one row can answer "what is
+    this source for" without consulting five other constants, and that a fifth
+    member does not mean touching every call site. `targets.Target.capabilities`
+    is where a catalogue row answers it.
+
+    **Not a declaration of which fields a source can supply**, and that is a
+    deliberate split rather than an omission. Calibre keeps `touched_fields`
+    separate from `capabilities` for the same reason: they answer different
+    questions. Here the field question is already answered by the output type
+    both families share, `catalogue.Record`, whose optional fields are exactly
+    "what this record carried"; a second set naming the same thing would be a
+    fact stored twice and nothing reads it today.
+    """
+
+    #: Answers a lookup by ISBN: one identifier in, at most one record out.
+    ANSWERS_ISBN = "answers_isbn"
+    #: Answers a search by title terms: several candidates out, ranked here.
+    ANSWERS_TITLE_SEARCH = "answers_title_search"
+    #: Costs money per request, so asking it about a book something else already
+    #: answered is a bill for nothing. See `sources.Plan.lookup_together`.
+    METERED = "metered"
+    #: Needs a credential the household supplies, so an install without one has
+    #: a source in the list that can never answer.
+    NEEDS_A_CREDENTIAL = "needs_a_credential"

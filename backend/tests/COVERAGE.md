@@ -1,15 +1,15 @@
 # Backend test coverage
 
-**5245 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05.
+**5274 tests**, in 84 files, recounted with `--collect-only` on 2026-09-05.
 
 **The headline is no longer equal to the passed count, and the difference is deliberate.** The
-gate reports `5229 passed, 16 xfailed`: sixteen tests are strict `xfail`, each recording a
+gate reports `5258 passed, 16 xfailed`: sixteen tests are strict `xfail`, each recording a
 defect the CSV importer has today, so each fails on purpose and the run is green. **Collected
 is the number this table sums to; passed is the number the gate prints.** They differ by
 exactly the count of open recorded defects, so if they ever differ by anything else, one of the
 two is wrong.
 
-**The rows below sum to 5212, thirty three short, and the shortfall is deliberate.** Those
+**The rows below sum to 5241, thirty three short, and the shortfall is deliberate.** Those
 tests live in four files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -70,7 +70,8 @@ why the helper uses regexes.
 | `test_google_books.py` | 41 | Volume mapping, the gap-filling merge, upstream failures, and that `merge_into` takes a `BookMatch` rather than a dictionary, pinned on the signature itself so a third call site inherits the bound |
 | `test_notifications.py` | 129 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, that a failure leaves the loan to retry |
 | `test_sources.py` | 94 | **The provider roster.** That off means not asked rather than deprioritised, that the stored order is the order sources are asked and not which is believed |
-| `test_targets.py` | 63 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
+| `test_targets.py` | 69 | **A catalogue as a row.** The seeded roster field by field, what a row may carry, and the two query builders |
+| `test_decoders.py` | 23 | **What a decoder is, and what it is never told.** The contract, a catalogue decoder reading a record off a file with no `Target`, and the two family refusal |
 | `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |
 | `test_settings_store.py` | 38 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |

@@ -9699,3 +9699,69 @@ what this app's catalogue chain is already for.
 **The bound on the claim.** This is a census of the candidates named on that ticket, not of
 deployed OPDS at large. A server outside that set may well emit an identifier, and the
 recommendation should be read as being about these applications rather than about the standard.
+
+## Two source families, one contract
+
+Catalogue sources and ebook importers share the output type (`catalogue.Record`), the rule
+that one bad record fails alone and never the batch, and the capability vocabulary
+(`enums.Capability`). They are **separate families with separate registries**, and the reason
+is not tidiness: one registry would let a member's imported library be selected as a source
+answering another member's ISBN scan, which is one household member's private holdings
+answering another member's lookup. `enums.SourceFamily` carries the argument; `targets.FAMILY`
+names which family the catalogue registry is;
+`tests/test_decoders.py::TestTwoFamiliesMeanTwoRegistries` is the enforcement, parametrised
+over `list(SourceFamily)` so a family added later is covered without an arm being remembered.
+
+## A decoder is never told how the bytes arrived
+
+`decoders.Decoding` is the whole of what a decoder is handed: a label, a reader, and three
+knobs the decoder itself reads. No address, no transport, no query, no handle. The
+enforcement is the type on `metadata._LOOKUP_READERS` and `_SEARCH_READERS`, so mypy refuses
+a decoder taking a `targets.Target`, plus
+`tests/test_decoders.py::TestADecoderWorksOnAFile`, which runs the claim rather than
+asserting it: a MARC record read off disk, decoded with a `Decoding` built by hand, no
+`Target` anywhere. That is the demand OPF makes, being both a zip entry inside an EPUB and a
+loose file beside a book in a Calibre library.
+
+**What is not separated, stated rather than left to be found.** `metadata._BESPOKE_LOOKUPS`,
+`_FREE_SEARCHES` and `_METERED_SEARCHES` hold adapters that fetch as well as decode. Their
+decoders are already pure inside them (`_open_library_edition`, `_google_record`); what is
+missing is only the registry entry. Splitting them is a rewrite of two JSON adapters rather
+than a seam over what is there, and the ticket refuses a rewrite.
+
+## The capability vocabulary is what a source can be asked for, not which fields it supplies
+
+Two owner notes name "the same vocabulary for declaring which fields a reader can supply" as
+part of the shared contract. `enums.Capability` deliberately does not become that, and the
+reason is the reference implementation's own: Calibre keeps `touched_fields` separate from
+`capabilities` because they answer different questions. Here the field question is already
+answered by the output type both families share. `catalogue.Record`'s fields are all optional
+and a decoder names only what its source carried, so "which fields can this supply" is read
+off the record rather than declared beside it, and `Record.completeness` already ranks on it.
+A second set naming the same thing would be a fact stored twice that nothing reads.
+
+**What would change that**: a caller that has to know before asking. Nothing does today.
+
+## Two families, the argument, and where it lives
+
+The reasoning belongs in this register and the consequence belongs at the code. At the code:
+`enums.SourceFamily` carries the consequence (two registries, and what one would allow),
+`targets.FAMILY` names which family the catalogue registry is, and the test class points at
+the enum. The argument on trust, direction, where they run and cardinality is the section
+above and is not repeated in three docstrings.
+
+## The capability vocabulary is a projection, not the stored field
+
+`Target.capabilities` is computed from the row's four boolean columns rather than replacing
+them. Making it the field and the booleans read only properties is the version with no second
+spelling, and it changes `Target.__init__`'s keyword surface, so existing tests would change.
+Raised rather than taken. If it is later taken, the cost measured on this tree is five
+constructor call sites in `backend/tests/test_targets.py` and nothing else: every other
+reader in the tree goes through an attribute read, which a property serves unchanged.
+
+## No migration, and why
+
+The capability declaration did not become stored data. `catalogue_targets` keeps its four
+boolean columns, `main.seed_catalogue_targets` writes them from the row exactly as before,
+and nothing reads the table back (`targets.SEEDED` is what the runtime asks). The closed set
+of what a source can do is code, so widening it is an enum member rather than DDL.
