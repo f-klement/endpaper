@@ -20,7 +20,7 @@ read is cheap enough that a cache would buy less than it risks.
 """
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
@@ -68,6 +68,25 @@ logger = logging.getLogger(__name__)
 #: 2026-08-24 the widest carried 7 credited names, and an anthology naming
 #: twenty is a real thing to catalogue.
 MAX_ASSERTIONS_PER_RECORD = 20
+
+#: The authority file that says two spellings are one person.
+#:
+#: **Declared here rather than in `authors.py` because this is the only line in
+#: the tree that evaluates it**, and the rules under `authors.py` take a spine as
+#: opaque strings and stay free of the ORM and of the scheme enum.
+#:
+#: One name for the whole idea, so a reader asking "which file is the spine"
+#: finds one answer. Why ISNI and not VIAF or the GND is in `docs/decisions.md`
+#: and `docs/legend.md`; it is a decision rather than a trap at this site, so it
+#: is not restated here.
+#:
+#: **Storing a VIAF cluster id is untouched by this.** It is recorded as a cross
+#: reference and shown, and it is barred from deciding identity by
+#: `tests/test_authorship.py::TestOnlyTheSpineSaysTwoSpellingsAreOnePerson`,
+#: which asks every member of `AuthorityScheme` rather than listing the ones it
+#: excludes, so a file added to the roster is covered without anybody
+#: remembering to.
+IDENTITY_SPINE = AuthorityScheme.ISNI
 
 
 class AuthorNotFound(Exception):
@@ -245,18 +264,64 @@ class Authorship:
         """Names that are probably one person.
 
         A suggestion and never a verdict: accepting one writes an alias row,
-        and deleting that row puts the shelf back exactly as it was.
+        and deleting that row puts the shelf back exactly as it was. That is
+        true of the `identity` rule as well, which is what keeps a stored ISNI
+        from folding two spellings on its own: see `_edges_on_identity`.
 
         Returns the schema type, like `listing()` and `merge()`. Returning the
         domain `AuthorSuggestion` left the router knowing its field names,
         which is exactly the locality this module exists to remove.
+
+        **Three statements rather than two**, and the third is the whole
+        `author_identifiers` table, which is what `listing()` already reads for
+        the same reason: one row per spelling per scheme Library wide is cheaper
+        read whole and grouped in Python than joined against every visible key.
+        `entries`, `book_ids_for`, `merge` and `unmerge` still cost two.
         """
+        entries = self.entries
         return [
             AuthorSuggestionOut(
                 keys=list(group.keys), names=list(group.names), reasons=list(group.reasons)
             )
-            for group in suggest_merges(self.entries)
+            for group in suggest_merges(entries, self._spines(entries))
         ]
+
+    def _spines(self, entries: Sequence[AuthorEntry]) -> dict[str, frozenset[str]]:
+        """Each author's ISNI, which is the only scheme identity is read from.
+
+        **Every value an entry's evidenced spellings carry, not one of them.**
+        The set is what lets `_edges_on_identity` tell an identity from a
+        disagreement; handing it a single value would pick a winner here, one
+        layer below where the rule refusing to pick lives.
+
+        **Built through `_evidenced_keys` and never off `_identifiers_by_key`
+        whole, and that is the privacy line rather than tidiness.** The table is
+        Library wide and unfiltered, exactly like the alias table, so a spine
+        taken from it directly would let a row filed under a spelling that
+        survives only on somebody else's Private Book decide that two of this
+        Member's authors are one person. That is the breach `_evidenced_keys`
+        records a measurement for, arriving through a new door: not a read of
+        the row, but a merge suggested because of it.
+
+        **Only `IDENTITY_SPINE`.** A VIAF cluster id, a GND number and a
+        national library's control number are all stored beside it and none of
+        them may say who somebody is: cluster ids split and merge, and a
+        national file's number identifies a record in that file rather than a
+        person. That constant names the guard that stops a second scheme
+        acquiring this.
+        """
+        identifiers = self._identifiers_by_key()
+        found: dict[str, frozenset[str]] = {}
+        for entry in entries:
+            values = {
+                row.identifier
+                for key in _evidenced_keys(entry)
+                for row in identifiers.get(key, ())
+                if AuthorityScheme(row.scheme) is IDENTITY_SPINE
+            }
+            if values:
+                found[entry.key] = frozenset(values)
+        return found
 
     def book_ids_for(self, author: str) -> list[int]:
         """The visible Books credited to one author, by key or by any spelling.

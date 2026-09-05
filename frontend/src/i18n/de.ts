@@ -850,6 +850,7 @@ export const de: Messages = {
   "authors.mergeIntoOther": "Unter diesem Namen zusammenführen",
   "authors.confirm": '{count} Schreibweisen zu "{name}" zusammenführen?',
   "authors.foldedInto": 'Dieser Name heißt bereits "{name}", dorthin ging es.',
+  "authors.reasonIdentity": "derselbe Normdatensatz",
   "authors.reasonSpelling": "derselbe Name, anders getrennt",
   "authors.reasonInitials": "eine Abkürzung gegen einen ausgeschriebenen Namen",
   "authors.reasonFragment": "Teil eines längeren Namens",

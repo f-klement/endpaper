@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**5177 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05 and equal to the
-`5177 passed` the gate reported on the same commit.
+**5205 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05 and equal to the
+`5205 passed` the gate reported on the same commit.
 
-**The rows below sum to 5144, thirty three short, and the shortfall is deliberate.** Those
+**The rows below sum to 5172, thirty three short, and the shortfall is deliberate.** Those
 tests live in four files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -71,9 +71,9 @@ why the helper uses regexes.
 | `test_models.py` | 80 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_importing.py` | 20 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
 | `test_authority.py` | 120 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
-| `test_authorship.py` | 67 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
+| `test_authorship.py` | 88 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
 | `test_shelf.py` | 187 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
-| `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules |
+| `test_authors.py` | 52 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the four suggestion rules |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 37 | The sliding window, and the login/registration limits |
 | `test_uploads.py` | 25 | Content-sniffed image validation and the size cap |

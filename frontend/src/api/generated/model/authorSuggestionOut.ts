@@ -5,18 +5,32 @@
  * Catalogue, lend and track a collection of physical books, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { SuggestionReason } from "./suggestionReason.ts";
 
 /**
  * Names that are probably one person, and the rules that said so.
  *
  * A suggestion, never a verdict. `reasons` is returned so a reader can tell a
- * certainty from a guess: `spelling` is the same name with the spaces moved,
- * `initials` is an abbreviated given name, and `fragment` is one name's words
- * sitting inside another's, which is what a credit line stored in catalogue
- * order splits into.
+ * certainty from a guess: `identity` is a confirmed ISNI shared inside the
+ * group, `spelling` is the same name with the spaces moved, `initials` is an
+ * abbreviated given name, and `fragment` is one name's words sitting inside
+ * another's, which is what a credit line stored in catalogue order splits
+ * into.
+ *
+ * `identity` is the only one that reads a stored fact rather than the letters
+ * of a name, so it is the only one that reaches a pen name, a transliteration
+ * or a married name. It is still a suggestion: an ISNI says two spellings are
+ * one person, and whether this Library folds them is a decision somebody makes
+ * and can undo.
+ *
+ * **The reasons are the union over the whole group and never a label on one
+ * name.** Two rules reaching overlapping pairs make one group, so `identity`
+ * on a group of three says that a pair inside it shares an ISNI, not that
+ * every name in it does. Read them as why these names arrived together and
+ * then decide per name: any of them can be dropped before merging.
  */
 export interface AuthorSuggestionOut {
   keys: string[];
   names: string[];
-  reasons: string[];
+  reasons: SuggestionReason[];
 }

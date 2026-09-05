@@ -269,7 +269,7 @@
         "type": "object"
       },
       "AuthorSuggestionOut": {
-        "description": "Names that are probably one person, and the rules that said so.\n\nA suggestion, never a verdict. `reasons` is returned so a reader can tell a\ncertainty from a guess: `spelling` is the same name with the spaces moved,\n`initials` is an abbreviated given name, and `fragment` is one name's words\nsitting inside another's, which is what a credit line stored in catalogue\norder splits into.",
+        "description": "Names that are probably one person, and the rules that said so.\n\nA suggestion, never a verdict. `reasons` is returned so a reader can tell a\ncertainty from a guess: `identity` is a confirmed ISNI shared inside the\ngroup, `spelling` is the same name with the spaces moved, `initials` is an\nabbreviated given name, and `fragment` is one name's words sitting inside\nanother's, which is what a credit line stored in catalogue order splits\ninto.\n\n`identity` is the only one that reads a stored fact rather than the letters\nof a name, so it is the only one that reaches a pen name, a transliteration\nor a married name. It is still a suggestion: an ISNI says two spellings are\none person, and whether this Library folds them is a decision somebody makes\nand can undo.\n\n**The reasons are the union over the whole group and never a label on one\nname.** Two rules reaching overlapping pairs make one group, so `identity`\non a group of three says that a pair inside it shares an ISNI, not that\nevery name in it does. Read them as why these names arrived together and\nthen decide per name: any of them can be dropped before merging.",
         "properties": {
           "keys": {
             "items": {
@@ -287,7 +287,7 @@
           },
           "reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/SuggestionReason"
             },
             "title": "Reasons",
             "type": "array"
@@ -5140,6 +5140,17 @@
         ],
         "title": "StatsOut",
         "type": "object"
+      },
+      "SuggestionReason": {
+        "description": "Which rule offered a group, so a person can tell a certainty from a guess.\n\n**An enum rather than four string constants, and the reason is a defect it\nalready caused.** `AuthorSuggestionOut.reasons` crosses the API, and while\nit was typed `list[str]` the client held its own map of three of the four\nand fell back to rendering the raw value. `identity` shipped that way and a\nreader saw the word `identity` beside `same name, spaced differently`.\n\nAs an enum it reaches the client as a union, so\n`SuggestionCard.tsx`'s `REASONS` is exhaustive by type and **a fifth rule\nfails `bun run typecheck` instead of shipping untranslated.** That is the\nguard; nothing here can enforce it from the Python side.\n\nModule local rather than in `enums.py`, which is the house pattern for a set\nno column stores: `covers.CoverOutcome`, `metadata.Outcome`,\n`targets.Transport` and `schemas.public.PublicBookSort` are the same shape.\n`enums.py` is for the closed sets the ORM writes to a column, and no row\nanywhere holds one of these: a suggestion is computed per request and stored\nnowhere.",
+        "enum": [
+          "identity",
+          "spelling",
+          "initials",
+          "fragment"
+        ],
+        "title": "SuggestionReason",
+        "type": "string"
       },
       "TagCategory": {
         "description": "The groups tags are presented in throughout the UI.\n\nThe first three are the curated vocabulary, seeded at boot and the same in\nevery deployment. CUSTOM is everything a library invents for itself.\n\nKeeping them apart, rather than making every tag free-form as Jelu and\nOpenreads do, is deliberate: the curated list is what makes the tag picker\nuseful on the first day, before anybody has typed anything. What was wrong\nwas having no way past it.",

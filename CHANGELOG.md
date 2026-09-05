@@ -4,6 +4,10 @@
 
 ### Added
 
+- Authors that share a confirmed ISNI are offered as one person on the merge suggestions
+  panel, which is the first rule there that reaches a pen name or a transliteration. It is a
+  suggestion like the other three: nothing is folded until somebody says so, and deleting
+  the alias row puts the shelf back.
 - **In library mode every member chases every loan.** The overdue page used to
   narrow to the loans a member lent or borrowed unless they were an admin, so a
   volunteer could see a book was out and not that it was late. With library mode

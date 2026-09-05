@@ -9588,3 +9588,49 @@ UNIMARC's.**
 **And a licence consequence for whoever writes the tests.** USEMARCON's sample records are
 covered by the licence above, so they cannot become fixtures here. A UNIMARC fixture in this
 repository is hand written.
+
+## ISNI is the identity spine, and VIAF is a discovery route
+
+Owner's ruling, 2026-08-28, on #99. What says two spellings are one person is a stored
+ISNI, and nothing else may.
+
+**No internal author id is minted, because the schema already refuses one.** `books.author`
+is free text, an author page is a `GROUP BY`, and neither identity table carries a foreign
+key to an author because there is nothing to point at. The spelling is already the
+identifier and is stable by construction, being derived from the books rather than
+assigned.
+
+**ISNI rather than VIAF, on measurement.** A cluster id is not a person: clusters split and
+merge, and #87 measured `Stevenson, Robert Louis` resolving to four distinct personal
+clusters. A spine built on one would offer a merge that changes with nothing in this
+database having changed. ISNI is ISO 27729, minted per person and language neutral, and
+that single property is the whole of why it was chosen.
+
+**ISNI rather than the GND, though the GND is the entry point.** The GND is a national
+file, so a spine built on it works for German language authors and thins out elsewhere,
+which is the coverage gap the authority feature exists to close.
+
+**A VIAF cluster id is still stored, and that is not a contradiction.** `author_identifiers`
+holds cross references beside the confirmed record; the identity is the record a Member
+confirmed. What the ruling forbids is a cluster id **deciding** who somebody is, and that is
+now true by construction rather than by convention: `authors.IDENTITY_SPINE` is the one
+place that names the scheme, and
+`tests/test_authorship.py::TestOnlyTheSpineSaysTwoSpellingsAreOnePerson` asks every member
+of `AuthorityScheme` in turn and fails if any but ISNI acquires the power.
+
+**A shared ISNI suggests a merge and never performs one.** Folding on it would adjudicate at
+write time, which is the one thing this feature refuses at both ends. The confirmation that
+put the number there was a person saying which record an author is, not a person saying two
+of their authors are the same. It joins `spelling`, `initials` and `fragment` as a fourth
+suggestion rule, and it is the only one of the four that reaches a pen name, a
+transliteration or a married name, because it is the only one that reads a stored fact
+rather than the letters of a name.
+
+**An author carrying two ISNIs contributes nothing.** That is a disagreement rather than an
+identity, and keeping either value would be resolution by ordering, the call
+`authority._viaf_sources` refuses for a code a cluster names twice. The disagreement is not
+lost by being dropped: `AuthorOut.identifier_conflicts` reports it under its scheme.
+
+**An author with no ISNI is the common case and is unaffected.** The spelling stays the key
+and the same suggestions are offered. Confirmed rather than assumed, in
+`TestAnAuthorWithNoSpine`.

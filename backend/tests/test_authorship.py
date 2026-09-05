@@ -27,15 +27,17 @@ from pathlib import Path
 import pytest
 from sqlalchemy import event
 
+from authors import SuggestionReason as Reason
 from authors import author_key
 from authorship import (
+    IDENTITY_SPINE,
     MAX_ASSERTIONS_PER_RECORD,
     AuthorNotFound,
     Authorship,
     IdentifierConflict,
 )
 from catalogue import AuthorityAssertion
-from database import engine
+from database import Base, engine
 from enums import AuthorityProvenance, AuthorityScheme
 from models import (
     AUTHORITY_IDENTIFIER_MAX,
@@ -46,6 +48,19 @@ from models import (
 )
 
 KANE = AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
+
+#: Dickens' ISNI, used wherever a test needs the spine to say two spellings are
+#: one person. A real number rather than an invented one, so a reader can check
+#: it, and a pen name rather than a misspelling, because that is the case no rule
+#: reading letters can reach.
+DICKENS = "0000000121174585"
+
+#: Two numbers bracketing it, so a contested author can be built whose lowest
+#: value is `DICKENS` and another whose highest is. One of the two is enough to
+#: let a rule that keeps a value rather than dropping the author pass, because
+#: it files that author under the number nobody else carries.
+BELOW_DICKENS = "0000000000000001"
+ABOVE_DICKENS = "0000000999999999"
 
 
 @pytest.fixture
@@ -1200,3 +1215,218 @@ class TestTheCrossReferencesStoredWithAConfirmation:
         )
 
         assert {row.scheme for row in recorded.stored} == {AuthorityScheme.VIAF}
+
+
+def _identify(db, user, name: str, identifier: str, scheme=IDENTITY_SPINE) -> None:
+    """File one authority identifier under a spelling the shelf carries."""
+    Authorship.seen_by(db, user.id).confirm_identifier(
+        name, scheme, identifier, by_user_id=user.id
+    )
+
+
+class TestOnlyTheSpineSaysTwoSpellingsAreOnePerson:
+    """Every authority file this app stores, asked whether it may decide identity.
+
+    **The exclusion is derived from `AuthorityScheme` rather than listed**, which
+    is the difference between a guard and an inclusion list: a file another
+    change adds to the roster is covered here without anybody remembering to add
+    an arm, and it fails loudly if that file acquires the power the spine has.
+
+    The interesting rows are the ones that look most like an identity and are
+    not. A VIAF cluster id is the one the ruling names: clusters split and merge,
+    and `Stevenson, Robert Louis` was measured resolving to four personal
+    clusters, so a spine built on one would offer a merge that changes when
+    nothing in this database has. A GND number is a record in a national file. So
+    is each of the six national numbers. All of them are stored, shown and
+    fetched back from; none of them says who somebody is.
+    """
+
+    @pytest.mark.parametrize("scheme", list(AuthorityScheme))
+    def test_exactly_one_scheme_groups_two_spellings_and_it_is_the_spine(
+        self, db, user, scheme
+    ):
+        shelve(db, user, "Boz", "Charles Dickens")
+        _identify(db, user, "Boz", DICKENS, scheme)
+        _identify(db, user, "Charles Dickens", DICKENS, scheme)
+
+        grouped = [
+            group
+            for group in Authorship.seen_by(db, user.id).suggestions()
+            if Reason.IDENTITY in group.reasons
+        ]
+
+        assert bool(grouped) is (scheme is IDENTITY_SPINE), scheme
+
+    def test_the_pair_is_reachable_by_no_other_rule(self, db, user):
+        """The control the row above needs, or every arm of it could be passing
+        because nothing on this shelf suggests anything at all."""
+        shelve(db, user, "Boz", "Charles Dickens")
+
+        assert Authorship.seen_by(db, user.id).suggestions() == []
+
+    def test_the_spine_is_isni(self):
+        """The only line in either test tree that pins **which** file the spine
+        is, and it is load bearing rather than decorative.
+
+        The parametrized test above reads `IDENTITY_SPINE` itself, so it
+        enforces that exactly one scheme decides identity and is silent about
+        which: a mutation repointing the constant at VIAF moves that guard with
+        it and every arm stays green. Measured, and this test was the only
+        failure. Deleting it leaves the roster's most churning identifier able
+        to become the spine with nothing going red.
+        """
+        assert IDENTITY_SPINE is AuthorityScheme.ISNI
+
+
+class TestThePrivacyLineOnTheSpine:
+    """A merge suggestion is a new door onto `author_identifiers`, and it needs
+    the rule the other doors have.
+
+    `_evidenced_keys` records a measured breach: `entry.key` is derived from a
+    `keep_name` a member typed, `merge` accepts one no Book carries, so a guessed
+    spelling reached rows derived from somebody else's Private Book. `listing`,
+    `identifiers_for` and `forget_identifier` were the three doors then. This is
+    a fourth, and it leaks differently: nothing shows the row, but the merge
+    offered tells the caller that some author of theirs shares an identifier with
+    a name they guessed.
+    """
+
+    @staticmethod
+    def _strangers_private_spine(db, other) -> None:
+        shelve(db, other, "Sean P. Kane", private=True)
+        _identify(db, other, "Sean P. Kane", DICKENS)
+
+    def test_guessing_a_name_does_not_borrow_its_identity(self, db, user, other):
+        self._strangers_private_spine(db, other)
+        shelve(db, user, "Terry Pratchett", "Boz")
+        _identify(db, user, "Boz", DICKENS)
+        authorship = Authorship.seen_by(db, user.id)
+
+        authorship.merge(
+            [author_key("Terry Pratchett")], "Sean P. Kane", by_user_id=user.id
+        )
+
+        assert all(Reason.IDENTITY not in group.reasons for group in authorship.suggestions())
+
+    def test_and_an_evidenced_spelling_carrying_it_is_grouped(self, db, user):
+        """The other half of the diagonal. Without it the test above passes on a
+        spine that never groups anything, which is a guard for nothing."""
+        shelve(db, user, "Terry Pratchett", "Boz")
+        _identify(db, user, "Boz", DICKENS)
+        _identify(db, user, "Terry Pratchett", DICKENS)
+
+        [group] = [
+            group
+            for group in Authorship.seen_by(db, user.id).suggestions()
+            if Reason.IDENTITY in group.reasons
+        ]
+
+        assert set(group.names) == {"Boz", "Terry Pratchett"}
+
+
+class TestASpineDisagreementIsReportedAndSettlesNothing:
+    def test_two_folded_spellings_holding_different_isnis_are_reported(
+        self, db, user
+    ):
+        """Reported exactly as a GND disagreement is, which is the ticket's
+        second open question answered in the tree rather than in a handoff."""
+        shelve(db, user, "Boz", "Charles Dickens")
+        _identify(db, user, "Boz", DICKENS)
+        _identify(db, user, "Charles Dickens", "0000000000000001")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("Boz"), author_key("Charles Dickens")],
+            "Charles Dickens",
+            by_user_id=user.id,
+        )
+
+        [author] = authorship.listing()
+
+        assert IDENTITY_SPINE in author.identifier_conflicts
+
+    def test_a_contested_author_pulls_nobody_else_in(self, db, user):
+        """Keeping either value would be resolution by ordering, which is the
+        call `authority._viaf_sources` refuses one layer up.
+
+        Two contested authors, bracketing the shared number from both sides, for
+        the reason `test_an_author_holding_two_isnis_pulls_nobody_in` records:
+        one of them lets a rule that keeps `min` pass without dropping anything.
+        """
+        shelve(
+            db, user, "Boz",
+            "Charles Dickens", "C. Dickens",
+            "Ellis Bell", "E. Bell",
+        )
+        _identify(db, user, "Boz", DICKENS)
+        _identify(db, user, "Charles Dickens", DICKENS)
+        _identify(db, user, "C. Dickens", ABOVE_DICKENS)
+        _identify(db, user, "Ellis Bell", DICKENS)
+        _identify(db, user, "E. Bell", BELOW_DICKENS)
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("Charles Dickens"), author_key("C. Dickens")],
+            "Charles Dickens",
+            by_user_id=user.id,
+        )
+        authorship.merge(
+            [author_key("Ellis Bell"), author_key("E. Bell")],
+            "Ellis Bell",
+            by_user_id=user.id,
+        )
+
+        assert all(Reason.IDENTITY not in group.reasons for group in authorship.suggestions())
+
+
+class TestAnAuthorWithNoSpine:
+    """The ticket's first open question, confirmed rather than assumed. It is the
+    common case: a self published book carries no authority record at all."""
+
+    def test_the_spelling_stays_the_key_and_the_suggestions_are_unchanged(
+        self, db, user
+    ):
+        shelve(db, user, "U. K. Le Guin", "Ursula K. Le Guin")
+
+        [group] = Authorship.seen_by(db, user.id).suggestions()
+
+        assert group.reasons == [Reason.INITIALS]
+
+    def test_the_author_page_is_what_it_was(self, db, user):
+        shelve(db, user, "Ursula K. Le Guin")
+
+        [author] = Authorship.seen_by(db, user.id).listing()
+
+        assert (author.key, author.book_count, author.identifiers) == (
+            author_key("Ursula K. Le Guin"),
+            1,
+            [],
+        )
+
+
+class TestIdentityIsDerivedAndNeverMinted:
+    """Clause one of the ruling, enforced against the schema rather than stated.
+
+    `AuthorAlias` says authors are not rows: `books.author` is free text, an
+    author page is a `GROUP BY`, and neither identity table carries a foreign key
+    to an author **because there is nothing to point at**. A table minting an id
+    would make the spelling stop being the key, and every rule in `authors.py`
+    reads a spelling.
+    """
+
+    def test_no_table_holds_an_author(self):
+        """`Base` is imported from `database`, which declares it. `models` holds
+        the tables and does not re-export it, and reaching the same registry
+        through `AuthorAlias.__table__` types as a `FromClause`."""
+        assert "authors" not in Base.metadata.tables
+
+    def test_neither_identity_table_points_at_one(self):
+        """Stated as the exclusion: the only thing either may reference is the
+        person who wrote the row down, which is a `users` row and not an author.
+        A list of the columns that are allowed to be keys is what goes stale."""
+        referenced = {
+            key.column.table.name
+            for table in (AuthorAlias.__table__, AuthorIdentifier.__table__)
+            for column in table.columns
+            for key in column.foreign_keys
+        }
+
+        assert referenced <= {"users"}

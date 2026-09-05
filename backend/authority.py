@@ -616,10 +616,10 @@ def _disagreements(
     request per candidate". Both halves have changed:
 
     * **ISNI is now stored.** `cross_references` writes it, and
-      `AuthorityScheme` calls it the spine. A wrong VIAF cluster shown on a
-      screen is corrected by looking again; a wrong ISNI written to
-      `author_identifiers` is a durable row, and `AuthorIdentifier` refuses to
-      retype one, so the correction is a delete.
+      `authorship.IDENTITY_SPINE` is the one line that makes it the spine. A
+      wrong VIAF cluster shown on a screen is corrected by looking again; a
+      wrong ISNI written to `author_identifiers` is a durable row, and
+      `AuthorIdentifier` refuses to retype one, so the correction is a delete.
     * **The detectors are no longer redundant**, because `cross_references`
       refuses to store any scheme named here. Without a `P213` comparison an
       ISNI disagreement is undetectable, and the rule that keeps a contested

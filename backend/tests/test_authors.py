@@ -9,11 +9,8 @@ row is a decision and is the only thing here that is stored.
 import time
 
 from authors import (
-    FRAGMENT,
-    INITIALS,
     MAX_BUCKET,
     MAX_SUGGESTIONS,
-    SPELLING,
     author_key,
     build_index,
     resolve_alias_map,
@@ -21,6 +18,21 @@ from authors import (
     squashed_key,
     suggest_merges,
 )
+from authors import (
+    SuggestionReason as Reason,
+)
+
+#: Dickens' ISNI, which is a real number rather than an invented one so that a
+#: reader can check it. The pen name is the point: no rule that reads letters
+#: reaches `Boz` from `Charles Dickens`.
+DICKENS = "0000000121174585"
+
+#: Two numbers that bracket it, so a contested set can be built whose lowest
+#: member is `DICKENS` and one whose highest is. A guard against a rule that
+#: keeps a value needs both, or it only rules out the ordering it happened to
+#: use.
+BELOW_DICKENS = "0000000000000001"
+ABOVE_DICKENS = "0000000999999999"
 
 
 class TestSplittingACreditLine:
@@ -222,12 +234,12 @@ class TestSuggestions:
     def test_the_same_name_with_the_spaces_moved(self):
         entries = build_index([(1, "JRR Tolkien"), (2, "J. R. R. Tolkien")], {})
         [group] = suggest_merges(entries)
-        assert SPELLING in group.reasons
+        assert Reason.SPELLING in group.reasons
 
     def test_an_abbreviated_given_name_against_a_full_one(self):
         entries = build_index([(1, "U. K. Le Guin"), (2, "Ursula K. Le Guin")], {})
         [group] = suggest_merges(entries)
-        assert INITIALS in group.reasons
+        assert Reason.INITIALS in group.reasons
 
     def test_two_different_people_sharing_a_surname_are_not_offered(self):
         """The rule that would catch `J. Smith` also catches `John` against
@@ -241,7 +253,7 @@ class TestSuggestions:
         )
         [group] = suggest_merges(entries)
         assert set(group.names) == {"Le Guin", "Ursula K.", "Ursula K. Le Guin"}
-        assert FRAGMENT in group.reasons
+        assert Reason.FRAGMENT in group.reasons
 
     def test_a_one_word_name_is_not_a_fragment_of_everything(self):
         """`Homer` is inside `Homer Hickam` and is not Homer Hickam."""
@@ -267,7 +279,7 @@ class TestSuggestions:
             {},
         )
         [group] = suggest_merges(entries)
-        assert set(group.reasons) == {FRAGMENT, INITIALS}
+        assert set(group.reasons) == {Reason.FRAGMENT, Reason.INITIALS}
 
     def test_the_number_of_groups_is_capped(self):
         entries = build_index(
@@ -357,3 +369,126 @@ class TestSuggestions:
         started = time.monotonic()
         suggest_merges(entries)
         assert time.monotonic() - started < 5
+
+
+class TestTheIdentitySpine:
+    """A stored ISNI is what says two spellings are one person.
+
+    The other three rules read the letters of a name, so all three are blind to
+    a pen name, a transliteration and a married name. This one reads a fact
+    somebody confirmed, and it is still a suggestion: see `_edges_on_identity`
+    for why a shared ISNI does not fold anything on its own.
+
+    `spines` here is keyed by entry key and is `authorship.Authorship._spines`'
+    output shape. That function does the row reading and the visibility walk;
+    nothing in this file can reach a row it left out, which is the same division
+    `build_index` already has with `Shelf`.
+    """
+
+    def _dickens(self):
+        return build_index([(1, "Boz"), (2, "Charles Dickens")], {})
+
+    def test_two_spellings_sharing_an_isni_are_offered_as_one_person(self):
+        [group] = suggest_merges(
+            self._dickens(),
+            {author_key("Boz"): frozenset({DICKENS}),
+             author_key("Charles Dickens"): frozenset({DICKENS})},
+        )
+
+        assert set(group.names) == {"Boz", "Charles Dickens"}
+        assert group.reasons == (Reason.IDENTITY,)
+
+    def test_and_no_other_rule_reaches_that_pair(self):
+        """The half that says the rule earns its place. Without the spine these
+        two names share no word, no initial and no squashed key, so a pen name
+        is invisible to everything that reads letters."""
+        assert suggest_merges(self._dickens()) == []
+
+    def test_two_different_isnis_are_two_people(self):
+        assert (
+            suggest_merges(
+                self._dickens(),
+                {author_key("Boz"): frozenset({DICKENS}),
+                 author_key("Charles Dickens"): frozenset({"0000000000000001"})},
+            )
+            == []
+        )
+
+    def test_an_author_holding_two_isnis_pulls_nobody_in(self):
+        """A second value is a disagreement, and this rule reports nothing it
+        cannot be sure of. Taking one of them would be resolution by ordering,
+        one layer below the rule that exists to refuse it.
+
+        **Two contested authors, and the shared number is the lowest of one set
+        and the highest of the other.** With one, a mutant picking `min` from a
+        contested set was equivalent: it filed that author under the number
+        `Boz` does not carry, so no edge appeared and the guard passed without
+        the drop rule doing anything. Any rule that keeps a value rather than
+        dropping the author, whichever value it keeps, groups one of these two
+        with `Boz`.
+        """
+        entries = build_index(
+            [(1, "Boz"), (2, "Charles Dickens"), (3, "C. J. H. Dickens")], {}
+        )
+
+        groups = suggest_merges(
+            entries,
+            {
+                author_key("Boz"): frozenset({DICKENS}),
+                # Two spellings folded together upstream carried different
+                # numbers, so both of these authors are contested.
+                author_key("Charles Dickens"): frozenset({DICKENS, ABOVE_DICKENS}),
+                author_key("C. J. H. Dickens"): frozenset({BELOW_DICKENS, DICKENS}),
+            },
+        )
+
+        assert all(Reason.IDENTITY not in group.reasons for group in groups)
+
+    def test_an_author_with_no_isni_is_offered_exactly_what_they_were_before(self):
+        """The ticket's open question, confirmed rather than assumed: an author
+        with no ISNI is the common case, and the spelling stays the key."""
+        entries = build_index([(1, "U. K. Le Guin"), (2, "Ursula K. Le Guin")], {})
+
+        assert suggest_merges(entries, {}) == suggest_merges(entries)
+        assert suggest_merges(entries, {})[0].reasons == (Reason.INITIALS,)
+
+    def test_the_spine_and_a_letter_rule_reaching_the_same_names_are_one_group(self):
+        """Transitive with the other three, like every rule here. A group
+        somebody has to split beats two that hide that they overlap."""
+        entries = build_index(
+            [(1, "Boz"), (2, "Charles Dickens"), (3, "C. Dickens")], {}
+        )
+
+        [group] = suggest_merges(
+            entries,
+            {author_key("Boz"): frozenset({DICKENS}),
+             author_key("Charles Dickens"): frozenset({DICKENS})},
+        )
+
+        assert len(group.keys) == 3
+        assert set(group.reasons) == {Reason.IDENTITY, Reason.INITIALS}
+
+    def test_a_planted_bucket_costs_one_edge_per_name_rather_than_a_pair(self):
+        """No `MAX_BUCKET` and no budget here, and this is why that is safe.
+
+        A member can plant this bucket, by confirming one ISNI under many
+        spellings, exactly as they can plant a surname bucket. Grouping is by an
+        exact identifier rather than by comparison, so the cost is linear: the
+        group is still offered where an oversized surname bucket is skipped
+        whole, and the comparison budget the other two rules share is untouched,
+        which the unrelated pair below is what shows.
+        """
+        planted = [(index, f"Nom{index} Sur{index}") for index in range(MAX_BUCKET + 1)]
+        entries = build_index(
+            [*planted, (9001, "U. K. Le Guin"), (9002, "Ursula K. Le Guin")], {}
+        )
+        spines = {
+            author_key(f"Nom{index} Sur{index}"): frozenset({DICKENS})
+            for index in range(MAX_BUCKET + 1)
+        }
+
+        groups = suggest_merges(entries, spines)
+
+        [identity] = [group for group in groups if Reason.IDENTITY in group.reasons]
+        assert len(identity.keys) == MAX_BUCKET + 1
+        assert any(Reason.INITIALS in group.reasons for group in groups)

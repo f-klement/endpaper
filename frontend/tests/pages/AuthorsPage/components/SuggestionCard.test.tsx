@@ -4,10 +4,14 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  AuthorSuggestionOut,
+  SuggestionReason,
+} from "../../../../src/api/generated/model";
 import SuggestionCard from "../../../../src/pages/AuthorsPage/components/SuggestionCard";
 import { renderLocalised } from "../../../utils";
 
-const GROUP = {
+const GROUP: AuthorSuggestionOut = {
   keys: ["j smith", "james smith", "john smith"],
   names: ["J. Smith", "James Smith", "John Smith"],
   reasons: ["initials"],
@@ -41,6 +45,42 @@ describe("SuggestionCard", () => {
     expect(
       screen.getByText("an initial against a full name"),
     ).toBeInTheDocument();
+  });
+
+  it("says it in words when the rule is a shared authority record", () => {
+    renderLocalised(
+      <SuggestionCard
+        group={{ ...GROUP, reasons: ["identity"] }}
+        isMerging={false}
+        onMerge={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("the same authority record")).toBeInTheDocument();
+    expect(screen.queryByText("identity")).not.toBeInTheDocument();
+  });
+
+  it("drops a rule this build does not know rather than printing its name", () => {
+    // Version skew: an older page against a newer API. The map is exhaustive by
+    // type, so this is unreachable for a client and server built together, and
+    // it is exactly how `identity` once reached a reader as a bare word.
+    renderLocalised(
+      <SuggestionCard
+        group={{
+          ...GROUP,
+          // Cast because the type says this value cannot exist, which is the
+          // guard working. The runtime still has to survive it.
+          reasons: ["initials", "sortition"] as SuggestionReason[],
+        }}
+        isMerging={false}
+        onMerge={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("an initial against a full name"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/sortition/)).not.toBeInTheDocument();
   });
 
   it("merges the whole group into the name that is kept", async () => {

@@ -140,6 +140,7 @@ export * from "./seriesOut.ts";
 export * from "./settingsOut.ts";
 export * from "./settingsUpdate.ts";
 export * from "./statsOut.ts";
+export * from "./suggestionReason.ts";
 export * from "./tagCategory.ts";
 export * from "./tagCreate.ts";
 export * from "./tagKey.ts";

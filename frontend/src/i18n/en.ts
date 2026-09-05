@@ -915,6 +915,7 @@ export const en = {
   "authors.mergeIntoOther": "Fold into this name",
   "authors.confirm": 'Fold {count} spellings into "{name}"?',
   "authors.foldedInto": 'That name is already "{name}", so they went there.',
+  "authors.reasonIdentity": "the same authority record",
   "authors.reasonSpelling": "same name, spaced differently",
   "authors.reasonInitials": "an initial against a full name",
   "authors.reasonFragment": "part of a longer name",

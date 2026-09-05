@@ -42,6 +42,7 @@ import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 #: The longest canonical name a caller may choose when merging.
 #:
@@ -374,11 +375,34 @@ def build_index(
 # was. Reversibility is what buys the licence to guess here, and it is why the
 # same licence is *not* taken by `author_key`, which folds with nobody asked.
 
-#: A group is reported with the rules that built it, so a person can tell a
-#: certainty from a guess before pressing anything.
-SPELLING = "spelling"
-INITIALS = "initials"
-FRAGMENT = "fragment"
+class SuggestionReason(StrEnum):
+    """Which rule offered a group, so a person can tell a certainty from a guess.
+
+    **An enum rather than four string constants, and the reason is a defect it
+    already caused.** `AuthorSuggestionOut.reasons` crosses the API, and while
+    it was typed `list[str]` the client held its own map of three of the four
+    and fell back to rendering the raw value. `identity` shipped that way and a
+    reader saw the word `identity` beside `same name, spaced differently`.
+
+    As an enum it reaches the client as a union, so
+    `SuggestionCard.tsx`'s `REASONS` is exhaustive by type and **a fifth rule
+    fails `bun run typecheck` instead of shipping untranslated.** That is the
+    guard; nothing here can enforce it from the Python side.
+
+    Module local rather than in `enums.py`, which is the house pattern for a set
+    no column stores: `covers.CoverOutcome`, `metadata.Outcome`,
+    `targets.Transport` and `schemas.public.PublicBookSort` are the same shape.
+    `enums.py` is for the closed sets the ORM writes to a column, and no row
+    anywhere holds one of these: a suggestion is computed per request and stored
+    nowhere.
+    """
+
+    #: The two spellings carry the same ISNI. The one rule that reads a stored
+    #: fact rather than the letters of a name.
+    IDENTITY = "identity"
+    SPELLING = "spelling"
+    INITIALS = "initials"
+    FRAGMENT = "fragment"
 
 
 @dataclass(frozen=True)
@@ -387,14 +411,23 @@ class AuthorSuggestion:
 
     keys: tuple[str, ...]
     names: tuple[str, ...]
-    reasons: tuple[str, ...]
+    reasons: tuple[SuggestionReason, ...]
 
 
-def suggest_merges(entries: Sequence[AuthorEntry]) -> list[AuthorSuggestion]:
+def suggest_merges(
+    entries: Sequence[AuthorEntry],
+    spines: Mapping[str, frozenset[str]] | None = None,
+) -> list[AuthorSuggestion]:
     """Groups of names that look like one person.
 
-    Three rules, each of which has to be worth a person's attention:
+    Four rules, each of which has to be worth a person's attention:
 
+    `identity`  the two spellings carry the same ISNI. The only rule here that
+                reads a stored fact rather than the letters of a name, and the
+                only one that is right about a pen name, a transliteration or a
+                married name, none of which look alike. `spines` supplies it:
+                see `_edges_on_identity`, and `authorship.IDENTITY_SPINE` for
+                which file it comes from.
     `spelling`  the same name with the spaces moved: `JRR Tolkien` and `J. R.
                 R. Tolkien`. Nearly always right, and the only reason it is not
                 folded automatically is `Ann Aker` against `Anna Ker`.
@@ -416,16 +449,24 @@ def suggest_merges(entries: Sequence[AuthorEntry]) -> list[AuthorSuggestion]:
     somebody has to split is more useful than three pairs that hide the fact
     they overlap.
 
-    Two of the three rules compare pairs inside a bucket, so both skip a bucket
+    Two of the four rules compare pairs inside a bucket, so both skip a bucket
     holding more than `MAX_BUCKET` names. See that constant: the bucket is
     member-controlled and the cost is paid before `MAX_SUGGESTIONS` can cap
     anything.
+
+    **`spines` is optional so that every caller with no rows in hand keeps
+    working unchanged**, which is what the ticket's open question asks for from
+    the other end: an author with no ISNI is offered exactly the suggestions
+    they were offered before, because the identity rule contributes no edge for
+    a key it holds nothing for. A shelf where nobody has confirmed an authority
+    record is that case for every author on it.
     """
     by_key = {entry.key: entry for entry in entries}
     budget = _Budget(MAX_COMPARISONS)
     edges = [
         # No budget: bucketed by an exact key, so it is one pass over the names
         # and compares nothing.
+        *_edges_on_identity(by_key, spines or {}),
         *_edges_on_squashed_key(by_key),
         *_edges_on_initials(by_key, budget),
         *_edges_on_fragments(by_key, budget),
@@ -448,7 +489,7 @@ def suggest_merges(entries: Sequence[AuthorEntry]) -> list[AuthorSuggestion]:
     # under a root that changed while it grew keeps all of them. Attaching them
     # during the union loses the ones recorded against a root that later became
     # a child.
-    reasons: defaultdict[str, set[str]] = defaultdict(set)
+    reasons: defaultdict[str, set[SuggestionReason]] = defaultdict(set)
     for left, _right, reason in edges:
         reasons[find(left)].add(reason)
 
@@ -472,7 +513,66 @@ def suggest_merges(entries: Sequence[AuthorEntry]) -> list[AuthorSuggestion]:
 
 
 #: One suggested pairing: two author keys and the rule that produced it.
-_Edge = tuple[str, str, str]
+_Edge = tuple[str, str, SuggestionReason]
+
+
+def _edges_on_identity(
+    by_key: Mapping[str, AuthorEntry], spines: Mapping[str, frozenset[str]]
+) -> list[_Edge]:
+    """Two spellings carrying the same ISNI are one person, and say so.
+
+    `spines` maps an entry key to every value that entry's evidenced spellings
+    carry under one authority file. **Which file is the caller's to decide and
+    is not checkable here**: these are opaque strings, so a second caller
+    inherits none of `authorship._spines`' rules, neither the scheme nor the
+    visibility walk. `authorship.IDENTITY_SPINE` names the file, and
+    `tests/test_authorship.py::TestOnlyTheSpineSaysTwoSpellingsAreOnePerson`
+    guards the one production caller rather than this function.
+
+    **A suggestion, like the other three, and the reason is that an automatic
+    fold would mint an author id.** A shared ISNI is the strongest evidence this
+    app can hold that two spellings are one person, so the case for folding on
+    it is real and it is refused anyway: folding here would make the ISNI the
+    key that groups books, and an author would stop being a name on a book.
+    That is the internal identifier `AuthorAlias` refuses, arriving without a
+    column.
+
+    "It would adjudicate at write time" is **not** the argument, and the
+    distinction is worth keeping straight because it is the one a later change
+    will reach for: this rule runs on a read, so folding here would be
+    derivation rather than a write. What holds is that the spelling has to stay
+    the key. The merge stays the act somebody performs, and deleting the alias
+    row still puts the shelf back.
+
+    **An entry holding more than one distinct value contributes nothing.** That
+    is a disagreement and not an identity: two spellings a member folded
+    together carry different ISNIs, so the merge is wrong or one of the numbers
+    is, and there is no rule here entitled to say which. Keeping either would be
+    resolution by ordering, which is the call `authority._viaf_sources` makes for
+    a code a cluster names twice and `authority._national_from_wikidata` makes
+    for a property with two values. The disagreement is not lost by being
+    dropped here: `AuthorOut.identifier_conflicts` reports it under its scheme.
+
+    **No budget, and the reason is the bucketing rather than a judgement about
+    how many rows there are.** Grouping is by an exact identifier, so this is one
+    pass over the entries and compares no pair, which is what
+    `_edges_on_squashed_key` does with a name. A member can plant a bucket, by
+    confirming one ISNI under many spellings, and a planted bucket of N costs
+    N-1 edges rather than the N squared that `MAX_BUCKET` exists to bound.
+    """
+    buckets: defaultdict[str, list[str]] = defaultdict(list)
+    for key in by_key:
+        values = spines.get(key) or frozenset()
+        # Exactly one, never the first of several. See the docstring: a second
+        # value is a disagreement, and this rule reports nothing it cannot be
+        # sure of.
+        if len(values) == 1:
+            buckets[next(iter(values))].append(key)
+    return [
+        (keys[0], other, SuggestionReason.IDENTITY)
+        for keys in buckets.values()
+        for other in keys[1:]
+    ]
 
 
 def _edges_on_squashed_key(by_key: Mapping[str, AuthorEntry]) -> list[_Edge]:
@@ -480,7 +580,7 @@ def _edges_on_squashed_key(by_key: Mapping[str, AuthorEntry]) -> list[_Edge]:
     for key, entry in by_key.items():
         buckets[squashed_key(entry.name)].append(key)
     return [
-        (keys[0], other, SPELLING)
+        (keys[0], other, SuggestionReason.SPELLING)
         for keys in buckets.values()
         for other in keys[1:]
     ]
@@ -531,7 +631,7 @@ def _edges_on_initials(
                 # groups.
                 if not (abbreviated or other_abbreviated):
                     continue
-                edges.append((key, other_key, INITIALS))
+                edges.append((key, other_key, SuggestionReason.INITIALS))
     return edges
 
 
@@ -584,5 +684,5 @@ def _edges_on_fragments(
                     (left, right) if len(left) < len(right) else (right, left)
                 )
                 if len(shorter) >= 2 and shorter < longer:
-                    edges.append((key, other, FRAGMENT))
+                    edges.append((key, other, SuggestionReason.FRAGMENT))
     return edges
