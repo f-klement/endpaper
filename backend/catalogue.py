@@ -43,6 +43,7 @@ from models import (
     COVER_URL_MAX,
     DESCRIPTION_MAX,
     GOOGLE_BOOKS_ID_MAX,
+    ISBN_MAX,
     LANGUAGE_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
@@ -231,6 +232,11 @@ _TEXT_CEILINGS: Final[dict[str, int]] = {
     "cover_url": COVER_URL_MAX,
     "series_name": SERIES_NAME_MAX,
     "google_books_id": GOOGLE_BOOKS_ID_MAX,
+    # Bounding this can clear the field, and `as_lookup` hands `None` to a
+    # required `BookLookup.isbn`, which is a 500 on a member's scan. Safe only
+    # while every lookup producer parses its own identifier: `as_lookup` carries
+    # the risk and the trigger, `docs/decisions.md` the measurement.
+    "isbn": ISBN_MAX,
 }
 
 #: How a value is rewritten between the record and the column, where anything
@@ -271,22 +277,15 @@ _NUMBER_RANGES: Final[dict[str, tuple[float, float]]] = {
     "series_index": (0, MAX_SERIES_INDEX),
 }
 
-#: The two scalars deliberately left unbounded, each for its own reason.
+#: The one scalar with no ceiling, and why it needs none.
 #:
 #: **`source`** is this app's own word rather than a catalogue's, so there is no
-#: outside value to bound.
+#: outside value to bound: `Record.sources` joins the roster's own names.
 #:
-#: **`isbn` is here reluctantly.** Bounding it would refuse a record over a
-#: malformed identifier the adapter should have normalised, which costs more than
-#: it saves; the fix belongs at the adapter and is one line there. Revisitable,
-#: and deliberately not revisited at a merge, because it is a behaviour change no
-#: critic seat has reviewed.
-#:
-#: The measurements behind both, and what bounding `isbn` was measured to cost,
-#: are in `docs/decisions.md`.
-#:
-#: Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`.
-_UNBOUNDED: Final = frozenset({"source", "isbn"})
+#: Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`, which asserts
+#: the composition as well as the coverage: moving a name out of the ceilings
+#: and into here in one gesture leaves the coverage assertion green.
+_UNBOUNDED: Final = frozenset({"source"})
 
 #: Which strings an uploaded file may have cut to fit, and which it may not.
 #:
@@ -298,18 +297,24 @@ _UNBOUNDED: Final = frozenset({"source", "isbn"})
 #: address, a Google volume id cut to 50 names a different volume, and a
 #: language code cut to 10 names a different language or nothing at all. Those
 #: are dropped on the upload path too, which is the answer the network path
-#: gives for everything. Deliberately no count of them here: the set is on the
-#: next line and a number would be a second thing to keep in step.
+#: gives for everything. **An ISBN is the same family and the sharpest case of
+#: it**: a cut identifier fails its own checksum, so it names no book at all,
+#: and `books.isbn` is the importer's primary match key. Deliberately no count
+#: of them here: the set is on the next line and a number would be a second
+#: thing to keep in step.
 #:
-#: Neither of the first two is reachable from a MARC file today:
-#: `_MARC_RECORD_FIELDS` does not carry `cover_url` or `google_books_id`, and
-#: `_marc_language` reads a three letter `041 $a`. They are classified because a set that is exhaustive
-#: by assertion cannot acquire a field by default, which is the shape this
-#: repository keeps finding.
+#: `cover_url` and `google_books_id` are not reachable from a MARC file today:
+#: `_MARC_RECORD_FIELDS` carries neither. The other two are, and neither can
+#: arrive over-wide: `_marc_language` reads a three letter `041 $a`, and
+#: `metadata._marc_isbn` returns `isbn.parse` output. All four are classified
+#: anyway, because a set that is exhaustive by assertion cannot acquire a field
+#: by default, which is the shape this repository keeps finding.
 _CUT_ON_UPLOAD: Final = frozenset(
     {"title", "subtitle", "author", "publisher", "description", "series_name"}
 )
-_KEPT_WHOLE_ON_UPLOAD: Final = frozenset({"language", "cover_url", "google_books_id"})
+_KEPT_WHOLE_ON_UPLOAD: Final = frozenset(
+    {"language", "cover_url", "google_books_id", "isbn"}
+)
 
 
 def _drop_unstorable(record: Record) -> list[str]:
@@ -698,42 +703,44 @@ class Record:
         makes `BookLookup(**record.as_lookup())` raise, and `lookup_isbn`
         catches no `ValidationError`, so the response would be a 500.
 
-        **Left as it is, deliberately, and written down rather than fixed.**
-        Nearly every source on the lookup path sets `isbn` from the
-        canonicalised argument `metadata.lookup` was given, so a live record
-        reaching here without one would be unusual, and coercing it to `""`
-        would answer a member's scan with a book carrying an empty ISBN instead
-        of an error. What makes it worth stating is that nothing checks it: the
-        return type is `dict[str, Any]`, so mypy sees no requirement, and the
-        guarantee lives in the adapters rather than in a type.
+        **`isbn` is left uncoerced deliberately, and written down rather than
+        fixed.** Every source on the lookup path sets it from the canonicalised
+        argument `metadata.lookup` was given or from `isbn.parse`'s output, so a
+        live record reaching here without one is a defect rather than an
+        ordinary answer, and coercing it to `""` would answer a member's scan
+        with a book carrying an empty ISBN instead of an error. What makes it
+        worth stating is that nothing in the **type** checks it: the return is
+        `dict[str, Any]`, so mypy sees no requirement, and the guarantee lives
+        in the adapters and in
+        `tests/test_metadata.py::TestEverySourceSetsTheIsbnItWasAskedFor`.
 
-        **"Nearly" is doing real work there, and the next paragraph says which
-        one.** This read "All **five** sources", twice, and both halves were
-        wrong: the roster is seven, and one of the seven does not keep the
-        guarantee. A seat quoted the bold version of that sentence when deciding
-        it was safe to bound this field, which then had to be reverted the same
-        day.
+        **No number is put on "every", deliberately, and it is a rule rather
+        than a style.** `tests/test_roster_counts.py` admits a candidate only
+        when its value is a **live** cardinality, so the right number here
+        creates a candidate with no verdict and fails that census, while a wrong
+        one is invisible to it. **A count leaves the census's scope at the
+        moment it becomes stale enough**, which is worth knowing about a guard
+        whose whole subject is stale counts. This sentence read "All **five**
+        sources" while the roster was larger, and a seat quoted it when deciding
+        it was safe to bound this field. A sentence with no number needs no
+        verdict and cannot rot.
 
-        **The counts are struck rather than corrected**, and that is not
-        squeamishness. `tests/test_roster_counts.py` admits a candidate only
-        when its value is a **live** cardinality, `{6, 7, 8, 9}` today, so
-        writing "seven" here creates a candidate with no verdict and fails that
-        census, while "five" was invisible to it. **A count leaves the census's
-        scope at the moment it becomes stale enough**, which is worth knowing
-        about a guard whose whole subject is stale counts. A sentence with no
-        number needs no verdict and cannot rot.
-
-        **One of those adapters does not keep the guarantee, which makes the
-        bold claim above false as written, and it is why `isbn` is in
-        `_UNBOUNDED`.** `metadata._google_record` sets
+        **The adapter that did not keep the guarantee now keeps it, and the
+        field is bounded because of that.** `metadata._google_record` set
         `isbn=fields.get("isbn13") or isbn`, preferring an identifier taken out
-        of Google's JSON with no parse over the canonicalised argument. Nothing
-        currently makes that a 500, because the field is not bounded and an
-        unparsed identifier is passed straight through here. Bounding it would:
-        measured, a 40 character identifier gives `record.isbn is None` and a
-        `ValidationError` at `('isbn',)`. So the trigger this paragraph writes
-        down for itself is not hypothetical, and the reason it has not fired is
-        that nothing yet clears the field.
+        of Google's JSON with no parse over the canonicalised argument;
+        `metadata._google_isbn13` parses it and refuses a non string first. So
+        every producer reaching here sets the field from `isbn.parse` output,
+        which is narrower than the column, and the ceiling `_TEXT_CEILINGS` now
+        carries cannot clear it. **No width is written here**, because a number
+        in prose stops being re-derived:
+        `tests/test_catalogue.py::TestWhichScalarsAreBoundedAndWhichAreNamedInstead`
+        recomputes it from the parser and compares it with `ISBN_MAX`.
+
+        **The bound is safe because of that invariant and not on its own**: an
+        adapter that set `isbn` from a record's own bytes again would turn the
+        ceiling into the 500 this paragraph describes, which is why the trigger
+        below is still written down.
 
         **The trigger is a shape, not a number, and that is why it worked.**
         It named the next source by ordinal once, and the OENB arrived on

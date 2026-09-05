@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
 
 import covers
+import filing
 from authors import AUTHOR_NAME_MAX
 from database import Base
 from enums import (
@@ -1362,6 +1363,20 @@ CLASSIFICATION_LABEL_MAX = 200
 #: a field. The widest shape measured here is 14 headings, so it clears 3x.
 CATEGORIES_MAX = 32 * CLASSIFICATION_NUMBER_MAX + 31 * 2
 
+#: How wide the stored shelf key has to be to hold any number the column takes.
+#:
+#: **Wider than the number, which is the whole trap.** A filing rule pads, so a
+#: key is longer than the value it files: `Q1` is two characters and files as
+#: thirteen. `filing.MAX_KEY_GROWTH` is the most a rule can add and is derived
+#: from the three widths that add it, so this bound moves when they do rather
+#: than being a number somebody remembered to update.
+#:
+#: SQLite does not enforce a `VARCHAR` length, so nothing truncates here today.
+#: `tests/test_models.py::TestTheShelfKeyFitsItsColumn` is the enforcement, and
+#: it measures rather than asserts: the longest key the longest admissible
+#: number can produce, against this bound.
+CLASSIFICATION_SORT_KEY_MAX = CLASSIFICATION_NUMBER_MAX + filing.MAX_KEY_GROWTH
+
 
 class Classification(Base):
     """One published scheme's assertion about what a book is about.
@@ -1443,8 +1458,52 @@ class Classification(Base):
     label: Mapped[str | None] = mapped_column(
         String(CLASSIFICATION_LABEL_MAX), nullable=True
     )
+    # Where this number stands on a shelf, under its own scheme's rule. See the
+    # class docstring for why it is a column rather than an expression, and
+    # `_file_the_number` for what keeps it in step.
+    #
+    # **NOT NULL and no default, which is the enforcement.** A writer that
+    # reached this table without deriving the key would otherwise store a null,
+    # and `_shelf_order` puts nulls last, so the row would file at the end of
+    # every shelf with nothing red anywhere. As it stands such a write raises
+    # `IntegrityError` at the flush.
+    sort_key: Mapped[str] = mapped_column(
+        String(CLASSIFICATION_SORT_KEY_MAX), nullable=False
+    )
 
     book: Mapped[Book] = relationship("Book", back_populates="classifications")
+
+    @validates("scheme", "number")
+    def _file_the_number(self, key: str, value: str) -> str:
+        """Keep `sort_key` in step with every ORM write of the two it derives from.
+
+        The shape `Collection._fold_the_name` and `Tag._drop_the_key_on_a_rename`
+        already use, for the reason the first of them gives: a derivation a
+        writer could forget is a derivation that will eventually be forgotten.
+        Here there are two columns rather than one, because the rule is chosen
+        by the scheme and applied to the number.
+
+        **Both attributes, and the order they are assigned in does not matter.**
+        SQLAlchemy assigns constructor kwargs in the order given and fires this
+        once per assignment, so whichever of the two is set second recomputes
+        the key with the first already on the instance. `value` is used for the
+        attribute being set, because the assignment has not happened yet.
+
+        **The other one being absent is an insert in progress, not an error.**
+        `Classification(scheme=...)` with no number yet leaves the key alone,
+        and if the number never arrives the NOT NULL on this column and on
+        `number` both refuse the row. Deriving from a `None` number would raise
+        `AttributeError` from inside a constructor instead.
+
+        A Core insert never fires this, which is `backup.restore`:
+        `backup._parse_row` derives the key there, through the same
+        `filing.sort_key_for`.
+        """
+        scheme = value if key == "scheme" else self.scheme
+        number = value if key == "number" else self.number
+        if number is not None:
+            self.sort_key = filing.sort_key_for(scheme, number)
+        return value
 
 
 #: The longest name a Library may give one of its own fields.

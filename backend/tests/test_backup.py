@@ -13,14 +13,26 @@ directory being written to.
 import json
 import zipfile
 from io import BytesIO
+from typing import Any
 
 import pytest
 
 import backup
+import filing
 from authors import author_key
 from backup import RestoreError
 from database import Base, SessionLocal
-from models import AuthorAlias, Book, Loan, Note, Quote, Tag, UserBook
+from enums import ClassificationScheme
+from models import (
+    AuthorAlias,
+    Book,
+    Classification,
+    Loan,
+    Note,
+    Quote,
+    Tag,
+    UserBook,
+)
 
 
 def read_manifest(data: bytes) -> dict:
@@ -1344,3 +1356,124 @@ class TestReadingProgressSurvives:
 
         assert res.status_code == 400
         assert "books" in res.json()["detail"]
+
+
+class TestRestoringTheShelfKey:
+    """`classifications.sort_key` is derived, and a restore does not derive it.
+
+    `restore()` inserts through Core, so `Classification._file_the_number` never
+    fires. `_parse_row` recomputes the value instead, which is the same reason
+    the `name_folded` and `cover_url` blocks beside it exist.
+
+    **This one's failure is the quietest of the three.** A wrong cover URL shows
+    a placeholder and a wrong fold trips a unique index. A wrong shelf key shows
+    nothing at all: the row is there, the number is right, and the book stands
+    in the wrong place on one shelf order.
+    """
+
+    NUMBER = "BF75"
+
+    def _archive(self, client, admin, db) -> bytes:
+        book = Book(title="Filed", added_by_user_id=None)
+        db.add(book)
+        db.flush()
+        db.add(
+            Classification(
+                book_id=book.id, scheme=ClassificationScheme.LCC, number=self.NUMBER
+            )
+        )
+        db.commit()
+        return client.get("/api/backup", headers=admin["headers"]).content
+
+    @staticmethod
+    def _restore(client, admin, data, manifest) -> Any:
+        return client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+
+    def test_an_archive_written_before_the_column_existed_still_restores(
+        self, client, admin, library, db
+    ):
+        """The column is NOT NULL, so without the recompute this is an
+        `IntegrityError`, which is not `RestoreError`, so the route answers 500
+        and the library's older backups become unrestorable. That is the promise
+        `FORMAT_VERSION` makes."""
+        data = self._archive(client, admin, db)
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["classifications"]:
+            row.pop("sort_key", None)
+
+        res = self._restore(client, admin, data, manifest)
+
+        assert res.status_code == 200, res.text
+        db.expire_all()
+        assert db.query(Classification).one().sort_key == filing.sort_key_for(
+            "lcc", self.NUMBER
+        )
+
+    def test_a_key_that_disagrees_with_its_number_is_recomputed(
+        self, client, admin, library, db
+    ):
+        """No index can catch this one: any string is a valid key, and the row
+        it mis-files is a row that looks completely ordinary. An archive is a
+        file an admin was handed rather than a file this app wrote."""
+        data = self._archive(client, admin, db)
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["classifications"]:
+            row["sort_key"] = "aaa"
+
+        self._restore(client, admin, data, manifest)
+
+        db.expire_all()
+        assert db.query(Classification).one().sort_key == filing.sort_key_for(
+            "lcc", self.NUMBER
+        )
+
+    @pytest.mark.parametrize("scheme", ["lcc", "gnd"])
+    def test_a_number_that_is_not_text_is_refused(
+        self, client, admin, library, db, scheme
+    ):
+        """The sibling of the `name_folded` case, and the two arms are refused
+        for two different reasons.
+
+        `lcc` raises inside the derivation, so without the check the route
+        answers 500 where it promises 400. `gnd` files under the generic rule,
+        which hands the int straight back, and SQLite's TEXT affinity then
+        converts it into `sort_key` exactly as into `number`: that row would
+        have restored with the **right** key. It is refused for consistency
+        with `name_folded` rather than because anything would be wrong, and
+        `backup._parse_row` carries the whole measurement.
+
+        Both arms are kept because they pin different behaviour, and the second
+        is the one that would silently start restoring again if somebody
+        narrowed the check to the schemes that raise.
+        """
+        data = self._archive(client, admin, db)
+        manifest = read_manifest(data)
+        manifest["tables"]["classifications"][0]["scheme"] = scheme
+        manifest["tables"]["classifications"][0]["number"] = 100
+
+        res = self._restore(client, admin, data, manifest)
+
+        assert res.status_code == 400, res.text
+        assert "not text" in res.json()["detail"]
+
+    def test_a_scheme_this_app_cannot_name_restores_under_the_generic_rule(
+        self, client, admin, library, db
+    ):
+        """Rather than failing the restore of a whole library over one row. The
+        `scheme` column is a plain `VARCHAR(20)` and this path has no validator,
+        so an archive may carry a scheme from a deployment this one has never
+        heard of."""
+        data = self._archive(client, admin, db)
+        manifest = read_manifest(data)
+        manifest["tables"]["classifications"][0]["scheme"] = "udc"
+
+        res = self._restore(client, admin, data, manifest)
+
+        assert res.status_code == 200, res.text
+        db.expire_all()
+        assert db.query(Classification).one().sort_key == self.NUMBER

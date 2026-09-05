@@ -18,6 +18,7 @@ from enums import (
 from google_books import split_categories
 from models import (
     CATEGORIES_MAX,
+    COVER_URL_MAX,
     DESCRIPTION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
@@ -55,6 +56,39 @@ MAX_PRICE_MINOR = 100_000_000
 # there is no column: it is a label naming which catalogues answered, and
 # nothing stores it. See the field for the derivation.
 SOURCE_LABEL_MAX = 120
+
+
+def _a_cover_url_the_column_can_hold(url: str | None) -> str | None:
+    """The value back, refusing one whose **stored** form is wider than the column.
+
+    `Book`'s `@validates("cover_url")` runs `covers.https_url` on every write,
+    turning `http://` into `https://` and so **lengthening the value by one
+    character**. A `max_length` alone therefore bounds a different string from
+    the one stored: measured on both request bodies carrying this field, a 500
+    character http URL was accepted and stored as 501 against a `String(500)`.
+    SQLite holds the over-wide row rather than refusing it; an engine that
+    enforces a `VARCHAR` width fails the flush mid request.
+
+    **It needs no hostile upstream.** `POST /api/books` and
+    `POST /api/books/{book_id}/enrich/apply` both take a URL a member chose, so
+    one long real catalogue address is the whole of it.
+
+    `catalogue._AS_STORED` is the same rule on the catalogue path, where a
+    record clears the field instead. Here there is a caller to tell, so this
+    raises: a 422 on both routes, and `routers/books._bounded_match` catches it
+    and drops the field, which is the catalogue path's answer reached through
+    this one rule rather than through a second copy of it.
+
+    Deleting this passes every other test in the tree, so
+    `tests/schemas/test_book.py::TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite`
+    drives it from the rewrite table rather than from a list of field names.
+    """
+    if url is not None and len(covers.https_url(url) or "") > COVER_URL_MAX:
+        raise ValueError(
+            "A cover URL is stored upgraded to https, so it may be at most "
+            f"{COVER_URL_MAX} characters once stored"
+        )
+    return url
 
 
 class BookLookup(BaseModel):
@@ -105,7 +139,7 @@ class BookCreate(BaseModel):
     publisher: str | None = Field(default=None, max_length=255)
     year: int | None = Field(default=None, ge=MIN_YEAR, le=MAX_YEAR)
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX)
-    cover_url: str | None = Field(default=None, max_length=500)
+    cover_url: str | None = Field(default=None, max_length=COVER_URL_MAX)
     is_private: bool = False
     series_name: str | None = Field(default=None, max_length=255)
     series_index: float | None = Field(default=None, ge=0, le=MAX_SERIES_INDEX)
@@ -154,7 +188,10 @@ class BookCreate(BaseModel):
         upgraded = covers.https_url(value)
         if upgraded is not None and not covers.is_renderable(upgraded):
             raise ValueError("A cover URL must be https or an uploaded cover")
-        return upgraded
+        # The width goes last and against `upgraded`, because this validator
+        # returns the upgraded form: the `max_length` above bounded what
+        # arrived, and what this model hands on is one character longer.
+        return _a_cover_url_the_column_can_hold(upgraded)
 
     @field_validator("isbn")
     @classmethod
@@ -482,7 +519,9 @@ class BookMatch(BaseModel):
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
     language: str | None = Field(default=None, max_length=10)
     categories: str | None = Field(default=None, max_length=CATEGORIES_MAX)
-    cover_url: str | None = Field(default=None, max_length=500)
+    #: Bounded twice: `max_length` on what arrives, and the validator below on
+    #: what the column ends up holding. See `_a_cover_url_the_column_can_hold`.
+    cover_url: str | None = Field(default=None, max_length=COVER_URL_MAX)
     #: The `isbn` column under another name, because a search row is one
     #: printing among several rather than the one asked for. So
     #: `BookCreate.isbn`'s 20, which is the agreement rule's number rather than
@@ -552,6 +591,21 @@ class BookMatch(BaseModel):
     # caller-supplied id list here, and is 4.8x the 105 seeded tags, so no
     # realistic vocabulary trips it.
     suggested_tag_ids: list[RowIdField] = Field(default=[], max_length=500)
+
+    @field_validator("cover_url")
+    @classmethod
+    def storable_cover(cls, value: str | None) -> str | None:
+        """Refuse a cover URL the column cannot hold once the ORM upgrades it.
+
+        The width only, and **not** `BookCreate`'s renderability refusal:
+        `Book`'s validator drops a cover on a host this app will not point an
+        `<img>` at, silently, and turning that into a 422 here would refuse an
+        enrichment over a field the member did not choose the value of.
+
+        The value goes back unchanged rather than upgraded, so this bounds what
+        will be stored without deciding what is stored.
+        """
+        return _a_cover_url_the_column_can_hold(value)
 
 
 class BookSearchOut(BaseModel):

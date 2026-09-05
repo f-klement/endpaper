@@ -7,13 +7,16 @@ behaviour under test belongs to the schema.
 from typing import Any
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import String, delete
 from sqlalchemy.exc import IntegrityError
 
+import filing
 from database import Base
 from enums import AuthorityProvenance, AuthorityScheme, ClassificationScheme
 from models import (
     AUTHORITY_IDENTIFIER_MAX,
+    CLASSIFICATION_NUMBER_MAX,
+    CLASSIFICATION_SORT_KEY_MAX,
     AuthorIdentifier,
     Book,
     Collection,
@@ -865,3 +868,47 @@ class TestTheAuthorityIdentifierConstraints:
         db.commit()
 
         assert db.query(AuthorIdentifier).count() == 2
+
+
+class TestTheShelfKeyFitsItsColumn:
+    """`CLASSIFICATION_SORT_KEY_MAX` is wider than the number column, and a
+    bound that was not would be a column too narrow for its own values.
+
+    SQLite does not enforce a `VARCHAR` length, so nothing truncates here today
+    and nothing would go red on the engine this ships on. That is exactly why
+    this is measured rather than left to the schema: the failure would arrive on
+    a database that does enforce it, with a key silently cut short and a book
+    filed under a class it does not belong to.
+    """
+
+    @staticmethod
+    def _worst_number() -> str:
+        """The longest admissible number whose key is longest.
+
+        `filing.MAX_KEY_GROWTH` is reached by the shortest class prefix the rule
+        matches, one letter and one digit, since everything after it is carried
+        through verbatim. Padding that out to `CLASSIFICATION_NUMBER_MAX` is the
+        longest key the column can be asked to hold.
+        """
+        return "Q1" + "x" * (CLASSIFICATION_NUMBER_MAX - 2)
+
+    def test_the_widest_key_the_number_column_can_produce_still_fits(self):
+        widest = max(
+            len(filing.rule_for(scheme).sort_key(self._worst_number()))
+            for scheme in ClassificationScheme
+        )
+
+        assert widest == CLASSIFICATION_SORT_KEY_MAX
+
+    def test_the_column_is_declared_that_wide(self):
+        """So the constant and the column cannot drift apart."""
+        column = Base.metadata.tables["classifications"].c.sort_key
+
+        assert isinstance(column.type, String)
+        assert column.type.length == CLASSIFICATION_SORT_KEY_MAX
+
+    def test_it_is_wider_than_the_number_it_files(self):
+        """The sentence the constant exists for: a key is longer than its
+        number, so reusing `CLASSIFICATION_NUMBER_MAX` here would be too
+        narrow."""
+        assert CLASSIFICATION_SORT_KEY_MAX > CLASSIFICATION_NUMBER_MAX

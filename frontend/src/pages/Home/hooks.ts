@@ -21,15 +21,14 @@ import {
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { useMyOverdue as useMyOverdueQuery } from "../../api/generated/endpoints/loans/loans";
 import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
+import { catalogueMode, type CatalogueMode } from "../../lib/catalogueMode";
 import {
   AVAILABLE_COLUMNS,
-  catalogueMode,
   clearColumns,
   isDefaultColumns,
   readColumns,
   toggledColumns,
   writeColumns,
-  type CatalogueMode,
   type ColumnKey,
 } from "../../lib/libraryColumns";
 import {

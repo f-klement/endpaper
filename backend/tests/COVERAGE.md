@@ -1,9 +1,9 @@
 # Backend test coverage
 
-**5074 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05 and equal to the
-`5074 passed` the gate reported on the same commit.
+**5177 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05 and equal to the
+`5177 passed` the gate reported on the same commit.
 
-**The rows below sum to 5041, thirty three short, and the shortfall is deliberate.** Those
+**The rows below sum to 5144, thirty three short, and the shortfall is deliberate.** Those
 tests live in four files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -53,10 +53,10 @@ why the helper uses regexes.
 | `test_config.py` | 52 | Settings resolution, the startup secret guard, upload limits, the frontend switch |
 | `test_isbn.py` | 57 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
-| `test_backup.py` | 76 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
+| `test_backup.py` | 81 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |
 | `test_marc.py` | 61 | **The MARCXML reader and writer.** That MARC is read through `metadata.py`'s parser rather than a second one, what the importer refuses that a lookup does not |
-| `test_metadata.py` | 396 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
+| `test_metadata.py` | 402 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 87 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
 | `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
@@ -68,11 +68,11 @@ why the helper uses regexes.
 | `test_sru.py` | 205 | **The SRU server: the protocol, driven as a function over a query string.** That no index reaches a private or a trashed book |
 | `test_settings_store.py` | 38 | Typed reads and writes over the key/value table |
 | `test_auth.py` | 22 | Password hashing, JWT creation and the auth dependencies |
-| `test_models.py` | 77 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
+| `test_models.py` | 80 | Constraints, defaults, cascades, relationships, what may be switched into, that a collection is not a privacy boundary |
 | `test_importing.py` | 20 | **Applying a parsed export to a library.** The private-book oracle: a row whose ISBN belongs to a book the member cannot see is counted, never named, writes nothing |
 | `test_authority.py` | 120 | **The network half of author identity.** That the four cross references a GND record carries are read off it, that the record's own scheme is never among them |
 | `test_authorship.py` | 67 | **The database half of author identity.** That one read costs two statements and that a read after a write is not stale |
-| `test_shelf.py` | 186 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
+| `test_shelf.py` | 187 | The seam every many-book query goes through, and the only enforcement of the privacy rule since the AST guard was deleted. |
 | `test_authors.py` | 45 | Splitting a credit line, the key that folds without asking against the one that only suggests, the index, the three suggestion rules |
 | `test_auth_backends_bindguard.py` | 20 | **The empty-password guards**, at all three layers |
 | `test_ratelimit.py` | 37 | The sliding window, and the login/registration limits |
@@ -82,15 +82,15 @@ why the helper uses regexes.
 | `test_house_rules.py` | 193 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
 | `test_roster_counts.py` | 59 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. |
-| `schemas/test_book.py` | 32 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
+| `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 1 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 46 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
-| `test_schema.py` | 104 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
+| `test_schema.py` | 113 | Alembic: create, adopt a pre-Alembic database, upgrade, that two table rewrites left their partial unique indexes partial |
 | `test_env_example.py` | 4 | **Operator documentation that goes stale silently.** That every environment name `config.py` reads appears in `.env.example` and nothing appears there that the code ignores |
 | `test_database.py` | 27 | Engine setup and the session dependency |
 | `test_fetch.py` | 61 | **The only door outwards.** That the body cap counts raw wire bytes and compression is never requested |
-| `test_catalogue.py` | 161 | Folding what one source repeats, filling one row from another, merging two catalogues of one printing, how complete a record is, the two draft shapes |
-| `test_filing.py` | 175 | **How each classification scheme's call numbers sort.** One rule per scheme answering four things: whether it recognises a number, the key that files it in Python |
+| `test_catalogue.py` | 170 | Folding what one source repeats, filling one row from another, merging two catalogues of one printing, how complete a record is, the two draft shapes |
+| `test_filing.py` | 238 | **How each classification scheme's call numbers sort.** One rule per scheme answering three things: whether it recognises a number, the key that files it |
 | `test_z3950.py` | 78 | The Z39.50 door: the byte and time bounds enforced by construction, the taxonomy keeping **refused**, **unreachable** and **answered nothing** apart, and PQF escaping. |
 | `test_z3950_provisional.py` | 38 | The provisional ctypes client behind that door: every ZOOM call declared against the signatures it really has, NULL checks, the single worker and its lock |
 | `routers/test_public.py` | 51 | The first routes reachable without a session: the gate as a router dependency rather than per handler, that nothing under the prefix accepts a write, 404 never 403 |

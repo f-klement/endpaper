@@ -28,11 +28,9 @@
  * migration is possible or needed.
  */
 
-// The mode is the library's rather than the table's, and it lives in
-// `libraryColumns.ts` because that is where it was first needed. Imported
-// rather than re-declared: two spellings of "is this a cataloguer" is exactly
-// the fact-stored-twice this module's two keys exist to avoid.
-import type { CatalogueMode } from "./libraryColumns";
+// Imported rather than re-declared: two spellings of "is this a cataloguer"
+// is exactly the fact-stored-twice this module's two keys exist to avoid.
+import type { CatalogueMode } from "./catalogueMode";
 
 export const LIBRARY_VIEWS = ["grid", "table", "list"] as const;
 

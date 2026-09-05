@@ -234,6 +234,20 @@ def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ..
     and recorded in `ddc.SEGMENTATION_PRIME`. For LCC the two differ on every
     row that has a class number at all.
 
+    **The key is read, not built.** `classifications.sort_key` holds what the
+    scheme's rule returned when the row was written, so this reads a column
+    where it used to compile a twelve arm `CASE` per classification row. What
+    that cost is in `filing.py`, at the constant it was measured against.
+    `models.Classification.sort_key` names what writes it.
+    Nothing recomputes it here, which is what makes the order cheap and what
+    makes a change to `filing.py` a data migration.
+
+    **No index for this, deliberately.** `uq_classifications_book_scheme_number`
+    already leads with `(book_id, scheme)`, which is exactly what this subquery
+    narrows on, and `MAX_CLASSIFICATIONS_PER_BOOK` bounds what is left to eight
+    rows. An index carrying the key as well would be a write on every heading
+    to save a `min` over at most eight values.
+
     `nullslast` for the reason `_SERIES_ORDER` has it: a library is mostly
     unclassified until somebody enriches it, and scattering those through the
     list wherever SQLite puts NULL would make the sort look broken rather than
@@ -260,9 +274,8 @@ def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ..
             f"{scheme.value!r} files under the {rule.name} rule, which orders no "
             "shelf. See filing.GenericFiling for why."
         )
-    key = rule.sort_expression(Classification.number)
     lowest = (
-        select(func.min(key))
+        select(func.min(Classification.sort_key))
         .where(
             Classification.book_id == Book.id,
             Classification.scheme == scheme,

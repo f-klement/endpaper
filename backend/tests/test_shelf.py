@@ -168,7 +168,6 @@ The rest of the file tests the Shelf's behaviour.
 
 import ast
 import importlib
-import random
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -180,15 +179,14 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Select,
-    String,
     Table,
     event,
     func,
     literal,
     select,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query
-from sqlalchemy.sql.elements import Case
 
 import ddc
 import filing
@@ -222,6 +220,11 @@ from shelf import (
     rereading_filtered_rows,
     whole_table_for_uniqueness,
 )
+
+# The corpus lives beside the rules it measures, in `tests/test_filing.py`, and
+# is read from here, from `tests/test_schema.py` and from `tests/test_backup.py`.
+# One list, so a shape added for one reader is a shape every reader gets.
+from tests.test_filing import CORPUS
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -2694,10 +2697,23 @@ class TestFilters:
         assert shelf.matching(BookFilters(q="Wool")).count() == 1
 
     def test_a_backslash_in_the_search_term_is_a_character_too(self, db, user):
-        """The escape character itself, which is escaped first for that reason.
+        """The escape character itself, which the loop escapes along with the two
+        wildcards.
 
-        Escaping `%` and `_` before the backslash would escape the backslashes
-        the loop had just added, and this is the term that shows it.
+        **The row rather than the count, and the difference is the whole test.**
+        Both fixtures are one edit apart, so a term left unescaped matches the
+        other one and the count stays at 1. Measured: with `"\\\\"` dropped from
+        the loop's tuple this asserted `count() == 1`, matched `ACDC Live`
+        instead, and passed, and so did every other test in this file. Asserting
+        which book came back is what makes the fixtures worth having.
+
+        **It does not pin the order the loop escapes in**, which its own reason
+        used to claim. A term carrying no `%` and no `_` produces the same
+        pattern whichever end the backslash is escaped from, so the order is
+        invisible here.
+        `test_a_wildcard_in_the_search_term_is_a_character_and_not_a_wildcard` is
+        what pins it: escaping the backslash last escapes the ones the loop had
+        just added, and `q="100%"` goes from 1 to 0.
         """
         db.add_all(
             [
@@ -2708,7 +2724,9 @@ class TestFilters:
         db.commit()
 
         shelf = Shelf.seen_by(db, user.id)
-        assert shelf.matching(BookFilters(q=r"AC\DC")).count() == 1
+        found = shelf.matching(BookFilters(q=r"AC\DC")).all()
+
+        assert [book.title for book in found] == [r"AC\DC Live"]
 
     def test_unread_includes_a_book_nobody_has_touched(self, db, user):
         """A Book with no `UserBook` row has never been touched, which is
@@ -3559,226 +3577,127 @@ class TestTheDivisionProjectionsAgree:
         assert self._sql(db, _looks_like_a_notation(literal("Hello world"))) is False
 
 
-class TestTheFilingKeysAgree:
-    """Every filing rule is written twice, in Python and in SQL, and the two
-    have to give the same string.
+class TestTheStoredKeyIsTheRulesKey:
+    """`classifications.sort_key` holds what the scheme's rule returned, and
+    every path that writes the table has to put it there.
 
-    `filing.FilingRule.sort_key` is what a test can read and what
-    `test_filing.py` reasons about. `sort_expression` is what actually orders a
-    listing, because a shelf order is paginated in the database. Nothing but a
-    comparison keeps them together, and `filing.py` named this class before it
-    existed: both critic seats reported that on 2026-09-03, which is the second
-    time a docstring in this file has claimed a guard it did not have.
+    The rule used to be written twice, in Python and in SQL, and this class
+    compared the two. There is one implementation now and the SQL is deleted, so
+    what needs holding together is the **write path** and the rule: an ORM
+    insert, an ORM update of either column it derives from, and
+    `backup.restore`, which inserts through Core and fires no validator.
 
-    Evaluated by real SQLite rather than recomputed here, for the reason
-    `TestTheDivisionProjectionsAgree` gives: a test that reimplemented `substr`
-    in Python would agree with itself and say nothing about the database.
+    Read back out of SQLite rather than off the instance, because half of what
+    this checks is that the value survives the column: a key is longer than the
+    number it files, and `models.CLASSIFICATION_SORT_KEY_MAX` is the bound that
+    says how much longer.
+
+    The corpus is `tests/test_filing.py::CORPUS`, which reaches all twelve class
+    shapes twice over. Its own coverage is guarded there.
     """
 
-    #: Values chosen to break the two apart, not to be representative.
-    #:
-    #: The call numbers the live sources supply, both spellings of the cutter
-    #: separator, the two boundaries the caps sit on (`_LETTERS_WIDTH` at
-    #: `ABCD1`, `_DECIMAL_WIDTH` at `QA76.1234567`), the class decimal against a
-    #: cutter, a value that falls to the generic arm, and characters SQLite and
-    #: Python disagree about the class of.
-    #:
-    #: **No NUL, and that is a statement rather than an omission.** SQLite's
-    #: string functions stop at one and Python's do not, so a stored NUL
-    #: produces two different keys. `ClassificationIn.tidy_number` refuses
-    #: every `Cc` and `Cf` character, and
-    #: `tests/routers/test_books_classifications.py` pins that, so no
-    #: request can store one.
-    #:
-    #: **One path still can, and it is named rather than glossed.**
-    #: `backup.restore` writes this table through `_TABLES` rather than through
-    #: the schema, so an archive taken before that refusal restores whatever it
-    #: holds. Admin only, and the consequence is that two numbers file equal.
-    #: Left rather than chased: `filing` deliberately does not lean on the
-    #: validator, and a restore that dropped rows to satisfy a sort would be
-    #: the worse failure.
-    CORPUS = [
-        "BF575.S75 E64 2022",
-        "HQ1090.3 .M67 1999",
-        "QA76.73.J38 F57 2020",
-        "PR6068.O93 H37 1997",
-        "KJC1234.5 .A2 1976",
-        "PZ8.3.G276Ci",
-        "BF575.5.S75",
-        "BF575.S7 A1",
-        "BF75",
-        "Q1",
-        "QA1",
-        "ABCD1",
-        "A1B2",
-        "QA76.1234567",
-        "QA76.",
-        "QA76..5",
-        "bf575",
-        "155.9042",
-        "005.13/3",
-        "004",
-        "Hello world",
-        "",
-        " ",
-        "ü9",
-        "\u0663\u0664",
-        "\u1e9e1",
-        "-1",
-        "[]{}",
-        # `re.DOTALL`, which `_LCC` sets and which nothing pinned until a
-        # mutation run survived: without it `.` refuses a newline, the Python
-        # side falls to the generic key and SQLite's `substr` keeps building
-        # the padded one. `tidy_number` means neither can be stored, and
-        # `filing` deliberately does not lean on that.
-        #
-        # **The newline is the one that pins the flag**, and the other two do
-        # not: bare `.` already matches a tab and a carriage return, so only
-        # the newline is its exception. Measured by the design seat, which
-        # killed the DOTALL mutant at 1 of 31 rather than 3. The other two stay
-        # as ordinary agreement fixtures, named here so nobody reads them as
-        # guarding something they do not.
-        "QA76\nS75",
-        "QA76\tS75",
-        "QA76\rS75",
-    ]
-
     @staticmethod
-    def _sql(db, expression):
-        return db.execute(select(expression)).scalar_one()
+    def _stored(db, scheme, number):
+        """The key SQLite holds for a row written through the ORM."""
+        book = Book(title="Filed", added_by_user_id=None)
+        db.add(book)
+        db.flush()
+        row = Classification(book_id=book.id, scheme=scheme, number=number)
+        db.add(row)
+        db.flush()
+        db.expire(row)
+        return row.sort_key
 
     @pytest.mark.parametrize("scheme", list(ClassificationScheme))
-    def test_across_every_scheme_and_the_whole_corpus(self, db, scheme):
+    def test_across_every_scheme_and_the_whole_corpus(self, db, user, scheme):
         """Parametrised over the enum, so a fifth scheme is covered the day it
         is added rather than the day somebody remembers this file."""
         rule = filing.rule_for(scheme)
         mismatches = [
-            (value, in_sql, rule.sort_key(value))
-            for value in self.CORPUS
-            if (
-                in_sql := self._sql(
-                    db, rule.sort_expression(literal(value, String()))
-                )
+            (value, stored, rule.sort_key(value))
+            for value in CORPUS
+            if (stored := self._stored(db, scheme, value)) != rule.sort_key(value)
+        ]
+
+        assert mismatches == []
+
+    def test_changing_the_number_refiles_the_row(self, db, user):
+        """The half a write-time derivation gets wrong. Nothing renames a
+        classification today, and `Collection._fold_the_name` is here for the
+        same reason: a derivation a writer could forget will be forgotten."""
+        book = Book(title="Refiled", added_by_user_id=user.id)
+        db.add(book)
+        db.flush()
+        row = Classification(
+            book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75"
+        )
+        db.add(row)
+        db.flush()
+
+        row.number = "BF575"
+        db.flush()
+        db.expire(row)
+
+        assert row.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF575")
+
+    def test_changing_the_scheme_refiles_the_row(self, db, user):
+        """The other column the key is derived from. `005.13/3` keys differently
+        under Dewey, which drops the segmentation prime, than under the generic
+        rule, which does not."""
+        book = Book(title="Rescheming", added_by_user_id=user.id)
+        db.add(book)
+        db.flush()
+        row = Classification(
+            book_id=book.id, scheme=ClassificationScheme.GND, number="005.13/3"
+        )
+        db.add(row)
+        db.flush()
+        assert row.sort_key == "005.13/3"
+
+        row.scheme = ClassificationScheme.DDC
+        db.flush()
+        db.expire(row)
+
+        assert row.sort_key == "005.133"
+
+    def test_the_two_columns_may_be_given_in_either_order(self, db, user):
+        """The trap `Tag._drop_the_key_on_a_rename` records: SQLAlchemy assigns
+        constructor kwargs in the order given, so a hook reading a sibling
+        attribute depends on which was assigned first. Whichever of the two is
+        set second recomputes the key with the first already there.
+        """
+        book = Book(title="Either way", added_by_user_id=user.id)
+        db.add(book)
+        db.flush()
+        scheme_first = Classification(
+            book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75"
+        )
+        number_first = Classification(
+            number="BF75", scheme=ClassificationScheme.LCC, book_id=book.id
+        )
+
+        assert scheme_first.sort_key == number_first.sort_key
+        assert scheme_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
+
+    def test_a_writer_that_skips_the_hook_is_refused_rather_than_filed_last(
+        self, db, user
+    ):
+        """The enforcement, and the reason the column is NOT NULL with no default.
+
+        A null key files last under `nullslast`, so a row written past the hook
+        would sit at the end of every shelf order with nothing to see: the book
+        is there, its number is right, and only its position is wrong. This
+        makes that write raise instead.
+        """
+        book = Book(title="Unfiled", added_by_user_id=user.id)
+        db.add(book)
+        db.flush()
+
+        with pytest.raises(IntegrityError):
+            db.execute(
+                Base.metadata.tables["classifications"].insert(),
+                [{"book_id": book.id, "scheme": "lcc", "number": "BF75"}],
             )
-            != rule.sort_key(value)
-        ]
-
-        assert mismatches == []
-
-    def test_no_value_matches_two_arms_of_the_library_of_congress_key(self, db):
-        """The invariant the deleted not-a-letter test used to be credited with.
-
-        `LccFiling.sort_expression` builds one arm per class letter count and
-        class integer count, and `case` takes the first that matches, so two
-        arms matching one value would make the key depend on arm order rather
-        than on the number. The letter run is closed by the digit test that
-        follows it at the same position, which is why that branch could go.
-
-        **It rests on every arm carrying at least one digit**: a `digits = 0`
-        arm would silently need the deleted branch back, and the failure would
-        be this property rather than anything red.
-
-        **Read off `filing._ARM_SHAPES`, which production iterates too, and
-        that is the whole of why this test is worth anything.** The first
-        version rebuilt the pairs as a literal here, so it was blind to the
-        mutation it names: with `sort_expression` widened to
-        `range(0, _INTEGER_WIDTH + 1)` it reported 0 overlaps and passed, while
-        57 of its own 90 shapes changed key. Both critic seats found that
-        independently, and the attack that was supposed to have proved it had
-        added the arm to this list rather than to production, which measures
-        the corpus and not the guard. It was blind to widening too: 15 arms in
-        production, 12 checked here.
-
-        The mutant was never a behavioural hole, because
-        `test_across_every_scheme_and_the_whole_corpus` catches it on keys. But
-        a count says a mutation was noticed and only the failing test's name
-        says it was noticed by the guard under test.
-
-        The corpus is the shapes the boundaries live on, `A` repeated 0 to 4
-        times against `1` repeated 0 to 5, with and without a trailing cutter.
-
-        **What this still does not catch**, stated because a guard whose limit
-        is undocumented gets read as a guarantee it never made, which is the
-        rule `TestTheShelfIsTheOnlyWayIn` follows. This test reads
-        `_ARM_SHAPES`, and on its own it cannot tell whether `sort_expression`
-        still does: a rewrite that built its arms some other way would leave
-        this iterating a tuple production had abandoned, and it would go quiet
-        rather than red. The sibling below closes the counted form of that.
-        What neither reaches is a rewrite producing the **same number** of
-        arms from different shapes, which is a rewrite of the whole mechanism
-        rather than a drift.
-        """
-        shapes = [
-            "A" * letters + "1" * digits + tail
-            for letters in range(5)
-            for digits in range(6)
-            for tail in ("", ".S75 E64 2022", ".5.S75")
-        ]
-        overlapping = []
-        for value in shapes:
-            literal_value = literal(value, String())
-            matched = [
-                shape
-                for shape in filing._ARM_SHAPES
-                if self._sql(db, filing.LccFiling._arm(literal_value, *shape)[0])
-            ]
-            if len(matched) > 1:
-                overlapping.append((value, matched))
-
-        assert overlapping == []
-
-    def test_the_key_is_built_from_the_shared_arm_shapes(self):
-        """Production reads `_ARM_SHAPES`, which the test above assumes.
-
-        **The rung the shared tuple did not by itself reach.** One tuple stops
-        the two sides disagreeing about the shapes; nothing stopped
-        `sort_expression` ceasing to read it. Measured: a `sort_expression`
-        rewritten to loop over `digits` 0 to 4 directly compiles 15 arms while
-        `_ARM_SHAPES` stays 12, and the disjointness test above passes clean,
-        because it is iterating the tuple rather than the expression. Key
-        agreement would catch it, which is where this whole thread started: a
-        count says a mutation was noticed, and only the failing test's name
-        says the guard written for it noticed.
-
-        Offered by the security seat after it had already signed off, which is
-        the round a finding is easiest not to raise.
-
-        `whens` is SQLAlchemy's own list of the `CASE` branches, so this counts
-        the compiled expression rather than re-deriving what it should hold.
-        The `isinstance` is not ceremony for mypy, though it is that too: the
-        declared return is `SQLColumnExpression`, so a rewrite returning
-        something with no branches at all would otherwise fail here on an
-        attribute rather than on the count.
-        """
-        compiled = filing.LIBRARY_OF_CONGRESS.sort_expression(literal("", String()))
-
-        assert isinstance(compiled, Case)
-        assert len(compiled.whens) == len(filing._ARM_SHAPES)
-
-    def test_the_keys_still_agree_on_a_generated_corpus(self, db):
-        """So the hand written list above cannot be the only evidence.
-
-        Drawn from an alphabet of the characters that decide a branch: letters
-        in both cases, digits, the point, the space, and the segmentation
-        prime. 400 values, seeded, against the Library of Congress rule, which
-        is the only one with branches to get wrong.
-        """
-        generator = random.Random(137)
-        alphabet = "AZaz09. /"
-        values = [
-            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 14)))
-            for _ in range(400)
-        ]
-        rule = filing.LIBRARY_OF_CONGRESS
-
-        mismatches = [
-            value
-            for value in values
-            if self._sql(db, rule.sort_expression(literal(value, String())))
-            != rule.sort_key(value)
-        ]
-
-        assert mismatches == []
 
 
 class TestTheShelfOrdersByEachSchemesOwnRule:

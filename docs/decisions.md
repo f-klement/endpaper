@@ -7082,7 +7082,11 @@ order invariant**: `metadata.lookup` asks every enabled source until one answers
 so no permutation of the roster finds more books. Modelled over five candidate
 orders on one 500 ISBN outcome set, all five resolved the same 300, and
 `tests/test_metadata.py::TestNoOrderOfTheRosterFindsMoreBooks` now asserts it
-over **every** permutation rather than the five that were considered.
+over every position each source can hold in the chain and over every ordered
+pair of sources, rather than over the five orders that were considered. It
+enumerated all 362,880 permutations until the cost of that became factorial in a
+roster that grows; what replaced enumeration, and what enumeration bought that
+the replacement does not, is in the class docstring.
 
 What follows is a refusal worth recording: reordering is never the fix for a
 country the chain misses. It buys latency, and which records `_merge` folds.
@@ -7307,6 +7311,19 @@ rechecking.** Both are the same rule as every stale number in `CLAUDE.md`, one
 level up from arithmetic: **a claim about what the tree contains is a claim, and
 it goes stale exactly like a figure does.** The seat found its own; the other was
 found by being contradicted and withdrew it with the mechanism named.
+
+## A test that loops holds one log record per iteration
+
+The `caplog` silencer that used to sit on the roster permutation class carried a rule with
+no other home, and the rule outlives the class that bought it.
+
+**pytest's capture handler retains every `LogRecord` emitted inside one test**, so a test
+that loops holds one record per iteration until it ends. `metadata.lookup` logs a line per
+resolved ISBN, and at 362,880 orders in a single test that was a measured 1059 MB on the
+xdist worker and an OOMKill of the backend test job against the runner's 2Gi. Setting the
+level stops the record being **created**, so it is the loop that gets cheaper rather than
+the handler. The permutation class no longer trips this, because its loop is bounded at 209
+iterations. The next loop test will.
 
 ## The National Library of Greece, and the rule that was refusing its records
 
@@ -8386,9 +8403,10 @@ exclusion was costing a whole search row, because the search body bounds the fie
 gives 0 rows against 1 for the same record with a valid one. So it was bounded. That made
 the 500 reachable through the same module, because `metadata._google_record` prefers the
 unparsed identifier over the canonicalised argument and sits on the ISBN lookup path. One
-lost search row is cheaper than the scan route, so the field is unbounded again and the
-whole trade is written at `_UNBOUNDED` rather than half of it. The one line fix is at that
-adapter, parsing its own identifier the way both Open Library paths already do.
+lost search row was cheaper than the scan route, so the field went back to being unbounded
+and the whole trade was written at `_UNBOUNDED` rather than half of it. The one line fix
+belonged at that adapter, parsing its own identifier the way both Open Library paths
+already do. It landed, and the field is bounded now: see the entry on what makes that safe.
 
 The lesson is this repository's own: a replacement better in the dimension it was designed
 for and silently weaker in one nobody re-checked. What found it was a seat attacking the
@@ -8573,9 +8591,8 @@ state has no reader today to notice it is wrong.
 
 Taken from Koha, which seeds every classification source with a **filing rule**
 naming a sorting routine: `dewey`, `lcc`, `generic`. `backend/filing.py` holds
-one rule per scheme, and a rule answers four things: whether it recognises a
-number, the key that files it in Python, the same key in SQL, and whether a
-shelf may be ordered by it at all.
+one rule per scheme, and a rule answers three things: whether it recognises a
+number, the key that files it, and whether a shelf may be ordered by it at all.
 
 **The generic rule orders no shelf, and that is the load bearing half.**
 Sorting an unrecognised scheme's values as text is an honest thing to do with
@@ -8587,10 +8604,12 @@ schemes whose rules order a shelf. It is worth knowing that the first version of
 this shipped the sentence and not the mechanism, and that both critic seats
 found that independently.
 
-**The key is computed in the query rather than stored.** Koha keeps a computed
-`cn_sort` column. A column here would have needed a migration, and the trio
-holding the Alembic head was another one that wave. The cost is a `CASE` of
-`substr` calls in the ORDER BY, and it is not small: measured on a seeded
+**The key is stored, the way Koha stores `cn_sort`.** It was computed in the
+query until revision `f1c30ab27d84` added the column; the reason it was not
+stored sooner, that another trio held the Alembic head, is spent. The
+measurements below are what justified the column and are kept for that: they
+describe the `CASE` of `substr` calls in the ORDER BY that the column replaced,
+and it was not small. Measured on a seeded
 library whose books carry one Dewey and one Library of Congress number each,
 best of 3, every column of a row from one run, the Library of Congress clause is
 73.1 ms at 5,000 books and 291.8 ms at 20,000, against 16.7 ms and 70.6 ms for
@@ -8605,23 +8624,35 @@ of 5.7. The security seat measured 0.131 against 0.020 on its own corpus, 6.4x.
 A ratio against the title order is not a constant, since that order never
 touches the table: that seat measured 59.5x at one row per book and 316x at
 four. The worst case a member can build is `MAX_CLASSIFICATIONS_PER_BOOK` rows
-on 20,000 books, and each pair has to come from one corpus: 13.2 s to 2.3 s
-here, 21.0 s to 3.2 s on the security seat's.
+on 20,000 books, which is 160,000 rows, and each pair has to come from one
+corpus: 12.5 to 13.1 s down to 2.3 s here, 21.0 s down to 3.2 s on the security
+seat's. Those totals are the per row figures above multiplied out rather than
+measured a second time, which is why the ticket that filed the column quotes
+12.6 s and 2.7 s for this box: both pairs fall inside the same per row range and
+neither is an independent measurement. Multiply out the range, do not copy a
+total.
 
 The absolute figures are a **floor**: SQLite was backed by a file on tmpfs, so
 the reads were RAM.
-**A stored key is what this wants**, and it is a migration. The benefit taken instead is a rule that
-cannot go stale against rows written before it existed, which is exactly what
-happened to `_looks_like_a_notation`'s subject.
+**A stored derivation moves the failure from slow to silent**, and that is what
+this change accepts. A computed key cannot go stale against rows written before
+the rule changed, which is exactly what happened to `_looks_like_a_notation`'s
+subject; a stored one can. Four things hold it: the column is `NOT NULL` with no
+default, so a writer that skips the hook raises rather than storing a wrong key;
+the `@validates` hook covers both columns the key derives from; `backup.restore`
+derives it rather than trusting the archive; and the migration backfills. What
+none of them covers is a change to `filing.py` with no revision recomputing the
+column. That is stated at the module, at the model and in `docs/data-model.md`,
+and enforced nowhere.
 
-**The Python and SQL halves live in one object.** A shelf order is paginated in
-the database, so SQL is the answer a reader sees, and Python is the one a test
-can read. One rule written twice is the shape that drifts, so both renderings
-sit on the rule and `tests/test_shelf.py` evaluates them against real SQLite
-over a corpus. The widths and caps are module constants read by the regex and by
-the SQL run lengths alike, because a value longer than either cap has to break
-in the same place on both or the keys differ only on inputs a short corpus does
-not carry.
+**There is no SQL half any more.** The rule is written once, in Python, and the
+query reads the column that rule wrote. The second reader that can drift is the
+copy of the rule inside revision `f1c30ab27d84`, which states it rather than
+importing it, on the precedent four earlier revisions set;
+`tests/test_schema.py::TestTheStoredShelfKey` holds that copy to the original
+over the corpus in `tests/test_filing.py`. The widths and caps stay module
+constants, because a value longer than either cap has to break in the same place
+for the migration's copy and for the rule alike.
 
 **Refusing an LCC number at the door was considered and not taken.**
 `ClassificationIn.dewey_numbers_are_notations` refuses a `ddc` row whose number
@@ -9121,10 +9152,12 @@ about SRU.
 guessing at it. Adding the index later is a row in `INDEXES` and one allowlist entry with
 a reason.
 
-## Two catalogue record scalars are deliberately unbounded
+## The one catalogue record scalar that is deliberately unbounded
 
 Moved out of `catalogue.py` on 2026-09-05, where the derivation was 72 lines above
-a constant. The rule stays at the constant; the measurements are here.
+a constant. The rule stays at the constant; the measurements are here. This named
+two scalars until `isbn` gained a ceiling later the same day, for which see the
+entry below.
 
 **`source`** is this app's own word rather than a catalogue's. Every producer
 sets it from a literal: the adapters in `metadata.py` from the source roster,
@@ -9132,70 +9165,90 @@ sets it from a literal: the adapters in `metadata.py` from the source roster,
 modules, not one**, and the count is worth stating rather than the module,
 because this comment named only `metadata.py` on the day the second one
 arrived. No catalogue can widen it either way, which is also what makes it
-safe to log untruncated below. `SOURCE_LABEL_MAX` still bounds it at
-`BookMatch`, where it is a field on the wire.
-
-**`isbn` is here reluctantly, and the reason it has to be is one line of
-somebody else's module.** It was excluded, then bounded, then excluded again
-inside one day, and every step is worth keeping because the last one is not
-the obvious answer.
-
-**What the exclusion costs, measured.** `as_match()` fills `isbn13`,
-`BookMatch` bounds it at 20, and `_match_rows` drops the **row** rather than
-the field, so an unusable identifier costs a whole search result:
-`_match_rows` over one record carrying a 40 character ISBN returns **0**
-rows against **1** for the same record with a valid one. Reachable without
-anything unusual, because `google_books._volume_to_fields` takes
-`industryIdentifiers[].identifier` straight out of somebody else's JSON.
-
-**What bounding it costs is worse, and it is the same adapter.**
-`metadata._google_record` sets `isbn=fields.get("isbn13") or isbn`, which
-prefers that unparsed identifier **over** the canonicalised argument, and it
-is on the ISBN lookup path. So a bound here clears it, `as_lookup()` hands
-`None` to `BookLookup.isbn`, which is **required**, and
-`errors.unhandled_exception_handler` answers a Member's scan with a 500.
-Measured through the real adapter:
-`_google_record({"isbn13": "9" * 40, ...}, "9780743273565")` gives
-`record.isbn is None` and a `ValidationError` at `('isbn',)`. One row lost is
-better than the scan route down, so the trade decides itself.
-
-**The fix is at the adapter and it is one line**: spelling that
-`isbn=parse_isbn(fields.get("isbn13") or "") or isbn`, which is what
-`_first_isbn13` already does on both Open Library paths. That makes the
-guarantee `as_lookup` rests on literally true for every lookup source, and
-bounding this field here becomes safe. **At the adapter rather than here, and
-that is the point rather than a division of labour**: a type cannot rescue a
-producer that hands it a value nobody parsed, it can only refuse it, and
-refusing this one is the 500 above.
-
-**That fix landed in the same wave, from another trio, and this comment's
-blocker is therefore gone.** `metadata._google_isbn13` refuses a non string
-before parsing the value, which the one line above would not have: `parse`
-calls string methods, so an int or a bool out of somebody else's JSON raises
-`TypeError` past a caller catching only `httpx.HTTPError` and `ValueError`,
-which is the same 500 wearing a different exception. Both tripwires in
-`TestWhichScalarsAreBoundedAndWhichAreNamedInstead` went red on the merged
-tree and were inverted there, which is what they were written to do.
-
-**So `isbn` is revisitable and is deliberately not revisited at a merge.**
-Bounding it is a behaviour change no critic seat has reviewed, and what it
-would have to establish is what the exclusion refuses that a bound accepts:
-that no producer on the lookup path can still yield a value wider than this
-column, since clearing one is the 500 above. The lookup adapters were
-measured at six taking the canonicalised argument and one parsing its own,
-with Google the hole that is now closed, but that measurement was taken for a
-different question and is not a substitute for taking it for this one.
-
-An earlier version of this comment also said nothing writes `Record.isbn` to
-a column, which was false: `importing.bounded_fields` ends
-`fields["isbn"] = record.isbn` and `MarcImport._create` passes that into
-`Book(...)`. What holds it there is `metadata._marc_isbn`, which returns
-`isbn.parse`'s output or `None`.
+safe to log untruncated. `SOURCE_LABEL_MAX` still bounds it at `BookMatch`,
+where it is a field on the wire.
 
 Pinned by `TestWhichScalarsAreBoundedAndWhichAreNamedInstead`, which asserts
 this set's **contents** and not only that the partition covers everything: an
 earlier version compared unions, so moving a name from a ceilings table into
 here would have left both sides equal and nothing red.
+
+## A catalogue record's ISBN is bounded, and what makes that safe
+
+`catalogue.Record.isbn` was excluded from `_TEXT_CEILINGS` because a bound can clear the
+field, `as_lookup()` hands `None` to a required `BookLookup.isbn`, and `lookup_isbn` catches
+no `ValidationError`: a 500 on a member's scan. What made that reachable was
+`metadata._google_record` preferring the volume's own unparsed `industryIdentifiers` entry
+over the canonicalised argument. `metadata._google_isbn13` closed it.
+
+**Decided 2026-09-05: bound it.** The question was what the exclusion refuses that a bound
+would accept, and on the lookup path the answer is nothing.
+
+Every producer that can reach `BookLookup` was enumerated from the roster rather than from a
+call graph, because a name based graph reported all nine `Record(` constructions in
+`metadata.py` reachable, which is the whole domain and therefore a tell rather than a
+measurement. `sources.LOOKUP_SOURCES` holds seven rows behind four readers
+(`_LOOKUP_READERS` plus `_BESPOKE_LOOKUPS`), and they reach five record constructions:
+`_dnb_record`, `_k10plus_record`, `_nkp_record`, `_open_library` and `_google_record`. The
+other four are search and cluster path only. Each of the five sets `isbn` from the
+canonicalised argument, from `metadata._marc_isbn`, or from `metadata._google_isbn13`, and
+all three are `isbn.parse` output.
+
+**Measured, `isbn.parse`'s output width, by three routes:** a sweep of 400,000 random and
+1,400,000 constructed inputs through `parse` gave 1,400,040 non-None outputs, every one **13
+characters**; driving `isbn10_to_isbn13` over 300,000 valid ISBN-10s gave 300,000 outputs at
+**13**; and the branch reading, `is_valid_isbn13` requiring `len == 13` and
+`isbn10_to_isbn13` returning `"978" + isbn10[:9]` plus one check digit. Against
+`ISBN_MAX = 20`. Thirteen against twenty, so the ceiling cannot clear the field.
+
+**What the bound buys:** on the search path a record with a 40 character identifier gives
+**1 row against 0**, because `BookMatch.isbn13` is bounded at 20 and `_match_rows` drops the
+whole record. Measured through `_match_rows` with the ceiling in place and again with it
+lifted in process.
+
+**What the bound is safe because of, and not on its own.** The invariant is that every
+lookup producer parses its own identifier. It is enforced by
+`tests/test_metadata.py::TestEverySourceSetsTheIsbnItWasAskedFor`, whose fixture bodies carry
+the ISBN-10 form so an adapter reading its own bytes fails it, and whose
+`test_every_registered_source_has_a_body_here` arms it for a source added later. The pair of
+tripwires in `tests/test_catalogue.py::TestWhichScalarsAreBoundedAndWhichAreNamedInstead`
+covering `_google_record` are now the precondition rather than the record of a defect.
+`test_the_ceiling_admits_every_isbn_the_parser_can_produce` recomputes the width from a sweep
+rather than from `_ISBN13_LENGTH`, which would be the constant agreeing with itself.
+
+`isbn` joins `_KEPT_WHOLE_ON_UPLOAD`: a cut identifier fails its own checksum, so it names no
+book, and `books.isbn` is the MARC importer's primary match key.
+
+## A request body bounds the cover URL it stores, not the one it receives
+
+`Book`'s `@validates("cover_url")` runs `covers.https_url` on every write, which turns
+`http://` into `https://` and lengthens the value by one, so a `max_length` equal to the
+column bounds a string one character shorter than the stored one.
+
+**Measured on both request bodies carrying the field**, with a 500 character http URL on an
+allowed cover host: `BookCreate` accepted it and its own validator returned **501**, and
+`BookMatch` accepted it at 500 and the ORM stored **501**, both against `String(500)`. SQLite
+holds the over-wide row rather than refusing it; an engine that enforces a `VARCHAR` width
+fails the flush mid request. `POST /api/books` and `POST /api/books/{book_id}/enrich/apply`
+are both ordinary authenticated member routes, so this needs no hostile upstream.
+`BookCreate` was the sharper of the two and was outside the ticket, which named `BookMatch`
+only: that model's own validator returns the upgraded value, so the schema emitted the 501
+rather than merely passing a 500 along.
+
+**Fixed by bounding what is stored**, in one helper,
+`schemas/book._a_cover_url_the_column_can_hold`, called from both. Not by raising
+`max_length` to 501, which would state a bound nobody could derive from the column. The
+ceiling is refused rather than dropped, because here there is a caller to tell: a 422 on both
+routes, and `routers/books._bounded_match` catches it and drops the field, which is the
+catalogue path's answer reached through this one rule. `catalogue._AS_STORED` is the same
+rule on the catalogue path.
+
+`_AS_STORED` is the register of which columns a write rewrites, and it arguably belongs
+beside the column in `models.py` rather than in `catalogue.py`. Wherever it lives,
+`tests/schemas/test_book.py::TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite` asserts
+`set(catalogue._AS_STORED) == set(Book.__mapper__.validators)`, which keeps the two in step.
+Measured before that arm existed: a lengthening validator added for `publisher` with the
+table untouched left every test in both files green.
 
 ## Which columns an import may fill, column by column
 

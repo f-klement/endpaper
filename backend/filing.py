@@ -15,29 +15,38 @@ and none of its code is.
 own. The two subject vocabularies get the generic one, which sorts a value as
 the text it is and declares that no shelf may be ordered by it.
 
-**A rule answers in two languages and both live here.** `sort_key` is the
-Python answer and `sort_expression` is the SQL one. A listing is paginated in
-the database, so the SQL is the answer a reader actually sees, and the Python
-is what a test can read. One rule written twice is the shape that drifts, so
-the two sit in one object and
-`tests/test_shelf.py::TestTheFilingKeysAgree` evaluates both against real
-SQLite over a corpus rather than trusting that they match. The widths and the
-caps are module constants for the same reason: the regex and the SQL run
-lengths have to stop at the same character or the two keys disagree on a long
-value only.
+**A rule answers once, in Python, and the answer is stored.** `sort_key` is
+the whole of a rule's arithmetic; `models.Classification.sort_key` holds what
+it returned and `shelf.py` orders on that column. The rule used to be written
+twice, in Python and in SQL, and the SQL half was the expensive part of every
+shelf listing: a twelve arm `CASE` rebuilt per classification row. At the worst
+case a member can construct, `MAX_CLASSIFICATIONS_PER_BOOK` rows across 20,000
+books, that was **2.3 s per request on one box and 3.2 s on another**, which is
+what `docs/decisions.md` records. Each box is a corpus of its own and the two
+are not the ends of one range.
 
-**Nothing here queries, and nothing here names a table.** `sort_expression` is
-handed a column by `shelf.py`. That keeps the privacy rule where it belongs and
-keeps this module invisible to the four guards in `tests/test_shelf.py`.
+**The ticket that ordered this records 2.7 s for the first box**, and the
+disagreement is left standing rather than averaged: two records of one
+measurement that differ are a thing to resolve at the instrument, not in a
+docstring. Storing the key deleted the SQL half, so there is no longer a second
+implementation to drift.
+
+**Changing a rule changes stored data.** Every key in
+`classifications.sort_key` was computed by the rule as it stood when the row
+was written, and nothing recomputes it on read: not paying that is the point
+of the column. So an edit to any `sort_key` here needs an Alembic revision that
+recomputes the column, and a rule edited without one leaves a library filed by
+the old rule with no error anywhere.
+
+**Nothing here queries, and nothing here names a table.** `models.py` calls
+`sort_key_for` on the way in and `shelf.py` reads the column. That keeps the
+privacy rule where it belongs and keeps this module invisible to the four
+guards in `tests/test_shelf.py`.
 """
 
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import ClassVar, Final
-
-from sqlalchemy import SQLColumnExpression, String, and_, case, func, literal
-from sqlalchemy.sql import ColumnElement
 
 import ddc
 from enums import ClassificationScheme
@@ -69,12 +78,6 @@ class FilingRule(ABC):
         database sorting a column and a database cannot be handed a comparison.
         """
 
-    @abstractmethod
-    def sort_expression(
-        self, column: SQLColumnExpression[str]
-    ) -> SQLColumnExpression[str]:
-        """`sort_key`, over a column, evaluated by the database."""
-
 
 class GenericFiling(FilingRule):
     """No schedule, so the value files as the text it is.
@@ -99,11 +102,6 @@ class GenericFiling(FilingRule):
     def sort_key(self, number: str) -> str:
         return number
 
-    def sort_expression(
-        self, column: SQLColumnExpression[str]
-    ) -> SQLColumnExpression[str]:
-        return column
-
 
 class DeweyFiling(FilingRule):
     """A Dewey number files as its own text, once the segmentation prime is gone.
@@ -126,10 +124,9 @@ class DeweyFiling(FilingRule):
 
     **No `strip`, deliberately.** `ClassificationIn.tidy_number` collapses the
     whitespace at every door into this table, so a stored number has none at
-    its edges and a strip here would guard a case that cannot arrive. It would
-    cost something real: `str.strip` is Unicode aware and SQLite's `trim`
-    removes spaces only, so the Python key and the SQL key would disagree on a
-    tab, which is the one thing this pair must never do.
+    its edges and a strip here would guard a case that cannot arrive. Adding
+    one would not be free either: it would file a number differently from the
+    text it was stored as, which is a rule this scheme does not have.
     """
 
     name: ClassVar[str] = "dewey"
@@ -141,27 +138,18 @@ class DeweyFiling(FilingRule):
     def sort_key(self, number: str) -> str:
         return number.replace(ddc.SEGMENTATION_PRIME, "")
 
-    def sort_expression(
-        self, column: SQLColumnExpression[str]
-    ) -> SQLColumnExpression[str]:
-        return func.replace(
-            column, ddc.SEGMENTATION_PRIME, "", type_=String()
-        )
-
 
 #: How wide each part of a Library of Congress key is padded to, and how far
 #: each part is read.
-#:
-#: **One statement of each, read by the regex and by the SQL alike.** The
-#: Python side stops reading a run because a repetition count says so and the
-#: SQL side stops because a `CASE` runs out of arms, and a value longer than
-#: either cap has to break in the same place on both or the two keys differ on
-#: exactly the inputs a short corpus does not carry.
 #:
 #: The class letters are one to three (`Q`, `QA`, `KJC`). The class number is
 #: an integer of one to four digits, since the schedules run to 9999. Its
 #: decimal extension is capped at six, which is past anything the Library of
 #: Congress publishes and is a cap rather than a claim.
+#:
+#: **The three are read by `_LCC` and by `MAX_KEY_GROWTH`, and one revision
+#: copies them.** Widening any of them lengthens every key already stored, so
+#: it is a data change as much as a code one: see the module docstring.
 _LETTERS_WIDTH: Final = 3
 _INTEGER_WIDTH: Final = 4
 _DECIMAL_WIDTH: Final = 6
@@ -169,53 +157,33 @@ _DECIMAL_WIDTH: Final = 6
 #: A call number, as far as its class number goes: letters, an integer, an
 #: optional decimal extension, and then everything else.
 #:
-#: **ASCII classes rather than `\\w` and `\\d`.** Python's `\\d` matches
-#: `٣` and `str.isalpha` matches `ü`, and SQLite's `BETWEEN 'A' AND 'Z'`
-#: matches neither, so the shorthands would put a divergence in the one pair
-#: that has to agree.
+#: **ASCII classes rather than `\\w` and `\\d`.** The schedules are ASCII, and
+#: the shorthands are not: Python's `\\d` matches `٣` and `str.isalpha` matches
+#: `ü`, so `\\d` would read `٣٤` as a class number and pad it into a shelf
+#: position the Library of Congress has never published. Such a value files
+#: under the generic rule instead, as its own text.
+#: `tests/test_filing.py::TestTheKeyIsAsciiOnly` pins that.
 #:
 #: **`DOTALL`, and matched in full, and it is load bearing rather than tidy.**
-#: Without it `.` refuses a newline, so a value containing one falls to the
-#: generic key in Python while SQLite's `substr` keeps building the padded one:
-#: 530 mismatches in 20,000 random values carrying newlines, measured by the
-#: design critic. `fullmatch` is what makes the `$` question moot.
+#: Without it `.` refuses a newline, so `QA76\\nS75` falls to the generic key
+#: and files as raw text while every other number in class QA76 files padded,
+#: which separates one row from its own class. Bare `.` already matches a tab
+#: and a carriage return, so the newline is the only character that pins this
+#: flag: `tests/test_filing.py::TestTheKeyReadsPastANewline` is the test that
+#: goes red without it. `fullmatch` is what makes the `$` question moot.
 #:
 #: `ClassificationIn.tidy_number` collapses whitespace at the door, so no
 #: request can put a newline in the column. This does not rely on that, for the
 #: reason `shelf._looks_like_a_notation` exists: a row written before a
 #: validator holds whatever it was given, and `backup.restore` writes this
 #: table through `backup._TABLES` rather than through the schema, so an old
-#: archive restores whatever it holds. **The same is true of the NUL that
-#: `tidy_number` now refuses**, and the consequence there is the sharper one:
-#: SQLite's string functions stop at a NUL and Python's do not, so such a row
-#: keys differently on the two sides. It mis-sorts one row and is left rather
-#: than chased, because a restore that dropped rows to satisfy a sort would be
-#: the worse failure.
+#: archive restores whatever it holds.
 _LCC: Final = re.compile(
     rf"([A-Za-z]{{1,{_LETTERS_WIDTH}}})"
     rf"([0-9]{{1,{_INTEGER_WIDTH}}})"
     rf"(?:\.([0-9]{{1,{_DECIMAL_WIDTH}}}))?"
     r"(.*)",
     re.DOTALL,
-)
-
-#: The (class letters, class integer) length pairs the flattened key has an arm
-#: for, and the **one** place that set is written.
-#:
-#: **Production iterates this and so does the disjointness guard**, which is the
-#: whole point. The first version of that guard rebuilt the pairs as a literal
-#: in its own body, so it could not see production grow an arm: mutating
-#: `sort_expression` to `range(0, _INTEGER_WIDTH + 1)` changed 57 of the guard's
-#: own 90 shapes and the guard still reported 0 overlaps and passed. Both critic
-#: seats found that independently, and the implementer's attack on it had added
-#: the arm to the guard's input rather than to production, which measures the
-#: corpus and not the guard.
-#:
-#: A literal beside a range is two statements of one fact. This is one.
-_ARM_SHAPES: Final = tuple(
-    (letters, digits)
-    for letters in range(1, _LETTERS_WIDTH + 1)
-    for digits in range(1, _INTEGER_WIDTH + 1)
 )
 
 #: What pads the class letters out to `_LETTERS_WIDTH`.
@@ -291,184 +259,22 @@ class LccFiling(FilingRule):
             + rest
         )
 
-    def sort_expression(
-        self, column: SQLColumnExpression[str]
-    ) -> SQLColumnExpression[str]:
-        """The key, as one `CASE` of twelve arms with literal offsets.
 
-        **Flattened because the obvious shape is several times slower**, and the
-        cost is per classification row rather than per book, so it grows with a
-        library's cataloguing rather than with its size.
-
-        **The absolute milliseconds are a floor, not an estimate**: the test
-        database is file backed on tmpfs, so a deployment on a spinning disk pays
-        more, and most of an LCC row is expression evaluation rather than I/O.
-
-        **Do not read a ratio against another column as a constant**, which is how
-        the first version of this note went wrong: the two scale differently, so
-        the ratio is a property of the corpus rather than of the query.
-
-        **The flattening is possible because both runs are bounded**, which is
-        what keeps twelve arms from becoming an open list.
-
-        **A stored key removes this rather than shrinking it**, and that is the
-        change to make if it ever matters.
-        """
-        arms = [self._arm(column, *shape) for shape in _ARM_SHAPES]
-        return case(*arms, else_=GENERIC.sort_expression(column))
-
-    @staticmethod
-    def _arm(
-        column: SQLColumnExpression[str], letters: int, digits: int
-    ) -> tuple[ColumnElement[bool], SQLColumnExpression[str]]:
-        """The test and the key for a call number of exactly these two lengths.
-
-        **The arms are disjoint on their positive tests alone**, and an earlier
-        version of this sentence credited the wrong half. It said a run of
-        `letters` letters is that many followed by something that is not one,
-        and appended a not-a-letter test at `letters + 1` to say so. That test
-        guarded nothing: every arm carries at least one digit, its first digit
-        test sits at exactly that position, and a digit is not a letter. So the
-        digit test already ends the letter run, and dropping the branch is an
-        equivalent mutant. The design seat demonstrated that rather than
-        arguing it: 0 key mismatches on three corpora, and 0 of 3,920 values
-        matching more than one arm.
-
-        The digit run needs its own not-a-digit test and keeps it, because
-        nothing follows it that is disjoint from a digit: the next character
-        may be a point, a cutter letter or a space.
-
-        **The deletion rests on every arm carrying at least one digit.** A
-        `digits = 0` arm would make the deleted test necessary again, and the
-        failure would be two arms matching one value rather than anything red.
-        `_ARM_SHAPES` is what makes that checkable: production and the guard in
-        `tests/test_shelf.py::TestTheFilingKeysAgree` read the same tuple, so a
-        shape added to production is a shape the guard tests. Stated that way
-        because the first version said "asserted rather than left to the range"
-        while the guard held its own literal, which left it to the range twice.
-
-        At either cap there is no closing test at all, because the run stops by
-        being capped. `_LCC` caps its own repetitions at the same two
-        constants, which is what keeps the two halves agreeing on a long value.
-        """
-        digits_at = letters + 1
-        # The character past the class integer: a point when a decimal
-        # extension follows, and the first of the cutters otherwise. A literal,
-        # which is the whole point of this arm.
-        after_integer = letters + digits + 1
-
-        matches = [_is_letter(_substr(column, at, 1)) for at in range(1, letters + 1)]
-        matches += [
-            _is_digit(_substr(column, digits_at + offset, 1)) for offset in range(digits)
-        ]
-        if digits < _INTEGER_WIDTH:
-            matches.append(~_is_digit(_substr(column, digits_at + digits, 1)))
-
-        decimal = case(
-            (
-                _substr(column, after_integer, 1) == ".",
-                _run_length(column, after_integer + 1, _is_digit, _DECIMAL_WIDTH),
-            ),
-            else_=0,
-        )
-        # A point with no digit after it belongs to a cutter, so the rest starts
-        # at the point rather than past it. That is `BF575.S75`.
-        rest_at = after_integer + case((decimal > 0, decimal + 1), else_=0)
-
-        key = (
-            _pad_right(
-                func.upper(_substr(column, 1, letters), type_=String()),
-                _LETTERS_WIDTH,
-                _LETTER_PAD,
-            )
-            + _pad_left(_substr(column, digits_at, digits), digits, _INTEGER_WIDTH)
-            + _pad_right(_substr(column, after_integer + 1, decimal), _DECIMAL_WIDTH, "0")
-            + _substr(column, rest_at)
-        )
-        return and_(*matches), key
-
-
-def _substr(
-    value: SQLColumnExpression[str],
-    start: SQLColumnExpression[int] | int,
-    length: object = None,
-) -> ColumnElement[str]:
-    """`substr`, typed as text.
-
-    **The type is the point.** Without it SQLAlchemy infers `NullType` and `+`
-    on the result renders as arithmetic addition rather than `||`. Measured by
-    dropping `type_` and evaluating the real expression: `BF575.S75 E64 2022`
-    keys as `575`, `QA76.73.J38 F57 2020` as `730076`, `Q1` as `1`, and a value
-    falling to the generic arm still keys as its own text. So the failure is
-    not a uniform `0` and not an error: it is plausible looking integers beside
-    strings, which a listing renders as an order that is partly right.
-    """
-    if length is None:
-        return func.substr(value, start, type_=String())
-    return func.substr(value, start, length, type_=String())
-
-
-def _is_letter(char: SQLColumnExpression[str]) -> ColumnElement[bool]:
-    """An ASCII letter, in either case.
-
-    Through `upper` and a range rather than a character class, for the reason
-    `shelf._looks_like_a_notation` gives: `GLOB` and a regex are one database's
-    and this expression has no reason to know which one it is on. `A` to `Z` is
-    contiguous, so the range admits letters and nothing else.
-    """
-    return func.upper(char, type_=String()).between("A", "Z")
-
-
-def _is_digit(char: SQLColumnExpression[str]) -> ColumnElement[bool]:
-    """A digit. `0` to `9` is contiguous, as above."""
-    return char.between("0", "9")
-
-
-def _run_length(
-    value: SQLColumnExpression[str],
-    start: SQLColumnExpression[int] | int,
-    is_kind: Callable[[SQLColumnExpression[str]], ColumnElement[bool]],
-    maximum: int,
-) -> ColumnElement[int]:
-    """How many characters from `start` are of this kind, capped at `maximum`.
-
-    The first arm that matches wins, so the arms ask where the run **stops**.
-    Past the end of the value `substr` returns the empty string, which is of no
-    kind, so a short value stops on its own rather than needing a length test.
-
-    Capped because the Python side is capped: a repetition count in `_LCC` and
-    the number of arms here are the same bound stated twice, and
-    `_LETTERS_WIDTH` and its two neighbours are what keep them equal.
-    """
-    return case(
-        *(
-            (~is_kind(_substr(value, start + offset, 1)), offset)
-            for offset in range(maximum)
-        ),
-        else_=maximum,
-    )
-
-
-def _pad_right(
-    value: SQLColumnExpression[str], width: int, fill: str
-) -> ColumnElement[str]:
-    """`value`, filled on the right to exactly `width`, and cut to it."""
-    return _substr(value + literal(fill * width), 1, width)
-
-
-def _pad_left(
-    value: SQLColumnExpression[str],
-    length: SQLColumnExpression[int] | int,
-    width: int,
-) -> ColumnElement[str]:
-    """`value`, zero filled on the left to exactly `width`.
-
-    Takes the value's length rather than calling `length()`, because the caller
-    has already computed it as a run length and a second derivation of one fact
-    is a second thing to get wrong.
-    """
-    return _substr(literal("0" * width) + value, length + 1, width)
-
+#: The most characters a key can carry that the number it files did not.
+#:
+#: **A stored key needs a column, and a column needs a width.** The generic and
+#: Dewey rules never lengthen a value: one returns it and the other removes a
+#: character. `LccFiling.sort_key` is the one that can, and by a bounded
+#: amount: it emits `_LETTERS_WIDTH + _INTEGER_WIDTH + _DECIMAL_WIDTH`
+#: characters in place of the prefix `_LCC` consumed, and the shortest prefix
+#: that regex matches is one letter and one digit. So the growth is those three
+#: widths less two, and it is reached by `Q1`.
+#:
+#: Derived rather than written as 11, because the three widths are the fact and
+#: a literal beside them is a second one.
+#: `tests/test_filing.py::TestTheKeyGrowsByABoundedAmount` derives the same
+#: number by measuring every shape instead, which is the second instrument.
+MAX_KEY_GROWTH: Final = _LETTERS_WIDTH + _INTEGER_WIDTH + _DECIMAL_WIDTH - 2
 
 GENERIC: Final = GenericFiling()
 DEWEY: Final = DeweyFiling()
@@ -492,6 +298,34 @@ FILING_RULES: Final[dict[ClassificationScheme, FilingRule]] = {
 def rule_for(scheme: ClassificationScheme) -> FilingRule:
     """The filing rule for one scheme. See `FILING_RULES` for the fallback."""
     return FILING_RULES.get(scheme, GENERIC)
+
+
+def sort_key_for(scheme: object, number: str) -> str:
+    """The stored key for one row, from whatever that row's two columns hold.
+
+    **The one entry point every writer of `classifications.sort_key` uses**, so
+    that the ORM hook, the restore path and a test cannot each decide the
+    question differently. `models.Classification._file_the_number` is the hook
+    and `backup._parse_row` is the restore.
+
+    **`scheme` is `object` because the column is a plain `VARCHAR(20)` and one
+    write path has no validator.** `backup.restore` inserts through Core, so an
+    archive may carry `"scheme": "udc"`, or a number, or nothing this app has
+    ever published. A scheme this app cannot name is exactly the case
+    `FILING_RULES` already answers with the generic rule: file it as its own
+    text and order no shelf by it. Raising instead would turn one unrecognised
+    row into a failed restore of a whole library.
+
+    Two ways to be unnameable and both end here: not text at all, and text this
+    app does not publish. A `ClassificationScheme` passes the first test because
+    it is a `StrEnum`.
+    """
+    if isinstance(scheme, str):
+        try:
+            return rule_for(ClassificationScheme(scheme)).sort_key(number)
+        except ValueError:
+            pass
+    return GENERIC.sort_key(number)
 
 
 #: The schemes a shelf may be ordered by, derived from the rules themselves.

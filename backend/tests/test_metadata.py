@@ -28,9 +28,8 @@ catalogue.
 
 import ast
 import asyncio
-import itertools
-import logging
 import math
+import random
 import re
 from pathlib import Path
 from typing import Any
@@ -5741,47 +5740,90 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
 
 
-#: One representative of every distinct plan the roster's permutations produce.
+#: How many orders are drawn at random, on top of the rotations below.
 #:
-#: **Session scoped because it is enumeration, not state.** Building it walks all
-#: 362,880 permutations once at about eight seconds; the class below then runs
-#: 3,600 lookups per holder instead of 362,880, which took that class from 290
-#: seconds to a fraction of it without dropping a single order.
-#: The registration groups the filter is checked against: the two this class
-#: actually asks about, and two it does not, so the property is not established
-#: only on the inputs that happen to be used.
-_GROUPS_CHECKED = ("978-0", "978-960", "978-3", "978-80")
+#: **One property of its own, and breadth beyond it.** The rotations carry
+#: position and precedence; what this buys and they cannot is adjacency. The
+#: rotations are one circular arrangement cut nine ways, so all nine put the same
+#: pairs **next to each other in the lookup chain**: one adjacency per source, so
+#: 7 of the 42 ordered pairs, and the sample takes that to 42 of 42.
+#:
+#: **"Next to each other" means in the chain and never in the roster**, and the
+#: two are different numbers: `bnf` and `loc` sit side by side at the end of
+#: `DEFAULT_ORDER` and are never asked, so counting roster adjacencies with both
+#: endpoints a lookup source gives 6 rather than 7. The chain is what `lookup`
+#: walks, and it is what both tests below collect.
+#:
+#: Neither figure is left stated.
+#: `test_the_rotations_are_one_circular_arrangement` recomputes the 7 from the
+#: roster and `test_every_source_is_tried_next_to_every_other` the 42, so lowering
+#: this constant fails rather than quietly staling the figures below.
+#:
+#: **It is not a coverage figure and must not be read as one.** The 209 orders
+#: reach 198 of the 3,600 distinct plans the roster's 362,880 permutations
+#: produce, which is 5.5%.
+_SAMPLED_ORDERS = 200
+
+#: Fixed, so a failure reproduces. A sample redrawn per run would make this class
+#: red once and green on the re-run, with nothing in the tree saying which orders
+#: were tried.
+_SAMPLE_SEED = 0
 
 
-@pytest.fixture(scope="session")
-def distinct_orders() -> tuple[tuple[tuple[CatalogueSource, ...], ...], dict]:
-    """The representatives, and the evidence that they are all of them.
+def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
+    """The family that carries both of this class's covering claims.
 
-    **One walk, not two.** The deduplication and the proof that it loses nothing
-    read the same 362,880 permutations, so computing them separately would be
-    the same fact derived twice at twice the cost. The map is returned rather
-    than asserted here because a fixture that fails is an error rather than a
-    failure, and this repository separates those.
+    Each member lands at each index exactly once, so a source is asked from
+    every position it can hold; and rotating until a source leads puts it before
+    every other, so every ordered pair is tried both ways round.
+
+    **Rotating the roster rotates the lookup chain**, which is what makes those
+    two sentences about the roster into sentences about what `lookup` sees.
+    Filtering a rotated sequence and rotating a filtered one cut it in the same
+    place, and what the filter drops is the two sources that answer no ISBN.
+
+    **Its own function so the claim can be tested on it alone.** The claims held
+    for the whole set with this deleted, because at nine sources 200 sampled
+    orders happen to cover every cell and every pair, so a test over the whole
+    set left this family at "a docstring says so".
+    `test_every_source_reaches_every_position_in_the_lookup_chain` and
+    `test_every_pair_of_sources_is_tried_in_both_directions` read this, and
+    `test_the_orders_asked_hold_every_rotation` is what ties it back to the set
+    the class actually runs.
     """
+    return tuple(roster[i:] + roster[:i] for i in range(len(roster)))
 
-    def plan(order: tuple[CatalogueSource, ...]) -> sources.Plan:
-        return sources.parse(
-            {"sources": [{"source": name.value, "enabled": True} for name in order]}
-        )
 
-    seen: dict[tuple, tuple[CatalogueSource, ...]] = {}
-    filtered: dict[tuple, tuple] = {}
-    collisions: list[tuple] = []
-    for order in itertools.permutations(sources.DEFAULT_ORDER):
-        built = plan(order)
-        signature = (tuple(built.lookup_together), tuple(built.lookup_in_turn(None)))
-        seen.setdefault(signature, order)
-        chains = tuple(
-            (group, tuple(built.lookup_in_turn(group))) for group in _GROUPS_CHECKED
-        )
-        if filtered.setdefault(signature, chains) != chains:
-            collisions.append((signature, order))
-    return tuple(seen.values()), {"collisions": collisions, "signatures": set(seen)}
+def _orders_worth_asking[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
+    """Bounded by the roster's length, where enumeration was bounded by its factorial.
+
+    The rotations, which carry the position and the precedence claims, and a
+    fixed sample, which carries one of its own, adjacency. See `_rotations` and
+    `_SAMPLED_ORDERS`.
+
+    **The reversed roster and its rotations were here and were measured out.**
+    They cover no cell and no pair the rotations do not, and their only
+    contribution, the 7 mirrored **chain** adjacencies, is inside what the sample
+    already reaches. The unit is named because this is the one adjacency figure
+    in this module no test can recompute: the family it counts is gone. In the
+    roster the same figure reads 6, which is the collision `_SAMPLED_ORDERS`
+    describes. A family kept for a property another family already carries is a
+    reason a reviewer agrees with and a hole nobody looks at.
+
+    `dict.fromkeys` rather than a set, so the rotations run before the sampled
+    orders and a failure names a reproducible order first.
+    """
+    draw = random.Random(_SAMPLE_SEED)
+    sampled = []
+    for _ in range(_SAMPLED_ORDERS):
+        one = list(roster)
+        draw.shuffle(one)
+        sampled.append(tuple(one))
+    return tuple(dict.fromkeys(list(_rotations(roster)) + sampled))
+
+
+#: Every order the class below asks `lookup` about.
+ORDERS_UNDER_TEST = _orders_worth_asking(sources.DEFAULT_ORDER)
 
 
 class TestNoOrderOfTheRosterFindsMoreBooks:
@@ -5791,13 +5833,33 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     it is pinned here rather than left as a sentence: over 500 domestic ISBNs,
     five candidate orders resolved the same 300. A test is the better half of
     that claim, because the survey measured the orders that were considered and
-    this measures **every permutation of the roster**.
+    this measures every position each source can hold.
 
     What it protects is a refusal. The cheap answer to "the chain misses books in
     Greece" is to reorder the list, and reordering cannot help: the only thing a
     reorder buys is latency and which records `_merge` folds. A future change
     that makes a hit depend on position, an early exit or a per tier deadline
     say, breaks this rather than quietly narrowing what the chain finds.
+
+    **This enumerated the roster's permutations and no longer does.** Enumeration
+    is factorial in the roster and the roster grows: a ninth source multiplied the
+    work ninefold overnight and a tenth would have multiplied it again, with the
+    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is 209 orders
+    where `itertools.permutations` was 362,880, and it grows by one per source
+    rather than by a factor of it.
+
+    **What that gave up, stated rather than implied.** Kept: every source is
+    asked from every index of the lookup chain, every ordered pair of sources is
+    tried in both directions, and every ordered pair is tried next to each other
+    in the lookup chain, that last one carried by the sample rather than by the
+    rotations and asserted by `test_every_source_is_tried_next_to_every_other`.
+    Given up: any failure that needs two sources in particular positions at once,
+    beyond one preceding the other or sitting next to it in the chain. An early
+    exit, a per tier deadline and a rule keyed on one source's position are each
+    a claim about a single position, so each is still refused; a defect that
+    loses a book only when the DNB leads **and** the NLG sits exactly two behind
+    it turns on a **distance**, which nothing here varies deliberately, and is
+    reached only if the sample happens on it.
 
     **Each holder is asked about a book in its own registration group, and #122
     is why.** `sources.SERVES_GROUPS` skips a national catalogue on the lookup
@@ -5830,17 +5892,6 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         )
 
     @staticmethod
-    def _signature(plan: sources.Plan) -> tuple:
-        """Everything about a plan that `lookup` can see.
-
-        The first tier it gathers, and the chain it walks one at a time with no
-        registration group filter applied. Two orders with the same signature
-        are the same input to `lookup`, which is what makes the deduplication
-        below lossless rather than a sample.
-        """
-        return (tuple(plan.lookup_together), tuple(plan.lookup_in_turn(None)))
-
-    @staticmethod
     def _only(holder: CatalogueSource):
         """A `metadata._lookup_one` table where exactly one catalogue holds the book."""
 
@@ -5858,56 +5909,35 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
 
         return {name: make(name) for name in sources.LOOKUP_SOURCES}
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("holder", sorted(sources.LOOKUP_SOURCES))
-    async def test_every_permutation_finds_a_book_any_one_source_holds(
-        self,
-        holder: CatalogueSource,
-        distinct_orders: tuple[tuple[tuple[CatalogueSource, ...], ...], dict],
-        monkeypatch: pytest.MonkeyPatch,
-        caplog: pytest.LogCaptureFixture,
-    ):
-        """Parametrised on the holder, because a table where nothing answers
-        would pass this with the chain deleted.
+    @staticmethod
+    def _no_cover_service(monkeypatch: pytest.MonkeyPatch) -> None:
+        """No cover lookup, and the signature is mirrored rather than swallowed.
 
-        **`distinct_orders` is every permutation, deduplicated by what `lookup`
-        can see, and that is not a sample.** The roster is nine sources and the
-        lookup chain is seven, of which the first tier gathers two, so most of a
-        permutation is invisible here: measured, the 362,880 orders produce
-        **3,600** distinct plans. Running one representative of each covers every
-        order, because the ones dropped are byte identical after `parse` rather
-        than merely similar, and `test_the_deduplication_reaches_every_order`
-        drives all 362,880 to prove it.
-
-        What that bought is the reason it is worth the paragraph: this class was
-        290 of the backend suite's 308 seconds.
+        conftest's reason: a stub that accepts anything keeps passing after the
+        real one changes shape.
         """
-        # **Silenced for memory, not for tidiness.** `lookup` logs one line per
-        # resolved ISBN, and pytest's capture handler holds every record emitted
-        # inside a single test. This loop is one test, so at 9! orders it held
-        # 362,880 LogRecords and their argument tuples at once: measured 15 live
-        # objects per iteration, a peak of 1059 MB on the xdist worker that runs
-        # this file, and an OOMKill of `test:backend` against the runner's 2Gi
-        # from 2026-08-31, the day the ninth source took 8! to 9!.
-        #
-        # Setting the level stops the record being CREATED, so it is the loop
-        # that gets cheaper rather than the handler. Nothing here reads the log.
-        # Restored by caplog at teardown, so a later test still captures.
-        caplog.set_level(logging.WARNING, logger="endpaper.metadata")
-        patch_lookup_adapters(monkeypatch, self._only(holder))
 
-        # The signature is mirrored rather than swallowed with **kwargs, for
-        # conftest's reason: a stub that accepts anything keeps passing after
-        # the real one changes shape.
         async def no_cover(
             raw_isbn: str, supplied: str | None = None, deadline: float | None = None
         ) -> str | None:
             return None
 
         monkeypatch.setattr(covers, "resolve", no_cover)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("holder", sorted(sources.LOOKUP_SOURCES))
+    async def test_a_source_is_found_from_every_position_it_can_hold(
+        self,
+        holder: CatalogueSource,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Parametrised on the holder, because a table where nothing answers
+        would pass this with the chain deleted."""
+        patch_lookup_adapters(monkeypatch, self._only(holder))
+        self._no_cover_service(monkeypatch)
         isbn = self.ISBNS.get(holder, self.ISBN)
         first_asked = set()
-        for order in distinct_orders[0]:
+        for order in ORDERS_UNDER_TEST:
             metadata.clear_cache()
             result = await metadata.lookup(isbn, "a-key", plan=self._plan(order))
             assert result.outcome is metadata.Outcome.FOUND, order
@@ -5921,41 +5951,159 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
             first_asked.add(result.attempts[0][0])
         # **Anti vacuity, and it is the assertion that makes the loop mean
         # something.** Everything above passes on an implementation that ignores
-        # the plan and asks all five, and passes on a `parse` that returns
-        # `DEFAULT_PLAN` for every input. This says the permutations really did
-        # reach `lookup` as different plans.
-        assert len(first_asked) > 1
+        # the plan and asks all of them, and on a `parse` that returns
+        # `DEFAULT_PLAN` for every input.
+        #
+        # **The whole set and not `> 1`, and it is derived rather than counted.**
+        # `attempts[0]` is the first member of the gathered tier, and
+        # `lookup_together` refuses a metered source whatever position it holds,
+        # so the sources that can be asked first are exactly these. Requiring all
+        # of them is what makes this fail when the orders stop reaching index
+        # zero, which a threshold of two would not notice.
+        assert first_asked == set(sources.LOOKUP_SOURCES) - sources.METERED
 
-    def test_the_deduplication_reaches_every_order(
-        self, distinct_orders: tuple[tuple[tuple[CatalogueSource, ...], ...], dict]
-    ):
-        """The half that makes the class above exhaustive rather than a sample.
+    def test_every_source_reaches_every_position_in_the_lookup_chain(self):
+        """The covering claim, recomputed from the rotations rather than argued for.
 
-        It drives all 362,880 permutations, which the class itself no longer
-        does, and asserts two things about them. That the signature really is
-        everything `lookup` sees: two orders sharing one produce the same chain
-        **after** the registration group filter, for every group this class
-        asks about and two it does not. And that the deduplicated set is the
-        whole of the signature space rather than a prefix of it.
-
-        **Without this the optimisation is a silent coverage cut.** A change to
-        `parse` that made the chain depend on something outside the signature
-        would leave the class above passing on a fraction of the orders it
-        claims, with nothing red. Here it fails.
+        This is what replaced enumeration, so it is the half that has to be
+        checkable: an early exit after the first tier, or a deadline that drops
+        the tail, is caught only because some order puts the missed source there.
         """
-        orders, evidence = distinct_orders
+        reached: dict[CatalogueSource, set[int]] = {}
+        for order in _rotations(sources.DEFAULT_ORDER):
+            for index, name in enumerate(self._plan(order).lookup_chain):
+                reached.setdefault(name, set()).add(index)
+        every_index = set(range(len(sources.LOOKUP_SOURCES)))
+        assert {
+            name: reached.get(name, set()) for name in sources.LOOKUP_SOURCES
+        } == dict.fromkeys(sources.LOOKUP_SOURCES, every_index)
 
-        assert not evidence["collisions"], (
-            "two orders share a signature and ask a different chain once the "
-            "registration group filter runs, so the signature is no longer "
-            "everything `lookup` sees and the class above covers a fraction of "
-            f"the orders it claims: {evidence['collisions'][:3]}"
-        )
-        assert evidence["signatures"] == {self._signature(self._plan(o)) for o in orders}
-        assert len(orders) == len(evidence["signatures"])
+    @staticmethod
+    def _every_ordered_pair() -> set[tuple[CatalogueSource, CatalogueSource]]:
+        """The 42 ordered pairs of lookup sources, which two tests compare against.
+
+        One expression rather than two, because the two tests differ in what
+        they collect and not in what a complete answer looks like.
+        """
+        return {
+            (one, other)
+            for one in sources.LOOKUP_SOURCES
+            for other in sources.LOOKUP_SOURCES
+            if one is not other
+        }
+
+    def test_every_pair_of_sources_is_tried_in_both_directions(self):
+        """The other covering claim: a rule keyed on one source preceding another
+        is refused, because both directions are asked."""
+        tried: set[tuple[CatalogueSource, CatalogueSource]] = set()
+        for order in _rotations(sources.DEFAULT_ORDER):
+            chain = self._plan(order).lookup_chain
+            for position, earlier in enumerate(chain):
+                tried.update((earlier, later) for later in chain[position + 1 :])
+        assert tried == self._every_ordered_pair()
+
+    def test_the_rotations_are_one_circular_arrangement(self):
+        """What the sample is bought to fix, recomputed rather than stated.
+
+        Rotating a cycle never changes which source follows which, so the
+        rotations reach exactly one adjacency per source however many ways they
+        are cut. **Asserted against the roster and not against a literal 7**,
+        which is the difference between this figure and the one that was here: a
+        number in prose stops being re-derived and starts being copied, and this
+        one was copied under two readings at once.
+
+        The unit is adjacency **in the lookup chain**. In the roster the answer
+        is 6, because `bnf` and `loc` are adjacent and neither is ever asked, and
+        that reading is the one to refuse: it counts positions `lookup` cannot
+        see.
+        """
+        beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
+        for order in _rotations(sources.DEFAULT_ORDER):
+            chain = self._plan(order).lookup_chain
+            beside.update(zip(chain, chain[1:], strict=False))
+        assert len(beside) == len(sources.LOOKUP_SOURCES)
+        assert beside < self._every_ordered_pair()
+
+    def test_every_source_is_tried_next_to_every_other(self):
+        """The sample's one purchase, recomputed rather than stated.
+
+        The rotations are one circular arrangement cut nine ways, so all nine put
+        the same 7 of the 42 ordered pairs next to each other in the chain, which
+        `test_the_rotations_are_one_circular_arrangement` is what says; the other
+        35 come from the sample. Nothing else here notices `_SAMPLED_ORDERS` being
+        lowered, and three figures in this module move with it.
+
+        **A red here means the sample is too small for a roster that grew, not
+        that the chain is broken**, and that is the one thing to know before
+        chasing it: this is the only property the construction reaches
+        statistically rather than by construction. Measured at seed 0 and nine
+        sources, 20 orders reach 40 of the 42, 30 reach 41, and 40 reach all of
+        them.
+        """
+        beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
+        for order in ORDERS_UNDER_TEST:
+            chain = self._plan(order).lookup_chain
+            beside.update(zip(chain, chain[1:], strict=False))
+        assert beside == self._every_ordered_pair()
+
+    def test_the_orders_asked_hold_every_rotation(self):
+        """What ties the two covering tests above to the set this class runs.
+
+        They read `_rotations`, so on their own they say nothing about
+        `ORDERS_UNDER_TEST`: replacing it with a single order leaves both green.
+        This is the other half, and it is a subset check rather than an equality
+        because the sample is deliberately free to grow.
+        """
+        assert set(_rotations(sources.DEFAULT_ORDER)) <= set(ORDERS_UNDER_TEST)
+
+    def test_the_order_set_grows_with_the_roster_and_not_with_its_factorial(self):
+        """The cost bound, and it is the reason enumeration was dropped.
+
+        **Bounded on both sides, because each side catches what the other
+        cannot.** The upper bound fails if anything factorial comes back; a lower
+        bound that a shrunk set would break is what the two covering tests above
+        already are, and it is repeated here in the roster's own unit so this
+        test is not a one way inequality that a smaller set passes.
+
+        Driven over a range of sizes rather than the roster's own, because a
+        bound checked at one point is a bound checked where it does not yet
+        bite.
+        """
+        for size in range(
+            len(sources.DEFAULT_ORDER), len(sources.DEFAULT_ORDER) + 12
+        ):
+            count = len(_orders_worth_asking(tuple(range(size))))
+            assert size <= count <= size + _SAMPLED_ORDERS, size
 
     @pytest.mark.asyncio
-    async def test_a_source_no_permutation_reaches_would_fail_this(
+    async def test_a_tail_that_is_never_asked_would_fail_this(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """The evasion for the covering set, run rather than argued.
+
+        A per tier deadline that abandons the tail is the change this class
+        exists to catch, and it is caught only if some order puts each source
+        there. So drop the tail and require that **every** holder is missed by
+        some order. It fails if the set shrinks back toward the roster's own
+        order, which the covering tests would also catch, and unlike them it asks
+        `lookup` rather than `Plan`.
+        """
+        monkeypatch.setattr(sources.Plan, "lookup_in_turn", lambda self, group: ())
+        self._no_cover_service(monkeypatch)
+        for holder in sorted(sources.LOOKUP_SOURCES):
+            patch_lookup_adapters(monkeypatch, self._only(holder))
+            isbn = self.ISBNS.get(holder, self.ISBN)
+            missed = False
+            for order in ORDERS_UNDER_TEST:
+                metadata.clear_cache()
+                result = await metadata.lookup(isbn, "a-key", plan=self._plan(order))
+                if result.outcome is not metadata.Outcome.FOUND:
+                    missed = True
+                    break
+            assert missed, holder
+
+    @pytest.mark.asyncio
+    async def test_a_source_no_order_reaches_would_fail_this(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         """The evasion, run rather than argued.

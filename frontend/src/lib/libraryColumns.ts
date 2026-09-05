@@ -1,12 +1,12 @@
 /**
  * Which columns the table view offers, and which of them are drawn.
  *
- * **Two readers, two sets.** A household reads its catalogue as a list of
- * things it owns: who is willing to lend what, what it cost, who has read it.
- * A cataloguer reads the same rows as records: where each one files on a
- * shelf, what published schemes say it is about, and whether the record itself
- * is finished. Half of each set is noise to the other, which is what the
- * ticket means by a list that is half irrelevant.
+ * **Two readers, two sets.** `catalogueMode.ts` owns which two readers, and
+ * this is what each wants from a table: who is willing to lend what, what it
+ * cost and who has read it, against where a book files on a shelf, what
+ * published schemes say it is about, and whether the record itself is
+ * finished. Half of each set is noise to the other, which is what the ticket
+ * means by a list that is half irrelevant.
  *
  * **This is a view configuration, not a second table.** The table renders
  * whatever `COLUMN_KEYS` order it is handed; nothing here knows how a cell is
@@ -29,6 +29,7 @@
  */
 
 import type { MessageKey } from "../i18n/en";
+import { CATALOGUE_MODES, type CatalogueMode } from "./catalogueMode";
 
 /**
  * Every column the table can draw, in the order it draws them.
@@ -81,24 +82,6 @@ export type ColumnKey = (typeof COLUMN_KEYS)[number];
  * place this can be said.
  */
 export const ALWAYS_SHOWN: ColumnKey = "title";
-
-/** Which reader the catalogue is being drawn for. Derived, never stored. */
-export const CATALOGUE_MODES = ["household", "cataloguer"] as const;
-
-export type CatalogueMode = (typeof CATALOGUE_MODES)[number];
-
-/**
- * The mode for a library mode flag.
- *
- * `undefined` is household, deliberately. The flags are fetched, so there is a
- * moment before they arrive, and the household set is the one every existing
- * library already sees: a cataloguer briefly sees the old table, where the
- * other way round every household would see a cataloguer's table flash past on
- * every load.
- */
-export function catalogueMode(libraryMode: boolean | undefined): CatalogueMode {
-  return libraryMode === true ? "cataloguer" : "household";
-}
 
 interface ColumnSpec {
   label: MessageKey;

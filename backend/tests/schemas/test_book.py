@@ -54,7 +54,10 @@ file exists to make mechanical.
   letters, digits, hyphens and a repeated pair.
 * A field bounded only by a **model** validator (`@field_validator`) is
   reported unbounded, because the probe runs the annotation rather than the
-  model. Nothing in the tree relies on one for a length.
+  model. Both `cover_url` fields carry such a bound, on the width of the value
+  **after** the ORM rewrites it, and both also carry a `max_length` these rules
+  do see, so neither is reported. `TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite`
+  is what covers the part these three rules cannot.
 * **Rules 2 and 3 read a *stated* bound, so a field bounded only by a
   `pattern` is invisible to both** even though rule 1 sees it. That is the
   honest shape of the limitation: not a corner about aliases, which is fixed,
@@ -93,6 +96,7 @@ from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+import catalogue
 import routers
 from enums import ReadStatus
 from google_books import CATEGORY_SEPARATOR
@@ -1151,3 +1155,160 @@ class TestTheShapesThatEscapedTheFirstDraft:
         annotation = Literal["a", "b"] | list[bounded]
         assert _element_types(annotation) == (bounded,)
         assert _unbounded(self._one("x", annotation, default=None, max_length=5)) == []
+
+
+#: What a value of a rewritten column has to start with to be legal apart from
+#: its width.
+#:
+#: One per key of `catalogue._AS_STORED`, and the arming test below fails when
+#: that table grows a column this does not. `cover_url` needs plain **http**,
+#: which is what makes the rewrite lengthen the value at all. The host is not
+#: load bearing: `covers.is_renderable` asks for https or a local upload and
+#: takes any host, measured.
+_REWRITTEN_SEEDS = {"cover_url": "http://covers.openlibrary.org/b/id/"}
+
+
+def _rewritten_probe(column: str) -> str:
+    """A value of `column` at exactly its column's width.
+
+    Padded from the width rather than typed out, so the probe follows the column
+    and a widened column cannot leave it testing a value that already fits.
+    """
+    seed = _REWRITTEN_SEEDS[column]
+    return seed + "9" * (_column_widths()[column] - len(seed))
+
+
+def _fields_writing_a_rewritten_column(
+    models: dict[str, type[BaseModel]],
+) -> list[tuple[str, str, str]]:
+    """(model, field, column) for every request body field writing one."""
+    return [
+        (name, field_name, column)
+        for name, model in sorted(models.items())
+        for field_name in model.model_fields
+        for column in [_COLUMN_FOR_FIELD.get(field_name, field_name)]
+        if column in catalogue._AS_STORED
+    ]
+
+
+def _refuses(model: type[BaseModel], field_name: str, value: str) -> bool:
+    """Whether `model` refuses `value` for `field_name`, with the other required
+    fields filled so nothing else can be what fails."""
+    payload: dict[str, Any] = {field_name: value}
+    for other, field in model.model_fields.items():
+        if other != field_name and field.is_required():
+            payload[other] = "x"
+    try:
+        model(**payload)
+    except ValidationError as exc:
+        return any(error["loc"] == (field_name,) for error in exc.errors())
+    return False
+
+
+class TestAColumnRewrittenOnWriteIsBoundedAfterTheRewrite:
+    """A fourth rule, and it is the one the three above cannot ask.
+
+    Those read a **stated** ceiling and compare it with the column. That is the
+    right comparison for a column stored as it arrives, and the wrong one for a
+    column the ORM rewrites on the way in: `Book`'s `@validates("cover_url")`
+    runs `covers.https_url`, which turns `http://` into `https://` and lengthens
+    the value by one, so a `max_length` equal to the column bounds a string one
+    character shorter than the stored one. Measured before the fix: a 500
+    character http URL was accepted by both bodies carrying the field and stored
+    as 501 against a `String(500)`.
+
+    **Driven from `catalogue._AS_STORED`**, which is the register of what a
+    write rewrites, so a request body added later is covered without a list of
+    field names here.
+
+    **That register is not derived from the model, so it is the half that has to
+    be checked rather than assumed.** Measured: add a lengthening validator for
+    `publisher`, leave `_AS_STORED` alone, and nothing in either of these two
+    files goes red. `test_every_column_with_a_validator_is_in_the_rewrite_table`
+    is what closes it, and it is why this class covers a column that grows a
+    validator later rather than merely claiming to.
+
+    That register arguably belongs beside the column in `models.py` rather than
+    in the catalogue module: raised rather than moved, since `models.py` is one
+    seam away from this change.
+    """
+
+    def test_every_column_with_a_validator_is_in_the_rewrite_table(self) -> None:
+        """The register against the model, so `_AS_STORED` cannot go stale in the
+        one direction that matters.
+
+        Every `@validates` on `Book` runs on the way into the column, so it is a
+        candidate for rewriting the value, and one missing from the table is a
+        column this whole class stops covering **in silence**. Equality rather
+        than containment, because a name in the table that no validator backs is
+        a probe measuring a rewrite nobody performs.
+        """
+        assert set(catalogue._AS_STORED) == set(Book.__mapper__.validators), (
+            "`Book`'s validators and `catalogue._AS_STORED` disagree. A new "
+            "validator goes in that table when it rewrites the value; when it "
+            "only refuses one, widen this test and say so here."
+        )
+
+    def test_every_rewritten_column_has_a_seed_here(self) -> None:
+        """The arming step. A column added to the rewrite table with no seed
+        would make the rules below iterate over nothing for it, in silence."""
+        missing = sorted(set(catalogue._AS_STORED) - set(_REWRITTEN_SEEDS))
+        assert missing == [], (
+            f"{missing} is rewritten on write with no probe seed here, so "
+            "nothing checks that the request bodies writing it bound the "
+            "stored form rather than the arriving one"
+        )
+
+    def test_every_seed_names_a_column_that_is_still_rewritten(self) -> None:
+        """The other direction, so the table cannot rot into an exemption for
+        whatever lands on that name next."""
+        assert sorted(set(_REWRITTEN_SEEDS) - set(catalogue._AS_STORED)) == []
+
+    def test_each_probe_is_a_value_the_rewrite_actually_lengthens(self) -> None:
+        """Without this the rules below pass on a probe the column holds, which
+        is a guard proving nothing while reading as if it proved everything."""
+        for column, rewrite in catalogue._AS_STORED.items():
+            probe = _rewritten_probe(column)
+            width = _column_widths()[column]
+
+            assert len(probe) == width
+            assert len(rewrite(probe) or "") > width
+
+    def test_the_walk_finds_the_bodies_that_carry_one(
+        self, bodies: dict[str, type[BaseModel]]
+    ) -> None:
+        """A rule over an empty set passes and looks like a rule that holds."""
+        assert {
+            (name, field_name)
+            for name, field_name, _ in _fields_writing_a_rewritten_column(bodies)
+        } == {("BookCreate", "cover_url"), ("BookMatch", "cover_url")}
+
+    def test_every_such_field_refuses_a_value_the_rewrite_pushes_past_the_column(
+        self, bodies: dict[str, type[BaseModel]]
+    ) -> None:
+        accepted = [
+            f"{name}.{field_name}"
+            for name, field_name, column in _fields_writing_a_rewritten_column(bodies)
+            if not _refuses(bodies[name], field_name, _rewritten_probe(column))
+        ]
+
+        assert accepted == [], (
+            "These request-body fields accept a value the column cannot hold "
+            "once the ORM rewrites it, so the row is stored over width:\n  "
+            + "\n  ".join(accepted)
+        )
+
+    def test_the_same_value_one_character_shorter_is_still_accepted(
+        self, bodies: dict[str, type[BaseModel]]
+    ) -> None:
+        """The diagonal. A field refusing the probe for some other reason, a
+        host rule or a pattern, would satisfy the rule above while bounding
+        nothing, and this is what tells the two apart: one character less is the
+        widest value the column can hold after the rewrite."""
+        refused = [
+            f"{name}.{field_name}"
+            for name, field_name, column in _fields_writing_a_rewritten_column(bodies)
+            if _refuses(bodies[name], field_name, _rewritten_probe(column)[:-1])
+        ]
+
+        assert refused == []

@@ -5,6 +5,7 @@ since before Alembic existed. These tests build such a database on purpose and
 then check it is adopted without losing data.
 """
 
+import random
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -13,11 +14,16 @@ from sqlalchemy import String, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
+import filing
 import models  # noqa: F401  (registers the tables on Base.metadata)
 import schema
 import targets
 from database import Base, engine
-from enums import AuthorityScheme
+from enums import AuthorityScheme, ClassificationScheme
+from migrations.versions import (
+    f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
+)
+from tests.test_filing import CORPUS
 
 
 def drop_everything() -> None:
@@ -751,12 +757,19 @@ class TestWideningTheClassificationNumber:
         schema.upgrade_to_head()
 
         with engine.connect() as connection:
+            # `sort_key` by hand, because this is raw SQL rather than the ORM:
+            # `f1c30ab27d84` made the column NOT NULL and
+            # `Classification._file_the_number` is what fills it everywhere else.
             connection.execute(
                 text(
-                    "INSERT INTO classifications (book_id, scheme, number, label) "
-                    "VALUES (1, 'lcsh', :number, NULL)"
+                    "INSERT INTO classifications "
+                    "(book_id, scheme, number, label, sort_key) "
+                    "VALUES (1, 'lcsh', :number, NULL, :sort_key)"
                 ),
-                {"number": self.HEADING},
+                {
+                    "number": self.HEADING,
+                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
+                },
             )
             connection.commit()
         assert self.HEADING in self.numbers()
@@ -793,12 +806,19 @@ class TestWideningTheClassificationNumber:
         self.build_database_with_a_heading()
         schema.upgrade_to_head()
         with engine.connect() as connection:
+            # `sort_key` by hand, because this is raw SQL rather than the ORM:
+            # `f1c30ab27d84` made the column NOT NULL and
+            # `Classification._file_the_number` is what fills it everywhere else.
             connection.execute(
                 text(
-                    "INSERT INTO classifications (book_id, scheme, number, label) "
-                    "VALUES (1, 'lcsh', :number, NULL)"
+                    "INSERT INTO classifications "
+                    "(book_id, scheme, number, label, sort_key) "
+                    "VALUES (1, 'lcsh', :number, NULL, :sort_key)"
                 ),
-                {"number": self.HEADING},
+                {
+                    "number": self.HEADING,
+                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
+                },
             )
             connection.commit()
 
@@ -2016,3 +2036,168 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
                 )
             )
             connection.commit()
+
+
+class TestTheStoredShelfKey:
+    """Revision f1c30ab27d84, which adds `classifications.sort_key` and fills it.
+
+    Two things can go wrong and only one of them is loud. The loud one is the
+    NOT NULL: a row the backfill missed fails the rebuild. The quiet one is a
+    key that is filled in **wrongly**, because the revision carries its own copy
+    of the filing rule rather than importing `filing`, which is the rule
+    `a4c73e0b19d5`, `c9a5f27b3e41`, `c1f8a7e3d240` and `b7d4e6f01a95` each state:
+    a migration describes the data as it was on the day it ran.
+
+    The cost of that rule is a second statement of one rule, and this is what
+    holds the two together today, exactly as
+    `TestTheSeededCatalogueTargetsMatchTheCode` does for the seeded roster. The
+    corpus is `tests/test_filing.py::CORPUS`, which reaches all twelve class
+    shapes twice over: a shape it did not reach would be a shape the copy could
+    get wrong in silence.
+    """
+
+    PREVIOUS = "b7d4e6f01a95"
+
+    #: Numbers whose keys differ from the numbers, so a backfill that copied the
+    #: number across would fail rather than pass. `BF75` pads to `BF 0075...`
+    #: and `005.13/3` loses the segmentation prime.
+    FILED = [
+        ("lcc", "BF75"),
+        ("lcc", "BF575.S75 E64 2022"),
+        ("ddc", "005.13/3"),
+        ("gnd", "4026894-9"),
+    ]
+
+    def build_database_one_revision_back(self) -> None:
+        drop_everything()
+        schema.upgrade_to(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, is_private, added_at, ownership) "
+                    "VALUES ('Clean Code', 0, datetime('now'), 'owned')"
+                )
+            )
+            for scheme, number in self.FILED:
+                connection.execute(
+                    text(
+                        "INSERT INTO classifications (book_id, scheme, number, label) "
+                        "VALUES (1, :scheme, :number, NULL)"
+                    ),
+                    {"scheme": scheme, "number": number},
+                )
+            connection.commit()
+
+    @staticmethod
+    def stored() -> list[tuple[str, str, str]]:
+        with engine.connect() as connection:
+            return [
+                (row.scheme, row.number, row.sort_key)
+                for row in connection.execute(
+                    text("SELECT scheme, number, sort_key FROM classifications ORDER BY id")
+                )
+            ]
+
+    def test_a_row_written_before_the_column_existed_is_backfilled(self):
+        """Not left null. A null files last under `nullslast`, so the book would
+        stand at the end of every shelf order with nothing to see."""
+        self.build_database_one_revision_back()
+
+        schema.upgrade_to_head()
+
+        assert self.stored() == [
+            (scheme, number, filing.sort_key_for(scheme, number))
+            for scheme, number in self.FILED
+        ]
+
+    def test_the_column_refuses_a_row_with_no_key(self):
+        """The rebuild's whole point. Without NOT NULL a writer that skipped the
+        derivation would store a null and nothing would say so."""
+        self.build_database_one_revision_back()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, label) "
+                    "VALUES (1, 'lcc', 'QA76', NULL)"
+                )
+            )
+
+    def test_the_unique_index_survives_the_rewrite(self):
+        """Batch mode rebuilds the table by reflecting it, and losing this index
+        would let every re-run of enrichment deposit a second copy of a
+        heading. `b7d41f0a2c95` pins the same property for its own rewrite."""
+        self.build_database_one_revision_back()
+        schema.upgrade_to_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO classifications "
+                    "(book_id, scheme, number, label, sort_key) "
+                    "VALUES (1, 'lcc', 'BF75', NULL, 'x')"
+                )
+            )
+
+    def test_the_downgrade_takes_the_column_away_and_keeps_the_rows(self):
+        """Nothing is lost by dropping it: every value in it is derived from the
+        two columns beside it."""
+        from alembic import command
+
+        self.build_database_one_revision_back()
+        schema.upgrade_to_head()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        with engine.connect() as connection:
+            numbers = list(
+                connection.execute(
+                    text("SELECT number FROM classifications ORDER BY id")
+                ).scalars()
+            )
+            columns = {
+                column["name"] for column in inspect(engine).get_columns("classifications")
+            }
+        assert numbers == [number for _scheme, number in self.FILED]
+        assert "sort_key" not in columns
+
+    @pytest.mark.parametrize("scheme", [scheme.value for scheme in ClassificationScheme])
+    def test_the_revisions_copy_of_the_rule_says_what_filing_says(self, scheme):
+        """Over the corpus, which is where the copy can go wrong quietly.
+
+        Parametrised over the enum rather than over the three schemes the copy
+        names, so a fifth scheme is compared on the day it is added: the copy
+        answers a scheme it does not name with the generic key, and this is what
+        would notice if that stopped being right.
+        """
+        mismatches = [
+            (number, revision._sort_key(scheme, number), filing.sort_key_for(scheme, number))
+            for number in CORPUS
+            if revision._sort_key(scheme, number) != filing.sort_key_for(scheme, number)
+        ]
+
+        assert mismatches == []
+
+    def test_the_copy_and_the_rule_agree_on_a_generated_corpus(self):
+        """So the hand written list cannot be the only evidence.
+
+        Drawn from an alphabet of the characters that decide a branch: letters
+        in both cases, digits, the point, the space and the segmentation prime.
+        400 values, seeded, against the Library of Congress rule, which is the
+        only one of the three with any branching to get wrong.
+        """
+        generator = random.Random(137)
+        alphabet = "AZaz09. /"
+        values = [
+            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 14)))
+            for _ in range(400)
+        ]
+
+        mismatches = [
+            value
+            for value in values
+            if revision._sort_key("lcc", value) != filing.sort_key_for("lcc", value)
+        ]
+
+        assert mismatches == []

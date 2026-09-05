@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 import catalogue
 import google_books
+import isbn as isbn_utils
 import metadata
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
 from enums import AuthorityScheme, ClassificationScheme
@@ -27,9 +28,11 @@ from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.test_house_rules import _is_vendored
 
 #: What a text field has to start with to satisfy a validator other than its
-#: length. Only `cover_url` has one: `BookCreate` refuses anything that is
-#: neither https nor an uploaded cover, and these fixtures are asserted against
-#: that model, so padding alone would fail for a reason this file is not about.
+#: length. Only `cover_url` can be helped this way: `BookCreate` refuses
+#: anything that is neither https nor an uploaded cover, and these fixtures are
+#: asserted against that model, so padding alone would fail for a reason this
+#: file is not about. `isbn` has such a validator too and no prefix satisfies
+#: it, which is what `VALID_ISBN` is for.
 _PREFIXES = {"cover_url": "https://example.com/"}
 
 
@@ -56,13 +59,58 @@ def _one_past(name: str) -> Any:
 
 #: A real ISBN, for the two assertions made against `BookCreate`.
 #:
-#: Supplied separately because `isbn` is not in the ceilings table, and real
-#: rather than padded because that model refuses this field on its checksum:
-#: a value chosen to test a length would be refused for the wrong reason.
+#: `isbn` is in the ceilings table, so `_at_every_ceiling` fills it to the
+#: column with padding. That is the right fixture for a `Record`, which checks
+#: only the width, and the wrong one for `BookCreate`, which refuses this field
+#: on its checksum: a padded value would be refused for a reason these two
+#: assertions are not about. Hence the override, and it cannot be folded into
+#: `_PREFIXES`, since no prefix makes a padded string a valid ISBN.
 VALID_ISBN: Final[dict[str, Any]] = {"isbn": "9780743273565"}
 
 
 BOUNDED = sorted(set(catalogue._TEXT_CEILINGS) | set(catalogue._NUMBER_RANGES))
+
+
+def _checked(body: str, characters: str, accepts: Any) -> str:
+    """`body` plus the one check character its own scheme accepts.
+
+    Found by asking `isbn.py` rather than by recomputing either checksum here,
+    which would be the algorithm stored twice and would agree with a broken copy
+    of itself.
+    """
+    return next(body + character for character in characters if accepts(body + character))
+
+
+def _every_shape_of_a_real_isbn() -> list[str]:
+    """Real ISBNs in every written form `isbn.normalise` accepts.
+
+    Both of `isbn.parse`'s returning branches: the ISBN-13 it validates, under
+    each Bookland prefix, and the ISBN-10 it converts, including the `X` check
+    digit, which is the one character `normalise` upper cases rather than
+    strips. Each written plain, hyphenated, spaced, padded and lower cased,
+    because a separator a caller left in is how a value wider than the canonical
+    form would reach a column.
+    """
+    thirteens = [
+        _checked(prefix + f"{number:09d}", "0123456789", isbn_utils.is_valid_isbn13)
+        for prefix in isbn_utils.BOOKLAND_PREFIXES
+        for number in (0, 1, 42, 441013593, 743273565, 999999999)
+    ]
+    tens = [
+        _checked(f"{number:09d}", "0123456789X", isbn_utils.is_valid_isbn10)
+        for number in (0, 1, 42, 306406152, 441013593, 999999999)
+    ]
+    return [
+        written
+        for value in thirteens + tens
+        for written in (
+            value,
+            "-".join(value),
+            " ".join(value),
+            f"  {value}  ",
+            value.lower(),
+        )
+    ]
 
 
 def _match_keys(table: dict[str, int] | None = None) -> dict[str, str]:
@@ -759,8 +807,9 @@ class TestARecordFitsTheColumnsItFeeds:
         """The two ends of the same rule meet: nothing a record keeps is a value
         this app's own request body would refuse.
 
-        `isbn` is supplied separately because it is not in the ceilings table:
-        see `_UNBOUNDED`.
+        `isbn` is overridden with a real one because `_at_every_ceiling` pads
+        it to the column and `BookCreate` refuses this field on its checksum:
+        see `VALID_ISBN`.
         """
         record = Record(source="dnb", **(_at_every_ceiling() | VALID_ISBN))
 
@@ -885,15 +934,24 @@ class TestWhichScalarsAreBoundedAndWhichAreNamedInstead:
         The union above is unchanged by moving a name out of a ceilings table
         and into `_UNBOUNDED` in one gesture, which is precisely the change that
         would need arguing. Measured by a design critic seat over every field in
-        turn: with the coverage assertion alone, 11 of the 12 bounded fields
-        could be moved here with the whole suite still green.
+        turn, against the twelve bounded fields as the tables stood then: with
+        the coverage assertion alone, eleven of them could be moved here with
+        the whole suite still green.
 
-        **This assertion was itself left behind by a revert**, saying one name
-        while the set held two, and the seat that asked for it found that too.
-        A guard naming its subject in a literal is a guard whose literal has to
-        move with the subject.
+        **The denominator is named because it has already moved.** It is
+        `BOUNDED`, and bounding `isbn` grew it without touching the finding, so
+        an unscoped fraction was stale in the very commit that bounded the
+        field. The measurement is what it was measured against; the
+        finding is what survives it.
+
+        **The literal below has to move with the subject**, and it has been left
+        behind before: it named one scalar while the set held two, after a
+        revert, and the seat that asked for this assertion found that too. That
+        is the cost of a guard naming its subject in a literal, and it is worth
+        paying, because it is the only thing here that notices a name moving
+        between the two tables.
         """
-        assert frozenset({"source", "isbn"}) == catalogue._UNBOUNDED
+        assert frozenset({"source"}) == catalogue._UNBOUNDED
 
     def test_no_scalar_is_in_both_tables(self):
         assert not set(catalogue._TEXT_CEILINGS) & set(catalogue._NUMBER_RANGES)
@@ -901,21 +959,71 @@ class TestWhichScalarsAreBoundedAndWhichAreNamedInstead:
     def test_nothing_bounded_is_also_named_as_unbounded(self):
         assert not set(BOUNDED) & catalogue._UNBOUNDED
 
-    def test_an_isbn_wider_than_its_column_is_kept(self):
-        """Deliberate, and the most expensive line in this file to have got
-        right. It costs a whole search row, since `BookMatch.isbn13` is bounded
-        at 20 and `_match_rows` drops the row. Bounding it costs more: see
-        `_UNBOUNDED`, and the test below."""
+    def test_an_isbn_wider_than_its_column_is_dropped(self):
+        """The most expensive line in this file to have got right, and it says
+        the opposite of what it said until the exclusion was decided again.
+
+        What it bought is a whole search row: `BookMatch.isbn13` is bounded at
+        20 and `_match_rows` drops the record, so a malformed identifier used to
+        cost the row rather than the field. What it costs is stated by the test
+        below, and why that cost is unreachable is stated at `_UNBOUNDED`.
+        """
         wide = "9" * (ISBN_MAX + 1)
 
-        assert Record(source="dnb", isbn=wide, title="X").isbn == wide
+        assert Record(source="dnb", isbn=wide, title="X").isbn is None
 
     def test_an_absent_isbn_makes_the_lookup_draft_raise(self):
-        """Why it is not bounded. `BookLookup.isbn` is required, so an absent
-        ISBN raises where the scan handler builds the draft, and nothing catches
-        a `ValidationError` there."""
+        """What bounding it would cost if a producer could reach here with a
+        wide value. `BookLookup.isbn` is required, so an absent ISBN raises
+        where the scan handler builds the draft, and nothing catches a
+        `ValidationError` there.
+
+        Kept as the statement of the risk rather than deleted with the
+        exclusion: the bound is safe because no lookup producer can supply a
+        value the ceiling clears, not because this stopped being a 500."""
         with pytest.raises(ValidationError):
             BookLookup(**Record(source="dnb", title="X").as_lookup())
+
+    def test_the_ceiling_admits_every_isbn_the_parser_can_produce(self):
+        """Why the bound cannot clear the field on the lookup path, recomputed
+        here rather than stated at `_UNBOUNDED`.
+
+        Every producer reaching `BookLookup` sets `isbn` from the canonicalised
+        argument `metadata.lookup` was given or from `isbn.parse`'s own output,
+        and the argument is that same function's output, so one width decides
+        it. Driven over both of `parse`'s returning branches, the ISBN-13 it
+        validates and the ISBN-10 it converts, and over the separator forms
+        `normalise` strips, since a form that survived normalisation would be
+        the way a wider value got through.
+
+        A sweep rather than a reading of `_ISBN13_LENGTH`, which would be the
+        constant agreeing with itself.
+        """
+        widths = {
+            len(parsed)
+            for raw in _every_shape_of_a_real_isbn()
+            for parsed in [isbn_utils.parse(raw)]
+            if parsed is not None
+        }
+
+        assert widths, "the sweep produced no ISBNs, so it asserts nothing"
+        assert max(widths) <= ISBN_MAX
+
+    def test_the_sweep_reaches_both_of_the_parsers_returning_branches(self):
+        """The diagonal for the test above, which its own width assertion cannot
+        make: both branches return thirteen characters, so dropping either one
+        leaves that assertion green. Measured, and it is why this exists.
+
+        The branches are told apart by what `parse` does with the value rather
+        than by how the fixture built it: an ISBN-13 comes back as its own
+        normalised form, and an ISBN-10 comes back as something else.
+        """
+        outcomes = {
+            isbn_utils.parse(raw) == isbn_utils.normalise(raw)
+            for raw in _every_shape_of_a_real_isbn()
+        }
+
+        assert outcomes == {True, False}
 
     def test_the_google_adapter_parses_its_own_identifier(self):
         """**This test was inverted at the wave merge of 2026-09-03, and the
@@ -930,9 +1038,11 @@ class TestWhichScalarsAreBoundedAndWhichAreNamedInstead:
 
         Another trio closed it in the same wave, in a file this one did not own,
         and the two tripwires here went red on the merged tree, which is what
-        they were for. So the blocker named at `catalogue._UNBOUNDED` is gone
-        and the exclusion is revisitable rather than settled: see the comment
-        there, which is where the decision lives.
+        they were for. The exclusion was then decided again and the field is
+        bounded, so **this pair is now the precondition rather than the record
+        of a defect**: the ceiling is safe only while every producer parses its
+        own identifier, and these two are what say it does. See
+        `catalogue._UNBOUNDED`, where the decision lives.
         """
         argument = "9780743273565"
         wider_than_the_column = "9" * (ISBN_MAX * 2)
@@ -1020,9 +1130,14 @@ class TestARecordAgreesWithTheColumnsItFeeds:
     def test_every_ceiling_with_a_column_width_is_that_width(self):
         """**A tautology today and kept as a tripwire.** `models.py` supplies
         both sides: the column is declared `String(TITLE_MAX)` and the ceiling
-        is `TITLE_MAX`. It goes red the moment somebody writes a literal back
-        into either, which is the arrangement it exists to prevent, and it costs
-        one dictionary comparison to keep."""
+        is `TITLE_MAX`, so this compares a constant with itself and goes red
+        only once a literal written into one of them stops tracking the other.
+
+        **It does not catch the literal, and it used to claim it did.** A
+        ceiling written `20` beside a column declared `String(ISBN_MAX)` passes
+        here, because 20 is what `ISBN_MAX` is: measured, the whole file stayed
+        green. The test below is what catches it, and this one is what catches
+        the constant moving afterwards."""
         declared = {
             name: width for name, width in self._declared().items() if width is not None
         }
@@ -1032,6 +1147,67 @@ class TestARecordAgreesWithTheColumnsItFeeds:
             for name, ceiling in catalogue._TEXT_CEILINGS.items()
             if name != "description"
         }
+
+    def test_every_ceiling_comes_from_the_module_that_declares_the_columns(self):
+        """What keeps the comparison above a tripwire instead of a coincidence.
+
+        A ceiling that is not the constant `models.py` declares agrees with its
+        column on the day it is written and stops moving with it, and nothing
+        comparing the two **values** can tell the difference: the mutation
+        writing `20` for `ISBN_MAX` passed every test in this file.
+
+        **The import list, not merely a name, and that is the correction rather
+        than the rule.** A first version asked only that the value be an
+        `ast.Name`, which a local `_ISBN_CEILING = 20` satisfies while stopping
+        dead exactly as the literal would. A critic seat measured it: the whole
+        file stayed green. The literal was the example and this is the family.
+
+        **What it still cannot see**, stated rather than left to be found, and
+        the two cases are refused by different things. A ceiling naming the
+        **wrong** constant from that module, `TITLE_MAX` on `isbn`, is imported
+        and passes here; `test_every_ceiling_with_a_column_width_is_that_width`
+        refuses it, because the two values then differ, so neither arm is the
+        rule on its own. An imported name **rebound in the module body**,
+        `ISBN_MAX = 20` under the import, passes both: the source arm finds the
+        name in the import list and the value arm finds the column's own width.
+        Nothing in this file catches that one. **ruff F811** does, measured
+        through this project's own config, which is why no third arm is written
+        for it: a rule the linter already holds is not one to restate here.
+
+        Read off the source rather than the imported table, because by the time
+        the module is loaded a literal and a constant are the same integer.
+        Structural on both sides, so a ceiling added later and a constant
+        imported later are both covered without a further arm.
+        """
+        module = ast.parse(pathlib.Path(catalogue.__file__).read_text())
+        from_models = {
+            alias.asname or alias.name
+            for node in ast.walk(module)
+            if isinstance(node, ast.ImportFrom) and node.module == "models"
+            for alias in node.names
+        }
+        assert from_models, "nothing is imported from models, so this asserts nothing"
+
+        table = next(
+            node.value
+            for node in ast.walk(module)
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_TEXT_CEILINGS"
+        )
+        assert isinstance(table, ast.Dict)
+
+        elsewhere = {
+            cast(ast.Constant, key).value: ast.unparse(value)
+            for key, value in zip(table.keys, table.values, strict=True)
+            if ast.unparse(value) not in from_models
+        }
+
+        assert elsewhere == {}, (
+            "These ceilings are not the constant `models.py` declares for the "
+            "column, so they agree with it today and stop moving with it: "
+            + repr(elsewhere)
+        )
 
     def test_the_text_column_takes_the_ceiling_its_schemas_already_carry(self):
         """`description` is `Text`, so the column declares nothing and the
@@ -1069,23 +1245,29 @@ class TestARecordAgreesWithTheColumnsItFeeds:
         assert set(_match_keys()) == set(catalogue._TEXT_CEILINGS)
         assert set(_match_keys().values()) <= set(BookMatch.model_fields)
 
-    def test_nothing_bounded_is_renamed_on_the_wire(self):
-        """True today and derived rather than assumed, because it is one field
-        away from false: `as_match` calls a record's `isbn` `isbn13`, and `isbn`
-        is the one scalar `_UNBOUNDED` leaves out of the ceilings. Assuming the
-        names matched is what broke these guards the first time that field was
-        bounded."""
-        assert {name: key for name, key in _match_keys().items() if name != key} == {}
+    def test_exactly_one_bounded_field_is_renamed_on_the_wire(self):
+        """Derived rather than assumed, and the rename is live since `isbn`
+        joined the ceilings: `as_match` calls a record's `isbn` `isbn13`,
+        because a search row is one printing among several rather than the one
+        asked for.
 
-    def test_the_derivation_can_see_a_rename_when_there_is_one(self):
-        """The diagonal, and it has to drive **this** function rather than
-        `as_match`, or a map that had become the identity passes it.
+        Assuming the names matched is what broke these guards the first time
+        that field was bounded, and this is now also the diagonal for
+        `_match_keys`: with it replaced by the identity this assertion fails,
+        where before no live rename existed for it to miss."""
+        assert {name: key for name, key in _match_keys().items() if name != key} == {
+            "isbn": "isbn13"
+        }
 
-        `isbn` is the field `as_match` renames and the one `_UNBOUNDED` keeps
-        out of the ceilings, so handing it in explicitly is the only way to
-        exercise a rename at all. Measured by the seat that found the first
-        version of this test: with `_match_keys` replaced by the identity, all
-        four of its consumers passed, this one included.
+    def test_the_derivation_reads_the_table_it_is_handed(self):
+        """The other half of the diagonal, which the assertion above cannot
+        make: it drives the live table, so a `_match_keys` ignoring its argument
+        and reading `_TEXT_CEILINGS` would satisfy it.
+
+        Measured by the seat that found the first version of this test: with
+        `_match_keys` replaced by the identity, all four of its consumers
+        passed, this one included, which is why it is written on a table with a
+        single entry rather than on the live one.
         """
         assert _match_keys({"isbn": ISBN_MAX}) == {"isbn": "isbn13"}
 

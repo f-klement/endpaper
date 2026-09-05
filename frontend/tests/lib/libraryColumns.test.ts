@@ -9,14 +9,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CATALOGUE_MODES } from "../../src/lib/catalogueMode";
 import {
   ALWAYS_SHOWN,
   AVAILABLE_COLUMNS,
-  CATALOGUE_MODES,
   COLUMN_KEYS,
   COLUMN_SPECS,
   DEFAULT_COLUMNS,
-  catalogueMode,
   clearColumns,
   isDefaultColumns,
   readColumns,
@@ -116,17 +115,6 @@ describe("the two column sets", () => {
       );
       expect(positions).toEqual([...positions].sort((a, b) => a - b));
     }
-  });
-});
-
-describe("catalogueMode", () => {
-  it("reads an unanswered flag as a household", () => {
-    // The flags are fetched, so there is a moment before they arrive. A
-    // household briefly seeing a cataloguer's table is the wrong way round:
-    // every existing library is a household.
-    expect(catalogueMode(undefined)).toBe("household");
-    expect(catalogueMode(false)).toBe("household");
-    expect(catalogueMode(true)).toBe("cataloguer");
   });
 });
 

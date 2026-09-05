@@ -36,6 +36,7 @@ from sqlalchemy import Date, DateTime, Table, delete
 from sqlalchemy.orm import Session
 
 import covers
+import filing
 import settings_store
 from config import COVERS_DIR
 from database import Base
@@ -354,6 +355,59 @@ def _parse_row(
     # take down every restore. Measured against the real column.
     if table.name == "tags":
         parsed["key"] = None
+
+    # The fourth derived column, and the one whose failure is silent rather
+    # than loud. `classifications.sort_key` is written by
+    # `Classification._file_the_number`, which is a `@validates` hook and so
+    # never fires here. Left to the archive it would restore whatever an
+    # archive happened to hold, and a wrong key is not visible anywhere: the
+    # row is there, the number is right, and the book stands in the wrong place
+    # on one shelf order.
+    #
+    # Derived rather than trusted for the reason `name_folded` is: an admin
+    # uploading a file is not a reason to trust the file, and this value is
+    # computable from the row. An archive taken before the column existed
+    # carries nothing for it and the column is NOT NULL, so recomputing is also
+    # what keeps that archive restorable at all, which is `FORMAT_VERSION`'s
+    # promise.
+    #
+    # `table.name`, not `"sort_key" in table.columns`, so that a second table
+    # growing a column of that name does not silently acquire a filing rule.
+    if table.name == "classifications":
+        number = parsed.get("number")
+        # Refused rather than skipped, the shape `name_folded` above uses.
+        #
+        # **What it buys is the promised 400, and not a correct key**, which is
+        # the opposite of what this comment first claimed. Measured against the
+        # real columns over `100`, `1.5`, `true`, `null`, an array and an
+        # object, on all four schemes:
+        #
+        # * `lcc` and `ddc` raise on every one of them, so without this the
+        #   route answers 500 where this module's docstring promises 400;
+        # * a generic rule returns the value unchanged, and `null`, an array
+        #   and an object then fail at the insert, which is a 500 again;
+        # * a generic rule with a number or a boolean is the one case that
+        #   would have restored **correctly**. SQLite's TEXT affinity converts
+        #   the bound value into `sort_key` exactly as it converts it into
+        #   `number`, so both store `'100'` and the stored key is the key that
+        #   value deserves.
+        #
+        # So no scheme can produce a silently wrong key, and that last case is
+        # refused for consistency with `name_folded` rather than because
+        # anything would be wrong. The cost is real and small: an archive
+        # carrying `{"scheme": "gnd", "number": 100}` restored before this
+        # column existed and is a 400 now. Only a hand-edited archive reaches
+        # it, since `_row_to_dict` over a `String` column cannot write a
+        # non-string.
+        #
+        # The slice is on the repr, because everything reaching this line is by
+        # definition not a `str`.
+        if not isinstance(number, str):
+            raise RestoreError(
+                f"A row in {table.name!r} has a number that is not text: "
+                f"{repr(number)[:120]}"
+            )
+        parsed["sort_key"] = filing.sort_key_for(parsed.get("scheme"), number)
     return parsed
 
 

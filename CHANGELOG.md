@@ -45,6 +45,15 @@
 
 ### Changed
 
+- The shelf order reads a stored key instead of building one. A classification row now
+  carries the key its scheme's filing rule returns for its number, written whenever the row
+  is written and backfilled for existing rows. The order used to compile a twelve arm `CASE`
+  per classification row on every listing: the worst case a member could construct cost
+  2.3 s of database time per request on one box and 3.2 s on another.
+- A catalogue record whose ISBN is wider than the column now loses that field rather than
+  carrying it. A malformed identifier used to cost a whole search row, since the search row
+  schema refused it; it now costs the identifier only.
+
 - Library mode now opens on the dense list rather than on whatever view was
   last chosen, and remembers changes made to it separately. Turning library
   mode on no longer overwrites a household's view, and turning it off again
@@ -142,6 +151,11 @@ byte identical, which is about the schema and was never about this.
   counted when it was taken.
 
 ### Fixed
+
+- A cover URL a member posts is now bounded against what the database stores rather than
+  against what arrives. The ORM upgrades `http://` to `https://` on every write, which
+  lengthens the value by one, so a 500 character URL was accepted and stored as 501 against
+  a 500 character column. Both adding a book and applying enrichment were affected.
 
 - A column change made in the first moment of a cold load was saved under the
   household's columns even in library mode, because the flag that names the

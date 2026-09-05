@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CATALOGUE_MODES } from "../../src/lib/libraryColumns";
+import { CATALOGUE_MODES } from "../../src/lib/catalogueMode";
 import {
   DEFAULT_LIBRARY_VIEWS,
   LIBRARY_VIEWS,

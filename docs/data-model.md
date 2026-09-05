@@ -169,6 +169,21 @@ sorts and a GND number does not. `sort=ddc` and `sort=lcc` are what read that di
 each orders a shelf under its own scheme's filing rule, and there is no equivalent for
 GND or LCSH, which are subject vocabularies with no order to offer.
 
+**The shelf position is stored, not computed** (migration `f1c30ab27d84`).
+`classifications.sort_key` holds what the scheme's filing rule returned for that number,
+written by a `@validates` hook on the model in the way `collections.name_folded` is, and
+derived again in `backup.restore`, which inserts through Core and fires no hook. It is the
+column a shelf order reads. Koha stores the same thing under the name `cn_sort`.
+
+The key is not the number: a Library of Congress key pads its three parts, so `Q1` files as
+thirteen characters, which is why the column is wider than `number` rather than the same
+size. The rule used to be written a second time as SQL and rebuilt per row on every listing,
+which is what the column replaced.
+
+**So a change to a filing rule is a change to stored data.** Nothing recomputes the column
+on read, deliberately, so editing a rule in `filing.py` needs a revision that recomputes it;
+without one the library stays filed under the rule it was written with, and nothing says so.
+
 **LCSH is the exception and is stored as one.** The Library of Congress supplies no
 identifier for a subject heading: no `valueURI` on any of 2,280 `<subject>` elements across
 900 live records, measured 2026-08-24. The authorised heading string is the access point, so

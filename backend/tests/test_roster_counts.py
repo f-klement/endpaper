@@ -1092,7 +1092,12 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ],
     ("backend/tests/test_metadata.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="asked at once"),
-        Counts("the whole roster", near="deduplicated by what"),
+        # Two figures in the permutation class, each dated to the roster it was
+        # measured at. **`Counts` and not `NotTheRoster`, deliberately**: a tenth
+        # source makes both of them wrong, and failing here is what sends
+        # somebody to re-derive them instead of leaving prose nobody rechecks.
+        Counts("the whole roster", near="tested on it alone"),
+        Counts("the whole roster", near="too small for a roster that grew"),
     ],
     ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [
         Counts("LOOKUP_SOURCES")
