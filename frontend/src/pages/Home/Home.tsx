@@ -118,6 +118,7 @@ export default function Home() {
         onClearTags={library.clearTags}
         view={library.view}
         onViewChange={library.setView}
+        canChangeView={library.modeIsKnown}
       />
 
       <SavedSearches
@@ -192,6 +193,7 @@ export default function Home() {
                   onToggle={library.toggleColumn}
                   onReset={library.resetColumns}
                   canReset={library.canResetColumns}
+                  canChange={library.modeIsKnown}
                 />
                 <BookTable
                   books={library.books}

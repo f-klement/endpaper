@@ -26,10 +26,16 @@ const SKELETON_COUNT = 3;
  * read what.** The loans list is rooted at the Shelf and stops there, so it
  * shows every loan over a book the reader can see. This page asks
  * `GET /api/loans/overdue`, which is `notifications.overdue_for_viewer`: a
- * member reads the loans they lent or borrowed, staff read every overdue loan
- * on their shelf, and it is the same rule the banner counts through. Two
- * screens that disagreed about how many loans are overdue would be worse than
- * either of them alone.
+ * member reads the loans they lent or borrowed, and staff read every overdue
+ * loan on their shelf. **In library mode every member reads all of them**,
+ * because a volunteer chasing a book somebody else lent out is the case that
+ * mode exists for, and the two lists then agree on the overdue rows rather
+ * than merely not contradicting each other. Whichever rule is in force, it is
+ * the same one the banner counts through: two screens disagreeing about how
+ * many loans are overdue would be worse than either alone.
+ *
+ * Private books are outside all of it. Both arms are rooted at the Shelf, so
+ * the mode widens which loans a member reads and never which books exist.
  *
  * The delivery panel sits above the list because it qualifies the whole of it.
  * What it can and cannot say is in `DeliveryStatus`.

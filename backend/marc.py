@@ -442,6 +442,28 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
         )
 
 
+def record_element(book: Book) -> ElementTree.Element:
+    """One Book as a `<record>` that carries its own namespace declaration.
+
+    For a caller embedding a single record in a document of its own, which is
+    what `sru.py` does: SRU wraps each record in its own `<recordData>` rather
+    than handing over a `<collection>`.
+
+    **The namespace goes on the record and not on the caller's root**, because
+    the caller's root is in a different namespace. Written as a plain `xmlns`
+    attribute for the reason `write` declares it the same way: everything
+    `_record_element` builds carries an unqualified tag, so a parent whose own
+    elements are namespace qualified would otherwise swallow the whole MARC
+    subtree into the parent's default namespace with nothing failing.
+
+    Nothing here filters, for the same reason nothing in `write` does. The
+    caller resolved the Book through the Shelf.
+    """
+    record = _record_element(book)
+    record.set("xmlns", NAMESPACE)
+    return record
+
+
 def write(books: Iterable[Book]) -> str:
     """A shelf as one MARCXML `<collection>`.
 

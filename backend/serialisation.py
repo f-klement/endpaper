@@ -154,6 +154,15 @@ def loan_summary(loan: Loan) -> LoanOut:
     `book` is left None deliberately: the caller is already holding the book
     this loan belongs to, and populating it would both bloat the response and
     trigger a lazy load per book.
+
+    **Nothing dated is filled**, and that is one decision rather than four
+    omissions. `due_at`, `is_overdue`, `days_overdue` and `days_out` all take
+    their defaults here, because the badge this feeds says who has the book and
+    nothing else, and every one of them needs a clock this function is not
+    given. Filling one of the four would be the defect: a reader who saw a real
+    `days_out` beside a defaulted `is_overdue` would trust both.
+    `tests/routers/test_loans.py::TestHowLongItHasBeenOut` pins them absent
+    together.
     """
     return LoanOut(
         id=loan.id,

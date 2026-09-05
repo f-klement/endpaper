@@ -1161,6 +1161,41 @@ class TestWhoTheInAppNoticeIsFor:
         viewer = db.get(User, admin["user"]["id"])
         assert notifications.overdue_for_viewer(db, viewer, now()).all() == []
 
+    def test_library_mode_lets_a_member_read_a_loan_they_are_not_party_to(
+        self, db, member, other_user, lend_to
+    ):
+        """The refusal the mode lifts, and the reason the item exists.
+
+        A volunteer at an archive is not an admin and still has to chase a book
+        somebody else lent out. With the mode off this is the assertion two
+        tests above, which answers with nothing.
+        """
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        loan = lend_to(owner=other_user["user"]["id"], lender=other_user["user"]["id"])
+        viewer = db.get(User, member["user"]["id"])
+        assert [row.id for row in notifications.overdue_for_viewer(db, viewer, now())] == [
+            loan.id
+        ]
+
+    def test_library_mode_does_not_reach_somebody_elses_private_book(
+        self, db, member, other_user, lend_to
+    ):
+        """The test the relaxation exists to pass.
+
+        The mode widens the arm about the loan's **parties**. The Shelf is
+        applied before it and is untouched, so a private book somebody else
+        added is as far out of reach with the mode on as it is with it off,
+        exactly as it is for an admin.
+        """
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        lend_to(
+            owner=other_user["user"]["id"],
+            lender=other_user["user"]["id"],
+            private=True,
+        )
+        viewer = db.get(User, member["user"]["id"])
+        assert notifications.overdue_for_viewer(db, viewer, now()).all() == []
+
     def test_a_returned_loan_is_not_chased(self, db, member, lend_to):
         loan = lend_to(borrower=member["user"]["id"])
         loan.returned_at = now()
@@ -1196,6 +1231,68 @@ class TestWhoTheInAppNoticeIsFor:
         assert len(reads) == 1, (
             "`sees_every_loan` is the only place this question is asked. A "
             f"second reader is a second rule: lines {reads}"
+        )
+
+    def test_the_mode_arm_is_decided_in_exactly_one_place(self):
+        """A guard for the clause library mode added, for the reason its
+        sibling exists: two readers of the mode in this module are two rules
+        about who may read another member's loans.
+
+        **Not the same guard as `is_admin`'s, and billing it as one is what
+        made the first version wrong.** That subject has exactly one door,
+        attribute access on a `User`, so matching an attribute matches
+        everything. This subject has three, because the mode is a *setting*: it
+        is reachable as `settings_store.library_mode(db)`, as
+        `settings_store.get_bool(db, SettingKey.LIBRARY_MODE)`, which is what
+        `routers/settings.py` and every helper in these tests actually write,
+        and as either of those imported to a bare name. The first version
+        required an `ast.Call` on an `ast.Attribute` named `library_mode` and
+        so was walked past by two of the three, the dominant idiom included.
+
+        So it counts the **subject** rather than one syntax for reaching it:
+        every mention of either name, as an attribute or as a bare name,
+        wherever it appears. That is structural rather than an arm per
+        spelling, which is the shape this repository keeps having to rewrite.
+        The baseline is 1 and not 2 because `LIBRARY_MODE` does not appear in
+        this module at all: `library_mode()` is the function that names it.
+
+        **An import alias is the subject under another name**, so the local
+        names are resolved first, the way `test_shelf.py::_entity_aliases`
+        resolves its own. Without that,
+        `from settings_store import library_mode as _lm` followed by `_lm(db)`
+        read the mode and passed, which is a docstring claiming the subject
+        while the code counts two spellings of it: the same defect this guard
+        was rewritten to fix, one round later. This repository has been walked
+        past by an aliased import before.
+
+        `import settings_store as ss` needs nothing extra: `ss.library_mode`
+        is still an attribute named `library_mode`, and the attribute arm
+        already sees it.
+
+        `ast` rather than text, so the paragraphs in `sees_every_loan` that
+        argue about the mode cannot move the count.
+        """
+        tree = ast.parse((BACKEND / "notifications.py").read_text())
+        subject = {"library_mode", "LIBRARY_MODE"}
+        # Local names bound to the subject by an aliased import. The `import
+        # x as y` form needs no entry: it renames the module, not the subject,
+        # and the attribute keeps its own name.
+        subject |= {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name in subject and alias.asname
+        }
+        reads = [
+            node.lineno
+            for node in ast.walk(tree)
+            if (isinstance(node, ast.Attribute) and node.attr in subject)
+            or (isinstance(node, ast.Name) and node.id in subject)
+        ]
+        assert len(reads) == 1, (
+            "`sees_every_loan` is the only place this module asks whether the "
+            f"library is in library mode: lines {reads}"
         )
 
 
@@ -1619,7 +1716,18 @@ class TestTheInAppCountIsCounted:
         ]
 
         assert counted == 20
-        # One statement, and not one Loan in the session. The list form loaded
-        # twenty, one per row, to take their length.
-        assert len(statements) == 1, statements
+        # Not one Loan in the session. The list form loaded twenty, one per
+        # row, to take their length, and that is the whole finding.
         assert loans_held == []
+        # **One statement over `loans`**, which is the claim, rather than one
+        # statement in the window, which is what this asserted until library
+        # mode gave `sees_every_loan` a setting to read. The narrower form is
+        # the honest one: a second SELECT over `loans` is the defect, and a row
+        # read from `settings` is not, so a bare total would have had to be
+        # bumped again by whatever reads a setting next.
+        over_loans = [line for line in statements if " loans" in line.lower()]
+        assert len(over_loans) == 1, statements
+        # The ceiling is kept beside it, so a second settings read cannot
+        # arrive unnoticed either: the count is the loan query plus the
+        # `library_mode` row `sees_every_loan` asks for.
+        assert len(statements) == 2, statements

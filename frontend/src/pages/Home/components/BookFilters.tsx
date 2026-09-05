@@ -46,6 +46,13 @@ interface BookFiltersProps {
   onClearClassifications: () => void;
   view: LibraryView;
   onViewChange: (view: LibraryView) => void;
+  /**
+   * False while the library cannot yet say which view a pick would be saved
+   * under, so the group is disabled rather than left looking live. The window
+   * is the feature flags being in flight, and `pages/Home/hooks.ts` says why a
+   * write in it cannot be allowed through.
+   */
+  canChangeView: boolean;
 }
 
 /**
@@ -70,6 +77,7 @@ export default function BookFilters({
   onClearClassifications,
   view,
   onViewChange,
+  canChangeView,
 }: BookFiltersProps) {
   const { t } = useTranslation();
   const activeTagCount = filters.tagIds.length;
@@ -126,10 +134,23 @@ export default function BookFilters({
               type="button"
               onClick={() => onViewChange(option.value)}
               aria-pressed={view === option.value}
-              className={`px-2.5 py-1 text-sm transition-colors first:rounded-l-md last:rounded-r-md ${
+              // `disabled` rather than a hidden group: the buttons say which
+              // view is on, and taking them away for a paint would move the
+              // strip under the reader's finger.
+              disabled={!canChangeView}
+              // **The house `disabled:opacity` is on the unpressed arm only.**
+              // `opacity` on a button composites its fill and its text
+              // together, and on the pressed arm that pair is
+              // `on-accent`/`accent-fill`, which `palettes.test.ts` floors at
+              // 4.5:1 and which halves to 2.83:1 light and 3.52:1 dark under
+              // it. `ColumnPicker` records those figures where it hit the same
+              // wall. Leaving the pressed button undimmed also keeps the group
+              // answering which view is on while it cannot be changed.
+              className={`px-2.5 py-1 text-sm transition-colors first:rounded-l-md last:rounded-r-md disabled:cursor-not-allowed ${
                 view === option.value
                   ? "bg-accent-fill text-on-accent"
                   : "bg-paper-0 text-paper-600 hover:text-accent-700 " +
+                    "disabled:opacity-50 " +
                     "dark:bg-paper-900 dark:text-paper-300 dark:hover:text-accent-300"
               }`}
             >

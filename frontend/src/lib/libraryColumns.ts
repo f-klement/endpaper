@@ -295,8 +295,14 @@ export function writeColumns(mode: CatalogueMode, keys: ColumnKey[]): void {
     }
     localStorage.setItem(STORAGE_KEYS[mode], canonical.join(","));
   } catch {
-    // Storage refused. The choice still holds for this session, which is the
-    // part the reader can see.
+    // Storage refused, and the choice goes with it, for the reason
+    // `writeLibraryView` states: the columns are derived from storage rather
+    // than held in state, so a pick that did not land re-reads as the previous
+    // set.
+    //
+    // This said the opposite from the commit that wrote it, 410ab30, which
+    // introduced the derived read in the same change. Never true here, unlike
+    // the view's copy of it, which was.
   }
 }
 

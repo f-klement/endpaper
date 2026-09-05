@@ -15,6 +15,7 @@ function renderPicker(props: Partial<Parameters<typeof ColumnPicker>[0]> = {}) {
       onToggle={() => {}}
       onReset={() => {}}
       canReset={false}
+      canChange={true}
       {...props}
     />,
   );
@@ -98,12 +99,37 @@ describe("ColumnPicker", () => {
 
     const title = screen.getByRole("button", { name: "Title" });
     expect(title).toHaveAttribute("aria-disabled", "true");
-    // And no opacity on it: `opacity` on the button composites the accent fill
-    // and its text together and takes the pair below the 4.5 contrast floor.
-    expect(title.className).not.toMatch(/\bopacity-/);
+    // The rule about opacity on this chip is not here: it is not a fact about
+    // the title, and stating it here is what let it cover one element. See
+    // "no chosen chip carries an opacity class" below.
 
     await userEvent.setup().click(title);
     expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("no chosen chip carries an opacity class", async () => {
+    // **`opacity` on a button composites its fill and its text together**, and
+    // a chosen chip's pair is `on-accent` on `accent-fill`, which
+    // `palettes.test.ts` floors at 4.5:1 and which halves to 2.83:1 light and
+    // 3.52:1 dark under a 50% dim. The unchosen arm is `text-paper-600` on
+    // `paper-0` and is exempt: `index.css` records that a disabled control does
+    // not owe the 3:1 floor, and every `disabled:opacity-50` control in this
+    // app already sits there.
+    //
+    // **Every pressed button rather than the title**, which is what this
+    // replaced. The title was one element read by name, so a dim applied to
+    // every other chosen chip passed clean, measured: the whole suite green at
+    // 141 files. `aria-pressed` is what the rule is actually about, so the
+    // assertion now covers the chips this picker draws today and the ones a
+    // later version adds.
+    renderPicker({ visible: ["title", "author", "callNumber"] });
+    await open();
+
+    const pressed = screen.getAllByRole("button", { pressed: true });
+    expect(pressed.length).toBeGreaterThan(1);
+    for (const chip of pressed) {
+      expect(chip.className).not.toMatch(/\bopacity-/);
+    }
   });
 
   it("says the title is always shown", async () => {
@@ -130,5 +156,43 @@ describe("ColumnPicker", () => {
       .click(screen.getByRole("button", { name: /usual columns/ }));
 
     expect(onReset).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ColumnPicker before the mode is known", () => {
+  it("disables every chip", async () => {
+    // A toggle in that window writes the household's key whatever mode the
+    // flags turn out to name, and nothing says so afterwards.
+    const onToggle = vi.fn();
+    renderPicker({ canChange: false, onToggle });
+    await open();
+
+    const author = screen.getByRole("button", { name: "Author" });
+    expect(author).toBeDisabled();
+    await userEvent.setup().click(author);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("disables the reset rather than hiding it", async () => {
+    // Hiding it would read as "there is nothing to reset", which is the
+    // opposite of what `canReset` true means.
+    const onReset = vi.fn();
+    renderPicker({ canChange: false, canReset: true, onReset });
+    await open();
+
+    const reset = screen.getByRole("button", {
+      name: "Back to the usual columns",
+    });
+    expect(reset).toBeDisabled();
+    await userEvent.setup().click(reset);
+    expect(onReset).not.toHaveBeenCalled();
+  });
+
+  it("hands every chip back once the mode arrives", async () => {
+    // The gate is a window, not a mode of its own: nothing stays disabled.
+    renderPicker({ canChange: true });
+    await open();
+
+    expect(screen.getByRole("button", { name: "Author" })).toBeEnabled();
   });
 });

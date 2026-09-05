@@ -471,8 +471,11 @@ who may see what.
 filter afterwards. Each of the three lands where everyone here reads, so a private title on
 one is readable by everyone in it, which is exactly what `is_private` exists to prevent.
 The digest reports `skipped_private` as a count and never names one, per channel as well as
-once at the top. The owner is still chased in the app, where the overdue view is per member
-and already scoped.
+once at the top. The owner is still chased in the app, where the overdue view is scoped by
+the shelf: per member by default, and widened to every loan on that shelf for staff, and
+for every member in library mode. **What widens is which loans a member reads, never which
+books they may see**: both arms are built on `visible_to` before either is added, so no
+setting in the app lets one member read a private book another added.
 
 **A per borrower mail is the one audience that could carry a private book**, because being
 reminded of a book you borrowed is not a disclosure. **It is still not built, and the fact it
@@ -500,6 +503,9 @@ configured host would send the library's book titles somewhere nobody approved.
 **The first surface in this application reachable without a session**, off by default,
 and the only place five separate rules apply at once. They are enforced in five places on
 purpose, because a single check doing all five would be a single check to get wrong.
+
+There is now a second such surface, `/sru`, and it answers these same five questions with
+the same five answers rather than with five of its own: see [SRU](#sru) below.
 
 | Question | Answered by |
 |---|---|
@@ -585,6 +591,149 @@ a record is read at and an opaque public id is a schema change with its own tick
 also why `PublicBookSort` excluding `newest` is a narrower guarantee than it reads: see
 `docs/decisions.md`.
 
+### SRU
+
+**The second surface reachable without a session**, and the reason it gets a heading of its
+own rather than a line above is that a query language now sits between a stranger and the
+shelf.
+
+**It does not answer any of the five questions a second time.** The gate is
+`routers.public.public_reader`, imported rather than restated, so `/sru` runs the same rate
+limit and the same two switches in the same order, and is the same 404 rather than 403.
+Rows are `Shelf.seen_by_the_public`. It is not in `middleware._INDEXABLE_PATHS`, so it
+stays `noindex` even on a deployment that has invited a crawler: an SRU base URL is a
+machine interface and a search engine holding it gains nobody anything.
+
+**The column boundary is `marc.py`'s field mapping, and it holds by accident until a test
+makes it hold on purpose.** MARC is a richer record than `PublicBookOut`: it has fields for
+the shelf mark, the price paid and the acquisition source, and a cataloguer will eventually
+want the first of them. `marc.py` writes none of them today, which is what makes reusing it
+safe. `tests/test_sru.py::TestTheRecordCarriesNoColumnThePublicPayloadWithholds` is what
+keeps it that way, and it asserts it two ways: it puts a distinctive value in every
+withheld column of a Book and looks for it in a rendered record, and it reads the writer's
+source for the columns it touches at all. The day an `852 $b` is added, that test fails and
+the SRU server needs a record writer of its own.
+
+**A private book is asserted unreachable per index**, driven from the index registry rather
+than from a list, because one unfiltered index is the whole leak and a fixed list is a list
+that a later index is not on. `rec.id` is the sharp case: the only term that reaches a
+hidden record through it is that record's own id.
+
+**Those arms prove the row filter and say nothing about the term**, which is worth stating
+because it looks like they say both. Measured by replacing the whole query compiler with
+`true()`: 0 of 36 assertions fail, since a shelf holding one public book cannot tell "the
+predicate matched it" from "the predicate matched everything". Privacy holds under that
+mutant, so it was never a leak; what was unguarded is a search for something nobody holds
+answering with the catalogue. A fourth arm per index asserts that a term matching nothing
+returns nothing, and it fails 12 of 12 under that mutant and 10 of 12 under a narrower one.
+
+**And a filter is a read of the column it filters on, one query at a time.** The record
+writer was guarded against publishing a withheld column and the query was not, so an index
+pointed at the shelf mark would have been an oracle a stranger walks with the row filter
+perfectly intact. Each index's predicate is now compiled and every `books` column named in
+it checked against `PublicBookOut`, which is the shape `TestEveryPublicSortOrdersByAPublishedColumn`
+already applies to the ORDER BY, so there is one rule rather than two that resemble each
+other.
+
+**CQL is bounded five ways on the parse**, because it is an outside input on an endpoint
+anybody can reach: query length, nesting depth, number of search clauses, words in a term,
+and masking characters in a term. The nesting bound is checked **inside** the recursion,
+since what it exists to stop is a `RecursionError` on `((((...))))` and a check after the
+parse runs after the failure. The term **length** bound is the query length bound: a term
+is a substring of the query.
+
+**And once on what the parse costs to run, which is a different bound and was missing.**
+Those five bound how much *structure* a query may hold. They say nothing about what the
+resulting SQL costs, and the first version of this server published a ceiling counted in
+`LIKE` occurrences as though they were the same thing. They are not, and counting in that
+unit made the **cheap** shape look like the worst case. Measured against 3,000 books with
+2,000 character descriptions, warm, three runs:
+
+| query, inside every parse bound | comparisons | wall clock |
+|---|---|---|
+| `dc.description` all, 16 clauses of 8 words | 128 | **2091 to 2284 ms** |
+| `dc.subject` all, 8 clauses of 8 words | 64 | **1067 to 1143 ms** |
+| `cql.serverChoice` all, 16 clauses of 8 words | 384 | 584 to 650 ms |
+| `dc.title` all, 8 clauses of 8 words | 64 | 91 to 98 ms |
+| `dc.title="one phrase"` | 1 | 7 to 11 ms |
+
+The shape with **three times** the comparisons is a third of the cost, because `title`,
+`author` and `isbn` are short columns while `description` has no length limit and
+`subject` is a correlated `EXISTS` over a join. Behind one 120 a minute counter this
+document itself describes as closer to a global cap than a per client one, the first row is
+about four minutes of work per one minute window from a single address.
+
+So the bound is now a **cost budget** of 64 units, spent per column comparison, one unit
+for a cheap index and eight for an expensive one, refusing when it runs out. The two
+classes are an order of magnitude apart and come from the table above rather than from the
+column type: deriving the weight from "the column has no length limit" gets
+`dc.description` right and `dc.subject` wrong, since its own column is `String(100)`. The
+weight of eight is the dearest expensive index against the dearest cheap one, so that the
+worst legal query in either class lands in the same place, about 91 to 141 ms against that
+catalogue.
+
+**The table above is measured at a point and not over a space, and one of the dimensions it
+holds fixed matters.** Every row was taken at **one tag per book**. `dc.subject` is a
+correlated `EXISTS` over `book_tags`, so its cost scales with that: measured separately,
+eight `dc.subject` comparisons are 126 to 138 ms at one tag per book and 1,579 to 1,660 ms
+at forty, while `dc.description` and `dc.title` are flat across the same sweep. The weight
+is therefore right at one tag and under-prices `dc.subject` at libraries that tag heavily,
+and tags per book is the one input a library sets with no limit. Recorded rather than
+acted on: weighting against a dimension the server does not measure per request is a design
+change rather than a correction.
+
+All of it scales with the catalogue, which is why it is quoted against a named size rather
+than stated as a property of the server.
+
+**It is applied on top of the parse bounds and never instead of them, so nothing it admits
+was previously refused**: it is strictly tighter, and what it now refuses that it used to
+allow is the whole of rows one to three above. A query naming four indexes, or eight words
+anywhere, or a description phrase, is well inside it.
+
+**Masking is supported and that is a measurement rather than a preference.** SQLite's LIKE
+does not backtrack the way a regular expression engine would. The figure published here
+first was taken on a fixture that could not match at all, `('%a' * 400)` against a 120
+character title, which fails at the first position on every row and so never backtracks;
+the conclusion was right and the evidence was not.
+
+Re-derived on the worst shape the mask bound admits, which is eight wildcards alternating
+with a literal that matches at every position and then one that cannot, so every position
+really is tried. Against **3,000 books whose title is 120 identical characters**, warm,
+three runs: **12.7 to 13.2 ms in total, 4.23 to 4.40 microseconds per book**. An ordinary
+`*a*` over the same corpus is 4.7 to 5.0 ms, 1.57 to 1.67 microseconds per book. Both units
+are given because the paragraph is about scanning rows and "per row" would otherwise be
+ambiguous with a row of the table above.
+
+So `*` and `?` become `%` and `_`, and the literal text is escaped **first**, so a client
+searching for `100%` means a per cent sign. Anchoring (`^`) is refused.
+
+**Every refusal the protocol decides is a 200 carrying an SRU diagnostic**, never a 4xx,
+which is what the protocol says and the only thing a client can act on. The gate's two
+answers are the exception and stay HTTP: 404 for an unpublished catalogue, 429 over the
+rate.
+
+An exception that is **not** a refusal is still a 500, deliberately: it is a defect rather
+than an answer to something a client asked for. What is not acceptable is a hostile input
+reaching one, and this document claimed none could while three parameters did. `rec.id`,
+`dc.date` and `startRecord` each accepted an integer Python parses and SQLite cannot store,
+and the `OverflowError` from the driver arrived at an unauthenticated client as `Internal
+Server Error`. Both review seats found it independently, by driving the running app rather
+than by reading the code, which is the only instrument that sees the status a client got.
+The fix is one range at the two integer conversions, and the boundaries are pinned at both
+ends: the negative arm overflows exactly as the positive one does.
+
+**`stylesheet` is refused rather than ignored.** Honouring it would put a client supplied
+URL into a processing instruction at the top of the response, so anybody could hand a third
+party a link to this catalogue that renders through their XSLT.
+
+**`explain` reports where the server is, and that comes from the `Host` header.** It is
+read from the header directly rather than off `request.url`, and that is the security half
+rather than a style: Starlette validates the header itself and, when it will not use it,
+falls back to `scope["server"]`, which is the address this process is **bound** to. Behind
+a reverse proxy that is an internal listen address, and a client sending a malformed `Host`
+would be handed it in a document it can keep. Reading the header means the only two answers
+are the client's own host and `localhost`.
+
 ### Telegram's host is a constant, and SMTP always verifies
 
 **`api.telegram.org` is not configurable**, and that absence is the control. The webhook
@@ -655,7 +804,7 @@ paragraph.
 | metadata lookup, search, refresh, enrich | 60 / min | username | Each call fans out to as many as eight public catalogues that this library neither runs nor pays for |
 | `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF: **8 requests, about 1.08 MB, three hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **14 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches two hosts and no VIAF, and is the **larger of the two in requests**: its name search branch is 1 + 2 per candidate capped by `MAX_CANDIDATES`, so **11 requests and about 43 KB**, and its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. At ten a minute that is up to 250 outbound requests for lookups against 140 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
 | `POST /api/books/covers/backfill` | 6 / min | username | One run fetches up to a hundred images from the same services the metadata limit protects, and it is the call a member would press twice while the first is still running |
-| `GET /api/public/books`, `GET /api/public/books/{id}` | 120 / min | address | The fourth reason, and the only counter here whose caller holds no session: this is the published catalogue, so it is the first surface a stranger can reach. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes |
+| `GET /api/public/books`, `GET /api/public/books/{id}`, `GET /sru` | 120 / min | address | The fourth reason, and the only counter here whose caller holds no session: this is the published catalogue, so it is the first surface a stranger can reach. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes. **One counter for three paths, not three counters**, because there is one published catalogue and a harvester and a browser reading the same records should not have two budgets between them |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses

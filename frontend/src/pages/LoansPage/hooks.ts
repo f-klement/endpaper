@@ -30,6 +30,12 @@ export interface UseLoansResult {
    * member: the nudge said 2 and the page it linked to showed 1. Zero when the
    * in app channel is switched off, which is what stops the nudge offering a
    * page the server has just emptied.
+   *
+   * **In library mode the two rules meet**, because the page widens to every
+   * loan on the shelf for every member. Reading the wide set here would still
+   * be wrong: it would be right in one mode and wrong in the other, and this
+   * count has to be the one the page it links to computes, whichever is in
+   * force.
    */
   overdueCount: number;
 

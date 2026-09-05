@@ -102,3 +102,86 @@ describe("an overdue row is marked twice, and neither mark is colour alone", () 
     expect(dangerClasses(container)).toEqual([]);
   });
 });
+
+describe("how long the book has been out", () => {
+  it("reads the day count off the server rather than the lending date", () => {
+    // The whole point of the field. `loaned_at` is right there in the payload
+    // and a browser could subtract it, which is what would put a second
+    // definition of a whole day in a second timezone.
+    row({ loaned_at: "2026-02-01T00:00:00", days_out: 9 });
+
+    expect(screen.getByText("Out for 9 days")).toBeInTheDocument();
+  });
+
+  it("says one day in the singular", () => {
+    // There is no plural engine here on purpose, so the two forms are two
+    // whole phrases and the component picks. A missing branch reads "Out for
+    // 1 days".
+    row({ days_out: 1 });
+
+    expect(screen.getByText("Out for 1 day")).toBeInTheDocument();
+  });
+
+  it("says nothing on a book lent today", () => {
+    // Zero is true and unhelpful: the lending date one line below already says
+    // today. It is also what a loan read off a book payload carries, because
+    // `loan_summary` fills nothing dated.
+    row({ days_out: 0 });
+
+    expect(screen.queryByText(/Out for/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing once the book is back", () => {
+    // The row reports the date it came back instead. A closed loan that went
+    // on counting would be a lie about a book on the shelf.
+    row({ days_out: 3, returned_at: "2026-02-20T00:00:00" });
+
+    expect(screen.queryByText(/Out for/)).not.toBeInTheDocument();
+  });
+});
+
+describe("how far past its deadline a loan is", () => {
+  it("puts the day count in the badge, ahead of the date", () => {
+    // What tells a week from a year at a glance, which the date alone does
+    // not: a reader has to know today's date to read "Overdue since 5 Jan".
+    row({ is_overdue: true, days_overdue: 14, due_at: "2026-01-05T00:00:00" });
+
+    expect(screen.getByText(/^14 days overdue, since/)).toBeInTheDocument();
+  });
+
+  it("keeps the deadline beside the count", () => {
+    // **The badge is the only place the deadline can appear on an overdue
+    // row.** The `dueOn` line is gated on the loan not being overdue, so a
+    // badge carrying the count alone takes the date off every overdue row past
+    // its first day, which is what the first version of this did. The count is
+    // for triage and the date is what somebody writes to a borrower.
+    row({ is_overdue: true, days_overdue: 14, due_at: "2026-01-05T00:00:00" });
+
+    const badge = screen.getByText(/days overdue/);
+    expect(badge.textContent).toContain(
+      new Date("2026-01-05T00:00:00").toLocaleDateString("en"),
+    );
+  });
+
+  it("says one day in the singular", () => {
+    row({ is_overdue: true, days_overdue: 1, due_at: "2026-01-05T00:00:00" });
+
+    expect(screen.getByText(/^1 day overdue, since/)).toBeInTheDocument();
+  });
+
+  it("falls back to the date alone within the first day", () => {
+    // `days_overdue` is 0 for a loan that went overdue this morning, and 0
+    // says nothing. The date carries that case on its own.
+    row({ is_overdue: true, days_overdue: 0, due_at: "2026-01-05T00:00:00" });
+
+    expect(screen.getByText(/^Overdue since/)).toBeInTheDocument();
+  });
+
+  it("falls back to the bare word for a loan with no deadline", () => {
+    // A loan with no `due_at` can still be flagged by something other than a
+    // date, and there is no date to name.
+    row({ is_overdue: true, days_overdue: 0, due_at: null });
+
+    expect(screen.getByText("Overdue")).toBeInTheDocument();
+  });
+});

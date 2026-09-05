@@ -18,6 +18,13 @@ interface ColumnPickerProps {
   onReset: () => void;
   /** False while the current set already is the default. */
   canReset: boolean;
+  /**
+   * False while the library cannot yet say which mode a change would be saved
+   * under, so every chip and the reset are disabled rather than left looking
+   * live. `pages/Home/hooks.ts` says why a write in that window cannot be
+   * allowed through.
+   */
+  canChange: boolean;
 }
 
 /**
@@ -44,6 +51,7 @@ export default function ColumnPicker({
   onToggle,
   onReset,
   canReset,
+  canChange,
 }: ColumnPickerProps) {
   const { t } = useTranslation();
   const panelId = useId();
@@ -111,11 +119,22 @@ export default function ColumnPicker({
                 // tokens as existing to stop. `aria-disabled` and the note
                 // below the chips say it is locked, in words.
                 aria-disabled={locked || undefined}
+                // The mode gate is `disabled` where the lock above is
+                // `aria-disabled`, because the two are different states: the
+                // lock is permanent and this lasts as long as one request, so
+                // taking the chip out of the tab order is right here and wrong
+                // there.
+                disabled={!canChange}
                 onClick={locked ? undefined : () => onToggle(key)}
-                className={`inline-flex items-baseline gap-1.5 rounded-full border px-2 py-1 text-xs transition-colors ${
+                // The house `disabled:opacity` is on the unchosen arm only,
+                // for the reason the note above gives: the chosen arm is the
+                // measured `on-accent`/`accent-fill` pair, and the title chip
+                // is always on it, which is what the "no opacity on the locked
+                // chip" test reads.
+                className={`inline-flex items-baseline gap-1.5 rounded-full border px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed ${
                   chosen
                     ? "border-accent-fill bg-accent-fill text-on-accent"
-                    : "border-paper-200 bg-paper-0 text-paper-600 hover:border-accent-300 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300 dark:hover:border-accent-700"
+                    : "border-paper-200 bg-paper-0 text-paper-600 hover:border-accent-300 disabled:opacity-50 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-300 dark:hover:border-accent-700"
                 } ${locked ? "cursor-default" : ""}`}
               >
                 {t(COLUMN_SPECS[key].label)}
@@ -132,7 +151,8 @@ export default function ColumnPicker({
             <button
               type="button"
               onClick={onReset}
-              className="shrink-0 text-xs text-accent-700 hover:underline dark:text-accent-300"
+              disabled={!canChange}
+              className="shrink-0 text-xs text-accent-700 hover:underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50 dark:text-accent-300"
             >
               {t("columns.reset")}
             </button>

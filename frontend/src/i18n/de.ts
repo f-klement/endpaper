@@ -658,7 +658,7 @@ export const de: Messages = {
   "settings.inAppHint":
     "Ein Hinweis auf der Bibliotheksseite und die Seite mit den überfälligen Ausleihen, auf die er verweist. Wird er ausgeschaltet, bleibt diese Seite leer, alle anderen Kanäle laufen weiter. Dies ist der einzige Kanal, für den nichts eingerichtet werden muss, deshalb ist er von Anfang an eingeschaltet.",
   "settings.inAppPrivacyNote":
-    "Dieser Kanal hat eine Leserin oder einen Leser, deshalb gilt der Hinweis oben für ihn nicht: Jede Person sieht die überfälligen Ausleihen, die sie verliehen oder ausgeliehen hat, einschließlich ihrer eigenen privaten Bücher, und niemals die anderer.",
+    "Dieser Kanal hat eine Leserin oder einen Leser, deshalb gilt der Hinweis oben für ihn nicht: Jede Person sieht die überfälligen Ausleihen, die sie verliehen oder ausgeliehen hat, einschließlich ihrer eigenen privaten Bücher, und niemals die anderer. Im Bibliotheksmodus sieht jede Person stattdessen alle überfälligen Ausleihen der Bibliothek, und weiterhin nie ein privates Buch, das jemand anderes angelegt hat.",
   "settings.senderHealthNotYet":
     "Noch nicht gelaufen. Erinnerungen gehen stündlich raus, und nur wenn etwas überfällig ist.",
   "settings.senderHealthWorking": "Funktioniert. Zuletzt gelaufen am {when}.",
@@ -909,6 +909,12 @@ export const de: Messages = {
   "loans.noDueDate": "Kein Datum",
   "loans.overdue": "Überfällig",
   "loans.overdueSince": "Überfällig seit {date}",
+  "loans.overdueByDaysSince": "{days} Tage überfällig, seit {date}",
+  "loans.overdueByOneDaySince": "1 Tag überfällig, seit {date}",
+  // "Seit ... ausgeliehen" rather than a word-for-word "Out for": German puts
+  // the participle last, so the English order does not survive translation.
+  "loans.outFor": "Seit {days} Tagen ausgeliehen",
+  "loans.outForOne": "Seit 1 Tag ausgeliehen",
   "loans.overdueOnly": "Nur überfällige",
   "loans.overdueBanner": "{count} Ausleihen sollten angemahnt werden.",
   "loans.chaseThem": "Anzeigen",

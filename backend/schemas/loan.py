@@ -77,6 +77,20 @@ class LoanOut(BaseModel):
     # the deadline passed until something wrote to the row.
     due_at: datetime | None = None
     is_overdue: bool = False
+    #: How many whole days past the deadline, and 0 when there is none.
+    #:
+    #: Read together with `is_overdue`, which is what tells 0 meaning "not
+    #: overdue" apart from 0 meaning "overdue since this morning". A nullable
+    #: field would have moved that same check into every caller and into the
+    #: generated client's types for no gain.
+    days_overdue: int = Field(default=0, ge=0)
+    #: How long the book has been away, in whole days, stopping at the return.
+    #:
+    #: The one number that is meaningful for every loan: most lending here has
+    #: no deadline, so a household reading only `days_overdue` has nothing to
+    #: go on. Both come from `lending`, which is the only place either is
+    #: computed.
+    days_out: int = Field(default=0, ge=0)
     book: BookOut | None = None
     loaned_to: UserOut | None = None
     loaned_by: UserOut | None = None

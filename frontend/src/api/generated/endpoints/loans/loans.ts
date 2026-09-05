@@ -346,9 +346,13 @@ export const getListOverdueUrl = (params?: ListOverdueParams) => {
  * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
  * private book somebody else added cannot reach here, and `sees_every_loan`
  * decides the rest: a member reads the loans they lent or borrowed, staff
- * read every overdue loan on their shelf.
+ * read every overdue loan on their shelf, and **in library mode so does every
+ * member**, because a volunteer chasing a book somebody else lent out is what
+ * that mode is for. The widening is about who is party to a loan and never
+ * about which books exist: the Shelf is applied before either arm.
  *
- * **Not `list_loans(overdue_only=True)`, which is a wider set.** That one is
+ * **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+ * library mode the two sets meet. That one is
  * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
  * member sees every overdue loan over a book they can see, housemates'
  * included. Pointing this page at it would list more rows than the banner

@@ -1,13 +1,34 @@
 """Tests for backend/routers/loans.py."""
 
+import ast
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from models import Loan
+import lending
+import notifications
+import settings_store
+from enums import SettingKey
+from models import Book, Loan
+from routers import loans as loans_module
 from tests.conftest import _make_account
 from tests.helpers import items, selects_for
+
+#: The module tree the `ast` guards in this file read.
+BACKEND = Path(__file__).resolve().parent.parent.parent
+
+
+def library_mode(db, on: bool = True) -> None:
+    """The switch itself, set through the store rather than the settings route.
+
+    The route is admin only and carries its own confirmation, neither of which
+    is what these tests are about: what is under test is what a **member**
+    reads once the mode is on.
+    """
+    settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true" if on else "false")
 
 
 def lend_between_strangers(client, make_book, password_hash: str, index: int) -> dict:
@@ -998,6 +1019,452 @@ class TestListOverdue:
             f"{short_cost} selects for 3 loans and {long_cost} for 10: "
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
-        # 12 rather than `list_loans`'s 11: this route reads the in app
-        # channel's switch before it queries anything.
-        assert long_cost == 12, f"{long_cost} selects for 10 overdue loans"
+        # 13 rather than `list_loans`'s 11, and the two are named. This route
+        # reads the in app channel's switch before it queries anything, and
+        # `sees_every_loan` reads the library mode row. It was 12 until the
+        # mode gained its clause; the number moved in the commit that moved
+        # the code, which is the only way a stated cost stays a measurement.
+        assert long_cost == 13, f"{long_cost} selects for 10 overdue loans"
+
+
+class TestLibraryModeAndWhoReadsWhichLoan:
+    """Library mode: a Member chases every loan, and never a private book.
+
+    **The relaxation is on the loan's parties, not on the Book**, and the two
+    halves of this class are why. `visible_to` has always admitted every non
+    private Book, so the loans list was never the thing refusing anything: it
+    is rooted at the Shelf, applies no lender-or-borrower arm, and has always
+    answered with every loan over a book the reader may see. The refusal a
+    volunteer actually hits is the overdue page, which narrows to the loans
+    they lent or borrowed unless `sees_every_loan` says otherwise.
+
+    So the mode changes the overdue page and leaves the loans list alone, and
+    both are asserted here rather than one being left to be assumed.
+    """
+
+    def lend(self, client, headers, book, to_user_id, *, overdue=True) -> dict:
+        due = datetime.now(UTC) + timedelta(days=-3 if overdue else 3)
+        res = client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_user_id": to_user_id,
+                "due_at": due.replace(tzinfo=None).isoformat(),
+            },
+            headers=headers,
+        )
+        assert res.status_code == 201, res.text
+        return res.json()
+
+    def test_a_member_chases_a_loan_they_are_not_party_to(
+        self, client, db, admin, member, other_user, make_book
+    ):
+        """User story 1, at the endpoint the banner links to."""
+        library_mode(db)
+        book = make_book(admin["headers"], title="Somebody else's business")
+        self.lend(client, admin["headers"], book, other_user["user"]["id"])
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert [row["book"]["title"] for row in body["items"]] == [
+            "Somebody else's business"
+        ]
+
+    def test_with_the_mode_off_that_loan_is_still_refused(
+        self, client, db, admin, member, other_user, make_book
+    ):
+        """The unchanged arm, asserted beside the changed one rather than
+        trusted to the class two above: a relaxation that turned out to be
+        unconditional would pass every other test in this file."""
+        library_mode(db, False)
+        book = make_book(admin["headers"], title="Somebody else's business")
+        self.lend(client, admin["headers"], book, other_user["user"]["id"])
+
+        body = client.get("/api/loans/overdue", headers=member["headers"]).json()
+
+        assert body["total"] == 0
+
+    def test_a_private_book_somebody_else_added_stays_out(
+        self, client, db, admin, member, other_user, make_book
+    ):
+        """**The test the item exists to pass.** The Shelf is applied before
+        the party arm and the mode does not touch it, so the relaxation cannot
+        become a disclosure. Checked on both lists, because they are two
+        queries and only one of them was widened."""
+        library_mode(db)
+        book = make_book(other_user["headers"], title="Members only", is_private=True)
+        self.lend(client, other_user["headers"], book, admin["user"]["id"])
+
+        overdue = client.get("/api/loans/overdue", headers=member["headers"]).json()
+        listed = client.get("/api/loans", headers=member["headers"]).json()
+
+        assert (overdue["total"], listed["total"]) == (0, 0)
+
+    def test_a_member_still_reads_their_own_private_book(
+        self, client, db, member, other_user, make_book
+    ):
+        """The other direction, and the reason the ticket's literal wording was
+        not implemented. "Every Book that is not private" is a **subset** of
+        what `visible_to` admits, so narrowing to it would have taken a
+        member's own private books out of their own loan list."""
+        library_mode(db)
+        book = make_book(member["headers"], title="Mine and private", is_private=True)
+        self.lend(client, member["headers"], book, other_user["user"]["id"])
+
+        overdue = client.get("/api/loans/overdue", headers=member["headers"]).json()
+        listed = client.get("/api/loans", headers=member["headers"]).json()
+
+        assert [row["book"]["title"] for row in overdue["items"]] == ["Mine and private"]
+        assert [row["book"]["title"] for row in listed["items"]] == ["Mine and private"]
+
+    def test_the_loans_list_answers_the_same_set_in_either_mode(
+        self, client, db, admin, member, other_user, make_book
+    ):
+        """The finding, pinned. Nothing about `list_loans` moved, and a later
+        change that quietly made the mode narrow or widen it would be a screen
+        disagreeing with itself rather than a failing test anywhere else."""
+        book = make_book(admin["headers"], title="Housemates' business")
+        self.lend(client, admin["headers"], book, other_user["user"]["id"])
+
+        library_mode(db, False)
+        off = items(client.get("/api/loans", headers=member["headers"]))
+        library_mode(db, True)
+        on = items(client.get("/api/loans", headers=member["headers"]))
+
+        assert [row["id"] for row in off] == [row["id"] for row in on]
+        assert len(on) == 1
+
+
+class TestHowLongItHasBeenOut:
+    """`days_out` and `days_overdue` on the serialised loan.
+
+    Computed on the server, in `lending`, and read here through the API. The
+    client is not asked to do date arithmetic, and the digest and the loans
+    page cannot come to disagree about the same loan, because there is one
+    function and both call it.
+    """
+
+    def lend_days_ago(self, db, admin, *, out=0, due=None, returned=None) -> Loan:
+        """A loan positioned in time, written through the ORM.
+
+        The API stamps `loaned_at` with the database's own clock and offers no
+        way to backdate it, which is correct of the API and useless for
+        measuring an elapsed span. So the row is written here.
+        """
+        moment = datetime.now(UTC).replace(tzinfo=None)
+        book = Book(title="Dune", added_by_user_id=admin["user"]["id"])
+        db.add(book)
+        db.flush()
+        loan = Loan(
+            book_id=book.id,
+            loaned_to_name="Kim",
+            loaned_by_user_id=admin["user"]["id"],
+            loaned_at=moment - timedelta(days=out),
+            due_at=None if due is None else moment - timedelta(days=due),
+            returned_at=None if returned is None else moment - timedelta(days=returned),
+        )
+        db.add(loan)
+        db.commit()
+        db.refresh(loan)
+        return loan
+
+    def only(self, client, headers, **params) -> dict:
+        listed = items(client.get("/api/loans", params=params, headers=headers))
+        assert len(listed) == 1, listed
+        return listed[0]
+
+    def test_an_open_loan_reports_the_days_since_it_left(self, client, db, admin):
+        self.lend_days_ago(db, admin, out=9)
+        assert self.only(client, admin["headers"])["days_out"] == 9
+
+    def test_a_loan_with_no_deadline_still_reports_it(self, client, db, admin):
+        """The common case here, and the reason `days_overdue` alone would not
+        have answered the story: most lending has no due date at all."""
+        self.lend_days_ago(db, admin, out=40, due=None)
+        row = self.only(client, admin["headers"])
+        assert (row["days_out"], row["due_at"], row["days_overdue"]) == (40, None, 0)
+
+    def test_a_returned_loan_stops_counting_at_the_return(self, client, db, admin):
+        """A closed row that grew a day every day would be a lie about a book
+        that is back on the shelf."""
+        self.lend_days_ago(db, admin, out=30, returned=27)
+        row = self.only(client, admin["headers"], active_only="false")
+        assert (row["days_out"], row["is_overdue"]) == (3, False)
+
+    def test_an_overdue_loan_reports_how_far_past_its_date_it_is(
+        self, client, db, admin
+    ):
+        self.lend_days_ago(db, admin, out=40, due=13)
+        row = self.only(client, admin["headers"])
+        assert (row["is_overdue"], row["days_overdue"], row["days_out"]) == (True, 13, 40)
+
+    def test_it_is_the_number_the_digest_reports_for_the_same_loan(
+        self, client, db, admin
+    ):
+        """The ticket's rule: one place, not two.
+
+        Asserted against `notifications.build_digest`, which is the existing
+        caller, rather than against a second subtraction written here. A copy
+        of the arithmetic agrees with a mistake in the arithmetic.
+        """
+        loan = self.lend_days_ago(db, admin, out=40, due=13)
+        moment = datetime.now(UTC).replace(tzinfo=None)
+
+        served = self.only(client, admin["headers"])["days_overdue"]
+        digested = notifications.build_digest([loan], moment)["loans"][0]["days_overdue"]
+
+        assert served == digested == lending.days_overdue(loan, moment)
+
+    def test_a_book_payload_carries_a_loan_summary_with_no_clock_facts(
+        self, client, admin, book, member
+    ):
+        """`serialisation.loan_summary` fills the borrower and nothing dated,
+        and it did so before this change: `due_at` and `is_overdue` were
+        already absent there. So the two new fields read 0 on a book payload
+        for the same reason, and this pins that they are consistently absent
+        rather than sometimes wrong.
+
+        Widening that summary is a separate change to a separate screen. What
+        would be a defect is one of the four being filled and the others not,
+        because a reader would then trust all four.
+        """
+        client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_user_id": member["user"]["id"]},
+            headers=admin["headers"],
+        )
+
+        active = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()[
+            "active_loan"
+        ]
+
+        assert (
+            active["due_at"],
+            active["is_overdue"],
+            active["days_overdue"],
+            active["days_out"],
+        ) == (None, False, 0, 0)
+
+
+class TestOneClockPerRequest:
+    """`_now` is read once per request, and every row in the response is
+    measured against that one instant.
+
+    **Stated in `_now`'s docstring before anything checked it, and false on two
+    routes of three.** `list_overdue` read a clock for its query and
+    `_to_out_many` read a second for the rows, at a different instant, so a
+    mutation back to a per row `lending.is_overdue(loan, _now())` was uncaught.
+    Two loans lent in the same second can straddle a midnight between two such
+    reads and come back a day apart.
+
+    **Two maps, both asserted total against the router, because one was not
+    enough.** The first version derived the route names from `router.routes`
+    and then exercised them with seven hand written tests, which delivers "a
+    route needs a figure" and not "no route goes unmeasured": measured, a route
+    added to the router that reads the clock twice, with its figure added to
+    `CLOCK_READS`, left this file green. A figure nothing issues a request for
+    is a number in a table.
+
+    So the requests are a map too, and the equality below is three way. That is
+    the same defect C1 was raised for, in a guard written to fix C1: a
+    docstring claiming the subject is covered while one syntax is.
+    """
+
+    #: Calls to `_now` per request, per route handler. Every route that
+    #: serialises a loan reads the clock exactly once.
+    #:
+    #: `notify_overdue` is the one 0 and it is not an exemption: it hands the
+    #: whole run to `notifications.run_digest`, which reads its own clock,
+    #: because a digest timestamps a delivery rather than a response.
+    CLOCK_READS = {
+        "list_loans": 1,
+        "create_loan": 1,
+        "list_overdue": 1,
+        "my_overdue": 1,
+        "notify_overdue": 0,
+        "return_loan": 1,
+    }
+
+    #: How to reach each route, so the figure above is measured rather than
+    #: declared. A list per route, because one handler can be reached by more
+    #: than one request shape and `list_loans` has two that take different
+    #: paths through the clock: the plain listing, and `overdue_only`, which is
+    #: the one that used to read a second instant for its predicate.
+    REQUESTS = {
+        "list_loans": [
+            lambda ctx: ctx.client.get("/api/loans", headers=ctx.headers),
+            lambda ctx: ctx.client.get(
+                "/api/loans", params={"overdue_only": True}, headers=ctx.headers
+            ),
+        ],
+        "create_loan": [
+            lambda ctx: ctx.client.post(
+                "/api/loans",
+                json={"book_id": ctx.free_book_id, "loaned_to_user_id": ctx.member_id},
+                headers=ctx.headers,
+            )
+        ],
+        "list_overdue": [
+            lambda ctx: ctx.client.get("/api/loans/overdue", headers=ctx.headers)
+        ],
+        "my_overdue": [
+            lambda ctx: ctx.client.get("/api/loans/overdue/mine", headers=ctx.headers)
+        ],
+        "notify_overdue": [
+            lambda ctx: ctx.client.post("/api/loans/overdue/notify", headers=ctx.headers)
+        ],
+        "return_loan": [
+            lambda ctx: ctx.client.put(
+                f"/api/loans/{ctx.loan_id}/return", headers=ctx.headers
+            )
+        ],
+    }
+
+    @pytest.fixture
+    def clock(self, monkeypatch) -> list:
+        """Every instant `_now` handed out, in order."""
+        instants: list = []
+        real = loans_module._now
+
+        def counted():
+            value = real()
+            instants.append(value)
+            return value
+
+        monkeypatch.setattr(loans_module, "_now", counted)
+        return instants
+
+    @pytest.fixture
+    def ctx(self, client, admin, member, make_book, loan):
+        """Everything the request map needs to name a real row.
+
+        `free_book_id` is a second book, because the one `loan` is on already
+        has an open loan and a book is out with one person at a time: pointing
+        `create_loan` at it answers 409 and reads no clock at all.
+        """
+        return SimpleNamespace(
+            client=client,
+            headers=admin["headers"],
+            loan_id=loan["id"],
+            member_id=member["user"]["id"],
+            free_book_id=make_book(admin["headers"], title="Not yet lent")["id"],
+        )
+
+    def test_the_maps_cover_every_route_in_the_file(self):
+        """Derived from the router in **both** directions, so a route added
+        without a figure fails, and a figure with nothing issuing a request for
+        it fails too. The second half is the one the first version lacked."""
+        declared = {
+            route.endpoint.__name__
+            for route in loans_module.router.routes
+            if hasattr(route, "endpoint")
+        }
+        assert declared == set(self.CLOCK_READS), (
+            "every route in routers/loans.py needs a clock figure: "
+            f"missing {sorted(declared - set(self.CLOCK_READS))}, "
+            f"stale {sorted(set(self.CLOCK_READS) - declared)}"
+        )
+        assert declared == set(self.REQUESTS), (
+            "every route needs a request that exercises it, or its figure is "
+            f"a number nothing measured: missing {sorted(declared - set(self.REQUESTS))}, "
+            f"stale {sorted(set(self.REQUESTS) - declared)}"
+        )
+
+    @pytest.mark.parametrize(
+        ("route", "shape"),
+        [
+            (route, shape)
+            for route, calls in REQUESTS.items()
+            for shape in range(len(calls))
+        ],
+    )
+    def test_a_request_reads_the_clock_its_figure_says(self, ctx, clock, route, shape):
+        """One case per request shape, generated from the map rather than
+        written out, so adding a shape adds a case."""
+        response = self.REQUESTS[route][shape](ctx)
+
+        assert response.status_code < 400, response.text
+        assert len(clock) == self.CLOCK_READS[route], (
+            f"{route} shape {shape} read the clock {len(clock)} times, "
+            f"expected {self.CLOCK_READS[route]}: {clock}"
+        )
+
+
+class TestEveryClockInThisFileGoesThroughNow:
+    """`_now` is the only place this module reads the wall clock.
+
+    **The rule exists because one site wrote the wrong kind of value and
+    nothing could have caught it.** `return_loan` set `returned_at` to an
+    **aware** `datetime.now(UTC)` while the column and every comparison in this
+    file are naive UTC. It reached the disk correctly only because SQLAlchemy's
+    SQLite formatter drops the offset, and read back correctly only because
+    `expire_on_commit` refetched the row before anything touched the attribute:
+    right by ordering, not by construction. Reverting that line leaves the
+    whole suite green, measured, so the fix needed a guard of its own rather
+    than a test of its effect.
+
+    **The first version caught one shape of five and said it caught the file.**
+    It walked only `FunctionDef` and `AsyncFunctionDef` and matched only `now`,
+    so a module level `_BOOT = datetime.now(UTC)` was invisible to it and
+    `datetime.utcnow()` and `datetime.today()` both passed. Two of those three
+    matter more than the others: a module level clock is read once per process
+    and would freeze every comparison in the file at import time, and
+    `datetime.today()` is naive **local** time, which is the wrong frame class
+    this guard exists over arriving from the other side, and which mypy accepts
+    because its type is right. Ruff's selected rules here do not include `DTZ`,
+    so nothing else covers either.
+
+    **`time.time()` is out of reach and is named rather than chased.** It
+    returns a float, so mypy refuses it anywhere a `datetime` is wanted, which
+    is every use this file has for a clock. A guard arm for it would be an arm
+    against a shape the type checker already refuses.
+
+    `ast` rather than a text search, so a docstring naming `datetime.now`
+    cannot move the answer.
+    """
+
+    #: The three spellings that produce a `datetime` from the wall clock.
+    #: `today` is here because it is naive **local** time: right type, wrong
+    #: frame, and invisible to mypy.
+    CLOCK_CALLS = {"now", "utcnow", "today"}
+
+    #: Where a call sits when it is not inside a function at all.
+    MODULE_LEVEL = "<module level>"
+
+    def _readers(self, tree: ast.Module) -> set[str]:
+        """Which functions read the wall clock, module level included.
+
+        Recursive rather than `ast.walk`, because the answer is *which*
+        function a call sits in and `walk` throws the nesting away. The first
+        version worked around that by walking each function separately, which
+        is what made every call outside one invisible.
+        """
+        found: set[str] = set()
+
+        def visit(node: ast.AST, owner: str) -> None:
+            for child in ast.iter_child_nodes(node):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr in self.CLOCK_CALLS
+                ):
+                    found.add(owner)
+                inner = (
+                    child.name
+                    if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+                    else owner
+                )
+                visit(child, inner)
+
+        visit(tree, self.MODULE_LEVEL)
+        return found
+
+    def test_no_handler_reads_the_wall_clock_directly(self):
+        tree = ast.parse((BACKEND / "routers" / "loans.py").read_text())
+        readers = self._readers(tree)
+
+        assert readers == {"_now"}, (
+            "routers/loans.py reads the wall clock outside `_now`, in "
+            f"{sorted(readers - {'_now'})}. One site wrote an aware datetime "
+            "into a naive column that way, and the suite stayed green."
+        )

@@ -57,7 +57,7 @@ import {
   saveSearch,
   type SavedSearch,
 } from "../../lib/savedSearches";
-import { useFeatureFlags } from "../../app/hooks";
+import { useFeatureFlagsState } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { useSortedByName, useTranslation } from "../../i18n";
 import type { BookFilters } from "./types";
@@ -99,12 +99,25 @@ export interface UseLibraryResult {
   clearClassifications: () => void;
   classifications: ClassificationFacets | undefined;
 
-  /** Covers, dense rows or metadata. Remembered in this browser, not on the account. */
+  /**
+   * Covers, dense rows or metadata. Remembered per mode, in this browser rather
+   * than on the account. Library mode opens on the dense rows.
+   */
   view: LibraryView;
   setView: (view: LibraryView) => void;
 
   /** Whether this library is being catalogued or kept. See `libraryColumns`. */
   mode: CatalogueMode;
+  /**
+   * Whether the mode is settled, and so whether a preference may be written.
+   *
+   * False only while the feature flags are in flight, which on a warm cache is
+   * no renders at all. Every control that writes a per-mode preference is
+   * disabled meanwhile, rather than left looking live: the write is refused
+   * either way, and a button that answers a press with nothing teaches the
+   * reader the page lies.
+   */
+  modeIsKnown: boolean;
   /** Every column this mode offers, whether drawn or not. */
   availableColumns: readonly ColumnKey[];
   /** The columns the table draws. Remembered per mode, in this browser. */
@@ -150,26 +163,58 @@ export function useLibrary(): UseLibraryResult {
     readSavedSearches<BookFilters>(),
   );
 
-  // Same reasoning, and the same failure posture: storage that refuses to
-  // answer gives the grid rather than an error.
-  const [view, setViewState] = useState<LibraryView>(() => readLibraryView());
-
-  // **The column set is derived from the mode, not held as state seeded from
-  // it.** The flags are fetched, so `library_mode` is undefined for the first
-  // render or two; a `useState` initialiser would capture the household set
-  // and a cataloguer would keep it for the rest of the session. Re-reading
-  // storage when the mode changes is one `getItem`, and it is what makes the
-  // two modes' choices independent rather than merely separately stored.
+  // **The view and the column set are derived from the mode, not held as state
+  // seeded from it.** The flags are fetched, so `library_mode` is undefined for
+  // the first render or two; a `useState` initialiser would capture the
+  // household's answer and a cataloguer would keep it for the rest of the
+  // session. Re-reading storage when the mode changes is one `getItem` each,
+  // and it is what makes the two modes' choices independent rather than merely
+  // separately stored.
+  //
+  // The cost is that a cataloguer sees the household's view and columns for a
+  // render or two. That is the trade `catalogueMode` already documents and the
+  // other way round is worse: every household would watch a cataloguer's
+  // catalogue flash past on every load.
+  //
+  // **`catalogueMode(undefined)` is a fallback for reading and is not one for
+  // writing**, which is `modeIsKnown` below. A cataloguer who picks a view in
+  // that window would otherwise have it filed under the household's key: the
+  // household loses the choice it made, the cataloguer's key stays empty, and
+  // nothing says so. A wrong read costs one paint; a wrong write is permanent
+  // and silent, which is the whole of what the two keys exist to prevent.
   //
   // `edits` is bumped by a write so the next render re-reads what was just
-  // stored. Storage is the single copy: keeping a second one in state is how
-  // the two come to disagree.
-  const mode = catalogueMode(useFeatureFlags()?.library_mode);
+  // stored. One counter for both preferences rather than one each, so a change
+  // to the columns re-reads the view as well. That is the whole cost: one
+  // `getItem` that returns what it returned before. Two counters would be
+  // accurate about which preference moved and nothing would read the
+  // difference. Storage is the single copy, and keeping a second one in state
+  // is how the two come to disagree.
+  const { flags, isResolved: modeIsKnown } = useFeatureFlagsState();
+  const mode = catalogueMode(flags?.library_mode);
   const [edits, setEdits] = useState(0);
   const columns = useMemo(
     () => readColumns(mode),
     // `edits` is the whole point of the dependency, not an accident.
     [mode, edits],
+  );
+  const view = useMemo(() => readLibraryView(mode), [mode, edits]);
+
+  /**
+   * One door for every write keyed on the mode.
+   *
+   * The mode is handed to the caller rather than closed over, so a write
+   * cannot reach it without passing the gate, and the re-read bump happens
+   * here rather than at three call sites that each had to remember it. A
+   * fourth per-mode preference gets both properties by construction.
+   */
+  const writeForMode = useCallback(
+    (write: (mode: CatalogueMode) => void) => {
+      if (!modeIsKnown) return;
+      write(mode);
+      setEdits((count) => count + 1);
+    },
+    [mode, modeIsKnown],
   );
 
   const params = { ...toParams(filters), page_size: PAGE_SIZE };
@@ -260,12 +305,13 @@ export function useLibrary(): UseLibraryResult {
     classifications: classifications.data,
 
     view,
-    setView: (next) => {
-      setViewState(next);
-      writeLibraryView(next);
-    },
+    // Written under this mode's own key, like the columns below and for the
+    // same reason: a household's view has to survive a switch into library
+    // mode and back out of it, unmodified.
+    setView: (next) => writeForMode((known) => writeLibraryView(known, next)),
 
     mode,
+    modeIsKnown,
     availableColumns: AVAILABLE_COLUMNS[mode],
     columns,
     // Written under this mode's own key, so a household's choice is untouched
@@ -273,14 +319,11 @@ export function useLibrary(): UseLibraryResult {
     // lands back on the default clears the key instead of storing a copy of
     // it, which `writeColumns` does rather than this call site: turning one
     // column off and straight back on is the ordinary way to get there.
-    toggleColumn: (key) => {
-      writeColumns(mode, toggledColumns(mode, columns, key));
-      setEdits((count) => count + 1);
-    },
-    resetColumns: () => {
-      clearColumns(mode);
-      setEdits((count) => count + 1);
-    },
+    toggleColumn: (key) =>
+      writeForMode((known) =>
+        writeColumns(known, toggledColumns(known, columns, key)),
+      ),
+    resetColumns: () => writeForMode(clearColumns),
     canResetColumns: !isDefaultColumns(mode, columns),
 
     books: flatBooks,
@@ -418,8 +461,9 @@ export function useBookSelection(): UseBookSelectionResult {
  *
  * Who is counted is the server's decision (`notifications.overdue_for_viewer`):
  * a member reads the loans they borrowed or lent, staff read every overdue loan
- * on their shelf, and both go through the Shelf so nobody sees a private book
- * that is not theirs.
+ * on their shelf, and in library mode every member reads every overdue loan in
+ * the library. All three go through the Shelf, so nobody sees a private book
+ * that is not theirs in any mode.
  *
  * Zero when the household switched the channel off, so the banner disappears
  * without this page having to read the admin-only settings record.

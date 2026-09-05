@@ -721,9 +721,32 @@ class Shelf:
             shelf = shelf.where(Book.location == filters.location)
 
         if filters.q:
-            like = f"%{filters.q}%"
+            # **Escaped, and the escape character declared.** A reader searching
+            # for `100%` means the four characters, and an unescaped `%` in a
+            # LIKE pattern means "anything", so that search used to match every
+            # title containing `100`. `_` is the same bug one character wide.
+            #
+            # SQLite has no default LIKE escape, so `escape=` is not optional
+            # here: without it a `\%` in the pattern is a literal backslash
+            # followed by a wildcard, which is the bug again with an extra
+            # character. `sru.py` states the same rule at `_LIKE_ESCAPE` and
+            # this is the same escape, spelled once per module because a shared
+            # helper would put a search detail in a module neither owns.
+            #
+            # Found by the SRU work, which needed the rule for its own masks
+            # and noticed this door had never had it. It is a wrong answer
+            # rather than a denial of service: measured on SQLite, a pattern of
+            # 400 alternating masks over 200 rows costs the same as five.
+            escaped = filters.q
+            for special in ("\\", "%", "_"):
+                escaped = escaped.replace(special, "\\" + special)
+            like = f"%{escaped}%"
             shelf = shelf.where(
-                or_(Book.title.ilike(like), Book.author.ilike(like), Book.isbn.ilike(like))
+                or_(
+                    Book.title.ilike(like, escape="\\"),
+                    Book.author.ilike(like, escape="\\"),
+                    Book.isbn.ilike(like, escape="\\"),
+                )
             )
 
         if filters.status is not None:

@@ -2667,6 +2667,49 @@ class TestFilters:
         assert shelf.matching(BookFilters(q="findable")).count() == 2
         assert shelf.matching(BookFilters(q="978000000001")).count() == 1
 
+    def test_a_wildcard_in_the_search_term_is_a_character_and_not_a_wildcard(
+        self, db, user
+    ):
+        """`100%` finds the four characters, not every title holding `100`.
+
+        Both directions, because a fix that escaped everything would pass a
+        test that only checked the literal: an ordinary term must still match
+        as a substring.
+        """
+        db.add_all(
+            [
+                Book(title="100% Wool", added_by_user_id=user.id),
+                Book(title="1000 Ships", added_by_user_id=user.id),
+                Book(title="a_b", added_by_user_id=user.id),
+                Book(title="axb", added_by_user_id=user.id),
+            ]
+        )
+        db.commit()
+
+        shelf = Shelf.seen_by(db, user.id)
+        assert shelf.matching(BookFilters(q="100%")).count() == 1
+        assert shelf.matching(BookFilters(q="a_b")).count() == 1
+        # The ordinary case, which is what the escape must not break.
+        assert shelf.matching(BookFilters(q="100")).count() == 2
+        assert shelf.matching(BookFilters(q="Wool")).count() == 1
+
+    def test_a_backslash_in_the_search_term_is_a_character_too(self, db, user):
+        """The escape character itself, which is escaped first for that reason.
+
+        Escaping `%` and `_` before the backslash would escape the backslashes
+        the loop had just added, and this is the term that shows it.
+        """
+        db.add_all(
+            [
+                Book(title=r"AC\DC Live", added_by_user_id=user.id),
+                Book(title="ACDC Live", added_by_user_id=user.id),
+            ]
+        )
+        db.commit()
+
+        shelf = Shelf.seen_by(db, user.id)
+        assert shelf.matching(BookFilters(q=r"AC\DC")).count() == 1
+
     def test_unread_includes_a_book_nobody_has_touched(self, db, user):
         """A Book with no `UserBook` row has never been touched, which is
         unread. Filtering on the row alone reports an untouched shelf as having

@@ -5493,9 +5493,10 @@ digest's rather than the module's.
 
 Two audiences, decided in one place, `notifications.sees_every_loan`. A member reads the
 loans they borrowed or lent; staff read every overdue loan on their shelf. That is the seam
-library mode widens, and what it must not become is "an admin sees all": an admin is not a
-superuser over another member's private books anywhere else in this app, and both arms go
-through the Shelf before either clause is added.
+library mode widens, and it now does: with library mode on, every member reads every
+overdue loan on their shelf. What it must not become is "an admin sees all": an admin is
+not a superuser over another member's private books anywhere else in this app, and all
+three arms go through the Shelf before any clause is added.
 
 ### A new endpoint is classified for cache invalidation, or the inventory guard fails
 
@@ -6579,7 +6580,8 @@ another.
 member reads every overdue loan over a book they can see. `GET /api/loans/overdue` applies
 `notifications.overdue_for_viewer` on top, which is the rule the in app count already
 uses: staff read every overdue loan on their shelf, a member reads the ones they lent or
-borrowed. Both are narrowed by the Shelf first, so neither arm can reach a private book
+borrowed, and in library mode every member reads every overdue loan on their shelf, which
+is the widening that seam was reserved for. Both are narrowed by the Shelf first, so neither arm can reach a private book
 somebody else added.
 
 **Two screens that disagreed about how many loans are overdue would be worse than either
@@ -10690,3 +10692,319 @@ on the box.
 In `after_script` so a failed run reports too, and every read is guarded with a fallback to
 cgroup v1 and then to a plain line, because a diagnostic that fails the job it is diagnosing
 is worse than none, and silence is indistinguishable from a healthy pod.
+
+```markdown
+## The loans list was never the thing refusing anything, and library mode does not touch it
+
+Library mode was asked to let a member see loans on every book that is not
+private, rather than only those they own. That reading of the filter was wrong
+in a way worth recording, because the obvious implementation would have made
+the app worse.
+
+`visible_to(viewer)` is `deleted_at IS NULL AND (is_private IS false OR
+added_by_user_id = viewer)`. It admits **every non private book, plus the
+viewer's own private ones**. `list_loans` is rooted at `Shelf.seen_by` and adds
+no lender-or-borrower arm, so it has always answered with every loan over every
+public book, housemates' included; `test_a_member_does_not_read_a_loan_they_are_not_party_to`
+has asserted exactly that since the overdue page was split out of it.
+
+So "every book that is not private" is a **subset** of what the loans list
+already served, and narrowing to it would have dropped a member's own private
+books out of their own loan list. That contradicts a rule settled earlier and
+written into `overdue_for_viewer`: a member's own private books belong in what
+they are told about, because being told about your own book is not a disclosure.
+
+The refusal a volunteer actually meets is on the overdue page, which narrows to
+the loans they are party to unless `notifications.sees_every_loan` says
+otherwise. That function's own docstring had already named library mode as the
+clause it would gain, so it gained it and nothing else moved. Both arms are
+rooted at the Shelf either way, so neither can reach a book its viewer may not
+see, and an admin is no more a superuser over another member's private books
+than the mode is.
+
+The cost of the clause is one row read per request on the overdue routes, which
+took `GET /api/loans/overdue` from 12 statements to 13. The figure moved in the
+commit that moved the code.
+
+## The loan clock is one module, because a badge and a reminder were computing it separately
+
+`is_overdue` was inline in `routers/loans._to_out` and `days_overdue` was inline
+in `notifications.build_digest`. Both are the same question about a loan and a
+moment, and two definitions of it can disagree: a row whose badge says the book
+is fine, listed on a page whose query says it is late, is a screen contradicting
+itself with nothing failing anywhere.
+
+`backend/lending.py` holds the three of them, `days_out` included, and both
+callers read it. The SQL form stays in `notifications._overdue_clauses`, because
+a query cannot call a Python predicate, and `tests/test_lending.py` asserts the
+two select the same loans rather than trusting the comment that says they
+should. The one clause only the query has is `Book.deleted_at`, which is a fact
+about the book rather than about the loan, and that asymmetry is asserted too.
+
+`days_out` is the number that means something for the lending that has no
+deadline at all, which is most of it here: a household reading only
+`days_overdue` has nothing to go on for a loan with no `due_at`.
+```
+
+## The library view is remembered per mode, and the household's key kept its name
+
+The view preference was one `localStorage` key. Library mode needed a different
+default, and a default alone would not have been enough: with one key, the first
+change a cataloguer made overwrote the household's choice, and turning the mode
+off left somebody looking at a view they never picked.
+
+So `lib/libraryView.ts` now takes a `CatalogueMode`, holds a default per mode
+(`grid` for a household, `list` for a cataloguer) and a key per mode. This is
+the shape `lib/libraryColumns.ts` already uses for the column set, and the
+argument is the same one: separate keys make independence structural, because
+writing one cannot touch the other and there is no merge to get wrong.
+
+Two places where the two modules deliberately differ, both of which read as
+oversights otherwise.
+
+**The household's key is `libraryView`, unprefixed, where the column keys are
+`libraryColumns.household` and `libraryColumns.cataloguer`.** Those keys shipped
+together with the modes and had nothing to preserve. This one is already in
+every browser that has ever chosen a view, so renaming it would reset every
+existing household to the grid: the clobber the two keys exist to prevent,
+arriving from the other direction.
+
+**`writeLibraryView` stores a choice equal to the default, where `writeColumns`
+clears the key instead.** That rule has two halves: a stored copy of the default
+stops following the default if a later version changes it, and a reader who
+turns a column off and straight back on would hold that copy with no control
+offered to clear it.
+
+The second half does not reach the view, because there is no reset control. The
+first half does, and is accepted rather than absent: a cataloguer who picks the
+dense view is pinned to it if a later version opens library mode elsewhere, and
+nothing in the interface clears the key. The trade is taken because the pick is
+one of three named buttons rather than a set of twenty three, so choosing again
+is one click and the buttons say which one is on. A reset control would make
+this `writeColumns`' rule instead.
+
+**The view is derived from the mode rather than seeded into state.** The mode
+comes from `library_mode` on the feature flags, which is fetched, so
+`catalogueMode(undefined)` is household for the first render or two. A
+`useState` initialiser reads storage before the mode is known and hands a
+cataloguer the household's view for the rest of the session. This is the bug
+the column set's comment already describes, and the view acquired it the moment
+the key became per mode. The cost is the same as the column set's and is
+accepted for the same reason: a cataloguer sees the household's view for a
+render or two, where the other way round every household would watch a
+cataloguer's catalogue flash past on every load.
+
+**`catalogueMode(undefined)` is a fallback for reading and is not one for
+writing.** The mode is household before the flags answer as well as after they
+answer false, which is the right view to draw and no answer at all about where
+to save one. A pick made in that window was filed under the household's key
+whatever the flags went on to say: the household lost the choice it had made,
+the cataloguer's key stayed empty, and nothing reported it. A wrong read costs
+one paint and a wrong write is permanent.
+
+So `useLibrary` takes `isResolved` from the flags query and refuses every write
+keyed on the mode until it is true, through one door rather than at three call
+sites, and the controls that make those writes are disabled meanwhile rather
+than left looking live. `toggleColumn` and `resetColumns` had the same hole
+before the view did, and `resetColumns` is the sharpest of the three because it
+deletes a set somebody chose rather than overwriting it.
+
+**Resolved means settled either way, not `flags !== undefined`.** A failure is
+an answer, and the documented one, so reading "no flags" as "not ready" would
+leave a library whose flags endpoint is down unable to change its view for the
+whole session, with the controls greyed and nothing saying why. `useFeatureFlags`
+returns only the data and cannot express the difference, so `app/hooks.ts` grew
+`useFeatureFlagsState` and `useFeatureFlags` is now that with the second half
+dropped.
+
+What the gate refuses that nothing refused before: a household's pick during the
+window, which would have been correct. That cannot be distinguished from a
+cataloguer's, because the fallback is the same value. The window is one request
+on a cold load, and it is visible in the suite: three existing tests waited for
+`mode` to read household, which passes on the first render, and now wait for
+`modeIsKnown`.
+
+Pinned by mutation rather than by reading, over `tests/lib/libraryView.test.ts`
+and `tests/pages/Home/hooks.test.tsx`. Returning the cataloguer's default to
+`grid` fails 5 named tests, pointing both keys at `libraryView` fails 6, and
+seeding the view into `useState` fails 4, including "opens library mode on the
+dense rows despite the household's choice", which is the only one that can see
+the last of those.
+
+Over the whole suite, deleting the gate fails 3 and defining resolved as
+`flags !== undefined` fails 5: the two written for it, plus three `Home's view
+toggle` tests that stub no flags endpoint and so never see the gate open.
+
+## The SRU server borrows the public catalogue's gate rather than growing one
+
+The ticket asked only that library mode off make the endpoint disappear.
+`routers/sru.py` imports `routers.public.public_reader` instead, which is library mode
+**and** the publish row, plus the rate limit, in that order.
+
+That is stricter than what was asked and the reason is not caution. `routers/public.py`
+names five questions a public surface has to answer and enforces each in a different place;
+a second unauthenticated surface answering any of them a second, different way is two
+answers that drift the first time one is edited. Importing the dependency makes the drift
+impossible rather than unlikely. An institution that has not published its catalogue has
+not published it over a protocol either.
+
+The same reasoning gives it the catalogue's rate limit counter rather than one of its own
+size: there is one published catalogue, and a harvester and a browser reading the same
+records should not have two budgets between them.
+
+## The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned
+
+`Shelf.seen_by_the_public` filters rows and `schemas/public.py` is the column boundary for
+the JSON catalogue. The SRU server publishes MARC, so its column boundary is whatever
+`marc.py` writes, and MARC is the **richer** record of the two: it has fields for the shelf
+mark, the price paid and the acquisition source. `marc.py` writes none of them, which is
+what made reusing it safe, and nothing enforced that.
+
+`tests/test_sru.py::TestTheRecordCarriesNoColumnThePublicPayloadWithholds` enforces it
+with two different instruments, because two readings of one instrument are one instrument
+twice: it puts a distinctive value in every withheld column of a transient Book and looks
+for it in a rendered record, and it reads the writer's source for the Book attributes it
+touches at all. The first catches a value that reaches the document; the second catches a
+column that is read at all, including one whose value happens not to render.
+
+An `852 $b` for a cataloguer is a reasonable future request and it fails that test. The
+answer then is a record writer for SRU, not a wider boundary.
+
+## Masking is supported because SQLite's LIKE does not backtrack
+
+The obvious reason to refuse CQL's `*` and `?` on a public endpoint is that they become SQL
+wildcards and a pattern of many wildcards is a classic denial of service. Measured, that is
+not true of this storage engine.
+
+**The first measurement was worthless and the conclusion it reached was right**, which is
+the awkward combination: `('%a' * 400)` against a 120 character title needs 400 literal
+`a`s inside 120 characters, so it fails at the first position on every row and never
+backtracks, and 400 masks is above the bound anyway. Two review seats found that
+independently. The number then outlived its own retraction inside `sru.py` for one commit,
+which is the malignant stale form: the correction arrived in the commit that left the wrong
+number at the site the correction points at.
+
+Re-derived on the worst shape the bound admits, eight wildcards alternating with a literal
+that matches everywhere and then one that cannot: against 3,000 books whose title is 120
+identical characters, 12.7 to 13.2 ms in total, 4.23 to 4.40 microseconds per book.
+
+So they are translated rather than refused, and the correctness question replaces the cost
+one: the literal text of a term is escaped **before** the masks are put in, so a client
+searching for `100%` means a per cent sign and a client searching for `100*` means a
+wildcard. `MAX_MASKS_IN_A_TERM` remains, and its comment says plainly that it is not a cost
+bound: a term of a thousand wildcards is not a search anybody meant to run, and a future
+storage engine is not promised to behave as this one measured.
+
+Anchoring (`^`) is refused with the diagnostic the specification has for it, because
+mapping it correctly is fiddlier than the value it adds and treating it as a literal would
+return the wrong result silently.
+
+## The query bound is a cost budget, because a count of predicates is not a cost
+
+The first version bounded the parse five ways and published the resulting predicate count
+as the ceiling. Counting in that unit made the **cheap** shape look like the worst case.
+Measured against 3,000 books with 2,000 character descriptions: 384 comparisons through
+`cql.serverChoice` are 584 to 650 ms, while 128 through `dc.description`, which the same
+parse bounds admit, are 2091 to 2284 ms, and 64 through `dc.subject` are 1067 to 1143 ms.
+Three times the comparisons, a third of the cost.
+
+So comparisons are charged against a budget, weighted per index, refused when it runs out.
+**The weight is a property of the index and not of the column**, and that is where the
+obvious derivation fails: "the column has no length limit" gets `dc.description` right and
+`dc.subject` wrong, since its column is `String(100)` and its cost is a correlated `EXISTS`
+over a join. The two classes are declared per row with no default, so a thirteenth index
+cannot be added without somebody deciding what it costs.
+
+**The parse bounds stay.** They bound structure, which is memory and stack; the budget
+bounds work, which is CPU. Neither is the other, and the budget is applied on top, so it is
+strictly tighter and admits nothing that used to be refused. What it now refuses that it
+used to allow is named in `docs/security.md`, because a bound in a different unit is a
+different bound rather than a tighter one.
+
+## An integer the storage engine cannot hold was three unauthenticated 500s
+
+`int()` parses any number of digits; SQLite stores 64 bits. A value in between parsed, went
+to the driver, and raised `OverflowError`, which is not an `SruError`, so it left `respond`
+and reached a caller with no credentials as `Internal Server Error`. Three routes:
+`rec.id`, `dc.date` and `startRecord`.
+
+Both review seats found it independently, and neither found it by reading: the exception is
+raised well below this module and only a test at the transport sees the status a client
+got. The claim it falsified was written in three places, including the ticket.
+
+The fix is one range at the two integer conversions, which are the only `int()` calls in
+the module. **Both ends**, because the negative arm overflows exactly as the positive one
+does. `startRecord` is the one a range check could not have caught: `page()` runs with
+`start_record - 1` before the check that compares it against the total, so the overflow
+happened inside the query.
+
+**The two sites have different outer refusals and a test written on the assumption that
+they behave alike failed.** A term lives inside `query`, so `MAX_QUERY_CHARS` caps it at
+about a thousand digits and CPython's own 4,300 digit limit is unreachable there; a
+parameter has no such cap, so `startRecord` really does reach it. Both arms are pinned.
+
+## A filter is a read of its column, and only the record writer was guarded
+
+`schemas/public.py` is the column boundary, `TestEveryPublicSortOrdersByAPublishedColumn`
+enforces it on the ORDER BY, and the SRU server enforced it on the record writer. Nothing
+enforced it on the twelve new filters, so an index pointed at the shelf mark would have
+been an oracle a stranger walks one query at a time with the row filter perfectly intact.
+
+Each index's predicate is now compiled and every `books` column named in it checked against
+`PublicBookOut`, in the same shape as the sort rule, so there is one rule rather than two
+that resemble each other.
+
+## `explain` reads the `Host` header directly, and not `request.url`
+
+The explain document reports the host and port the request arrived at, which is the only
+honest answer since no setting holds one. The obvious implementation is
+`request.url.hostname`, and it is wrong in a way that is invisible from the call site.
+
+Starlette 1.6.0 validates the `Host` header itself against
+`^([a-z0-9.-]+|\[ipv6\])(?::[0-9]+)?$` and, when it will not use it, falls back to
+`scope["server"]`, which is the address this process is **bound** to. Behind a reverse
+proxy that is a container's internal listen address, so a client sending a malformed
+`Host` would be handed a deployment's internal address in a document it can keep.
+
+Reading the header means the only two answers are the client's own host and `localhost`.
+The router's own pattern is narrower than Starlette's in two ways it states: it bounds the
+length, since that rule admits a name of any length and this value goes into XML, and it
+refuses the bracketed IPv6 form, which costs a client on such a deployment an accurate
+`<host>` and nothing else.
+
+## The diagnostic numbers were checked against a second implementation, and four changed
+
+Three of the numbers this server raised at the time of the check, twenty two of them, were
+the ones its author was least sure of: 30, 31 and 36. A wrong number here is not a wrong message, it is a URI a client matches
+on and misroutes, and no amount of re-reading the code would have found it, because the
+code says exactly what its author remembered.
+
+`targets.py` already corroborated 8, 11 and 235 from contact with live servers. The rest
+were read off CLARIN's `fcs-sru-server` `SRUConstants.java`, an independent implementation
+of the same list. All twenty two agreed name for name, so the three uncertain ones were
+right. **The register has grown since and no number is quoted for its current size**, here
+or in the module: a count in prose does not recount itself, and the totality test does.
+
+**What the check was actually worth was not the confirmation.** Reading the whole list
+showed four places this server was answering with a general code where the specification
+has a specific one: `recordPacking` was diagnostic 6 and is 71, and `sortKeys`,
+`stylesheet` and `resultSetTTL` were all diagnostic 8, "there is no such parameter", where
+the numbers for declining those three features are 80, 110 and 50. The difference is what a
+client does next: told there is no such parameter as `sortKeys`, it goes looking for a typo.
+
+The generic code is still what an *unknown* parameter gets, and
+`tests/test_sru.py` asserts both halves, because a table that swallowed everything would
+leave diagnostic 8 unreachable with nothing failing.
+
+## `dc.subject` searches tags, and classification headings are not indexed
+
+An SRU client asking for a subject would reasonably expect the Dewey and GND headings this
+library holds, and `PublicBookOut` publishes them. They are not indexed, and the reason is
+where the code would have to reach: `Book.classifications.any(Classification.number == ...)`
+inside `Shelf.where` is a statement that `BOOK_OWNED_READERS` in `tests/test_shelf.py`
+exists to make somebody justify, and that is a decision about the privacy guard rather than
+about SRU.
+
+`explain` is generated from the index registry, so a client sees the omission rather than
+guessing at it. Adding the index later is a row in `INDEXES` and one allowlist entry with
+a reason.

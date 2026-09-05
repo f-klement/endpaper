@@ -75,7 +75,9 @@ title, and the author, series, year and reading status beside it, plus a marker
 where the book is out on loan or nobody has confirmed the library holds it. The
 table carries twenty three columns, sorts on what the server can genuinely
 order by, and draws whichever of them you pick. Both the view and the columns
-are remembered in the browser, and the columns are remembered per mode.
+are remembered in the browser, and both are remembered per mode: a library
+opens on the dense list and a household opens on the cards, and neither
+overwrites what the other chose.
 
 **Series** and **author** pages group the shelf by what it already knows, and a
 series page works out which volumes are missing rather than making you notice.
@@ -117,6 +119,16 @@ state beside them. The library page says how many and links to it; the loans
 page keeps every loan in one list and marks the late ones in place. What the
 channel lines can say is bounded, and the page says so: the app records what
 each channel did on its last run, not which reminder reached which borrower.
+
+**Every loan says how long the book has been out**, in whole days, and a late
+one says how far past its date it is beside the date itself. Both are computed
+on the server, in the same place the reminders read, so a row and a reminder
+cannot disagree about the same loan.
+
+**In library mode every member chases every loan**, not only the ones they lent
+or borrowed, because a volunteer at an archive is not an admin and still has to
+chase a book somebody else lent out. Private books stay out of it in every mode:
+the relaxation is about who is party to a loan, not about which books exist.
 
 **A reminder channel that has stopped working says so**, under the switch that
 configures it, on the overdue page beside the loans, and, once it has been
@@ -220,18 +232,20 @@ record.
 
 **A public catalogue, off by default and behind two switches.** Library mode
 changes what a cataloguer sees: call number and Classification in, ownership,
-lending willingness and reading status out. Which columns the table draws is
-chosen from that set and remembered separately for each mode, so turning the
-mode on and off does not rearrange a household's catalogue. The call number is
-Dewey and Library of Congress, the two schemes that place a book on a shelf, and
-it sorts by neither the text in the cell nor by one scheme's rule applied to
-both: each scheme declares how its own numbers file, and pressing the header
-cycles the shelf orders and names the one it is reading. It publishes
-nothing. The publish switch is a
-second, separate decision, and a library running library mode internally without
-publishing is the common case rather than an edge one. Publishing is refused by
-the server whenever library mode is off, so turning library mode back off cannot
-leave a catalogue public.
+lending willingness and reading status out. It also opens on the dense list,
+which is the view that puts the most records on a counter's screen. Which
+columns the table draws is chosen from that set, and both the columns and the
+view are remembered separately for each mode, so turning the mode on and off
+does not rearrange a household's catalogue or move it off the view it chose.
+The call number is Dewey and Library of Congress, the two schemes that place a
+book on a shelf, and it sorts by neither the text in the cell nor by one
+scheme's rule applied to both: each scheme declares how its own numbers file,
+and pressing the header cycles the shelf orders and names the one it is
+reading. It publishes nothing. The publish switch is a second, separate
+decision, and a library running library mode internally without publishing is
+the common case rather than an edge one. Publishing is refused by the server
+whenever library mode is off, so turning library mode back off cannot leave a
+catalogue public.
 
 What a reader with no account gets is **search and one item record, and nothing
 else**. Ownership, lending willingness, reading status, member names, notes,
@@ -241,6 +255,17 @@ mode**: that rule is not the switch's to relax. The public routes are rate
 limited, and a published catalogue is `noindex` until indexing is separately
 allowed, because publishing a catalogue and inviting a search engine to crawl it
 are different decisions.
+
+**An SRU server, on the same two switches.** A published catalogue can be
+searched by a person; being searched by another institution's software needs a
+protocol, and the one this domain uses is SRU. `/sru` takes a CQL query and
+answers MARCXML, and `operation=explain` tells a client which indexes exist
+without anybody having to ask a human. It exposes **exactly** what the public
+catalogue exposes and not one row more: the same gate, the same rows, the same
+rate limit, and records built by the same MARC writer the export uses. A hostile
+query is bounded five ways on the parse and once more on what it costs to run,
+and refused as an SRU diagnostic rather than as an error a client cannot read.
+With library mode off the endpoint does not exist.
 
 ## Deliberately not built
 
@@ -258,6 +283,10 @@ screen here.
 
 **No library circulation.** No queue positions, no pickup notifications, no
 fines, no MARC, no Z39.50 as a client. Koha exists and is better at all of it.
+
+**No Z39.50 server.** SRU is served and this is not: Z39.50 is a binary
+protocol over raw TCP, normally served through YAZ, and is not a shape this
+stack takes.
 
 **No author biographies or portraits.** The shelf stores a name and, where a
 catalogue asserted one or somebody confirmed one, that spelling's number in an

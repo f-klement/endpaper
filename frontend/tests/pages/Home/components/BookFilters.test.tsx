@@ -30,6 +30,7 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     onClearClassifications: vi.fn(),
     view: "grid" as const,
     onViewChange: vi.fn(),
+    canChangeView: true,
     ...overrides,
   };
   renderLocalised(<BookFilters {...props} />);
@@ -133,5 +134,65 @@ describe("the author chip", () => {
     await userEvent.setup().click(screen.getByLabelText("Clear selection"));
 
     expect(props.onFilterChange).toHaveBeenCalledWith({ author: null });
+  });
+});
+
+describe("the view group", () => {
+  it("offers every view while the mode is known", () => {
+    renderFilters();
+
+    for (const name of ["Covers", "List", "Table"]) {
+      expect(screen.getByRole("button", { name })).toBeEnabled();
+    }
+  });
+
+  it("disables the group until the mode is known", async () => {
+    // A pick made in that window would be filed under the wrong mode's key,
+    // so the hook refuses it. Disabled rather than inert, because a button
+    // that answers a press with nothing teaches the reader the page lies.
+    const props = renderFilters({ canChangeView: false });
+
+    const table = screen.getByRole("button", { name: "Table" });
+    expect(table).toBeDisabled();
+    await userEvent.setup().click(table);
+    expect(props.onViewChange).not.toHaveBeenCalled();
+  });
+
+  it("no pressed control carries an opacity class", () => {
+    // The same rule as `ColumnPicker`'s, and this panel had nothing to trip at
+    // all until this test: a pressed button is `on-accent` on `accent-fill`,
+    // the pair `palettes.test.ts` floors at 4.5:1, and `opacity` composites a
+    // button's fill and its text together, halving it to 2.83:1 light and
+    // 3.52:1 dark. The unpressed arm is exempt at 2.15:1, which is where every
+    // other `disabled:opacity-50` control in this app already sits and what
+    // `index.css` records a disabled control as not owing.
+    //
+    // **Read off `aria-pressed` across the whole panel**, not off the three
+    // view buttons by name. A name list is what let the `ColumnPicker` version
+    // of this guard cover one element while a dim on every other chosen chip
+    // passed clean. This covers the status pills and the ownership pills too,
+    // which carry the same pair, and a fourth view inherits it.
+    //
+    // Rendered disabled because that is the state the class exists for. The
+    // class list does not depend on it, so either state would read the same:
+    // `disabled:opacity-50` is in the string whether or not it applies.
+    renderFilters({ canChangeView: false, view: "list" as const });
+
+    const pressed = screen.getAllByRole("button", { pressed: true });
+    expect(pressed.length).toBeGreaterThan(1);
+    for (const button of pressed) {
+      expect(button.className).not.toMatch(/\bopacity-/);
+    }
+  });
+
+  it("still says which view is on while it is disabled", () => {
+    // The buttons are the only thing that names the current view, so a
+    // disabled group has to keep answering that question.
+    renderFilters({ canChangeView: false, view: "list" as const });
+
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

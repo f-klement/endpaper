@@ -3005,6 +3005,18 @@
             "title": "Book Id",
             "type": "integer"
           },
+          "days_out": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Days Out",
+            "type": "integer"
+          },
+          "days_overdue": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Days Overdue",
+            "type": "integer"
+          },
           "due_at": {
             "anyOf": [
               {
@@ -9768,7 +9780,7 @@
     },
     "/api/loans/overdue": {
       "get": {
-        "description": "The overdue loans themselves, for the page the banner links to (#102).\n\n**The same rule as the banner's count, because it is the same audience.**\n`notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a\nprivate book somebody else added cannot reach here, and `sees_every_loan`\ndecides the rest: a member reads the loans they lent or borrowed, staff\nread every overdue loan on their shelf.\n\n**Not `list_loans(overdue_only=True)`, which is a wider set.** That one is\nrooted at the Shelf and stops there: it has no lender-or-borrower arm, so a\nmember sees every overdue loan over a book they can see, housemates'\nincluded. Pointing this page at it would list more rows than the banner\ncounted, which is the same fact disagreeing with itself on two screens.\nThe loans page keeps that endpoint, because a loans list is a list of the\nhousehold's loans by design.\n\n**Honours the in app channel's switch**, exactly as `my_overdue` does. That\nsetting is spelled \"show overdue loans in the app\", and this page is what\nit shows; a page that went on listing them when the channel was off would\nmake the switch a lie about half its surface. The loans page is not\naffected: a loan list is not the reminder channel.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a literal\nfirst segment declared after a path parameter is a segment the parameter can\nswallow. `/overdue` and `/overdue/mine` cannot collide with each other,\nbecause they differ in segment count rather than in a parameter's value.\n\nEager loading here and none in `overdue_for_viewer`, which is the seam that\nfunction's docstring describes: it hands out the query so the count caller\ncan stay at one statement and no ORM objects, and a caller that renders\ntitles adds the loads it needs.",
+        "description": "The overdue loans themselves, for the page the banner links to (#102).\n\n**The same rule as the banner's count, because it is the same audience.**\n`notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a\nprivate book somebody else added cannot reach here, and `sees_every_loan`\ndecides the rest: a member reads the loans they lent or borrowed, staff\nread every overdue loan on their shelf, and **in library mode so does every\nmember**, because a volunteer chasing a book somebody else lent out is what\nthat mode is for. The widening is about who is party to a loan and never\nabout which books exist: the Shelf is applied before either arm.\n\n**Not `list_loans(overdue_only=True)`, which is a wider set**, though in\nlibrary mode the two sets meet. That one is\nrooted at the Shelf and stops there: it has no lender-or-borrower arm, so a\nmember sees every overdue loan over a book they can see, housemates'\nincluded. Pointing this page at it would list more rows than the banner\ncounted, which is the same fact disagreeing with itself on two screens.\nThe loans page keeps that endpoint, because a loans list is a list of the\nhousehold's loans by design.\n\n**Honours the in app channel's switch**, exactly as `my_overdue` does. That\nsetting is spelled \"show overdue loans in the app\", and this page is what\nit shows; a page that went on listing them when the channel was off would\nmake the switch a lie about half its surface. The loans page is not\naffected: a loan list is not the reminder channel.\n\nDeclared **before** `/{loan_id}/return`, per the route-order rule: a literal\nfirst segment declared after a path parameter is a segment the parameter can\nswallow. `/overdue` and `/overdue/mine` cannot collide with each other,\nbecause they differ in segment count rather than in a parameter's value.\n\nEager loading here and none in `overdue_for_viewer`, which is the seam that\nfunction's docstring describes: it hands out the query so the count caller\ncan stay at one statement and no ORM objects, and a caller that renders\ntitles adds the loads it needs.",
         "operationId": "list_overdue",
         "parameters": [
           {

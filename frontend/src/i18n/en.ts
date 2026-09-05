@@ -707,7 +707,7 @@ export const en = {
   "settings.inAppHint":
     "A note on the library page, and the overdue loans page it links to. Switched off, that page stays empty and every other channel keeps running. This is the only channel that needs nothing set up, so it is on to begin with.",
   "settings.inAppPrivacyNote":
-    "This one has a reader, so the rule above does not apply to it: each person sees the overdue loans they lent or borrowed, including their own private books, and never anybody else's.",
+    "This one has a reader, so the rule above does not apply to it: each person sees the overdue loans they lent or borrowed, including their own private books, and never anybody else's. In library mode each person sees every overdue loan in the library instead, and still never a private book somebody else added.",
   "settings.senderHealthNotYet":
     "Not run yet. Reminders go out on the hour, and only when something is overdue.",
   "settings.senderHealthWorking": "Working. Last run on {when}.",
@@ -973,6 +973,22 @@ export const en = {
   "loans.noDueDate": "No date",
   "loans.overdue": "Overdue",
   "loans.overdueSince": "Overdue since {date}",
+  // Two whole phrases per number rather than one with a plural rule, which is
+  // the pattern `public.resultCount` already uses: there is no plural engine
+  // here on purpose, and German agrees with English about which two forms it
+  // needs. The badge falls back to `overdueSince` below a day, where the day
+  // count is 0 and says nothing.
+  // The day count **and** the date, not the count instead of it. The count is
+  // what tells a week from a year at a glance and the date is what a person
+  // needs to write to a borrower, and the first version of this row dropped
+  // the date from every overdue row past its first day: the only other place
+  // the deadline appears is `dueOn`, which is gated on the loan not being
+  // overdue, so there was nowhere left for it to show.
+  "loans.overdueByDaysSince": "{days} days overdue, since {date}",
+  "loans.overdueByOneDaySince": "1 day overdue, since {date}",
+  // How long the book has been away, on every open loan, deadline or not.
+  "loans.outFor": "Out for {days} days",
+  "loans.outForOne": "Out for 1 day",
   "loans.overdueOnly": "Overdue only",
   "loans.overdueBanner": "{count} loans need chasing.",
   "loans.chaseThem": "Show them",

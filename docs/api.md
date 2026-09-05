@@ -1081,6 +1081,15 @@ SQL rather than by discarding rows after serialising them, so `total` and the pa
 describe the same set as `items`. A returned loan is never overdue, however late it was:
 the field answers "chase this", not "was this late".
 
+**`days_out` and `days_overdue` are computed per request too, and are whole days.**
+`days_out` is how long the book has been away, counting to `returned_at` on a closed loan
+and to now on an open one; it is the number that means something for lending with no
+deadline, which is most of it. `days_overdue` is how far past `due_at` a loan is, and is
+`0` both for a loan that is not overdue and for one that went overdue within the last day,
+so it is read together with `is_overdue` rather than on its own. Both are computed on the
+server so that a row on a screen and a line in an overdue reminder cannot come to disagree
+about the same loan: they are one function, and the digest calls it.
+
 A book has at most one open loan. Recording a return is a shelf action, not an ownership
 one, so any member may do it for any book they can see. The listing excludes loans of books
 the caller cannot see, which would otherwise disclose a private book's title and holder.
@@ -1115,7 +1124,16 @@ shelf and stops there, so it answers with every overdue loan over a book the cal
 see, housemates' loans included. That is the household's loans list working as designed:
 bare `/api/loans` with no parameter answers the same set, and `overdue_only` opens nothing
 that was closed. The overdue endpoint applies `notifications.overdue_for_viewer` on top: a
-member reads the loans they lent or borrowed, staff read every overdue loan on their shelf.
+member reads the loans they lent or borrowed, and staff read every overdue loan on their
+shelf.
+
+**In library mode that narrowing lifts for every member**, so the overdue endpoint answers
+with every overdue loan over a book the caller can see, which is the same set
+`?overdue_only=true` answers. The mode exists for a library whose volunteers are not
+admins and still have to chase a book somebody else lent out. It is a clause about who is
+**party to a loan** and not about which books exist: both arms are rooted at the shelf
+either way, so a private book somebody else added is as far out of reach with the mode on
+as with it off, for a member and for an admin alike.
 
 That is the rule the count above is computed with, so a screen showing one and counting the
 other disagrees with itself: measured for a non admin member, a nudge reading the wide set
@@ -1466,6 +1484,7 @@ evaluated on the server, so a publish row left on while library mode is off serv
 |---|---|---|---|
 | GET | `/api/public/books` | **public** | Search the published catalogue. **404** when nothing is published |
 | GET | `/api/public/books/{book_id}` | **public** | One record. **404** for a book that is private, trashed or absent |
+| GET | `/sru` | **public** | The SRU base URL. Same switches, same rate limit. Not in the OpenAPI schema |
 | GET | `/robots.txt` | **public** | Generated from the switches. Not in the OpenAPI schema |
 
 **`HEAD` answers 404 where `GET` answers 200**, on these routes and on every other GET
@@ -1515,6 +1534,84 @@ not trusted. See [security.md](security.md).
 
 Unless indexing is separately allowed, every response carries `X-Robots-Tag: noindex,
 nofollow` and `/robots.txt` disallows everything.
+
+### SRU
+
+`/sru` is the same catalogue over the protocol other library systems speak: CQL in a query
+string, MARCXML out. It runs the **same** gate as the JSON catalogue above, which means the
+same two switches, the same 404 rather than 403, and the same 120 a minute counter shared
+with it rather than a second budget of its own.
+
+It is **not** in the OpenAPI schema, for the reason `/robots.txt` is not: it is a document
+another institution's software fetches, not an operation this application's own client
+calls.
+
+| Parameter | Taken | Notes |
+|---|---|---|
+| `operation` | `explain`, `searchRetrieve` | Absent means `searchRetrieve` when `query` came with it and `explain` otherwise, which is SRU 2.0's rule. `scan` is diagnostic 4 |
+| `version` | `1.1`, `1.2` | Nominally mandatory and defaulted anyway, because clients omit it. `2.0` is diagnostic 5 |
+| `query` | CQL | Mandatory for a search |
+| `startRecord` | 1 and up | Past the end of a non-empty result set is diagnostic 61 |
+| `maximumRecords` | 0 and up | **Clamped**, never refused. The cap is advertised in `explain` |
+| `recordSchema` | `marcxml` or its URI | Anything else is diagnostic 66 |
+| `recordPacking` | `xml` | `string` is diagnostic 71 |
+
+Anything else is refused, `x-` prefixed extensions excepted, and **which refusal depends on
+whether the specification defines the parameter**. `sortKeys` is diagnostic 80, `stylesheet`
+is 110, `resultSetTTL` is 50 and `recordXPath` is 72, each the number for declining that
+feature; a parameter nobody defines is diagnostic 8, which means there is no such
+parameter. Telling a client that `sortKeys` does not exist would send it looking for a typo.
+That set was checked against SRU 1.2's own searchRetrieve parameter table rather than
+assembled from memory.
+
+**Sorting is refused in both spellings**, because SRU 1.2 moved it out of the parameters
+and into CQL: `sortby dc.date` at the end of a query is diagnostic 80, the same answer the
+retired `sortKeys` parameter gets. Without that arm the client using the current spelling
+was told its CQL was malformed while the one using the retired spelling got a straight
+answer.
+
+`stylesheet` is a refusal rather than a gap: honouring it would put a client supplied URL
+into a processing instruction at the top of the response.
+
+**Every refusal is an HTTP 200 carrying an SRU diagnostic**, which is what the protocol
+says and what a client can read. The two exceptions are the gate's, not the protocol's: an
+unpublished catalogue is 404 and a caller over the rate is 429.
+
+`operation=explain` reports the indexes that are actually implemented, because the document
+is generated from the same table the query compiler reads. Today that is `cql.serverChoice`
+and `bib.anywhere`, `dc.title`, `dc.creator`, `dc.publisher`, `dc.identifier`,
+`dc.language`, `dc.description`, `dc.subject`, `dc.date`, `bath.isbn` and `rec.id`.
+`dc.subject` searches the library's own tags; classification headings are not indexed.
+
+CQL is bounded five ways on the parse, because it is an outside input on an endpoint
+anybody can reach: query length, nesting depth, search clauses, words in a term and masking
+characters in a term. Each is refused with the diagnostic the specification has for it.
+Masking (`*` and `?`) is supported and anchoring (`^`) is not.
+
+There is a sixth bound on what the query costs to **run**, which is a different question:
+comparing a term against an index is charged against a budget of **64 units** and a query
+that would spend more is refused. One comparison costs **1 unit** through most indexes and
+**8** through `dc.description` and `dc.subject`, which measured an order of magnitude
+dearer than the rest. `cql.serverChoice` and `bib.anywhere` compare three columns, so one
+comparison through either costs **3**.
+
+**`=` compares a term once; `any` and `all` compare once per word.** So
+`dc.description all "a study of the keepers of chartreuse windmills"` is eight words,
+therefore eight comparisons at 8, and spends the whole budget; the same phrase under `=` is
+one comparison and spends 8.
+
+The diagnostic names the index and what one comparison through it costs, in that same unit,
+so a refusal says what to send instead: `dc.description: 8 a comparison, 64 a query`. See [security.md](security.md) for the measurements
+and the corpus they were taken on.
+
+An integer larger than the catalogue's storage can hold is refused too, on `rec.id`,
+`dc.date` and `startRecord`. It was a 500 until it was not.
+
+**CQL booleans are left associative and all have equal precedence**, which is not SQL's
+rule: `a or b and c` is `(a or b) and c`. Parentheses are how a client says otherwise.
+
+The records are `marc.py`'s, so they carry exactly the fields the MARC export does, which
+is a subset of what `PublicBookOut` publishes. See [security.md](security.md).
 
 ## System
 

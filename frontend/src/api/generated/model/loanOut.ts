@@ -11,6 +11,10 @@ import type { UserOut } from "./userOut.ts";
 export interface LoanOut {
   book?: BookOut | null;
   book_id: number;
+  /** @minimum 0 */
+  days_out?: number;
+  /** @minimum 0 */
+  days_overdue?: number;
   due_at?: string | null;
   id: number;
   is_overdue?: boolean;

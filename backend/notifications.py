@@ -83,6 +83,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
+import lending
 import mailer
 import settings_store
 from database import SessionLocal
@@ -230,12 +231,25 @@ def reminder_days(db: Session) -> int:
     )
 
 
-def _overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
+def overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
     """What makes a loan overdue and still worth looking at, in one place.
 
-    Two callers ask this question, and restating it in both is how they drift.
-    They already had: the private count carried a `notified_at` clause copied
-    from the digest, where it does not belong, and under-reported because of it.
+    **Five callers** ask this question, and restating it in any of them is how
+    they drift. They already had: the private count carried a `notified_at`
+    clause copied from the digest, where it does not belong, and under-reported
+    because of it. The fifth is `routers/loans.list_loans`, which restated the
+    three loan clauses inline until 2026-09-05, in the same release as the
+    module that exists to stop this rule having copies.
+
+    Public, not `_overdue_clauses`, because of that fifth caller: a name
+    another module reaches for is not private, whatever the underscore says.
+
+    **The Python form of the same rule is `lending.is_overdue`**, which is what
+    the serialised `is_overdue` flag and `days_overdue` both read. This one
+    carries a fourth clause the Python form cannot: `Book.deleted_at`, because
+    these queries join `books` and a per loan predicate has no book to test.
+    `tests/test_lending.py` asserts the two agree, and pins **three** of these
+    four clauses; the fourth is named there and cannot be pinned by that test.
     """
     return [
         Loan.returned_at.is_(None),
@@ -248,7 +262,7 @@ def _overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
 def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
     """Open loans past their date that nothing has chased recently.
 
-    The two clauses on top of `_overdue_clauses` are the two this query owns.
+    The two clauses on top of `overdue_clauses` are the two this query owns.
 
     Privacy: `.is_(False)` rather than `not Book.is_private`, for the reason
     `visible_to` states. The latter collapses to a constant and matches every
@@ -265,7 +279,7 @@ def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
         .join(Book, Loan.book_id == Book.id)
         .options(joinedload(Loan.book), joinedload(Loan.loaned_to))
         .filter(
-            *_overdue_clauses(now),
+            *overdue_clauses(now),
             Book.is_private.is_(False),
             (Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff),
         )
@@ -319,7 +333,7 @@ def count_private_overdue(db: Session, now: datetime) -> int:
     return (
         db.query(Loan)
         .join(Book, Loan.book_id == Book.id)
-        .filter(*_overdue_clauses(now), Book.is_private.is_(True))
+        .filter(*overdue_clauses(now), Book.is_private.is_(True))
         .count()
     )
 
@@ -340,34 +354,43 @@ def count_overdue(db: Session, now: datetime) -> int:
     return (
         db.query(Loan)
         .join(Book, Loan.book_id == Book.id)
-        .filter(*_overdue_clauses(now))
+        .filter(*overdue_clauses(now))
         .count()
     )
 
 
-def sees_every_loan(viewer: User) -> bool:
+def sees_every_loan(db: Session, viewer: User) -> bool:
     """Whether this viewer reads the whole overdue list rather than their own.
 
-    **The seam library mode (#18) will widen, named rather than guessed.** The
-    owner settled the audiences per sender: the household channels go to a
-    mailbox or a chat, mail is addressed to the borrower, and the in app notice
-    is per member **except in library mode or for an admin**, where the reader
-    is staff checking open reminders and outstanding books.
+    **Library mode, or an admin.** The owner settled the audiences per sender:
+    the household channels go to a mailbox or a chat, mail is addressed to the
+    borrower, and the in app notice is per member **except in library mode or
+    for an admin**, where the reader is staff checking open reminders and
+    outstanding books. A volunteer at an archive is not an admin and still has
+    to chase a book somebody else lent out, which is the refusal this clause
+    lifts.
 
-    Library mode does not exist yet, so today this answers one question and
-    that is the whole of it. What it must not become is `admins see all`: an
-    admin is not a superuser over another member's private books anywhere else
-    in this app, and this is not the thing that makes them one. Both arms of
-    `overdue_for_viewer` are narrowed by the Shelf either way; this decides
-    only whether the loans are further narrowed to the ones the viewer is
-    party to.
+    What this must not become is `admins see all`: an admin is not a superuser
+    over another member's private books anywhere else in this app, and this is
+    not the thing that makes them one. The same holds of the mode. Both arms of
+    `overdue_for_viewer` are narrowed by the Shelf either way, so **neither
+    clause here can reach a book its viewer may not see**; this decides only
+    whether the loans are further narrowed to the ones the viewer is party to.
 
-    So when library mode lands, this function gains a clause and nothing else
-    changes: the staff rule is already "every loan over a book this viewer may
-    see", and that mode changes what the set contains rather than how it is
-    computed.
+    That is the whole of the library mode relaxation, and it is narrower than
+    the ticket that asked for it. `visible_to` already admits every non private
+    Book, so the loans list has always shown every Loan over one: what a member
+    could not read was a loan they were not **party to** on the overdue page,
+    which is this arm and not a book predicate. `tests/routers/test_loans.py`
+    pins both halves, including that a private book somebody else added stays
+    out with the mode on.
+
+    `db` rather than a resolved boolean passed down, because this is the one
+    place the difference is decided and a caller that resolved it could pass
+    the wrong answer. It is one row read per call, on a function called once
+    per request, beside the row `list_overdue` already reads.
     """
-    return viewer.is_admin
+    return settings_store.library_mode(db) or viewer.is_admin
 
 
 def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
@@ -388,10 +411,11 @@ def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
     book is not a disclosure.
 
     Two arms, and `sees_every_loan` is the only place the difference is
-    decided. Staff read every overdue loan on their shelf. A member reads the
-    ones they are party to: they borrowed it, or they lent it out. Both are
-    facts about the loan rather than about the book, which is why neither arm
-    needs a second privacy rule on top of the Shelf's.
+    decided. Staff, and every member in library mode, read every overdue loan
+    on their shelf. Otherwise a member reads the ones they are party to: they
+    borrowed it, or they lent it out. Both are facts about the loan rather than
+    about the book, which is why neither arm needs a second privacy rule on top
+    of the Shelf's.
 
     No `notified_at` clause, deliberately. That column records that a reminder
     went **out**, and nothing goes out here: an overdue loan is on the member's
@@ -414,9 +438,9 @@ def overdue_for_viewer(db: Session, viewer: User, now: datetime) -> Query[Loan]:
         Shelf.seen_by(db, viewer.id)
         .select(Loan)
         .join(Loan, Loan.book_id == Book.id)
-        .filter(*_overdue_clauses(now))
+        .filter(*overdue_clauses(now))
     )
-    if not sees_every_loan(viewer):
+    if not sees_every_loan(db, viewer):
         query = query.filter(
             or_(
                 Loan.loaned_to_user_id == viewer.id,
@@ -433,6 +457,7 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
     and eight separate messages about eight books is the behaviour people turn
     off. `days_overdue` is computed here rather than left to the receiver, so a
     three-line script can render a useful line without doing date arithmetic.
+    It comes from `lending`, which is where the loans list reads it too.
     """
     return {
         "event": EVENT_NAME,
@@ -450,7 +475,13 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
                     loan.loaned_to.username if loan.loaned_to else loan.loaned_to_name
                 ),
                 "due_at": loan.due_at.isoformat() if loan.due_at else None,
-                "days_overdue": (now - loan.due_at).days if loan.due_at else 0,
+                # `lending.days_overdue`, not the subtraction that was inline
+                # here, so the number a receiver reads and the number the loans
+                # list shows cannot come to differ. Same value for every input
+                # this function is given: it is handed unreturned overdue loans
+                # only, so neither of that function's two extra arms is
+                # reachable from here.
+                "days_overdue": lending.days_overdue(loan, now),
             }
             for loan in loans
         ],

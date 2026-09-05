@@ -51,8 +51,43 @@ export function useExportLibrary(): UseExportLibraryResult {
  * falling back to the browser's language, not an error screen.
  */
 export function useFeatureFlags(): FeatureFlagsOut | undefined {
-  return useGetFeatureFlags({ query: { retry: false, staleTime: 60_000 } })
-    .data;
+  return useFeatureFlagsState().flags;
+}
+
+export interface FeatureFlagsState {
+  flags: FeatureFlagsOut | undefined;
+  /**
+   * Whether the request has finished, either way.
+   *
+   * **`flags === undefined` cannot answer this**, which is the reason this
+   * exists: it is the same value before the request has answered and after it
+   * has failed, and those two want opposite treatment. A failure is a settled
+   * answer, and the documented one, because every flag falls back to what an
+   * existing library already had. Still waiting is not an answer at all.
+   *
+   * Anything that only reads a flag can ignore this and take the fallback for
+   * a render. Anything that **writes** something keyed on a flag cannot: a
+   * wrong read costs one paint and a wrong write is permanent. See
+   * `pages/Home/hooks.ts`.
+   */
+  isResolved: boolean;
+}
+
+/**
+ * The flags, and whether they have arrived.
+ *
+ * `useFeatureFlags` is this with the second half dropped, rather than a second
+ * query beside it: two call sites configuring one endpoint is how they come to
+ * disagree about `retry` or `staleTime`.
+ */
+export function useFeatureFlagsState(): FeatureFlagsState {
+  const query = useGetFeatureFlags({
+    query: { retry: false, staleTime: 60_000 },
+  });
+  // `isPending` is "no data and no error", so it goes false on a failure as
+  // well as on an answer, and stays false through a background refetch. That
+  // is the question this is asking.
+  return { flags: query.data, isResolved: !query.isPending };
 }
 
 export interface UseStoredAppearanceResult {

@@ -3247,9 +3247,9 @@ class TestOneReaderPerAmbiguousSubfield:
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
     down and it came through the rewrite untouched from the first version.
-    `_python_sources()` already holds **seven** colliding stems, `auth`,
-    `backup`, `covers`, `imports`, `public`, `settings` and `stats`, each a
-    module at the root and one under `routers/` or `schemas/`. Neither
+    `_python_sources()` already holds **eight** colliding stems, `auth`,
+    `backup`, `covers`, `imports`, `public`, `settings`, `sru` and `stats`, each
+    a module at the root and one under `routers/` or `schemas/`. Neither
     `metadata` nor `marc` collides today, which is why nothing failed; a reader
     added to `routers/metadata.py` would have been indistinguishable from the
     allowlisted one.
@@ -3274,7 +3274,7 @@ class TestOneReaderPerAmbiguousSubfield:
     #: The only two places in the backend that may spell the subfield code.
     #:
     #: One reader and one writer, as `(path below backend/, function)`. A path
-    #: rather than a module name: see the docstring on the seven colliding
+    #: rather than a module name: see the docstring on the eight colliding
     #: stems.
     SITES = (
         ("marc.py", "_subject_fields"),
@@ -3357,7 +3357,7 @@ class TestOneReaderPerAmbiguousSubfield:
         assert set(found) == {("metadata.py", "_subject_vocabulary")}
 
     def test_two_files_of_one_stem_are_two_sites(self):
-        """`path.stem` was the identity and seven stems already collide.
+        """`path.stem` was the identity and eight stems already collide.
 
         `metadata` is not one of them today, so nothing failed; a reader added
         to `routers/metadata.py` would have been indistinguishable from the
@@ -3372,9 +3372,10 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
 
-        The docstring names seven. If an eighth appears the number above is
-        stale, and this says so at the rule rather than leaving the next reader
-        to trust it.
+        The docstring names eight, and it named seven until `sru.py` arrived
+        beside `routers/sru.py` and this failed. If a ninth appears the number
+        above is stale, and this says so at the rule rather than leaving the
+        next reader to trust it.
         """
         stems: dict[str, list[str]] = {}
         for path in _python_sources():
@@ -3388,6 +3389,7 @@ class TestOneReaderPerAmbiguousSubfield:
             "imports",
             "public",
             "settings",
+            "sru",
             "stats",
         }
         assert not colliding & {"marc", "metadata"}

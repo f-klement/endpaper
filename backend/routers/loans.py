@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+import lending
 import notifications
 import settings_store
 from auth import require_admin
@@ -18,7 +19,32 @@ from shelf import Shelf
 router = APIRouter(prefix="/api/loans", tags=["loans"])
 
 
-def _to_out_many(loans: list[Loan], current_user: User, db: Session) -> list[LoanOut]:
+def _now() -> datetime:
+    """The clock every loan in one response is measured against.
+
+    Naive UTC, because that is what the three datetime columns hold.
+
+    **Read once per request and threaded down**, which is asserted rather than
+    described: `TestOneClockPerRequest` counts the calls on every route in this
+    file and every one of them is 1. The sentence was here first and was false
+    on two routes of three, because `list_overdue` read a clock for its query
+    and `_to_out_many` then read a second for the rows it returned, at a
+    different instant. Two loans lent in the same second could straddle a
+    midnight between those two reads and come back a day apart, and a mutation
+    to a per row clock was uncaught.
+
+    Threading the **query's** clock into the serialisation is the half that is
+    easy to lose in a refactor and is worth more than the tidiness: a row
+    `due_at < now` selected is then a row `is_overdue` calls overdue, by
+    construction rather than by the two instants happening to fall the same
+    side of a deadline.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _to_out_many(
+    loans: list[Loan], current_user: User, db: Session, now: datetime
+) -> list[LoanOut]:
     """Serialise a page of loans, with each book's per-member fields filled in.
 
     The nested `BookOut` used to come from a bare `model_validate`, so every
@@ -26,6 +52,9 @@ def _to_out_many(loans: list[Loan], current_user: User, db: Session) -> list[Loa
     `active_loan: null` regardless of what the reader had actually done with
     it. Those two fields are computed per request by `books_to_out`, which is
     the only thing that knows how, so the books go through it here as well.
+
+    `now` is the caller's and is not read here, so a page is serialised against
+    the same instant its query was filtered with. See `_now`.
     """
     books = {loan.book.id: loan.book for loan in loans if loan.book}
     serialised = {
@@ -35,31 +64,37 @@ def _to_out_many(loans: list[Loan], current_user: User, db: Session) -> list[Loa
 
     results: list[LoanOut] = []
     for loan in loans:
-        out = _to_out(loan)
+        out = _to_out(loan, now)
         if loan.book is not None:
             out.book = serialised.get(loan.book.id)
         results.append(out)
     return results
 
 
-def _to_out(loan: Loan) -> LoanOut:
-    """Serialise a loan, computing `is_overdue` rather than reading it.
+def _to_out(loan: Loan, now: datetime) -> LoanOut:
+    """Serialise a loan, computing the three clock facts rather than reading them.
 
     A stored flag would be wrong from the moment the deadline passed until
     something happened to write to the row, which for a forgotten loan is
     exactly never. A returned loan is never overdue, however late it was: the
     field answers "chase this", not "was this late".
+
+    All three come from `lending` and none of them is spelled out here, which
+    is the point of that module: `is_overdue` was inline in this function and
+    `days_overdue` was inline in `notifications.build_digest`, so a badge and a
+    digest line could have come to disagree about the same loan.
+
+    `now` is the caller's, so every row on one page is measured against one
+    clock. See `_now`.
     """
     out = LoanOut.model_validate(loan)
-    out.is_overdue = (
-        loan.returned_at is None
-        and loan.due_at is not None
-        and loan.due_at < datetime.now(UTC).replace(tzinfo=None)
-    )
+    out.is_overdue = lending.is_overdue(loan, now)
+    out.days_overdue = lending.days_overdue(loan, now)
+    out.days_out = lending.days_out(loan, now)
     return out
 
 
-def _loan_with_relations(loan_id: int, db: Session) -> LoanOut:
+def _loan_with_relations(loan_id: int, db: Session, now: datetime) -> LoanOut:
     loan = (
         db.query(Loan)
         .options(joinedload(Loan.book), joinedload(Loan.loaned_to), joinedload(Loan.loaned_by))
@@ -68,7 +103,7 @@ def _loan_with_relations(loan_id: int, db: Session) -> LoanOut:
     )
     if loan is None:
         raise HTTPException(status_code=404, detail="Loan not found")
-    return _to_out(loan)
+    return _to_out(loan, now)
 
 
 @router.get("", response_model=Page[LoanOut])
@@ -79,10 +114,22 @@ def list_loans(
     active_only: bool = True,
     overdue_only: bool = False,
 ) -> Page[LoanOut]:
+    now = _now()
     # Rooted at the shelf and joined outward to `loans`, so the privacy
     # predicate is on the query by construction. A loan of a book the caller
     # cannot see would otherwise disclose its title and who has it, straight
     # through the loans list.
+    #
+    # **Library mode changes nothing here, and that is a finding rather than an
+    # omission.** The mode was asked to let a member see loans on every book
+    # that is not private, and `visible_to` has always admitted every non
+    # private book: this list is rooted at the Shelf and applies no
+    # lender-or-borrower arm, so it already answers with every loan over one.
+    # Narrowing it to exactly "not private" would be the only change available
+    # and it is the wrong direction, because it would drop the viewer's **own**
+    # private books out of their own loan list. The relaxation the mode really
+    # carries is `notifications.sees_every_loan`, which is a clause about the
+    # loan's parties and not about the book. See `docs/decisions.md`.
     query = Shelf.seen_by(db, current_user.id).select(Loan).join(Loan, Loan.book_id == Book.id)
 
     if active_only:
@@ -92,11 +139,14 @@ def list_loans(
         # Filtered in SQL rather than by serialising the whole list and
         # discarding most of it, so `total` and the paging stay honest.
         # Implies active: a returned loan is closed, whenever it came back.
-        query = query.filter(
-            Loan.returned_at.is_(None),
-            Loan.due_at.isnot(None),
-            Loan.due_at < datetime.now(UTC).replace(tzinfo=None),
-        )
+        #
+        # `notifications.overdue_clauses`, not the three clauses written out
+        # again. They were, until 2026-09-05, in the same file as the module
+        # that exists to stop this rule having copies: a third statement of it,
+        # beside the Python form in `lending.is_overdue` and the SQL form it
+        # now calls. It also carries `Book.deleted_at`, which is redundant here
+        # because the Shelf already applied it, and free.
+        query = query.filter(*notifications.overdue_clauses(now))
 
     total = query.with_entities(func.count(Loan.id)).order_by(None).scalar() or 0
 
@@ -151,7 +201,7 @@ def list_loans(
     )
 
     return Page[LoanOut](
-        items=_to_out_many(loans, current_user, db),
+        items=_to_out_many(loans, current_user, db, now),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -233,7 +283,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     db.add(loan)
     db.commit()
     db.refresh(loan)
-    return _loan_with_relations(loan.id, db)
+    return _loan_with_relations(loan.id, db, _now())
 
 
 @router.get("/overdue", response_model=Page[LoanOut])
@@ -244,9 +294,13 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
     private book somebody else added cannot reach here, and `sees_every_loan`
     decides the rest: a member reads the loans they lent or borrowed, staff
-    read every overdue loan on their shelf.
+    read every overdue loan on their shelf, and **in library mode so does every
+    member**, because a volunteer chasing a book somebody else lent out is what
+    that mode is for. The widening is about who is party to a loan and never
+    about which books exist: the Shelf is applied before either arm.
 
-    **Not `list_loans(overdue_only=True)`, which is a wider set.** That one is
+    **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+    library mode the two sets meet. That one is
     rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
     member sees every overdue loan over a book they can see, housemates'
     included. Pointing this page at it would list more rows than the banner
@@ -275,7 +329,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
             items=[], total=0, page=paging.page, page_size=paging.page_size
         )
 
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = _now()
     query = notifications.overdue_for_viewer(db, current_user, now)
     # `order_by(None)` before counting: the query carries `due_at, id` for the
     # page below, and SQLite will not accept an ORDER BY over a bare COUNT.
@@ -301,7 +355,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     )
 
     return Page[LoanOut](
-        items=_to_out_many(loans, current_user, db),
+        items=_to_out_many(loans, current_user, db, now),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -342,7 +396,7 @@ def my_overdue(db: DbSession, current_user: CurrentUser) -> MyOverdueOut:
     enabled = settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED)
     if not enabled:
         return MyOverdueOut(enabled=False, count=0)
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = _now()
     # `.count()`, not `len(...all())`. The query is handed out rather than the
     # rows precisely so this can be one statement and no ORM objects: against
     # 500 overdue loans the list form built 500 of them, on every library page
@@ -393,6 +447,18 @@ def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> Loa
     if loan.returned_at is not None:
         raise HTTPException(status_code=400, detail="Loan already returned")
 
-    loan.returned_at = datetime.now(UTC)
+    # Naive UTC, like every other clock in this file and like the column
+    # itself. It was `datetime.now(UTC)`, an aware value written into a
+    # `DateTime` with no timezone, which reached the disk as the same instant
+    # only because SQLAlchemy's SQLite formatter drops the offset, and read
+    # back naive only because `expire_on_commit` refetches it. Anything that
+    # touched the attribute before that refetch, which is what `lending`
+    # does with `days_out`, would subtract a naive datetime from an aware one
+    # and raise.
+    now = _now()
+    loan.returned_at = now
     db.commit()
-    return _loan_with_relations(loan.id, db)
+    # The same instant the return was stamped with, so `days_out` on the row
+    # this answers with counts to the return rather than to a clock read a
+    # moment later. One call per request, which `TestOneClockPerRequest` pins.
+    return _loan_with_relations(loan.id, db, now)

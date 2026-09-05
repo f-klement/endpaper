@@ -53,6 +53,7 @@ from routers import (
     loans,
     public,
     settings,
+    sru,
     stats,
     users,
 )
@@ -415,6 +416,11 @@ app.include_router(loans.router)
 # answer without a session, which is why its own module opens by naming the
 # four rules that apply to it.
 app.include_router(public.router)
+# The second router whose routes answer without a session, and it borrows the
+# first one's gate rather than carrying its own: see `routers/sru.py`. Before
+# the SPA mount for the reason `/robots.txt` is, since `/sru` is likewise a path
+# outside `/api` that a build emitting a file of that name would otherwise claim.
+app.include_router(sru.router)
 app.include_router(settings.router)
 app.include_router(stats.router)
 app.include_router(users.router)

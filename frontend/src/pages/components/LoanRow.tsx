@@ -25,6 +25,21 @@ interface LoanRowProps {
  * bar is what the comment said before, and it would have sent somebody looking
  * for the three sides they thought were missing.
  *
+ * **The overdue badge can wrap to two lines and cannot overflow sideways.**
+ * It carries a day count and a date now, so it is the widest thing on the
+ * card: "14 days overdue, since 21/08/2026" in English. The bound is readable
+ * off the classes rather than needing a pixel measurement: the badge is
+ * `inline-block` with no `whitespace-nowrap`, inside a `flex-1 min-w-0`
+ * column, so the worst case is a pill on two lines and never a card that
+ * scrolls.
+ *
+ * **The two day counts come from the server, not from the dates beside them.**
+ * `days_out` and `days_overdue` are computed in `backend/lending.py`, which is
+ * also what the overdue digest reads, so a row here and a reminder sent to a
+ * chat cannot disagree about the same loan. Recomputing them from `loaned_at`
+ * in the browser would put a second definition of a whole day in a second
+ * timezone.
+ *
  * `danger-500` rather than the `danger-300` / `danger-700` pair this card
  * carried before, and the reason is measured: on the default palette that pair
  * is **1.89:1** on the light card and **2.18:1** on the dark one, against the
@@ -43,6 +58,17 @@ export default function LoanRow({
 }: LoanRowProps) {
   const { t, locale } = useTranslation();
   const isReturned = Boolean(loan.returned_at);
+  // Defaulted because both fields are optional in the generated type: they
+  // carry a server side default, so orval emits them as `number | undefined`
+  // and TypeScript will not let either be compared without this.
+  //
+  // **Not because of `serialisation.loan_summary`**, which was the reason
+  // written here first and is a real omission on a payload this component
+  // never sees: `active_loan` is rendered by the book detail page, and every
+  // loan reaching `LoanRow` comes from the loans list or the overdue page,
+  // where both fields are filled. Zero renders nothing either way.
+  const daysOut = loan.days_out ?? 0;
+  const daysOverdue = loan.days_overdue ?? 0;
 
   return (
     <div
@@ -95,17 +121,54 @@ export default function LoanRow({
           </p>
           {loan.is_overdue && (
             <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700 dark:text-danger-100">
-              {loan.due_at
-                ? t("loans.overdueSince", {
-                    date: new Date(loan.due_at).toLocaleDateString(locale),
-                  })
-                : t("loans.overdue")}
+              {/* The day count leads, because it is what tells a week from a
+                  year at a glance, and the date stays beside it: it is what a
+                  person writing to a borrower needs, and the only other place
+                  it appears is the `dueOn` line below, which is gated on the
+                  loan not being overdue. Leading with the count alone took the
+                  deadline off every overdue row past its first day.
+
+                  The count is 0 within the first day past the deadline, which
+                  says nothing, so the date carries that case on its own, and
+                  the bare word carries a loan flagged with no date at all. */}
+              {daysOverdue > 0 && loan.due_at
+                ? t(
+                    daysOverdue === 1
+                      ? "loans.overdueByOneDaySince"
+                      : "loans.overdueByDaysSince",
+                    {
+                      days: daysOverdue,
+                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                    },
+                  )
+                : loan.due_at
+                  ? t("loans.overdueSince", {
+                      date: new Date(loan.due_at).toLocaleDateString(locale),
+                    })
+                  : t("loans.overdue")}
             </span>
           )}
           {!loan.is_overdue && loan.due_at && !loan.returned_at && (
             <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
               {t("loans.dueOn", {
                 date: new Date(loan.due_at).toLocaleDateString(locale),
+              })}
+            </p>
+          )}
+          {/* Every open loan, deadline or not. Most lending here has none, so
+              a row that said only "overdue" or nothing at all left the common
+              case with no answer to the question the page is for.
+
+              Hidden on a returned loan, which reports the date it came back
+              instead, and hidden at zero: a book lent this morning would
+              otherwise read "Out for 0 days" beside today's date one line
+              below. Zero is also what a loan read off a book payload carries,
+              because `loan_summary` fills nothing dated, so the same guard
+              keeps a defaulted field from rendering as a measurement. */}
+          {!isReturned && daysOut > 0 && (
+            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+              {t(daysOut === 1 ? "loans.outForOne" : "loans.outFor", {
+                days: daysOut,
               })}
             </p>
           )}

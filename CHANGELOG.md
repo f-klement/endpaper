@@ -4,6 +4,27 @@
 
 ### Added
 
+- **In library mode every member chases every loan.** The overdue page used to
+  narrow to the loans a member lent or borrowed unless they were an admin, so a
+  volunteer could see a book was out and not that it was late. With library mode
+  on that arm lifts for everyone. Private books are as far out of reach as they
+  were: the relaxation is about who is party to a loan, not about which books
+  exist, and the shelf filter in front of it did not move.
+- **A loan says how long the book has been away.** Every open loan on the loans
+  page and the overdue page carries the number of whole days it has been out,
+  and an overdue one carries how far past its date it is. Both are computed on
+  the server, in the same place the overdue reminders read, so a row and a
+  reminder cannot disagree about the same loan.
+- **An SRU server, on the published catalogue's own two switches.** A published
+  catalogue can be searched by a person; being searched by another institution's
+  software needs a protocol, and the one this domain uses is SRU. `/sru` takes a CQL
+  query and answers MARCXML, and `operation=explain` tells a client which indexes exist
+  without anybody having to ask a human. It exposes exactly what the public catalogue
+  exposes and not one row more: the same gate, the same rows, the same rate limit
+  counter, and records from the same MARC writer the export uses. A hostile query is
+  bounded five ways on the parse and once more on what it costs to run, and refused as
+  an SRU diagnostic in a 200, which is what an SRU client can read, rather than as a
+  status code it cannot. With library mode off the endpoint does not exist.
 - A **filing rule** per classification scheme, which is how that scheme's call numbers
   sort. Dewey files a notation as its own text, Library of Congress files by class letters
   then class number so `BF75` stands before `BF575` as it does on a shelf, and a scheme
@@ -23,6 +44,12 @@
 
 
 ### Changed
+
+- Library mode now opens on the dense list rather than on whatever view was
+  last chosen, and remembers changes made to it separately. Turning library
+  mode on no longer overwrites a household's view, and turning it off again
+  returns it unmodified. Nothing already stored is reset: the household keeps
+  the key it has always had, and library mode gets one of its own.
 
 - A catalogue's address, transport, query indexes, record format and page sizes are data
   on one typed row per source, and its parser stays code: eleven near identical adapters,
@@ -115,6 +142,11 @@ byte identical, which is about the schema and was never about this.
   counted when it was taken.
 
 ### Fixed
+
+- A column change made in the first moment of a cold load was saved under the
+  household's columns even in library mode, because the flag that names the
+  mode had not arrived yet. The controls that write a per-mode preference are
+  now disabled until it has.
 
 - The cataloguer's call number column drew Dewey **and** Library of Congress notations and
   offered one order, a Dewey one, over both. A library shelving by Library of Congress got
