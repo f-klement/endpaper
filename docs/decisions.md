@@ -10643,3 +10643,50 @@ generalises: `addopts` carries `-q`, which drops `pytest_report_header` outright
 `pytest_terminal_summary` prints under this project's own settings. **A diagnostic that is
 invisible under the settings it ships with is the same defect it exists to report**, which is
 why `backend/tests/test_scratch_report.py` pins the hook name as well as the text.
+
+### The runner checks its image against the pipeline for both toolchains, not one
+
+The suite runner refused to run the frontend suite on a different bun than the pipeline
+and had no such check for uv, which is the toolchain the larger suite runs on. The gap was
+invisible until Renovate moved the pipeline to a newer uv and the runner stayed on an older
+digest: the backend suite then validated against a different uv and a different Python than
+CI ran, silently, with everything green.
+
+**The runner's pin could not have been compared even if somebody had looked**, and that is
+the part worth keeping. It named the unversioned `uv:python3.14-alpine` tag at a digest,
+while the pipeline names a versioned one. Two strings that are never equal are not a check
+that fails, they are a check that cannot be written. The runner now carries the pipeline's
+exact reference.
+
+One implementation serves both, because a second copy of twenty five lines is how the next
+one goes missing too. It takes the label, the pattern and the consequence.
+
+**Two things the attack found that reading did not.**
+
+The refusal that fires when a pin has gone missing named the wrong file. It read
+`${want:+$0}${want:-$ci_file}`, which expands to the runner's path followed by the found
+reference whenever the pipeline's side is the one that is present, so a runner that had lost
+its own pin was reported as a path with an image glued to the end. Two explicit branches
+replace it, and the test asserts the message names the pipeline file and not the runner.
+
+And the guard reads its own file with `grep | head -1`, while both patterns are now written
+out as string literals a few lines above the pins they match. A pattern that matched its own
+literal would compare a comment against the pipeline and pass for ever. Neither does, checked
+by running the greps rather than by reading them, and pinned by a test that asserts each
+pattern finds exactly one reference in the runner.
+
+Deleting the call does not fail a test, it stops the suite running at all with the refusal on
+stderr, which is the self enforcing rung rather than the tested one.
+
+### What the pipeline now reports about its own CPU
+
+The backend job reads `cpu.stat` from its cgroup in `after_script`. It is there to settle one
+question and it is written down so the answer is read correctly: `nr_throttled` high against
+`nr_periods` means the two CPU quota is binding, while `nr_throttled` near zero with
+`usage_usec` far below two cores' worth of the elapsed time means the opposite, that the
+ceiling is never reached because the pod requests 200m and loses its turns to everything else
+on the box.
+
+In `after_script` so a failed run reports too, and every read is guarded with a fallback to
+cgroup v1 and then to a plain line, because a diagnostic that fails the job it is diagnosing
+is worse than none, and silence is indistinguishable from a healthy pod.
