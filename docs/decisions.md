@@ -872,7 +872,7 @@ curated tag for any of them would be the failure this whole design avoids.
 
 `_LOC_URL` is `http://lx2.loc.gov:210/lcdb`, with `follow_redirects=True`. It is one of the
 three catalogues not fetched over TLS, because that is the endpoint the Library of
-Congress publishes for its Z39.50-over-HTTP SRU gateway; the other six are https. The
+Congress publishes for its Z39.50-over-HTTP SRU gateway; the other seven are https. The
 other two plaintext endpoints are `_NLG_URL` and `_NKP_URL`, which arrived later and are
 the same gateway shape.
 
@@ -7691,7 +7691,7 @@ this catalogue. So the refusal was scoped to German and English without saying s
 silently, for every catalogue that is neither.
 
 **Fixed for this source only, deliberately.** Widening the shared pattern is the tempting
-move and it changes what six other sources refuse on the strength of a phrase measured
+move and it changes what seven other sources refuse on the strength of a phrase measured
 in one catalogue. `_NKP_ONLINE` states this source's own and a test pins that the shared
 rule is untouched. **Whether the rule should be per source everywhere was a real question
 and a larger one than this ticket.** It is answered below, in "The record's own carrier
@@ -8142,10 +8142,10 @@ The size of the catalogue roster is spelled in prose at dozens of sites, and add
 source made twenty two statements stale, found in three passes, every pass believing it was
 the last.
 
-**"The roster count" is not one number.** Six named cardinalities over four values, all
-computed from `sources.py`: the whole roster and `DEFAULT_ORDER` at 9, `SEARCH_SOURCES` at 8,
-`LOOKUP_SOURCES` at 7, the free lookup sources at 6, lookup-or-search at 9. So "six sources"
-is a correct free lookup count, a correct count of something else, or a stale search count,
+**"The roster count" is not one number.** Six named cardinalities over three values, all
+computed from `sources.py`: the whole roster and `DEFAULT_ORDER` at 10, `SEARCH_SOURCES` at 8,
+`LOOKUP_SOURCES` at 8, the free lookup sources at 7, lookup-or-search at 10. So "eight sources"
+is a correct lookup count, a correct search count, or a stale count of something else,
 and nothing in the sentence's shape separates them. **The classification is semantic, so a
 person makes it once and a machine notices when it needs making again.**
 
@@ -8162,9 +8162,9 @@ unclassified scan fails on its first run at that scale and is switched off withi
 
 **This register is inside its own subject**, and the pruning of 2026-09-05 is what proves the
 arrangement works: entries were rewritten, the sentences several verdicts were written for went
-with them, and the guard failed rather than going quiet. The census raises 4 candidates in it.
-**0** are live claims the guard now checks against `sources.py`; **4** are not the roster,
-being this entry's own worked examples and two sentences about what a shared pattern would have
+with them, and the guard failed rather than going quiet. The census raises 3 candidates in it.
+**0** are live claims the guard now checks against `sources.py`; **3** are not the roster,
+being this entry's own worked examples and a sentence about what a shared pattern would have
 changed. All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
@@ -9634,3 +9634,31 @@ lost by being dropped: `AuthorOut.identifier_conflicts` reports it under its sch
 **An author with no ISNI is the common case and is unaffected.** The spelling stays the key
 and the same suggestions are offered. Confirmed rather than assumed, in
 `TestAnAuthorWithNoSpine`.
+
+## A new catalogue gets a lookup slot and no search slot until somebody measures the search
+
+**The rule.** A source added to the roster answers an ISBN lookup if its coverage was
+measured against the books the chain already finds, and answers a title search only once
+somebody has measured what its search **finds** that the roster does not. Absent that
+second measurement it holds `answers_search=False`.
+
+**What this is not.** It is not "a source earns a request by measurement", which was the
+first draft of this paragraph and is a rule **no incumbent satisfies**. `MEASURED`,
+`TAIL_MARGINAL` and `TIER_UNION` are all lookup measurements. The BnF and the Library of
+Congress hold search slots on the reverse argument, that neither was worth an ISBN request,
+and no source in the roster has ever had its search gain measured. Stating the bar that way
+would have described a test the eight incumbents fail and the newcomer alone was held to.
+
+**So it is a default and not a bar**, and the honest form is: for a source nobody has
+measured on this path, the conservative answer is no slot, because a search slot is an
+outbound request on every search of every install and the cheap version of the question is
+not free either. Measured at the Spanish National Library, 2026-09-05: 30 records answers
+in 1.117s median over 15 samples, and 50 records costs 2.448 to 5.911s against a 4.0s
+deadline covering the **whole** fan out.
+
+**How it is undone.** By a measurement, not an argument: the books a search there returns
+that the current roster's search does not, on a sample somebody can commit. The row already
+carries the address, so the cost is the probe rather than the plumbing.
+
+**Where it is enforced.** `sources.SEARCH_SOURCES` derives from `Target.answers_search`,
+and that docstring carries this reasoning at the rule's own site.

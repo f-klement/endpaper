@@ -4,6 +4,13 @@
 
 ### Added
 
+- **The Spanish National Library joins the catalogue chain.** A book with a Spanish ISBN
+  now resolves against the Biblioteca Nacional de España rather than only against whatever
+  Open Library or Google Books happens to hold. Measured over the 500 ISBN sample committed
+  to the tree: of the 15 Spanish ISBNs the free chain missed, the BNE holds 14. It is asked
+  about an ISBN, never about a title, and it declares no registration group remit because it
+  alone answers four books outside `978-84`, one Portuguese, one Argentine and two
+  Uruguayan. The free chain now answers 395 of the 500 where it answered 377.
 - Authors that share a confirmed ISNI are offered as one person on the merge suggestions
   panel, which is the first rule there that reaches a pen name or a transliteration. It is a
   suggestion like the other three: nothing is folded until somebody says so, and deleting
@@ -49,6 +56,8 @@
 
 ### Changed
 
+- The provider list in Settings gains a tenth catalogue, enabled by default and reorderable
+  like the rest.
 - The shelf order reads a stored key instead of building one. A classification row now
   carries the key its scheme's filing rule returns for its number, written whenever the row
   is written and backfilled for existing rows. The order used to compile a twelve arm `CASE`

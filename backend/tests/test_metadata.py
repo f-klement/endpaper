@@ -68,11 +68,13 @@ from metadata import (
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.helpers import (
+    silence_bne,
     silence_covers,
     silence_nkp,
     silence_nlg,
     silence_oenb,
     silence_open_library,
+    silence_sru_catalogues,
 )
 
 #: The `backend/` directory, so a doc guard can reach the repository root.
@@ -318,6 +320,25 @@ def _oenb_envelope(*records: str) -> str:
 
 
 OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
+
+#: The Spanish National Library. Alma's SRU on the OPAC hostname, which is the
+#: whole of why this source exists: see `targets.SEEDED[CatalogueSource.BNE]`.
+BNE = "https://catalogo.bne.es/view/sru/34BNE_INST"
+
+#: Every SRU lookup target's address, mapped to the name `lookup` reports it as.
+#:
+#: **Derived from the rows, because the two enumerations it replaces disagreed
+#: with the roster the moment one grew.** `TestTheResponseSizeCap` listed the
+#: hosts to silence in a tuple and the names to read back in a dict literal, and
+#: a source absent from the first escapes as an unmocked request while a source
+#: absent from the second is a `KeyError`. The constants above stay: a test that
+#: wants one source to answer names it, and naming one is not the same as
+#: claiming to know them all.
+SRU_LOOKUP_HOSTS = {
+    target.base_url: source.value
+    for source, target in targets.SEEDED.items()
+    if target.transport is targets.Transport.SRU and target.answers_lookup
+}
 
 #: The National Library of Greece. Plaintext HTTP on port 210, which is what
 #: the catalogue offers: see `targets.SEEDED[CatalogueSource.NLG]`.
@@ -712,6 +733,7 @@ class TestSourceOrder:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -753,6 +775,7 @@ class TestSourceOrder:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -787,6 +810,7 @@ class TestSourceOrder:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
@@ -815,6 +839,7 @@ class TestSourceOrder:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -839,6 +864,7 @@ class TestOutcome:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -866,6 +892,7 @@ class TestOutcome:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -888,6 +915,7 @@ class TestOutcome:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -910,6 +938,7 @@ class TestOutcome:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1222,6 +1251,7 @@ class TestDnbRecord:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1287,6 +1317,7 @@ class TestDnbRecord:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1379,6 +1410,7 @@ class TestCatalogueXml:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -1536,6 +1568,12 @@ class TestTheResponseSizeCap:
             (OENB, "_oenb_over_cap", GERMAN_ISBN),
             (NLG, "_marc_over_cap", GREEK_ISBN),
             (NKP, "_nkp_over_cap", ENGLISH_ISBN),
+            # The Alma envelope again, because this source shares the ÖNB's
+            # profile. `ENGLISH_ISBN` and not a Spanish one, unlike the two
+            # rows above: this source declares no `sources.SERVES_GROUPS` remit,
+            # so it is asked about every registration group and the remit trap
+            # those two rows record cannot arise here.
+            (BNE, "_oenb_over_cap", ENGLISH_ISBN),
         ],
     )
     async def test_an_oversized_lookup_answer_costs_that_source(
@@ -1543,7 +1581,7 @@ class TestTheResponseSizeCap:
     ):
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
-            for other in (DNB, K10PLUS, OENB, NLG, NKP):
+            for other in SRU_LOOKUP_HOSTS:
                 mock.get(url__startswith=other).mock(
                     return_value=_xml(
                         getattr(self, body)() if other == host else OENB_EMPTY
@@ -1557,9 +1595,7 @@ class TestTheResponseSizeCap:
             )
             result = await lookup(isbn)
 
-        name = {
-            DNB: "dnb", K10PLUS: "k10plus", OENB: "oenb", NLG: "nlg", NKP: "nkp"
-        }[host]
+        name = SRU_LOOKUP_HOSTS[host]
         assert (name, Outcome.UNAVAILABLE) in result.attempts
         assert result.outcome is not Outcome.FOUND
 
@@ -1606,6 +1642,7 @@ class TestTheResponseSizeCap:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_EMPTY)
@@ -2106,6 +2143,7 @@ class TestK10plusIdentity:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
@@ -2135,6 +2173,114 @@ class TestK10plusIdentity:
         assert result.outcome is Outcome.NOT_FOUND
 
     @pytest.mark.asyncio
+    async def test_a_record_naming_the_isbn_only_as_cancelled_is_refused(self):
+        """`020 $z` is an ISBN the catalogue says is **not** this book's.
+
+        **The shape is the National Library of Greece's, measured**: asking it
+        for `0000000000000` returns a record whose 020 reads
+        `$a 9789602675441 $z 0000000000000`, so the index covers `$z` and the
+        answer is a real book with an unrelated number recorded as cancelled.
+        The Spanish National Library does the same thing on the same probe. A
+        cancelled or invalid ISBN is exactly what a catalogue uses to record a
+        number that was printed on a **different** book, so admitting one puts
+        an unrelated record on a shelf from a barcode scan.
+
+        **`$a` and `$z` in one entry, deliberately, and that is what makes this
+        a guard rather than a restatement.** `_marc_claims_isbn` reading `$z`
+        is a one expression change and this fails on it. The other shape, an
+        020 carrying `$z` alone, is refused twice over, by `_isbn_entries`
+        dropping the entry and by `_marc_claims_isbn` reading `$a`, so no single
+        expression change can reach it and the test below pins the behaviour
+        without pinning either mechanism.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        # Built inline rather than through `_marc_record`,
+                        # because the `$z` has to sit in the **same** 020 entry
+                        # as the `$a`, which is the shape the catalogue writes
+                        # and the only one a single expression change reaches.
+                        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+                        "<leader>01533nam a2200505 c 4500</leader>"
+                        '<datafield tag="020" ind1=" " ind2=" ">'
+                        '<subfield code="a">9786171276895</subfield>'
+                        f'<subfield code="z">{ENGLISH_ISBN}</subfield>'
+                        "</datafield>"
+                        '<datafield tag="245" ind1="1" ind2="0">'
+                        '<subfield code="a">Another Book Entirely</subfield>'
+                        "</datafield>"
+                        '<datafield tag="300" ind1=" " ind2=" ">'
+                        '<subfield code="a">218 S.</subfield></datafield>'
+                        "</record>"
+                    )
+                )
+            )
+            # After the K10plus route, never before: routes resolve in
+            # registration order and this one is a catch-all over every SRU
+            # target. Registered first it answers for K10plus and this test
+            # asserts NOT_FOUND against a source that was never asked.
+            silence_sru_catalogues(mock)
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(ENGLISH_ISBN)
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_a_record_whose_only_isbn_is_cancelled_is_refused(self):
+        """The other `$z` shape: an 020 carrying no `$a` at all.
+
+        Measured at the Spanish National Library on 2026-09-05:
+        `alma.isbn=0000000000000` returns one record and its only 020 is
+        `$z 00-00000-00-0`.
+
+        **Behaviour, not mechanism.** Two things refuse this independently and
+        neither can be removed alone to make this fail, which is stated rather
+        than left for whoever tries: `_isbn_entries` keeps only entries carrying
+        `$a`, and `_marc_claims_isbn` reads `$a`. Measured by mutation on
+        2026-09-05: widening either one on its own leaves the whole suite green.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(
+                return_value=_xml(
+                    _marc(
+                        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+                        "<leader>01533nam a2200505 c 4500</leader>"
+                        '<datafield tag="020" ind1=" " ind2=" ">'
+                        f'<subfield code="z">{ENGLISH_ISBN}</subfield>'
+                        "</datafield>"
+                        '<datafield tag="245" ind1="1" ind2="0">'
+                        '<subfield code="a">Another Book Entirely</subfield>'
+                        "</datafield>"
+                        '<datafield tag="300" ind1=" " ind2=" ">'
+                        '<subfield code="a">218 S.</subfield></datafield>'
+                        "</record>"
+                    )
+                )
+            )
+            # After the K10plus route, never before: routes resolve in
+            # registration order and this one is a catch-all over every SRU
+            # target. Registered first it answers for K10plus and this test
+            # asserts NOT_FOUND against a source that was never asked.
+            silence_sru_catalogues(mock)
+            mock.get(url__startswith=OPEN_LIBRARY).mock(
+                return_value=httpx.Response(404)
+            )
+            mock.get(url__startswith=GOOGLE_BOOKS).mock(
+                return_value=httpx.Response(200, json={"items": []})
+            )
+            result = await lookup(ENGLISH_ISBN)
+
+        assert result.outcome is Outcome.NOT_FOUND
+
+    @pytest.mark.asyncio
     async def test_a_record_whose_every_isbn_is_qualified_is_still_this_book(self):
         """A binding is not a cross reference, and refusing it lost the book.
 
@@ -2148,6 +2294,7 @@ class TestK10plusIdentity:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(
@@ -2813,6 +2960,7 @@ class TestAHostileSourceCostsItsOwnRows:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith="https://openlibrary.org/search.json").mock(
@@ -2843,6 +2991,7 @@ class TestAHostileSourceCostsItsOwnRows:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -2906,6 +3055,7 @@ class TestAHostileSourceCostsItsOwnRows:
             silence_covers(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             silence_nlg(mock)
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
@@ -4159,6 +4309,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4220,6 +4371,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4244,6 +4396,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4272,6 +4425,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4300,6 +4454,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4316,6 +4471,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=_xml(OENB_RECORD))
@@ -4341,6 +4497,7 @@ class TestTheAustrianNationalLibrary:
             silence_open_library(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             route = mock.get(url__startswith=OENB).mock(
@@ -4359,6 +4516,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(429))
@@ -4386,6 +4544,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4414,6 +4573,7 @@ class TestTheAustrianNationalLibrary:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=OENB).mock(
@@ -4571,6 +4731,7 @@ class TestTheAustrianNationalLibrarySearch:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=OENB).mock(return_value=httpx.Response(500))
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -4644,6 +4805,7 @@ class TestTheAustrianNationalLibrarySearch:
             silence_covers(mock)
             silence_nlg(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=OENB).mock(side_effect=_crawl)
             mock.get(url__startswith=K10PLUS).mock(
                 return_value=_xml(K10PLUS_RECORD)
@@ -4708,6 +4870,7 @@ class TestTheNationalLibraryOfGreece:
             silence_open_library(mock)
             silence_oenb(mock)
             silence_nkp(mock)
+            silence_bne(mock)
             mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_EMPTY))
             mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
@@ -5090,7 +5253,7 @@ class TestTheCzechNationalLibrary:
     def test_the_shared_online_rule_is_left_alone(self):
         """The Czech phrasing is this source's constant and not a widening of
         `_NOT_A_BOOK`, which every other source is filtered by. Widening that on
-        a phrase measured in one catalogue would change what six other sources
+        a phrase measured in one catalogue would change what seven other sources
         refuse."""
         assert not metadata._NOT_A_BOOK.search("1 online zdroj (106 pages) :")
         assert metadata._NKP_ONLINE.search("1 online zdroj (106 pages) :")
@@ -5673,6 +5836,10 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
                     )
                 ),
             ),
+            # The Alma envelope, because that is what this source answers in,
+            # and the ÖNB's record body, because the two share a profile. The
+            # 020 carries the ISBN-10 for the reason the class docstring gives.
+            "bne": (BNE, _xml(oenb)),
             "open_library": (
                 OPEN_LIBRARY,
                 httpx.Response(200, json={"title": "The Great Gatsby"}),
@@ -5783,9 +5950,11 @@ def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
     place, and what the filter drops is the two sources that answer no ISBN.
 
     **Its own function so the claim can be tested on it alone.** The claims held
-    for the whole set with this deleted, because at nine sources 200 sampled
-    orders happen to cover every cell and every pair, so a test over the whole
-    set left this family at "a docstring says so".
+    for the whole set with this deleted, because at the nine sources of the day
+    200 sampled orders happened to cover every cell and every pair, so a test
+    over the whole set left this family at "a docstring says so". The roster has
+    grown since and that coverage has not been re-measured, which is a reason to
+    keep this function rather than a reason to trust the sampling.
     `test_every_source_reaches_every_position_in_the_lookup_chain` and
     `test_every_pair_of_sources_is_tried_in_both_directions` read this, and
     `test_the_orders_asked_hold_every_rotation` is what ties it back to the set

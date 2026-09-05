@@ -28,9 +28,7 @@ from tests.helpers import (
     items,
     selects_for,
     silence_covers,
-    silence_nkp,
-    silence_nlg,
-    silence_oenb,
+    silence_sru_catalogues,
     titles,
 )
 
@@ -64,9 +62,7 @@ def open_library_hit():
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
-        silence_oenb(mock)
-        silence_nlg(mock)
-        silence_nkp(mock)
+        silence_sru_catalogues(mock)
         mock.get(OPEN_LIBRARY_ISBN).mock(
             return_value=httpx.Response(
                 200,
@@ -120,9 +116,7 @@ def open_library_miss():
         )
         mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
-        silence_oenb(mock)
-        silence_nlg(mock)
-        silence_nkp(mock)
+        silence_sru_catalogues(mock)
         silence_covers(mock)
         yield mock
 
@@ -186,14 +180,14 @@ def dnb_hit():
     """
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
-        silence_oenb(mock)
-        silence_nlg(mock)
-        silence_nkp(mock)
         mock.get(url__startswith=DNB).mock(
             return_value=httpx.Response(
                 200, text=DNB_RECORD, headers={"content-type": "text/xml"}
             )
         )
+        # After the DNB route, never before: routes resolve in registration
+        # order and this one is a catch-all over every SRU target.
+        silence_sru_catalogues(mock)
         mock.get(url__startswith="https://openlibrary.org/").mock(
             return_value=httpx.Response(404)
         )
@@ -832,9 +826,7 @@ def open_library_oversized():
     with respx.mock(assert_all_called=False) as mock:
         mock.get(url__startswith=DNB).mock(return_value=_sru_empty())
         mock.get(url__startswith=K10PLUS).mock(return_value=_sru_empty())
-        silence_oenb(mock)
-        silence_nlg(mock)
-        silence_nkp(mock)
+        silence_sru_catalogues(mock)
         mock.get(OPEN_LIBRARY_ISBN).mock(
             return_value=httpx.Response(
                 200,

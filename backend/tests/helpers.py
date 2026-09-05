@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 import auth_backends
+import targets
 
 # ── Image payloads ────────────────────────────────────────────────────────────
 #
@@ -84,11 +85,13 @@ def titles(response: httpx.Response) -> list[str]:
 
 # ── Metadata catalogues ───────────────────────────────────────────────────────
 #
-# Nine sources answer a lookup or a search, and respx fails a test that makes
+# Ten sources answer a lookup or a search, and respx fails a test that makes
 # an unmocked request rather than letting it reach the real service. So a test
-# touching either path has to silence all nine, and stating them one by one in
+# touching either path has to silence all ten, and stating them one by one in
 # every test was both noise and a trap: adding a source broke thirty tests in
-# an unrelated file.
+# an unrelated file. It did so again when the Spanish National Library joined,
+# because `silence_catalogues` still held a **list** of the sources rather than
+# reading them; see the comment in its body.
 
 OPEN_LIBRARY = "https://openlibrary.org/"
 #: The two image services. Separate hosts from the catalogues, and reached on
@@ -104,6 +107,7 @@ LOC = "http://lx2.loc.gov:210/lcdb"
 OENB = "https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB"
 NLG = "http://catalogue.nlg.gr:210/biblios"
 NKP = "http://aleph.nkp.cz:9991/NKC"
+BNE = "https://catalogo.bne.es/view/sru/34BNE_INST"
 
 #: An SRU envelope holding no records. Every SRU source answers 200 with an
 #: empty set rather than a 404, so mocking a 404 would test a case none of them
@@ -183,6 +187,63 @@ def silence_nkp(mock: Any) -> Any:
     return mock
 
 
+def silence_bne(mock: Any) -> Any:
+    """Answer the Spanish National Library with "nothing found".
+
+    `silence_oenb`'s helper, three sources later and for the same reason. The
+    body is `SRU_EMPTY` rather than an Alma shaped envelope because an empty
+    answer carries no records and so no schema, which is the one case where the
+    two envelopes are the same bytes.
+
+    **Not autouse**, for `silence_oenb`'s reason.
+    """
+    mock.get(url__regex=f"{re.escape(BNE)}.*").mock(return_value=sru_response())
+    return mock
+
+
+def silence_sru_catalogues(mock: Any) -> Any:
+    """Answer every reachable catalogue with "nothing found", derived from the rows.
+
+    **The one to reach for instead of listing the national catalogues.** Naming
+    them one by one is how `silence_oenb`, `silence_nlg` and `silence_nkp` came
+    to be written out at five sites in `tests/routers/test_books.py` and thirty
+    one in `tests/test_metadata.py`, and every one of those sites is a place a
+    new source escapes as an unmocked request.
+
+    **It is not the same as `silence_catalogues`**, which answers Open Library
+    with a 404 and Google Books with an empty result list rather than with an
+    SRU envelope. A fixture that wants to register its own Google response
+    cannot use that one, because a catch-all registered by the fixture resolves
+    before the route the test body adds later.
+
+    **The exclusions, both of them, because stating the inclusion is what put a
+    list of seven base URLs here in the first place.** Z39.50 is excluded
+    because `fetch.py` never opens that socket. BESPOKE is excluded because an
+    empty SRU envelope is not an answer Open Library or Google Books could give,
+    and each has its own silencer with its own shape. Widening this to cover
+    them was tried and is wrong twice over: it answers a JSON adapter with XML,
+    and being a catch-all it resolves before any route a fixture registers
+    afterwards, which silently turned `open_library_hit` into a fixture where
+    Open Library says nothing.
+
+    **What stops a new source being missed anyway**, which is the concern that
+    widening was reaching for:
+    `test_house_rules.py::test_every_seeded_source_is_covered_by_a_silencer`
+    fails when a seeded target is not answered by `silence_catalogues`.
+
+    **Call it after any SRU source the test wants to answer.** Routes resolve in
+    registration order and the first match wins, and these are regexes, so a
+    route already registered with `url__startswith` keeps its answer.
+    """
+    for target in targets.SEEDED.values():
+        if target.transport in (targets.Transport.BESPOKE, targets.Transport.Z3950):
+            continue
+        mock.get(url__regex=f"{re.escape(target.base_url)}.*").mock(
+            return_value=sru_response()
+        )
+    return mock
+
+
 def silence_open_library(mock: Any) -> Any:
     """Answer the whole Open Library host with "nothing found".
 
@@ -231,8 +292,14 @@ def silence_catalogues(mock: Any) -> Any:
       pattern left one route, this one, and the test's own Google response was
       silently discarded.
     """
-    for base in (DNB, K10PLUS, BNF, LOC, OENB, NLG, NKP):
-        mock.get(url__regex=f"{re.escape(base)}.*").mock(return_value=sru_response())
+    # **Derived from the rows rather than listed**, and that was a defect this
+    # helper shipped with. A tuple of seven base URLs is an enumeration of an
+    # open set: adding a catalogue left it out silently, and the symptom was not
+    # this helper failing but every test that calls it making an unmocked
+    # request to the new source. The constants above stay, because a test that
+    # wants one source to answer names it; what must not be written twice is
+    # **which sources exist**.
+    silence_sru_catalogues(mock)
     silence_covers(mock)
     mock.get(url__regex=f"{re.escape(OPEN_LIBRARY)}.*").mock(
         return_value=httpx.Response(404)

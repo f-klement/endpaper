@@ -7,7 +7,7 @@ It defines nothing endpaper invented: for that, read [data-model.md](data-model.
 
 ## The catalogues
 
-Seven of the nine metadata sources are national or union library catalogues. The other two,
+Eight of the ten metadata sources are national or union library catalogues. The other two,
 Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
@@ -18,6 +18,7 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 | **LoC** | Library of Congress, the de facto national library of the United States. One of the three sources fetched over plaintext HTTP, which `decisions.md` records as accepted rather than fixed. |
 | **ÖNB** | Österreichische Nationalbibliothek, Austria's national library. In the chain for Austrian imprints the German catalogues hold as cross references or not at all. Austria has no registration group of its own, so its remit is `978-3`, shared with Germany and Switzerland. |
 | **NLG** | The National Library of Greece, Greece's legal deposit library. One of the plaintext sources: its catalogue answers on port 210 and offers no TLS. Asked only about Greek publishing, `978-960` and `978-618`. |
+| **BNE** | Biblioteca Nacional de España, Spain's legal deposit library. Reached over Alma's SRU on its OPAC hostname, which is why an earlier survey recorded it as closed: its Z39.50 port authenticates and its catalogue does not. Asked about an ISBN and never about a title. It declares no registration group remit, because it alone answers for books outside `978-84`: Spanish language publishing from Latin America reaches this catalogue and no other in the chain. |
 | **NKP** | Národní knihovna České republiky, the Czech national library. Asked about an ISBN and never about a title: its server renders one populated record per response whatever page size is asked for, so a search for ten candidates would be ten requests. Plaintext on port 9991. |
 
 ## Inside an ISBN
@@ -31,7 +32,7 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
 |---|---|
-| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All seven catalogues above speak it, though the NKP takes its query in PQF rather than CQL. |
+| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All eight catalogues above speak it, though the NKP takes its query in PQF rather than CQL. |
 | **PQF** | Prefix Query Format, YAZ's textual form of a Z39.50 query: `@attr 1=7 "9788025712948"` is "the ISBN index equals this". The NKP takes this and refuses CQL, so its terms are quoted by `z3950.pqf_term`, which is PQF's own escaping rule and deliberately not the CQL sanitiser. |
 | **CQL** | The query language SRU carries. Its index names are catalogue specific, which is why the code holds `num=` (the DNB's identifier index, which matches an identifier anywhere in a record), `WOE=` (the DNB's all words index) and `pica.all=` (K10plus's catch all, named for PICA, the cataloguing system behind those networks). |
 | **MARC**, **MARC21** | MAchine Readable Cataloging, the dominant library record format since the 1960s. A record is numbered **fields**, each holding lettered **subfields**: `245 $a` is the title and `$b` the subtitle. MARC21 is the Anglo-American branch, the harmonisation of the American and Canadian formats, and it is what every catalogue this build reads sends. It is not the only branch: see UNIMARC below. |

@@ -202,7 +202,7 @@ class TestLimitsAreSane:
 
 class TestTheMetadataLimit:
     """Unlike the others, what this protects is somebody else's server: every
-    lookup fans out to as many as seven public catalogues.
+    lookup fans out to as many as eight public catalogues.
 
     Every source is silenced, so the burst these tests fire never leaves the
     machine. Without that they would be sixty real requests to the DNB.

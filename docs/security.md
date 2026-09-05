@@ -991,9 +991,9 @@ therefore never repair another member's private books. It is rate limited instea
 
 ## Catalogue requests
 
-Nine third party catalogues are asked for records: Open Library, the DNB, K10plus, the
-BnF, the Library of Congress, the Austrian National Library, the National Library of
-Greece, the Czech National Library and Google Books. `backend/fetch.py` is the only place an HTTP
+Ten third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+BnF, the Library of Congress, the Austrian National Library, the Spanish National Library,
+the National Library of Greece, the Czech National Library and Google Books. `backend/fetch.py` is the only place an HTTP
 client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
 over the tree, because the defect that produced the module was ten hand built clients that
 agreed on the timeout and agreed on nothing else.
@@ -1013,7 +1013,7 @@ stored configuration or a request body, that changes.
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
 per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
-mean adding nine catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+mean adding ten catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
 
 **Redirects are walked here, and only to the same host.** Measured live with redirects off,

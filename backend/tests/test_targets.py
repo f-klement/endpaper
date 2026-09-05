@@ -262,7 +262,12 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
             targets.cql_phrase(["moby", 'dick"'])
 
     def test_the_seeded_lookup_queries_are_what_the_adapters_built(self):
-        """Byte for byte against the five constants this ticket deleted."""
+        """Byte for byte, and the first five are the constants #127 deleted.
+
+        **The count in that sentence is the history and not the dict below**,
+        which has grown since and will again. The BNE is the sixth and was never
+        an adapter: it is the first lookup target that arrived as a row alone.
+        """
         isbn = "9783825354077"
         assert {
             source.value: targets.SEEDED[source].isbn_query(isbn)
@@ -275,6 +280,7 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
             "oenb": f"alma.isbn={isbn}",
             "nlg": f"dc.isbn={isbn}",
             "nkp": f'@attr 1=7 "{isbn}"',
+            "bne": f"alma.isbn={isbn}",
         }
 
     def test_the_seeded_search_queries_are_what_the_adapters_built(self):

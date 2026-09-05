@@ -16,7 +16,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final, get_args
 
+import httpx
 import pytest
+import respx
 from pydantic import BaseModel
 from sqlalchemy import CheckConstraint
 
@@ -24,6 +26,7 @@ import metadata
 import sources
 import targets
 from enums import CatalogueSource
+from tests.helpers import silence_catalogues
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -2493,13 +2496,14 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the nine rows actually say. A row whose capability changes has to change
+        the ten rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
         """
         assert {source.value for source in sources.LOOKUP_SOURCES} == {
-            "dnb", "k10plus", "oenb", "nlg", "nkp", "open_library", "google_books",
+            "dnb", "k10plus", "oenb", "nlg", "nkp", "bne", "open_library",
+            "google_books",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb", "k10plus", "oenb", "nlg", "open_library", "google_books",
@@ -2558,6 +2562,45 @@ class TestBeliefIsStatedOnceRatherThanTwice:
         )
 
 
+def test_every_seeded_source_is_covered_by_a_silencer():
+    """`silence_catalogues` answers for every row, whatever its transport.
+
+    **The hole this closes is silent and it has opened twice.** respx fails a
+    test that makes an unmocked request, so a source no silencer covers does not
+    fail here: it fails in whichever unrelated test happens to reach it, with a
+    message about a URL. Adding the ÖNB broke 21 such tests, and adding the
+    Spanish National Library broke 32 more plus four in `tests/routers/`.
+
+    **A request per row rather than a reading of the helper**, because what
+    matters is whether a route resolves, and respx resolves in registration
+    order with the first match winning. Reading the loop cannot see that.
+
+    `silence_sru_catalogues` deliberately covers less, and its docstring says
+    which and why. This is the one that has to cover everything.
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        silence_catalogues(mock)
+        unanswered = []
+        for target in targets.SEEDED.values():
+            # **Z39.50 is excluded and the exclusion is the point.** `fetch.py`
+            # never opens that socket, so a row carrying that transport is not
+            # reached over HTTP and an HTTP silencer for it would be a route
+            # nothing requests. Without this line the day the Z39.50 transport
+            # lands, #129, this fails and the cheap way to green it is exactly
+            # that useless route.
+            if target.transport is targets.Transport.Z3950:
+                continue
+            try:
+                httpx.get(target.base_url, params={"probe": "1"})
+            except Exception as error:  # respx raises its own assertion type
+                unanswered.append(f"{target.source.value}: {error!r}"[:120])
+    assert not unanswered, (
+        "these seeded sources are not answered by `silence_catalogues`, so a "
+        "test that reaches one fails on an unmocked request instead:\n  "
+        + "\n  ".join(unanswered)
+    )
+
+
 class TestNoModuleHardCodesASourceOrder:
     """The ranking is data now, and the guard is that nobody kept a copy.
 
@@ -2586,7 +2629,7 @@ class TestNoModuleHardCodesASourceOrder:
     * `sources.DEFAULT_ORDER`, the seeded order itself.
     * `metadata._MATCH_PRECEDENCE`, which source is believed about a shared
       field. Deliberately not reachable from the settings list.
-    * `targets.SEEDED`, the nine catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the ten catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is

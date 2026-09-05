@@ -1303,6 +1303,7 @@ export const en = {
   "providers.name.oenb": "Austrian National Library",
   "providers.name.nlg": "National Library of Greece",
   "providers.name.nkp": "Czech National Library",
+  "providers.name.bne": "Spanish National Library",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

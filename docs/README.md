@@ -61,8 +61,9 @@ is no CORS problem in production and no second web server. Authentication is a s
 JWT in `localStorage`. Storage is a single SQLite file plus a directory of uploaded cover
 images, both under `DATA_DIR`. Book metadata is fetched on demand from the German
 National Library and K10plus together, with Open Library, the Czech National Library, the
-National Library of Greece, the Austrian National Library and Google Books as fallbacks.
-Google Books needs a key you supply, so a stock install runs the other six.
+Spanish National Library, the National Library of Greece, the Austrian National Library and
+Google Books as fallbacks. Google Books needs a key you supply, so a stock install runs the
+other seven.
 
 The frontend's API client and its React Query hooks are **generated** from the backend's
 OpenAPI schema, so the two halves cannot drift apart silently. Access to a book is decided

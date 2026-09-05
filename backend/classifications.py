@@ -109,7 +109,7 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
 
     **Ordered by scheme before the slice, and this is the only place that can
     be.** A parser can only order the record in front of it, and by the time a
-    list reaches here a merge has concatenated up to six catalogues, which is
+    list reaches here a merge has concatenated up to seven catalogues, which is
     every source that builds a `Heading` at all: the
     leading source's subject headings sit in front of the second catalogue's
     Dewey number and the Library of Congress's call number, which are then the

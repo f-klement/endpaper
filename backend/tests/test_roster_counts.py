@@ -15,12 +15,13 @@ the sentence somebody thought to guard.
 ## Why a scan alone cannot do this
 
 **"The roster count" is not one number.** There are **six** named sets a claim
-may bind to, and only **four** distinct sizes among them, because three of the
-six are 9. Nothing in a sentence's shape says which is meant. So "six sources" in
-this tree is a correct count of the free lookup sources, a correct count of some
-other subject entirely, or a stale search count. Measured over the census below,
-**28** of its occurrences count something that is not the roster, so a scan with
-no classification fails 28 times on its first run and is switched off.
+may bind to, and only **three** distinct sizes among them, because three of the
+six are the roster's own size and two more are equal to each other. Nothing in a
+sentence's shape says which is meant. So "eight sources" in this tree is a
+correct count of the lookup sources, a correct count of the search sources, or a
+stale count of some other subject entirely. Measured over the census below,
+**17** of its occurrences count something that is not the roster, so a scan with
+no classification fails 17 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -583,6 +584,40 @@ def scan(name: str, text: str):
         )
 
 
+def scan_unbounded(name: str, text: str):
+    """`scan` without the value filter: every grammar match, whatever it counts.
+
+    **Read only by `orphans`, and it exists because that check had no arm for
+    the one thing this file's docstring says happens.** A verdict is named an
+    orphan when nothing in the tree reaches it, on the reading that its sentence
+    was reworded or deleted. There is a third cause: the sentence is untouched
+    and its **value left the census's bound**, which is the drift the docstring
+    already records as the census's blind spot. Adding one source moved the live
+    set from {6, 7, 8, 9} to {7, 8, 10} and orphaned **twenty six** verdicts in
+    one commit, every one of them still true and still describing a sentence
+    that is still there.
+
+    What made that dangerous is the only way to make the check green: delete
+    the verdicts. That is exactly backwards, because a deleted verdict is what
+    the census asks for again the day its value comes back inside the bound, and
+    in between the sentence is unjudged. So orphanhood is decided on the
+    **grammar** and never on the bound.
+    """
+    flat = _WRAP.sub(lambda m: " " * len(m.group(0)), text)
+    for match in _CLAIM.finditer(flat):
+        number, gap, noun = match.group(1), match.group(2), match.group(3)
+        phrase = re.sub(r"\s+", " ", f"{{n}}{gap}{noun}").strip().lower()
+        paragraph, block = _paragraph(text, match.start())
+        yield Occurrence(
+            path=name,
+            line=text.count("\n", 0, match.start()) + 1,
+            value=_value(number),
+            phrase=phrase,
+            paragraph=paragraph,
+            block=block,
+        )
+
+
 def candidates():
     """Every file the census would read before the declaration rule is applied.
 
@@ -965,6 +1000,50 @@ def _occurrence_valued(value: int) -> Occurrence:
     )
 
 
+def unbounded_census():
+    """Every grammar match in the scope, ignoring the value bound, in file order.
+
+    **Its own function so a test can replace it**, which is the whole reason it
+    is not inlined into `_verdict_reach`. Both synthetic orphan tests use a file
+    that is not in `scope()`, so the real walk answers nothing for their key
+    whichever branch `written` takes, and the anchor comparison was therefore
+    unobservable: deleting it and returning `bool(found)` changed nothing and
+    failed nothing. A stub here is what lets a test put two sentences in one
+    synthetic file and ask which verdict each belongs to.
+    """
+    for path in scope():
+        yield from scan_unbounded(
+            str(path.relative_to(REPO)), path.read_text(encoding="utf-8")
+        )
+
+
+def _verdict_reach() -> dict[tuple[tuple[str, str], int], tuple[bool, bool]]:
+    """Per verdict, whether the census reached it and whether its sentence exists.
+
+    **One walk feeding both `orphans` and `out_of_bound`**, because they are two
+    readings of one fact and writing the reachability twice is the defect this
+    whole file is about, one level down.
+    """
+    used = {(key, index) for _, key, index, _ in judgements() if index is not None}
+    reachable: dict[tuple[str, str], list[Occurrence]] = {}
+    for occurrence in unbounded_census():
+        reachable.setdefault((occurrence.path, occurrence.phrase), []).append(
+            occurrence
+        )
+
+    def written(key, entry) -> bool:
+        found = reachable.get(key, [])
+        if entry.near is None:
+            return bool(found)
+        return any(entry.near in occurrence.paragraph for occurrence in found)
+
+    return {
+        (key, i): ((key, i) in used, written(key, entry))
+        for key, entries in CLAIMS.items()
+        for i, entry in enumerate(entries)
+    }
+
+
 def orphans() -> list[str]:
     """Every verdict in `CLAIMS` that judged nothing in the tree, named.
 
@@ -976,17 +1055,89 @@ def orphans() -> list[str]:
     reworded sentence leaves its verdict with nothing to judge, and a verdict
     with nothing to judge is named here.
 
+    **Decided on the grammar rather than on the bound**, which is the correction
+    `scan_unbounded` carries: a sentence that is still written, and whose value
+    has merely left the live set, is not rot. It is not silently forgiven
+    either, which was this correction's own first draft. It goes to
+    `out_of_bound`, and that set is pinned.
+
     Split out of the test below so it can be driven with a stubbed census
     rather than only observed against the real one.
     """
-    used = {(key, index) for _, key, index, _ in judgements() if index is not None}
+    reach = _verdict_reach()
     return sorted(
-        f"{key[0]} {key[1]!r} entry[{i}] near={entry.near!r}"
-        for key, entries in CLAIMS.items()
-        for i, entry in enumerate(entries)
-        if (key, i) not in used
+        f"{key[0]} {key[1]!r} entry[{i}] near={CLAIMS[key][i].near!r}"
+        for (key, i), (used, written) in reach.items()
+        if not used and not written
     )
 
+
+def out_of_bound() -> list[str]:
+    """Verdicts whose sentence is still written and whose value the census
+    cannot see, named one by one.
+
+    **This is the set `orphans` used to report and no longer does, and it must
+    not simply disappear.** Splitting the two was necessary, because the old
+    rule called this rot and the fix it invited was deleting verdicts that are
+    still true. Hiding it instead is worse: **every entry here is a sentence
+    nothing in this file is checking**, and a roster change is exactly when such
+    a sentence goes stale.
+
+    Measured on the commit that added the tenth source: the live set moved from
+    {6, 7, 8, 9} to {7, 8, 10}, this set went from empty to **22**, and **six**
+    of the 22 were sentences that had just become wrong, in `metadata.py`,
+    `docs/api.md`, `test_books_google.py`, `test_fetch.py`, `test_house_rules.py`
+    and `test_schema.py`. Nothing failed. That is the whole argument for
+    `OUT_OF_BOUND` being pinned rather than counted.
+    """
+    reach = _verdict_reach()
+    return sorted(
+        f"{key[0]} {key[1]!r} entry[{i}]"
+        for (key, i), (used, written) in reach.items()
+        if not used and written
+    )
+
+
+#: The one path in `OUT_OF_BOUND` too long to sit on a line with its phrase.
+_MARC_IMPORT = (
+    "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components/"
+    "MarcImport.test.tsx"
+)
+
+#: The verdicts whose sentence is still written and whose value the census can
+#: no longer see, pinned one by one rather than counted.
+#:
+#: **Pinned, and equality rather than a ceiling.** A count would be a weaker
+#: inequality in the direction that hides things: a set that shrinks is a
+#: sentence deleted and a set that grows is a sentence that just went invisible,
+#: and only the second is urgent. Naming them means a roster change fails here
+#: with the list in the message, so somebody reads each sentence and says
+#: whether it is still true. That review is precisely what the tenth source did
+#: not get: **22** verdicts left the bound in one commit and **six** of them
+#: had become wrong.
+#:
+#: **What each entry means for the next reader.** The census admits a candidate
+#: only if its value is a live cardinality, so these sentences are unguarded
+#: until the roster happens to reach their number again. They are not errors.
+#: Each was read when it was added here and found to be a dated statement, a
+#: count of something that is not the roster, or both.
+OUT_OF_BOUND: frozenset[str] = frozenset({
+    "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
+    "backend/tests/test_authority.py '{n} viaf source' entry[0]",
+    "backend/tests/test_fetch.py '{n} sources' entry[0]",
+    "backend/tests/test_fetch.py '{n} sources' entry[3]",
+    "backend/tests/test_fetch.py '{n} sources' entry[4]",
+    "backend/tests/test_metadata.py '{n} sources' entry[1]",
+    "backend/tests/test_metadata.py '{n} sources' entry[2]",
+    "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
+    "backend/tests/test_roster_counts.py '{n} sources' entry[4]",
+    "backend/tests/test_roster_counts.py '{n} sources' entry[6]",
+    "docs/decisions.md '{n} source' entry[0]",
+    "docs/security.md '{n} sources' entry[0]",
+    # Split only to fit the line: this is one path and two entries on it.
+    _MARC_IMPORT + " '{n} records this catalogue' entry[0]",
+    _MARC_IMPORT + " '{n} records this catalogue' entry[1]",
+})
 
 #: Every occurrence the census finds, and what each one counts.
 #:
@@ -1144,8 +1295,23 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
             near="fact about the past",
         ),
     ],
-    ("backend/tests/test_roster_counts.py", "{n} third party catalogues"): [
-        NotTheRoster("a fixture text, in the file that states the rule")
+    # **Frames of the sample, not sources.** `MEASURED` is taken over ten frames
+    # of fifty domestic ISBNs, and ten is a roster size today, so the census
+    # raises this sentence the moment the roster reaches ten. The two counts are
+    # unrelated and their being equal is a coincidence of this roster.
+    ("backend/sources.py", "{n} frames a source"): [
+        NotTheRoster("frames of the ISBN sample `MEASURED` is taken over")
+    ],
+    # Characters in a mutation's input, not sources: a MARC entity expansion
+    # turning a very short input into a 1,000,000 character title. `source`
+    # there is the adjective for the input text.
+    #
+    # **The number is described rather than quoted**, and that is this file's
+    # own recursion rather than fussiness: a first draft of this comment quoted
+    # the sentence verbatim, which put a roster sized number beside a roster
+    # noun inside the census's own scope and raised a candidate here.
+    ("backend/tests/test_marc.py", "{n} source"): [
+        NotTheRoster("characters of input to an entity expansion, not catalogues")
     ],
     ("backend/tests/test_z3950.py", "{n} sources"): [Counts("SEARCH_SOURCES")],
     ("backend/z3950.py", "{n} source"): [Counts("SEARCH_SOURCES")],
@@ -1490,6 +1656,27 @@ class TestTheCensusBoundIsDerivedAndNotChosen:
         assert len(CatalogueSource) in live_cardinalities()
 
 
+def a_spelled_cardinality() -> tuple[str, int]:
+    """One live cardinality and the word it is spelled with.
+
+    **Derived, because three fixtures below went stale together.** Each spelled
+    `nine`, which was a live cardinality until the roster grew to ten, and a
+    fixture whose number leaves the census's own bound stops exercising the
+    scanner and starts reporting that the bound works: all three failed finding
+    nothing, which is what a scanner that cannot read a spelled number looks
+    like as well.
+
+    What those fixtures are about is that a spelled number is read **at all**,
+    through a line wrap and across two intervening words. Which number does not
+    matter to any of them, and pinning one is the whole of how they came to be
+    wrong.
+    """
+    for word, value in SPELLED.items():
+        if value in live_cardinalities():
+            return word, value
+    raise AssertionError("no live cardinality is inside the spelled range")
+
+
 class TestTheCensusSeesWhatItClaimsTo:
     """Attacked rather than read. Every fixture here is a shape measured in the
     tree, and each one broke a draft of the scanner."""
@@ -1500,13 +1687,15 @@ class TestTheCensusSeesWhatItClaimsTo:
         A line by line scan missed four claims in this tree, one of them the
         only one in its file and one of them the stale count in `frontend/`.
         """
-        found = list(scan("t.py", "#: Measured live, all nine\n#: sources answer.\n"))
-        assert [(o.value, o.phrase) for o in found] == [(9, "{n} sources")]
+        word, value = a_spelled_cardinality()
+        found = list(scan("t.py", f"#: Measured live, all {word}\n#: sources answer.\n"))
+        assert [(o.value, o.phrase) for o in found] == [(value, "{n} sources")]
 
     def test_it_reports_the_line_the_number_is_on(self):
         """The offsets survive flattening, which is why the wrap is padded
         rather than removed."""
-        text = "one\ntwo\n#: all nine\n#: sources\n"
+        word, _value = a_spelled_cardinality()
+        text = f"one\ntwo\n#: all {word}\n#: sources\n"
         assert [o.line for o in scan("t.py", text)] == [3]
 
     def test_a_number_out_of_scope_does_not_swallow_a_claim_behind_it(self):
@@ -1543,14 +1732,16 @@ class TestTheCensusSeesWhatItClaimsTo:
         assert not list(scan("t.py", "three sources answer.\n"))
 
     def test_it_reads_across_two_intervening_words(self):
-        assert [o.phrase for o in scan("t.py", "nine third party catalogues.\n")] == [
-            "{n} third party catalogues"
-        ]
+        word, _value = a_spelled_cardinality()
+        assert [
+            o.phrase for o in scan("t.py", f"{word} third party catalogues.\n")
+        ] == ["{n} third party catalogues"]
 
     def test_it_stops_at_three_intervening_words(self):
         """Stated because it is the edge the grammar was drawn at, not because
         three words is a principle."""
-        assert not list(scan("t.py", "nine of the third party catalogues.\n"))
+        word, _value = a_spelled_cardinality()
+        assert not list(scan("t.py", f"{word} of the third party catalogues.\n"))
 
     def test_a_paragraph_stops_at_a_blank_line(self):
         """`near` and `dated` are claims about the sentence's surroundings. A
@@ -1677,6 +1868,69 @@ class TestTheCensusSeesWhatItClaimsTo:
         named = [o for o in orphans() if o.startswith("f.py")]
         assert len(named) == 1 and "entry[1]" in named[0], named
 
+    def test_an_unanchored_verdict_whose_sentence_is_gone_is_still_an_orphan(
+        self, monkeypatch
+    ):
+        """The `near is None` arm of the written test, which nothing reached.
+
+        **Unobservable on the real tree, and that is why it needs a synthetic
+        case.** Every unanchored verdict in `CLAIMS` today has a sentence that
+        still exists, so the arm returns True either way: a critic replaced
+        `bool(found)` with a bare `True` and the whole file stayed green. The
+        arm only bites for a verdict with no anchor whose sentence was deleted,
+        which is exactly what this builds.
+
+        Without it, a verdict left behind by a deleted sentence is reported as
+        merely out of bound, which is the "read it and confirm" list rather than
+        the "this is rot" one, and it would sit there being re-approved.
+        """
+        key = ("f.py", "{n} sources")
+        monkeypatch.setitem(CLAIMS, key, [Counts("DEFAULT_ORDER")])
+        monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(()))
+
+        assert [o for o in orphans() if o.startswith("f.py")] == [
+            "f.py '{n} sources' entry[0] near=None"
+        ]
+        assert not [o for o in out_of_bound() if o.startswith("f.py")]
+
+    def test_the_anchor_decides_which_of_two_sentences_a_verdict_is_about(
+        self, monkeypatch
+    ):
+        """The anchored arm of `written`, which nothing reached.
+
+        **Both other orphan tests use a file `scope()` does not contain**, so
+        the unbounded walk answers nothing for their key and `written` returns
+        False whichever branch it takes. Replacing the anchor comparison with
+        `bool(found)` therefore changed nothing anywhere: `orphans()` stayed
+        empty, `out_of_bound()` stayed equal to `OUT_OF_BOUND`, and both tests
+        passed. Stubbing `unbounded_census` is what makes the branch reachable.
+
+        The case is one key with two verdicts and two sentences, one of which
+        has been reworded away. Under `bool(found)` the surviving sentence
+        vouches for both and the deleted one's verdict is reported as merely out
+        of bound, which is the read-and-confirm list rather than the rot list.
+        """
+        key = ("f.py", "{n} sources")
+        monkeypatch.setitem(
+            CLAIMS,
+            key,
+            [Counts("DEFAULT_ORDER", near="alpha"), Counts("DEFAULT_ORDER", near="beta")],
+        )
+        # Only alpha's sentence survives, and it is out of the value bound, so
+        # the bounded census reaches neither verdict.
+        surviving = Occurrence("f.py", 1, 3, "{n} sources", "alpha here", 1)
+        monkeypatch.setattr("tests.test_roster_counts.census", lambda: iter(()))
+        monkeypatch.setattr(
+            "tests.test_roster_counts.unbounded_census", lambda: iter([surviving])
+        )
+
+        assert [o for o in orphans() if o.startswith("f.py")] == [
+            "f.py '{n} sources' entry[1] near='beta'"
+        ]
+        assert [o for o in out_of_bound() if o.startswith("f.py")] == [
+            "f.py '{n} sources' entry[0]"
+        ]
+
     def test_an_anchor_that_matches_nothing_is_a_failure_not_a_default(self):
         occurrence = Occurrence("f.py", 1, 8, "{n} sources", "nothing here", 1)
         index, complaint = judge(
@@ -1795,6 +2049,31 @@ class TestThisFileCountsItself:
             "the same sentence carries this number twice and only the first was "
             f"recomputed; the second reads {repeated}"
         )
+
+
+def test_every_sentence_the_census_stopped_seeing_is_named():
+    """`OUT_OF_BOUND`, recomputed. A roster change is what moves this.
+
+    **The failure this exists for is silent everywhere else.** A count whose
+    value leaves the live set is invisible to the census and its verdict stops
+    being reached, so nothing compares it with anything until the roster
+    happens to return to that number. `orphans` used to name these and called
+    them rot, which invited deleting verdicts that are still true; splitting
+    them out fixed that and would have hidden them instead.
+
+    A failure here is not a bug to route around. Read each sentence the message
+    names, decide whether it is still true, correct it if it is not, and only
+    then add or remove its line above.
+    """
+    named = sorted(OUT_OF_BOUND)
+    found = out_of_bound()
+    assert found == named, (
+        "the set of verdicts the census can no longer see has moved, which is "
+        "what a roster change does. Every entry below is a sentence nothing is "
+        "checking. Read each one before editing OUT_OF_BOUND.\n"
+        "  no longer out of bound: " + ", ".join(sorted(set(named) - set(found)))
+        + "\n  newly out of bound: " + ", ".join(sorted(set(found) - set(named)))
+    )
 
 
 def test_a_file_that_declares_itself_internal_is_out_of_scope():

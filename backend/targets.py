@@ -583,10 +583,10 @@ class Target:
         return min(limit * self.search_multiplier, self.search_cap)
 
 
-#: The nine catalogues this application ships knowing about.
+#: The ten catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
-#: migration writes these nine rows into `catalogue_targets` and
+#: migrations write these ten rows into `catalogue_targets` and
 #: `main.seed_catalogue_targets` reconciles them on every start; **nothing reads
 #: that table back**, deliberately, because #127's decision D2 sends a member
 #: supplied host to #131 and an address read off a row is that decision. #130
@@ -688,9 +688,43 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
         isbn_attribute=z3950.USE_ISBN,
         lookup_records=1,
     ),
+    CatalogueSource.BNE: Target(
+        source=CatalogueSource.BNE,
+        rank=4,
+        transport=Transport.SRU,
+        # **The OPAC hostname, and that is the whole finding.** This library was
+        # recorded as having no open interface, measured against
+        # `z3950.bne.es`, which authenticates and answers every database name
+        # with the identical access control failure. `catalogo.bne.es` is Alma
+        # fronted: `/sru` answers an Ex Libris error report and Alma's own SRU
+        # path answers a 186,457 byte explain. Measured 2026-09-05.
+        base_url="https://catalogo.bne.es/view/sru/34BNE_INST",
+        reader=Reader.MARC_GND,
+        answers_lookup=True,
+        # **Its search works and nobody has measured what it would find**,
+        # which are two different facts and only the second decides this. 30
+        # records answers in 1.117s median over 15 samples; 50 records costs
+        # 2.448 to 5.911s against a 4.0s whole fan out. No incumbent search
+        # source has that measurement either, so this is a conservative default
+        # for a new source rather than a bar the others passed. The full
+        # argument is on `sources.SEARCH_SOURCES`.
+        answers_search=False,
+        metered=False,
+        needs_key=False,
+        sru_version="1.2",
+        query_parameter="query",
+        query_language=QueryLanguage.CQL,
+        record_schema="marcxml",
+        isbn_index="alma.isbn",
+        lookup_records=5,
+        # 15 of 400 live records on 2026-09-05 are leader/07 `a`, 3.8%. Lower
+        # than the OENB's 55.4% and higher than the NLG's zero, and refused for
+        # the reason that covers all three: an article is never a book.
+        refuses_component_parts=True,
+    ),
     CatalogueSource.NLG: Target(
         source=CatalogueSource.NLG,
-        rank=4,
+        rank=5,
         transport=Transport.SRU,
         # Plaintext by necessity: port 210 speaks no TLS, and
         # `https://catalogue.nlg.gr` on 443 is a different service that answers
@@ -719,7 +753,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.OENB: Target(
         source=CatalogueSource.OENB,
-        rank=5,
+        rank=6,
         transport=Transport.SRU,
         base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
         reader=Reader.MARC_GND,
@@ -741,7 +775,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.GOOGLE_BOOKS: Target(
         source=CatalogueSource.GOOGLE_BOOKS,
-        rank=6,
+        rank=7,
         transport=Transport.BESPOKE,
         base_url="https://www.googleapis.com/books/v1/volumes",
         reader=Reader.GOOGLE_BOOKS,
@@ -752,7 +786,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.BNF: Target(
         source=CatalogueSource.BNF,
-        rank=7,
+        rank=8,
         transport=Transport.SRU,
         base_url="https://catalogue.bnf.fr/api/SRU",
         reader=Reader.DUBLIN_CORE,
@@ -771,7 +805,7 @@ SEEDED: Final[dict[CatalogueSource, Target]] = {
     ),
     CatalogueSource.LOC: Target(
         source=CatalogueSource.LOC,
-        rank=8,
+        rank=9,
         transport=Transport.SRU,
         base_url="http://lx2.loc.gov:210/lcdb",
         reader=Reader.MODS,
@@ -821,7 +855,7 @@ def origin(base_url: str) -> str:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
 #: TLS target to plaintext or move it to another port on the same name. Three
 #: targets are plain HTTP by necessity (ports 210, 9991 and 210 speak no TLS) and
-#: an allowlist of bare hostnames would let the other six join them.
+#: an allowlist of bare hostnames would let the other seven join them.
 #:
 #: **Declared here and applied nowhere, deliberately, and this is the paragraph
 #: to read before applying it.** `fetch.py` and `z3950.py` both argue they need

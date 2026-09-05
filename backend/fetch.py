@@ -1,6 +1,6 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask nine third party catalogues for records.
+`metadata.py` and `google_books.py` ask ten third party catalogues for records.
 Every one of those requests used to be built by hand: nine `httpx.AsyncClient(...)`
 constructions in `metadata.py` and one in `google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
@@ -12,7 +12,7 @@ question: `cover_url` arrives on `BookCreate` from any signed in member, so the
 host is chosen by an attacker and has to be tested against an allowlist
 (`covers.is_fetchable`) on every hop. Here the host is a module constant and the
 member supplies at most a query string, so there is no allowlist to apply and
-nothing an allowlist would refuse. Folding them together would mean adding nine
+nothing an allowlist would refuse. Folding them together would mean adding ten
 catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the CSP's `img-src`
 is generated from: the merge would widen the browser policy to pay for a fetch
 policy. What the two do share is the *shape* of the read loop, and both now have
@@ -79,9 +79,9 @@ MAX_REDIRECTS: Final = 2
 #: **Which makes the ceiling sixteen concurrent sources, and it is worth having
 #: written down before somebody proposes the seventeenth.** 536,870,912 divided
 #: by (2,097,152 x 15.28) is 16.75, so eight spends 47.8% of the pod and the
-#: seventeenth source exceeds it outright. **The roster is now half of that
-#: ceiling**, and #91 proposes national catalogues for six more countries, so
-#: the next source but eight is the one that does not fit. The provider list
+#: seventeenth source exceeds it outright. **The roster is ten of that
+#: ceiling**, and #91 proposes national catalogues for more countries still, so
+#: the next source but six is the one that does not fit. The provider list
 #: (`sources.py`) lets a library switch sources **off**, never on beyond the
 #: roster, so nothing a household does moves this: the bound is the roster's
 #: size, which is why `tests/test_fetch.py::_concurrent_search_sources` counts
@@ -118,11 +118,11 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: 215.8 MB traced peak. `aiter_raw()` on the identical response counted 65,250.
 #:
 #: So the bytes are counted raw, and compression is not requested, which keeps
-#: "the wire bytes" and "the memory" the same number. Measured live, all nine
-#: sources answer under `identity`: DNB, the BnF, Google Books and the ÖNB gzip
-#: when offered and honour this, K10plus, Open Library, the Library of Congress,
-#: the NLG and the NKP never compressed anyway. The one that would cost most, K10plus at
-#: 687,481 bytes, is uncompressed today either way.
+#: "the wire bytes" and "the memory" the same number. Measured live, all ten
+#: sources answer under `identity`: DNB, the BnF, Google Books, the ÖNB and the
+#: BNE gzip when offered and honour this, K10plus, Open Library, the Library of
+#: Congress, the NLG and the NKP never compressed anyway. The one that would cost
+#: most, K10plus at 687,481 bytes, is uncompressed today either way.
 #:
 #: **The two newest were each measured both ways rather than assumed**, because
 #: a source that ignored the header would put a decompressed body past the cap.
@@ -134,11 +134,12 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: nothing to begin with. The NKP is the ninth and behaves the same way, 7,362
 #: bytes under both with no `content-encoding`, 2026-08-31.
 #:
-#: **The ninth source does not enter the arithmetic below**, and that is the one
-#: place this file's counts and the roster's diverge. The bound is on what
+#: **Two sources do not enter the arithmetic below**, and that is the one place
+#: this file's counts and the roster's diverge. The bound is on what
 #: `metadata.search` asks **concurrently**, which is `sources.SEARCH_SOURCES`,
-#: and the NKP answers no title search: its server renders one populated record
-#: per response whatever page size is asked for. So the fan out is still eight
+#: and neither the NKP nor the BNE answers a title search: the NKP's server
+#: renders one populated record per response whatever page size is asked for,
+#: and the BNE's search gain was never measured. So the fan out is still eight
 #: and every figure below is unchanged.
 _IDENTITY: Final = {"accept-encoding": "identity"}
 

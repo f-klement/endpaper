@@ -78,8 +78,15 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
     the constants describe **this recorded run**. It cannot prove the run was
     honest, because somebody editing the constants and the sample together defeats
     it, and it cannot prove a re-run would agree: these are live third party
-    catalogues and the figures are dated 2026-08-31. Re-deriving them against the
-    world means re-running the probe, not running this suite.
+    catalogues and the figures are dated. Re-deriving them against the world means
+    re-running the probe, not running this suite.
+
+    **The file is not one run any more, and its name says one date.** Every column
+    but `bne` is the 2026-08-31 pass; `bne` and `seconds_bne` are a 2026-09-05 pass
+    over the same 500 books. The coverage counts stay comparable, because those are
+    a property of the books rather than of the day. `p90_seconds` is not comparable
+    across the two dates in the way `Measured` promises within one, and
+    `sources.MEASURED` says so at the row rather than leaving it here.
     """
 
     def test_the_sample_holds_what_it_claims_to(self):
@@ -175,13 +182,14 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`DEFAULT_ORDER` orders the tail on 82, 42, 34 and 1, which is the one
-        figure in that docstring no per source table can hold.
+        """`DEFAULT_ORDER` orders the tail on 82, 42, 40, 34 and 1, which is the
+        one figure in that docstring no per source table can hold.
 
-        **The pooled counts say the opposite about three of the four**, which is
-        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 59, 37
-        and 55 would put the OeNB ahead of both national catalogues and the NKP
-        behind the NLG.
+        **The pooled counts say the opposite about four of the five**, which is
+        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 59, 57,
+        37 and 55 would put the OeNB ahead of all three national catalogues and
+        the NKP ahead of the BNE by two books where the margin that decides is
+        two the other way.
         """
         rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
@@ -191,6 +199,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         assert len(missed) == 278
         assert sum(1 for entry in missed if entry["open_library"] == "found") == 82
         assert sum(1 for entry in missed if entry["nkp"] == "found") == 42
+        assert sum(1 for entry in missed if entry["bne"] == "found") == 40
         assert sum(1 for entry in missed if entry["nlg"] == "found") == 34
         assert sum(1 for entry in missed if entry["oenb"] == "found") == 1
 
@@ -289,8 +298,9 @@ class TestTheOrderFollowsTheMeasurement:
 
         Two conditions, not one: fast enough to be asked on every lookup, and
         **general** enough to be worth asking on every lookup. See
-        `sources.TIER_MAX_CONCENTRATION` for the second, which the NLG and the
-        NKP both fail, at 100% and 83% of their answers in one frame.
+        `sources.TIER_MAX_CONCENTRATION` for the second, which the NLG, the NKP
+        and the BNE all fail, at 100%, 83% and 82% of their answers in one
+        frame.
         """
         return [
             source
@@ -446,7 +456,15 @@ class TestTheOrderFollowsTheMeasurement:
         The tier must be the same for every bound between the most concentrated
         source it keeps and the least concentrated one it excludes, or the
         constant is sitting on an edge and the next remeasurement moves it.
-        Measured: 55% kept, 83% excluded, and two thirds sits 42% into that.
+        Measured: 55% kept, 82% excluded, and two thirds sits 43% into that.
+
+        **The excluded end moved when the roster grew and this sentence did
+        not**, which is the failure this file's own subject is. It read 83%, the
+        NKP's, until the BNE arrived at 82.5% and became the least concentrated
+        excluded source. The assertion below stayed green throughout, because
+        43.4% is inside its bound exactly as 42% was: a stated measurement can
+        stop being true without anything failing, and only re-deriving it says
+        so.
         """
         kept = self._within()
         # **Excluded by *this* rule, not by the budget.** Open Library is out of
@@ -1151,11 +1169,11 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         tier, tail = _free_plan_names()
         before = sum(_walk(row, tier, tail)[1] for row in rows)
         after = sum(_walk(row, tier, _served_tail(tail, row))[1] for row in rows)
-        assert before == after == 377
+        assert before == after == 395
 
     def test_the_saving_the_constant_claims_recomputes(self):
-        """`SERVES_GROUPS` states 1.396s becoming 1.279s and 753 tail requests
-        becoming 518. A number written in prose stops being re-derived and starts
+        """`SERVES_GROUPS` states 1.435s becoming 1.336s and 872 tail requests
+        becoming 673. A number written in prose stops being re-derived and starts
         being copied."""
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1178,10 +1196,10 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         # refuses it, which is correct about the types and wrong about the test.
         plain_seconds, plain_requests = totals(False)
         served_seconds, served_requests = totals(True)
-        assert plain_seconds == pytest.approx(1.396, abs=0.001)
-        assert plain_requests == 753
-        assert served_seconds == pytest.approx(1.279, abs=0.001)
-        assert served_requests == 518
+        assert plain_seconds == pytest.approx(1.435, abs=0.001)
+        assert plain_requests == 872
+        assert served_seconds == pytest.approx(1.336, abs=0.001)
+        assert served_requests == 673
 
     def test_ordering_alone_saves_almost_nothing(self):
         """**Why the rule skips rather than demotes**, which is the design this
@@ -1189,7 +1207,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         because it cannot lose a book.
 
         Moving a source that cannot answer to the back of the tail models at
-        1.3959s against 1.3964s: half a millisecond. The tail stops at the first
+        1.4342s against 1.4346s: four tenths of a millisecond. The tail stops at the first
         hit, so a dead source ahead of the answerer is only paid when something
         behind it answers, and on the rows where nothing answers every source is
         asked whatever the order. The saving is the failed lookups, and ordering
@@ -1210,9 +1228,9 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
 
         mean = sum(_walk(row, tier, demoted(row))[0] for row in rows) / len(rows)
         plain = sum(_walk(row, tier, tail)[0] for row in rows) / len(rows)
-        assert mean == pytest.approx(1.3959, abs=0.0001)
-        assert plain == pytest.approx(1.3964, abs=0.0001)
-        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 377
+        assert mean == pytest.approx(1.4342, abs=0.0001)
+        assert plain == pytest.approx(1.4346, abs=0.0001)
+        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 395
 
     def test_an_unrestricted_source_is_asked_about_every_isbn(self):
         for group in ("978-3", "978-960", "978-80", None):

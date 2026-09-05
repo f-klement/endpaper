@@ -2000,7 +2000,7 @@
         "type": "object"
       },
       "CatalogueSource": {
-        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP is the other way round, **lookup only**, and for\na reason that is the server's rather than ours: it renders one populated\nrecord per response whatever page size is asked for, so a search for ten\ncandidates would be ten requests. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.",
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP and BNE are the other way round, **lookup only**,\nand for two different reasons. The NKP's is the server's: it renders one\npopulated record per response whatever page size is asked for, so a search\nfor ten candidates would be ten requests. The BNE's is ours: its search\nworks and nobody has measured what it would find, so it holds the\nconservative default. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.",
         "enum": [
           "open_library",
           "google_books",
@@ -2010,7 +2010,8 @@
           "nlg",
           "nkp",
           "bnf",
-          "loc"
+          "loc",
+          "bne"
         ],
         "title": "CatalogueSource",
         "type": "string"
@@ -4772,7 +4773,7 @@
                 "items": {
                   "$ref": "#/components/schemas/CatalogueSourcePreference"
                 },
-                "maxItems": 9,
+                "maxItems": 10,
                 "type": "array"
               },
               {
@@ -7875,7 +7876,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds seven lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain, and by\ntitle and author otherwise, which runs the ranked search. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds eight lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\nClassifications need a selected candidate through `enrich/apply`.",
         "operationId": "enrich_book",
         "parameters": [
           {

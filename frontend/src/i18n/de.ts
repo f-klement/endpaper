@@ -1232,6 +1232,7 @@ export const de: Messages = {
   "providers.name.oenb": "Österreichische Nationalbibliothek",
   "providers.name.nlg": "Griechische Nationalbibliothek",
   "providers.name.nkp": "Tschechische Nationalbibliothek",
+  "providers.name.bne": "Spanische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

@@ -636,7 +636,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks seven catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks eight catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -647,11 +647,12 @@ nothing overwritten, so a page count from one and a subject heading from the oth
 the same book.
 
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
-**Czech National Library**, then the **National Library of Greece**, then the **Austrian
-National Library**, then **Google Books**. Phase two stops at the first hit, so it is
-ordered by how often a source answers a book phase one missed: of 278 such ISBNs in 500,
-Open Library answers 82, the NKP 42, the NLG 34 and the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it is
-here rather than in phase one; Google is the only one with a key, a quota and a bill
+**Czech National Library**, then the **Spanish National Library**, then the **National
+Library of Greece**, then the **Austrian National Library**, then **Google Books**. Phase
+two stops at the first hit, so it is ordered by how often a source answers a book phase one
+missed: of 278 such ISBNs in 500, Open Library answers 82, the NKP 42, the BNE 40, the NLG
+34 and the ÖNB 1. Open Library is the broadest source and much the slowest, which is why it
+is here rather than in phase one; Google is the only one with a key, a quota and a bill
 attached, and an ordinary lookup therefore spends no quota at all.
 
 **A national catalogue is never in phase one**, however well it does on the whole sample.
@@ -665,8 +666,13 @@ for.
 registration group, `978-3` for German language publishing, `978-960` and `978-618` for
 Greek, and a catalogue whose collecting remit is one of those is skipped for a book from
 another. So a German library stops paying a round trip to Athens on every scan the German
-pair misses. Measured over the same 500 ISBNs: **1.396s per lookup becoming 1.279s**, and
-**753 phase two requests becoming 518**, for the same 377 books.
+pair misses. Measured over the same 500 ISBNs: **1.435s per lookup becoming 1.336s**, and
+**872 phase two requests becoming 673**, for the same 395 books.
+
+**The Spanish National Library declares no remit**, unlike the two above it, and that is a
+measurement rather than an omission: it alone answers four books outside `978-84`, one
+Portuguese, one Argentine and two Uruguayan. A remit would stop it being asked about them.
+So it is the one national catalogue in phase two that every lookup can reach.
 
 **No book is lost to it, and that is a measured bound rather than an intention.** A
 catalogue may carry a remit only if there is no book it alone answers outside that remit,
@@ -698,11 +704,11 @@ the registration groups it collects and no others. The bound on that is zero boo
 sentence above holds in practice as well as in principle.
 
 **What the chain covers without a Google Books key, which is what a stock install runs.**
-Six of the seven are free; Google Books needs a key you supply. Measured over 500 domestic
-ISBNs across ten countries, re-run 2026-08-31, the six free sources answer **377 and miss
-123**, and outside German language publishing they miss **119 of 400**. The same books
-under the previous release answered 300: the two national catalogues added since, the NLG
-and the NKP, account for part of that and a fix to how a qualified `020` is read accounts
+Seven of the eight are free; Google Books needs a key you supply. Measured over 500
+domestic ISBNs across ten countries, the seven free sources answer **395 and miss 105**,
+and outside German language publishing they miss **101 of 400**. The same books under an
+earlier release answered 300: the three national catalogues added since, the NLG, the NKP
+and the BNE, account for part of that and a fix to how a qualified `020` is read accounts
 for the rest, 51 records that three sources already held and this app was refusing. So a statement that this chain covers a given country is
 still a statement about a keyed install: an earlier survey put Italy at 36% missed keyless
 against 0% with a key, and Greece at 86% against 54%, and the Greek half of that has since
@@ -735,7 +741,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the seven sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the eight sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the

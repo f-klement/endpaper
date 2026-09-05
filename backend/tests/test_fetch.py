@@ -361,8 +361,8 @@ class TestTheCapIsTheWholePoint:
         """The header is half the fix, and it is the half a reader cannot see.
 
         `aiter_raw` alone would leave every honest body arriving gzipped and
-        unparseable. Measured live, all nine catalogues answer 200 under
-        `identity`; four of them gzip when it is not sent. The names and the
+        unparseable. Measured live, all ten catalogues answer 200 under
+        `identity`; five of them gzip when it is not sent. The names and the
         byte counts are in `fetch._IDENTITY`, which is where they belong:
         restating them here is what left this sentence saying six and three
         after a seventh source was added, then again at the eighth, and again

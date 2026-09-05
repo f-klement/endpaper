@@ -1898,7 +1898,7 @@ class TestAnAddressPerMember:
 
 @pytest.mark.usefixtures("restore_schema")
 class TestTheSeededCatalogueTargetsMatchTheCode:
-    """The nine rows the migration writes are the nine constants the code reads.
+    """The ten rows the migrations write are the ten constants the code reads.
 
     **The migration writes literals rather than importing `targets.SEEDED`**,
     which is the rule `c1f8a7e3d240` states: a migration describes the data as it

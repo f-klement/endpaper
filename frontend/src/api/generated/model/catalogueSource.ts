@@ -18,10 +18,12 @@
  *
  * **Not every source answers every question**, and the split is real rather
  * than incidental. BNF and LOC are title search only, because neither was
- * worth an ISBN request. NKP is the other way round, **lookup only**, and for
- * a reason that is the server's rather than ours: it renders one populated
- * record per response whatever page size is asked for, so a search for ten
- * candidates would be ten requests. See `sources.LOOKUP_SOURCES` and
+ * worth an ISBN request. NKP and BNE are the other way round, **lookup only**,
+ * and for two different reasons. The NKP's is the server's: it renders one
+ * populated record per response whatever page size is asked for, so a search
+ * for ten candidates would be ten requests. The BNE's is ours: its search
+ * works and nobody has measured what it would find, so it holds the
+ * conservative default. See `sources.LOOKUP_SOURCES` and
  * `SEARCH_SOURCES`, which is why those are two sets and not one.
  */
 export type CatalogueSource =
@@ -37,4 +39,5 @@ export const CatalogueSource = {
   nkp: "nkp",
   bnf: "bnf",
   loc: "loc",
+  bne: "bne",
 } as const;
