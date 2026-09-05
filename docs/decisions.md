@@ -9458,3 +9458,133 @@ supplies, so there is no host an attacker gets to choose and nothing an allowlis
 refuse. **That property lives in the callers, not here**, and the day a `Target` is built
 from stored configuration or from a request body, this module needs the allowlist
 `covers.is_fetchable` already is for the other direction.
+
+## UNIMARC is read from the Library of Congress crosswalk, and not until a source sends one
+
+Three tickets treated UNIMARC as a mapping this project would have to invent, which is what
+made the Romance and Mediterranean national libraries look expensive. It has been written
+already, and the question was which of the existing answers is usable here.
+
+**USEMARCON is refused, on its licence and on its contents, and either alone is enough.**
+
+Its README says "USEMARCON is provided under a fairly liberal license". The `LICENSE` file
+it points at is a **modified GPL-2.0** under the title "USEMARCON PLUS SOFTWARE LICENCE
+AGREEMENT", copyright the British Library and USEMARCON Consortium, 2001. Modified rather
+than reproduced: it is numbered 0 to 8, where GPL-2.0 runs to 12; GPL-2.0's sections 7 to 10
+are absent, its warranty sections 11 and 12 are renumbered 7 and 8, and its section 2(b),
+the clause that is GPL's copyleft, does not appear anywhere in the file. Neither the Free
+Software Foundation nor the words "General Public License" are named in it. GitHub's licence
+detector reports `NOASSERTION`.
+
+**That makes it worse to depend on rather than better.** What survives the edit is section
+2's whole-work clause, "the distribution of the whole must be on the terms of this Licence",
+so it is still copyleft; what does not survive is any way to reason about it. A real GPL-2.0
+has thirty years of compatibility analysis behind it, and a bespoke copyleft licence that
+merely resembles one has none. Endpaper is Apache-2.0. **A README is not a licence, and this
+is the case that shows why**: the sentence everybody quotes and the file it points at say
+different things.
+
+Separately, the repository ships one ruleset, `uni2uk`, and it converts UNIMARC to
+**UKMARC**, a format the British Library retired in favour of MARC21. There is no UNIMARC to
+MARC21 ruleset in it at all. So even had the licence permitted taking the rules, the rules
+for this conversion are not there.
+
+**Linking the tool instead is refused on the licence first and the cost second.** The
+tempting reading is that running a separate binary escapes copyleft, and the licence does say
+"activities other than copying, distribution and modification are not covered". Running it is
+indeed outside that scope. **Shipping it is not**: this project publishes an image to Docker
+Hub, which is distribution, and section 3 governs distributing "in object code or executable
+form under the terms of Sections 1 and 2 above", which is where the whole-work clause quoted
+above lands. So linking is the strongest form of the copyleft question here rather than a way
+around it.
+
+The cost is a second refusal rather than the only one, and the distinction matters: a cost
+argument is overturned the day somebody finds a smaller build, and a licence blocker is not.
+`docker/build-yaz.sh` already shows what one C library costs this image, and the Dockerfile
+drops pip and setuptools specifically to shrink the scan surface, so a second C dependency to
+parse records is a poor trade against implementing a table. And it would run the same absent
+ruleset, so there is nothing to run.
+
+**The Library of Congress crosswalk is the specification.** UNIMARC to MARC 21 Conversion
+Specifications, version 3.0, August 2001, from the Network Development and MARC Standards
+Office: six documents giving field, indicator and subfield level mappings with processing
+notes, thirteen procedures and five tables. It is field by field rather than approximate:
+UNIMARC 210 `$c` becomes MARC21 260 `$b` and `$d` becomes `$c`, which is exactly what
+`_marc_publisher` and `_marc_year` read; UNIMARC relator `070` becomes `aut`, which is
+exactly what `_marc_author_entries` tests for.
+
+It states its own limits, and they are quoted rather than summarised: "Although updated in
+2001 for UNIMARC users, resources were not available for exhaustive review. Some UNIMARC or
+MARC 21 elements may be missing from this specification." Its UNIMARC side is the UNIMARC
+Manual, Bibliographic Format, 2nd edition, 1994, which is what dates it.
+
+**It is the bibliographic crosswalk only.** Authority records are not in it and stay a
+separate question, which matters because the author identity work will want them and will
+not find them here.
+
+**Thirteen of the sixteen datafield tags this tree reads have a source in it.** The three
+without are `264`, which is RDA and postdates the MARC21 edition the crosswalk targets, and
+which costs nothing because `_marc_publisher` and `_marc_year` read `260` as well; `655`,
+genre, whose UNIMARC counterpart 608 appears nowhere in the document because it postdates
+the 1994 edition; and `689`, the German networks' subject chain, which is not standard
+MARC21 and which no UNIMARC record carries. Both real losses are subject headings, so a
+converted record is thinner and never wrong.
+
+**The shape is element to element, and the tempting shape is wrong.** `metadata._marc_fields`
+produces `dict[str, list[_Subfields]]` and `marc._record` consumes one, so a transformation
+between two such dicts looks like the whole job. It is not: that map is built from
+`datafield` alone and carries **no leader, no control fields and no indicators**. Those are
+load bearing at two different ends, and conflating them is what makes the dict look
+sufficient.
+
+**The leader and the control fields are load bearing on the output side.** Procedure 9
+constructs the MARC21 leader and `008` from UNIMARC's coded fields and is the largest single
+piece of the document, and the carrier door below reads both off the record node.
+
+**The indicators are load bearing on the input side**, which is easy to miss because nothing
+in this tree reads a MARC21 indicator: filing is handled by stripping the delimiters in
+`_marc_text`, a subject's vocabulary comes from `$2`, and every `ind1` and `ind2` in the
+backend is in `marc.py`'s writer. The crosswalk's rules are keyed on the **UNIMARC** record's
+indicators all the same. Procedure 1 sets the MARC21 `100` first indicator from the UNIMARC
+`700` second indicator, which is what says whether the entry element is a forename or a
+surname. Nothing here reads it: `_flip_catalogue_name` guesses the same thing from the comma
+count, and gets a direct order name carrying one comma wrong. A dict built from `datafield`
+cannot express a rule keyed on something it discarded.
+
+**The carrier door is the first thing such a path has to answer**, and it fails open rather
+than closed. `_marc_carrier_is_book` reads the leader and the control fields off the record
+node, by its own docstring, precisely because `_marc_fields` does not carry them. Executed on
+a UNIMARC record with a UNIMARC leader and no `007` or `008`, it returns `True`, where the
+same function correctly returns `False` for a MARC21 online resource. So a dict to dict
+transform would admit every UNIMARC record as a physical book, including the electronic ones,
+silently.
+
+**None of it is built yet, and the reason is a count rather than an estimate.** No source
+this build has answers UNIMARC. `targets.Reader` has seven members and none is UNIMARC,
+`enums.CatalogueSource` has nine and none is, and the Z39.50 seam names the format while
+`Target` refuses that transport outright, so no target carries it. The one catalogue ever
+measured for UNIMARC answered MARC21 labelled MARC21. A reader for a format nothing sends is
+a reader nothing can test. **Establish the format per source and not per country**: the
+assumption that a country implies a format has been wrong three times already in this tree.
+
+**Two more things will bite whoever builds it, and they are today's behaviour rather than
+UNIMARC's.**
+
+* **The ISBN, which is the importer's primary match key.** MARC21 `020 $b` is obsolete, so
+  the crosswalk's processing note for UNIMARC 010 folds the qualification into `$a` in
+  parentheses. `metadata._marc_isbn` parses `9783161484100`, `978-3-16-148410-0` and
+  `9783161484100 :`, and returns nothing for `9783161484100 (pbk.)`. That divergence is
+  already recorded on `marc._record`; what is new is that a UNIMARC path makes it the normal
+  case rather than the occasional one, because `broché` and `relié` are what `$b` holds in
+  the catalogues this would be built for.
+* **Co-authors.** UNIMARC records the role in the tag, 701 for alternate and 702 for
+  secondary intellectual responsibility. The crosswalk maps both to `700` and copies `$4`
+  only where the source had one, so the role the tag carried is dropped with nothing put in
+  its place. `_marc_author_entries` then keeps only the main entry, and the fallback that
+  would have caught the rest does not run because the main entry made the credit line
+  non-empty. That is a defect in the MARC21 reader today and is on the tracker as its own
+  issue, not a UNIMARC one.
+
+**And a licence consequence for whoever writes the tests.** USEMARCON's sample records are
+covered by the licence above, so they cannot become fixtures here. A UNIMARC fixture in this
+repository is hand written.
