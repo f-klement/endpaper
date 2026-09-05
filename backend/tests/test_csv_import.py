@@ -8,9 +8,11 @@ LibraryThing exports tab separated in Latin-1 with every value in brackets, and
 Openreads separates its header words with underscores.
 
 The column-guessing approach is taken from BookWyrm's `importers/importer.py`.
-Two of its properties are load bearing and are tested here directly, because
-losing either is silent: a matched header is removed from the pool, and the
-first matching candidate wins.
+One of its properties is load bearing and is tested here directly, because
+losing it is silent: a matched header is removed from the pool. The other,
+that the first matching candidate wins, is claimed by `csv_import.py` and is
+not what the code does; `TestTheCandidateListDoesNotSetPriority` holds the
+measurement.
 """
 
 import pytest
@@ -160,7 +162,12 @@ class TestColumnGuessing:
         assert mapping["isbn13"] == "ISBN13"
         assert mapping["isbn"] == "ISBN"
 
-    def test_the_first_candidate_wins(self):
+    def test_a_file_listing_exclusive_shelf_before_shelf_takes_the_named_one(self):
+        """Named for what it pins, which is not candidate priority.
+
+        These two headers happen to be listed in candidate order, so this
+        passes whether the candidates or the file decide.
+        """
         mapping = build_mapping(["Title", "Exclusive Shelf", "Shelf"])
         assert mapping["status"] == "Exclusive Shelf"
 
@@ -222,6 +229,7 @@ class TestFieldParsing:
             ("DNF", ReadStatus.DID_NOT_FINISH),
             ("Abandoned", ReadStatus.DID_NOT_FINISH),
             ("abgebrochen", ReadStatus.DID_NOT_FINISH),
+            ("stopped reading", ReadStatus.DID_NOT_FINISH),
             # "finished" is READ and "unfinished" is not a negation of it that
             # any prefix rule would get right, which is why these match exactly.
             ("finished", ReadStatus.READ),
@@ -307,3 +315,380 @@ class TestDelimiterSniffing:
 
     def test_an_ordinary_csv(self):
         assert sniff_delimiter("Title,Author\nDune,Frank Herbert\n") == ","
+
+
+# ── The 2026 audit ────────────────────────────────────────────────────────────
+#
+# Every header row below is quoted from a named artefact with the date it was
+# taken, because a header row is the fact that goes stale. **Every book row is
+# invented**: `backend/tests/` is published, and a real export is somebody's
+# reading history.
+#
+# `xfail(strict=True)` marks what the module does not do today. Strict, so the
+# marker fails the moment the behaviour is fixed and cannot be left behind.
+
+#: Open Library's reading log, `ReadingLogExport.fieldnames` in
+#: `openlibrary/plugins/upstream/account.py` at `acfa38d17f`, committed
+#: 2026-09-01. Taken from the generator rather than a sample.
+OPEN_LIBRARY = b'''Work ID,Title,Authors,First Publish Year,Edition ID,Edition Count,\
+Bookshelf,My Ratings,Ratings Average,Ratings Count,Has Ebook,Subjects,Subject People,\
+Subject Places,Subject Times
+OL1W,The Left Hand of Darkness,Ursula K. Le Guin,1969,OL2M,12,Already Read,5,4.2,900,\
+true,Science fiction,,,
+'''
+
+#: The same export before 2022, from `bookwyrm/tests/data/openlibrary.csv`,
+#: committed 2021-12-14. Work keys only, so there is nothing to import.
+OPEN_LIBRARY_2021 = b"Work Id,Edition Id,Bookshelf\nOL1W,OL2M,Already Read\n"
+
+#: BookWyrm's own account export, from `bookwyrm/tests/data/bookwyrm.csv`,
+#: committed 2024-08-10.
+BOOKWYRM = b'''title,author_text,remote_id,openlibrary_key,inventaire_id,librarything_key,\
+goodreads_key,bnf_id,viaf,wikidata,asin,aasin,isfdb,isbn_10,isbn_13,oclc_number,start_date,\
+finish_date,stopped_date,rating,review_name,review_cw,review_content,review_published,\
+shelf,shelf_name,shelf_date
+Solaris,Stanislaw Lem,https://example.test/book/1,,,,,,,,,,,0156027607,9780156027601,,\
+2024-01-02,2024-02-03,,4,On Solaris,,An ocean that thinks.,2024-02-04,read,Read,2024-02-03
+'''
+
+#: Libib's bulk import template, from `support.libib.com/libib/website/add-items.html`,
+#: read 2026-09-05. UNVERIFIED that Libib's export uses these same names: the
+#: vendor's exports page names `creators` and `copies` in prose, which is this
+#: vocabulary, but no real export file was obtained.
+LIBIB_TEMPLATE = b'''added,creators,began_date,completed_date,copies,description,group,\
+upc_isbn10,ean_isbn13,ddc,lcc,lccn,oclc,lexile,length_of,notes,price,publish_date,\
+publisher,rating,review,review_date,status,tags,title
+2026-01-05,Ursula K. Le Guin,,2026-02-06,1,,,0441478123,9780441478125,,,,,,304,,,1974,\
+Harper,4,,,Completed,sci-fi,The Dispossessed
+'''
+
+#: This app's own CSV export. The header is written by the `/export` route in
+#: `backend/routers/books.py` and pinned by
+#: `tests/routers/test_books.py::TestExport`, so a drift fails there, not here.
+ENDPAPER_OWN = b'''Title,Author,ISBN,Publisher,Year,Description,Tags,My Status,Date Added,\
+Added By,Format,Condition,Location,Collection,Purchase Price,Purchase Currency,\
+Purchased On,Purchased From
+Solaris,Stanislaw Lem,9780156027601,Harcourt,1970,An ocean that thinks.,sci-fi,read,\
+2026-01-05,ada,paperback,good,Shelf 2,,12.00,EUR,2026-01-05,a shop
+'''
+
+#: LibraryThing's column order, from `bookwyrm/tests/data/librarything.tsv`,
+#: committed 2021-12-28, and confirmed unchanged by the column indices in
+#: `vandinem/tsv-to-csv`, pushed 2024-01-24. `Length` is a physical dimension
+#: and stands before `Page Count`, which is the point of this fixture.
+LIBRARYTHING_DIMENSIONS = (
+    b"Title\tLength\tPage Count\n" b"A Winter in Kaliningrad\t5.12 inches\t471\n"
+)
+
+#: A file that is UTF-8 apart from one MARC-8 byte in a column nothing maps.
+#: This is the real shape of a LibraryThing export: measured on the 2021 file,
+#: one line of five failed UTF-8, at `Cort\xe2azar` in `Subjects`.
+MIXED_ENCODING = (
+    b"Title\tSubjects\n"
+    + "Ein Winter in Königsberg\t".encode()
+    + b"Bl\xe2umer, Ines"
+    + b"\n"
+)
+
+
+class TestTheCandidateListDoesNotSetPriority:
+    """`build_mapping` iterates the headers, so the file's column order decides.
+
+    The module docstring and two inline comments in `csv_import.py` say the
+    order the candidates are written decides. It does not, and the Goodreads
+    case they cite is safe for another reason: `bookshelves` is not in the
+    status candidates at all.
+    """
+
+    def test_the_goodreads_case_still_works(self):
+        """Which is why nothing has noticed. Kept as the control."""
+        assert build_mapping(["Title", "Bookshelves", "Exclusive Shelf"])["status"] == (
+            "Exclusive Shelf"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="Header order decides, not candidate order. Returns 'Shelf'.",
+    )
+    def test_the_first_written_candidate_wins_whatever_order_the_file_uses(self):
+        assert build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == (
+            "Exclusive Shelf"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`Length` precedes `Page Count` in a LibraryThing export and wins.",
+    )
+    def test_a_page_count_beats_a_column_that_holds_a_shelf_dimension(self):
+        assert build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="Reads `5.12 inches` as 5 pages. The real 2021 export fails the same way.",
+    )
+    def test_a_librarything_row_keeps_its_page_count(self):
+        [row] = parse(LIBRARYTHING_DIMENSIONS).rows
+        assert row.pages == 471
+
+
+class TestOneStrayByteDecidesTheEncodingOfTheWholeFile:
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="One MARC-8 byte in an unmapped column sends the file to cp1252.",
+    )
+    def test_an_accent_survives_a_bad_byte_in_a_column_nothing_reads(self):
+        [row] = parse(MIXED_ENCODING).rows
+        assert row.title == "Ein Winter in Königsberg"
+
+
+class TestEndpapersOwnExportRoundTrips:
+    def test_the_columns_that_do_come_back(self):
+        [row] = parse(ENDPAPER_OWN).rows
+        assert row.title == "Solaris"
+        assert row.author == "Stanislaw Lem"
+        assert row.isbn == "9780156027601"
+        assert row.year == 1970
+        assert row.format is BookFormat.PAPERBACK
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="The export writes `My Status`, which is not a status candidate.",
+    )
+    def test_a_reading_status_survives_an_export_and_an_import(self):
+        [row] = parse(ENDPAPER_OWN).rows
+        assert row.status is ReadStatus.READ
+
+
+class TestOpenLibraryReadingLog:
+    def test_the_columns_that_match(self):
+        [row] = parse(OPEN_LIBRARY).rows
+        assert row.title == "The Left Hand of Darkness"
+        assert row.author == "Ursula K. Le Guin"
+        assert row.status is ReadStatus.READ
+
+    def test_every_shelf_the_reading_log_can_write_is_recognised(self):
+        """Completeness for this service, not the vocabulary itself.
+
+        `bookshelf_map` in the generator has exactly these four values, so an
+        unrecognised one here is a shelf that imports with no status at all.
+        What each word means is `test_status_vocabularies`' job.
+        """
+        shelves = ["Want to Read", "Currently Reading", "Already Read", "Stopped Reading"]
+        assert all(match_status(shelf) is not None for shelf in shelves)
+
+    def test_the_export_carries_no_isbn_to_match_on(self):
+        """A property of the export, recorded so nobody looks for the bug.
+
+        Open Library exports work and edition keys, so a reading log import
+        matches by title and author or not at all.
+        """
+        assert parse(OPEN_LIBRARY).mapping["isbn"] is None
+        assert parse(OPEN_LIBRARY).mapping["isbn13"] is None
+
+    def test_the_2021_export_is_refused_rather_than_imported_empty(self):
+        with pytest.raises(ImportError_) as error:
+            parse(OPEN_LIBRARY_2021)
+        assert "Work Id" in str(error.value)
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="The column is `My Ratings`; the candidate is `my rating`.",
+    )
+    def test_the_members_own_rating_is_read(self):
+        [row] = parse(OPEN_LIBRARY).rows
+        assert row.rating == 5
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="Header order decides, so a bare `Rating` column wins.",
+    )
+    def test_a_crowd_rating_never_wins_over_the_members_own(self):
+        """The hazard is finding 1 again, not a candidate name.
+
+        Matching is exact after normalising, so no `ratings` candidate could
+        ever claim `Ratings Average`. What can put somebody else's number in
+        this field is a file that lists a bare `Rating` column before the
+        member's own, which is what this asserts against.
+        """
+        assert build_mapping(["Title", "Rating", "My Rating"])["rating"] == "My Rating"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`First Publish Year` is not a year candidate.",
+    )
+    def test_the_publication_year_is_read(self):
+        [row] = parse(OPEN_LIBRARY).rows
+        assert row.year == 1969
+
+
+class TestBookWyrmExport:
+    def test_the_columns_that_match(self):
+        [row] = parse(BOOKWYRM).rows
+        assert row.title == "Solaris"
+        assert row.author == "Stanislaw Lem"
+        assert row.isbn == "9780156027601"
+        assert row.status is ReadStatus.READ
+        assert row.rating == 4
+        assert row.date_read is not None and row.date_read.month == 2
+
+    def test_every_bookwyrm_shelf_is_recognised(self):
+        """Completeness for this service. The vocabulary itself is tested once."""
+        shelves = ["to-read", "currently-reading", "read", "stopped-reading"]
+        assert all(match_status(shelf) is not None for shelf in shelves)
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`review_content` is not one of the notes candidates.",
+    )
+    def test_the_review_becomes_the_note(self):
+        [row] = parse(BOOKWYRM).rows
+        assert row.notes == "An ocean that thinks."
+
+
+class TestLibibsCurrentVocabulary:
+    """Libib's own template, and the three columns of it that matter most.
+
+    The `LIBIB` fixture above uses `creator`, `isbn` and `ean`. No Libib
+    artefact found uses those spellings: the vendor's current template and a
+    2024 third party template both say `creators`, `upc_isbn10` and
+    `ean_isbn13`, and a real 2016 export said `authors`, `isbn10`, `isbn13`.
+    """
+
+    def test_the_columns_that_match(self):
+        [row] = parse(LIBIB_TEMPLATE).rows
+        assert row.title == "The Dispossessed"
+        assert row.status is ReadStatus.READ
+        assert row.rating == 4
+        assert row.publisher == "Harper"
+        assert row.year == 1974
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="The column is `creators`, plural.",
+    )
+    def test_the_author_is_read(self):
+        [row] = parse(LIBIB_TEMPLATE).rows
+        assert row.author == "Ursula K. Le Guin"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`upc_isbn10` and `ean_isbn13` are not candidates.",
+    )
+    def test_the_isbn_is_read(self):
+        """Without this and the author, a Libib row is a bare title."""
+        [row] = parse(LIBIB_TEMPLATE).rows
+        assert row.isbn == "9780441478125"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`completed_date` is not a date candidate.",
+    )
+    def test_the_completed_date_is_the_date_read(self):
+        [row] = parse(LIBIB_TEMPLATE).rows
+        assert row.date_read is not None and row.date_read.year == 2026
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`length_of` is not a pages candidate.",
+    )
+    def test_the_page_count_is_read(self):
+        [row] = parse(LIBIB_TEMPLATE).rows
+        assert row.pages == 304
+
+
+class TestOpenreadsGaps:
+    """From `bookwyrm/tests/data/openreads-csv-example.csv`, committed 2025-03-31."""
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`planned` is not in the want to read list.",
+    )
+    def test_planned_is_a_book_somebody_wants_to_read(self):
+        assert match_status("planned") is ReadStatus.WANT_TO_READ
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`book_format` is not a format candidate.",
+    )
+    def test_the_book_format_column_is_found(self):
+        assert build_mapping(["title", "book_format"])["format"] == "book_format"
+
+
+#: Amazon's Kindle document listing, from
+#: `Kindle.KindleDocs/datasets/Kindle.KindleDocs.DocumentMetadata/`. Header taken
+#: from a real 2022 export a member published; **no 2026 export was obtained**,
+#: so treat the column names as of that date and not as current.
+KINDLE_DOCUMENTS = b'''DocumentId,Title,DocumentProvider,Filename,DocumentOriginalType,\
+DocumentSizeInBytes,DocumentTypeAndConvertionCompletionStatus,HasBeenDeleted,\
+EntryCreationDate
+AAAA,Solaris,Stanislaw Lem,solaris.azw3,application/x-mobipocket-ebook,100,\
+documentType = document,true,2019-01-01
+BBBB,Roadside Picnic,Arkady Strugatsky,picnic.azw3,application/x-mobipocket-ebook,100,\
+documentType = document,false,2019-01-02
+'''
+
+
+class TestTheCloudExports:
+    """What #197's two candidates actually look like when handed to `parse`."""
+
+    def test_the_kindle_listing_gives_a_title_and_nothing_else(self):
+        parsed = parse(KINDLE_DOCUMENTS)
+        assert parsed.mapping["title"] == "Title"
+        assert [field for field, header in parsed.mapping.items() if header] == ["title"]
+
+    def test_the_kindle_listing_carries_no_identifier_to_match_on(self):
+        """No ASIN and no ISBN. The ASIN is in the reading session log instead."""
+        assert all(row.isbn is None for row in parse(KINDLE_DOCUMENTS).rows)
+
+    def test_a_document_amazon_marks_deleted_arrives_beside_the_rest(self):
+        """The finding, and it is not a name that fixes it.
+
+        The fixture holds one row with `HasBeenDeleted` true and one with it
+        false, and both come back. The module has one row filter, "no title, so
+        skip", and a row level exclusion cannot be expressed as a candidate
+        header name. Asserted on the titles, not on a count, so the flag is
+        load bearing in the test that is named for it.
+
+        Where those rows land matters as much as that they arrive: an import
+        never sets `is_private`, which defaults to false, so a title the member
+        deleted at the source comes back visible to the whole instance.
+        """
+        titles = [row.title for row in parse(KINDLE_DOCUMENTS).rows]
+        assert titles == ["Solaris", "Roadside Picnic"]
+
+    def test_a_json_library_file_is_refused_rather_than_read_as_a_table(self):
+        """Google Play's book list is `Library.json`, so somebody will upload it."""
+        with pytest.raises(ImportError_):
+            parse(b'[{"libraryDoc": {"doc": {"documentType": "Book"}}}]\n')
+
+
+class TestARefusalDoesNotEchoTheFileBack:
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="`headers[:12]` bounds the count, nothing bounds each header's length.",
+    )
+    def test_a_file_that_is_not_a_table_gets_a_short_refusal(self):
+        """A file with no delimiters has one enormous first line, and it is a header.
+
+        Measured: a 100,000 character line produces a 100,108 character message,
+        and `routers/imports.py` makes it the `detail` of a 400.
+        """
+        with pytest.raises(ImportError_) as error:
+            parse(("x" * 100_000 + "\ny\n").encode())
+        assert len(str(error.value)) < 2_000

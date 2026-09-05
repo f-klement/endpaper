@@ -1,9 +1,15 @@
 # Backend test coverage
 
-**5215 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05 and equal to the
-`5215 passed` the gate reported on the same commit.
+**5245 tests**, in 83 files, recounted with `--collect-only` on 2026-09-05.
 
-**The rows below sum to 5182, thirty three short, and the shortfall is deliberate.** Those
+**The headline is no longer equal to the passed count, and the difference is deliberate.** The
+gate reports `5229 passed, 16 xfailed`: sixteen tests are strict `xfail`, each recording a
+defect the CSV importer has today, so each fails on purpose and the run is green. **Collected
+is the number this table sums to; passed is the number the gate prints.** They differ by
+exactly the count of open recorded defects, so if they ever differ by anything else, one of the
+two is wrong.
+
+**The rows below sum to 5212, thirty three short, and the shortfall is deliberate.** Those
 tests live in four files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -59,7 +65,7 @@ why the helper uses regexes.
 | `test_metadata.py` | 408 | **The catalogue chain.** Source ranking, the merge, the cross-reference guards, denoising, the relevance ranking, the search deadline, outcomes, the cache |
 | `test_errors.py` | 38 | Content-negotiated errors, the 500 handler, API-vs-SPA routing |
 | `test_auth_backends.py` | 87 | Local, LDAP and proxy identity sources, and that a directory identity never adopts a test account |
-| `test_csv_import.py` | 60 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
+| `test_csv_import.py` | 90 | **Reading anybody's export.** One real shape per service, and the awkward part of each |
 | `test_schemas.py` | 64 | Request/response contracts and their validation rules |
 | `test_google_books.py` | 41 | Volume mapping, the gap-filling merge, upstream failures, and that `merge_into` takes a `BookMatch` rather than a dictionary, pinned on the signature itself so a third call site inherits the bound |
 | `test_notifications.py` | 129 | **The overdue digest.** Selection and the reminder interval, that a private book never reaches the wire, the signature, redirects refused, that a failure leaves the loan to retry |

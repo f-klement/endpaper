@@ -9662,3 +9662,40 @@ carries the address, so the cost is the probe rather than the plumbing.
 
 **Where it is enforced.** `sources.SEARCH_SOURCES` derives from `Target.answers_search`,
 and that docstring carries this reasoning at the rule's own site.
+
+## OPDS is a discovery route, and the Atom line is not a metadata import route
+
+Established 2026-09-05 by probing every candidate on the ebook providers epic. **The ticket's
+leverage claim was right and its protocol assumption was wrong**, which is a useful shape to
+record: one reader really does reach most of the self hosted world, and what it reaches is not
+metadata.
+
+**The measurement, and it is a census rather than a sample.** Nine candidate applications;
+two serve no OPDS at all; **the Atom serialiser of all seven that do was read, and not one
+emits an identifier of any kind.** OPDS 1.2 provides an element for it and its own example
+shows an ISBN. Every implementation surveyed declines to use it.
+
+**Series is worse than absent, because it arrives in three shapes and none is a field**: prose
+inside a description element in the four servers of one lineage, folded into the book's own
+title string in another, and missing entirely in a third. A reader cannot extract what was
+never structured, and guessing at prose is the enumerating shape this repository refuses.
+
+**The axis is Atom against JSON, not one minor version against another.** These servers declare
+the 1.x Atom catalog namespace; the precise minor version is not established for most of them
+and nothing turns on it. What the evidence splits on is the Atom serialisers, which carry no
+identifier, against OPDS 2.0's manifest, which has a typed place for one.
+
+**The sharpest single result.** One widely deployed server exposes both its OPDS feed and its
+own JSON API **on the same port under the same authentication**, and only the JSON one carries
+the ISBN. For a library behind that server the comparison does not merely fail to favour OPDS:
+it argues for bypassing it.
+
+**So the decision is to scope rather than to abandon.** Build the one reader, use it for
+holdings and discovery, which is what it is good at, and take metadata import from a server's
+own JSON API or from OPDS 2.0 where one is served. **A route that establishes what somebody
+owns is worth having even when it cannot describe what they own**, because the description is
+what this app's catalogue chain is already for.
+
+**The bound on the claim.** This is a census of the candidates named on that ticket, not of
+deployed OPDS at large. A server outside that set may well emit an identifier, and the
+recommendation should be read as being about these applications rather than about the standard.
