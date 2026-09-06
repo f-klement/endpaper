@@ -158,13 +158,19 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     place that can be.** The kind leads: a disc the DNB wrote into a subject
     field is the first thing a full book should lose, and before this it was
     kept ahead of a Library of Congress subject heading because its number
-    happened to be a GND one. A parser can only order the record in front of it, and by the time a
-    list reaches here a merge has concatenated up to seven catalogues, which is
-    every source that builds a `Heading` at all: the
+    happened to be a GND one. A parser can only order the record in front of it,
+    and by the time a list reaches here a merge has concatenated up to seven
+    catalogues, which is every catalogue whose reader builds a `Heading`: the
     leading source's subject headings sit in front of the second catalogue's
     Dewey number and the Library of Congress's call number, which are then the
     first things dropped. Ordering here is what makes "the Dewey number
     survives" true of a book rather than of a record.
+
+    **Catalogues rather than sources, because a catalogue is not the only
+    thing that builds one.** `marc._record` builds headings out of an uploaded
+    file and `routers/imports` hands them straight to this function, so a claim
+    about every *source* was false by one. The count itself is derived rather
+    than restated, by `tests/test_classifications.py`.
     """
     headings: list[ClassificationIn] = []
     for entry in entries:

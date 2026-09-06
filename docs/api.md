@@ -912,17 +912,21 @@ which solves the same problem well: rather than a class per service with a fixed
 column list, each field carries a list of candidate header names matched against
 whatever the file actually has. Two of its properties are load bearing:
 
-* **A matched header is removed from the pool.** Goodreads has both `ISBN` and
-  `ISBN13`; without removal the first field to want an ISBN claims both.
-* **First match wins, in written order.** Goodreads has `Exclusive Shelf` (the
-  status) and `Bookshelves` (free-form tags), and claiming the latter as the
-  status imports an entire library as unread.
+* **The first candidate that is present wins, in written order**, whatever
+  order the file puts its columns in. A LibraryThing export carries `Length`
+  (`5.12 inches`) before `Page Count`, and a file that decided read a 590 page
+  book as 4 pages.
+* **A matched header is removed from the pool**, so two fields cannot claim one
+  column. No name is shared between two fields today, so this decides nothing
+  yet; it is what a name added to two lists would be resolved by.
 
 What is ours rather than theirs: the delimiter and the encoding are sniffed
 instead of declared per service, because a file arrives as an upload with no
-label saying where it came from. LibraryThing exports tab separated in Latin-1
-with every value in square brackets, and asking somebody to know that is asking
-them to debug a CSV.
+label saying where it came from. LibraryThing exports tab separated with every
+value in square brackets and a few bytes that are not UTF-8, and asking
+somebody to know that is asking them to debug a CSV. **Encoding is decided one
+byte at a time**: a byte that is not UTF-8 is read as cp1252 and costs its own
+character, rather than sending the whole file to another encoding.
 
 Headers and values are normalised the same way (lower case, underscores and
 hyphens as spaces), so `publication_year` and `Year Published` need one entry
@@ -1041,9 +1045,9 @@ with guesses writes assertions nobody here can support.
 | POST | `/api/backup/restore?confirm=true` | **admin** | multipart. Replaces everything. **400** without `confirm` |
 
 The CSV export is not a backup and never was: it carries one row per book and
-drops the notes, the quotes, the classifications, the loans, every member's reading status,
-the accounts and every cover file. The archive holds `endpaper.json` (every row of every table,
-including the `book_tags` association, which has no model of its own and is
+drops the notes, the quotes, the classifications, the loans, every other member's reading
+status, the accounts and every cover file. The archive holds `endpaper.json` (every row of
+every table, including the `book_tags` association, which has no model of its own and is
 therefore the one that gets forgotten) plus a `covers/` directory.
 
 JSON rather than a copy of the SQLite file. A file copy taken while the app is

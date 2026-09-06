@@ -6,8 +6,12 @@ column that is not the tag column). Every other service's shape is covered at
 the parser, in `tests/test_csv_import.py`.
 """
 
+import csv
+import dataclasses
+import io
+
 import csv_import
-from enums import ReadStatus
+from enums import BookFormat, ReadStatus
 from models import Book, UserBook
 from tests.helpers import items
 
@@ -689,3 +693,220 @@ class TestUnreadableFile:
         res = upload(client, admin["headers"], f'Title,Author\n"{huge}",X\n'.encode())
 
         assert res.status_code == 400
+
+
+# ── The round trip ────────────────────────────────────────────────────────────
+
+#: Which importer field each export column fills.
+#:
+#: Checked against the live export header rather than a fixture, so a column
+#: renamed in `routers/books.py` fails here rather than drifting quietly.
+_ROUND_TRIPPED: dict[str, str] = {
+    "Title": "title",
+    "Author": "author",
+    "ISBN": "isbn",
+    "Publisher": "publisher",
+    "Year": "year",
+    "Tags": "tags",
+    "My Status": "status",
+    "Format": "format",
+}
+
+#: Export columns the importer does not read, and why each one.
+#:
+#: A reason per column, because "there is no field for this" and "there is a
+#: field and this is not it" are different answers, and only the second is a
+#: defect waiting to happen.
+_NOT_READ_BACK: dict[str, str] = {
+    "Description": "the book's blurb. `notes` is the member's own review, not this",
+    "Date Added": "when this library got the book, not when anybody read it",
+    "Added By": "a username in this deployment, and meaningless in another",
+    "Condition": "no importer field",
+    "Location": "a shelf in this house, and no importer field",
+    "Collection": "no importer field. `docs/decisions.md`: not an import option",
+    "Purchase Price": "no importer field",
+    "Purchase Currency": "no importer field",
+    "Purchased On": "no importer field",
+    "Purchased From": "no importer field",
+}
+
+#: Importer fields the export writes no column for.
+_NOT_EXPORTED: dict[str, str] = {
+    "isbn13": "the export writes one ISBN column, and `isbn` reads it",
+    "rating": "the export carries no rating column",
+    "date_read": "the export carries no date read column",
+    "pages": "the export carries no page count column",
+    "notes": "`docs/api.md`: notes, quotes and loans are not in the CSV",
+}
+
+
+class TestEndpapersOwnExportSurvivesItsOwnImporter:
+    """The join between `GET /api/books/export` and this router.
+
+    Both halves are in this repository, both were tested, and the pair was not,
+    so each was free to be individually correct and jointly lossy. It was: the
+    export wrote `My Status`, no candidate named it, and a library exported and
+    imported back came home unread.
+
+    The three tables above are the half that stops it returning. Every column
+    of the live export is in exactly one of the first two, and every field of
+    `COLUMN_GUESSES` is in exactly one of the first and third, so a column or a
+    field added to either side fails here until somebody says which it is.
+    """
+
+    ISBN = "9780156027601"
+
+    def _library(self, client, headers, make_book) -> dict:
+        """One book with every column of the export filled in."""
+        book = make_book(
+            headers,
+            title="Solaris",
+            author="Stanislaw Lem",
+            isbn=self.ISBN,
+            publisher="Harcourt",
+            year=1970,
+            description="An ocean that thinks.",
+            format="paperback",
+            location="Shelf 2",
+        )
+        collection = client.post(
+            "/api/collections", json={"name": "Ebooks"}, headers=headers
+        ).json()
+        client.patch(
+            f"/api/books/{book['id']}/collection",
+            json={"collection_id": collection["id"]},
+            headers=headers,
+        )
+        for name in ("sci-fi", "translated"):
+            tag = client.post("/api/books/tags", json={"name": name}, headers=headers)
+            client.post(
+                f"/api/books/{book['id']}/tags/{tag.json()['id']}", headers=headers
+            )
+        client.patch(
+            f"/api/books/{book['id']}",
+            json={
+                "condition": "good",
+                "purchase_price_minor": 1200,
+                "purchase_currency": "EUR",
+                "purchased_at": "2026-01-05",
+                "purchase_source": "a shop",
+            },
+            headers=headers,
+        )
+        client.put(
+            f"/api/books/{book['id']}/status", json={"status": "read"}, headers=headers
+        )
+        return book
+
+    def _export(self, client, headers) -> bytes:
+        res = client.get("/api/books/export", headers=headers)
+        assert res.status_code == 200, res.text
+        return res.content
+
+    def test_every_export_column_is_read_back_or_named_as_not_read(
+        self, client, admin, make_book
+    ):
+        make_book(admin["headers"])
+        export = self._export(client, admin["headers"])
+        header = next(csv.reader(io.StringIO(export.decode())))
+
+        assert not set(_ROUND_TRIPPED) & set(_NOT_READ_BACK)
+        assert sorted(header) == sorted(set(_ROUND_TRIPPED) | set(_NOT_READ_BACK))
+
+    def test_the_importer_reads_each_column_into_the_field_named_here(
+        self, client, admin, make_book
+    ):
+        """The pairing, which the partition above does not check.
+
+        That one compares a set of column names against a set of field names,
+        so two rows of `_ROUND_TRIPPED` could swap their fields and stay green.
+        This asks the parser what it actually did with the live header row.
+        """
+        make_book(admin["headers"])
+        export = self._export(client, admin["headers"])
+
+        mapping = csv_import.parse(export).mapping
+
+        assert {header: field for field, header in mapping.items() if header} == (
+            _ROUND_TRIPPED
+        )
+
+    def test_every_importer_field_is_filled_by_the_export_or_named_as_absent(self):
+        filled = list(_ROUND_TRIPPED.values())
+
+        assert sorted(filled) == sorted(set(filled))
+        assert sorted(field for field, _ in csv_import.COLUMN_GUESSES) == sorted(
+            set(filled) | set(_NOT_EXPORTED)
+        )
+
+    def test_a_book_carrying_every_exported_field_comes_back_unchanged(
+        self, client, admin, make_book
+    ):
+        """One assertion over the whole row, so a field that quietly stops
+        arriving cannot hide behind the ones that still do."""
+        self._library(client, admin["headers"], make_book)
+
+        [row] = csv_import.parse(self._export(client, admin["headers"])).rows
+
+        assert dataclasses.replace(row, tags=sorted(row.tags)) == csv_import.ImportRow(
+            title="Solaris",
+            author="Stanislaw Lem",
+            isbn=self.ISBN,
+            status=ReadStatus.READ,
+            rating=None,
+            date_read=None,
+            publisher="Harcourt",
+            year=1970,
+            pages=None,
+            format=BookFormat.PAPERBACK,
+            tags=["sci-fi", "translated"],
+            notes=None,
+        )
+
+    def test_a_title_a_spreadsheet_would_run_comes_back_neutralised(
+        self, client, admin, make_book
+    ):
+        """The one cell the export deliberately does not round trip.
+
+        `_csv_safe` prefixes an apostrophe to anything a spreadsheet would
+        execute, so for these titles the round trip is not an identity and must
+        not become one: an importer that stripped the apostrophe to make this
+        test prettier would hand the formula straight back. Asserted here
+        rather than avoided, because the equality test above uses a title that
+        never reaches the guard.
+        """
+        make_book(admin["headers"], title='=HYPERLINK("http://evil.test","ok")')
+
+        [row] = csv_import.parse(self._export(client, admin["headers"])).rows
+
+        assert row.title == '\'=HYPERLINK("http://evil.test","ok")'
+
+    def test_the_guard_applied_to_its_own_output_does_not_grow_the_cell(
+        self, client, admin, make_book
+    ):
+        """Otherwise a shelf exported and imported often enough grows a margin
+        of apostrophes."""
+        make_book(admin["headers"], title="'=already quoted")
+
+        [row] = csv_import.parse(self._export(client, admin["headers"])).rows
+
+        assert row.title == "'=already quoted"
+
+    def test_a_status_crosses_both_routes_and_lands_on_the_importers_shelf(
+        self, client, admin, member, make_book, db
+    ):
+        """The parser is not the deliverable. Both routes are, end to end."""
+        book = self._library(client, admin["headers"], make_book)
+
+        res = upload(client, member["headers"], self._export(client, admin["headers"]))
+
+        assert res.status_code == 200, res.text
+        mine = (
+            db.query(UserBook)
+            .filter(
+                UserBook.book_id == book["id"],
+                UserBook.user_id == member["user"]["id"],
+            )
+            .one()
+        )
+        assert mine.status == ReadStatus.READ

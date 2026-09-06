@@ -2155,6 +2155,78 @@ class TestTheAuthorsAuthorityIdentifier:
         assert len(_marc_author_identifiers(fields)) == 1
 
 
+class TestWhichAddedEntryWroteTheBook:
+    """What `700 $4` has to say before a name joins the credit line.
+
+    The rule is `metadata._AUTHOR_RELATORS` and the measurement behind it is
+    there too. These pin the three answers it gives, because the interesting one
+    is a refusal: a `700` that states no role is refused even where the credit
+    line would otherwise be one name long, and a reader looking at that record
+    alone sees a co-author being dropped.
+    """
+
+    @staticmethod
+    def _fields(*datafields: str):
+        return _marc_fields(_marc_element("".join(datafields)))
+
+    MAIN = (
+        '<datafield tag="100" ind1="1" ind2=" ">'
+        '<subfield code="a">Ferrante, Elena</subfield></datafield>'
+    )
+
+    @staticmethod
+    def _added(name: str, *relators: str) -> str:
+        roles = "".join(f'<subfield code="4">{value}</subfield>' for value in relators)
+        return (
+            '<datafield tag="700" ind1="1" ind2=" ">'
+            f'<subfield code="a">{name}</subfield>{roles}</datafield>'
+        )
+
+    def test_a_700_stating_no_role_stays_out_of_the_credit_line(self):
+        """The record names the illustrator and the translator in the same
+        field as a co-author, and nothing in it says which is which."""
+        fields = self._fields(
+            self.MAIN,
+            self._added("Goldstein, Ann"),
+            self._added("Rossi, Marco"),
+        )
+
+        assert _marc_authors(fields) == "Elena Ferrante"
+
+    def test_a_record_crediting_nobody_still_names_everybody_it_names(self):
+        """The other half of the same rule: refusing the bare `700` costs a name
+        only where some other field supplied one."""
+        fields = self._fields(self._added("Goldstein, Ann"), self._added("Rossi, Marco"))
+
+        assert _marc_authors(fields) is None
+        assert metadata._marc_credited_names(fields) == "Ann Goldstein, Marco Rossi"
+
+    def test_a_second_relator_naming_an_author_is_read(self):
+        """`$4=edt $4=aut` is an editor who wrote a chapter too. Reading the
+        first `$4` alone dropped them."""
+        fields = self._fields(self.MAIN, self._added("Sokolicek, Alexander", "edt", "aut"))
+
+        assert _marc_authors(fields) == "Elena Ferrante, Alexander Sokolicek"
+
+    def test_a_relator_written_as_a_uri_says_the_same_thing(self):
+        fields = self._fields(
+            self.MAIN,
+            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/aut"),
+        )
+
+        assert _marc_authors(fields) == "Elena Ferrante, Ann Goldstein"
+
+    def test_a_uri_naming_a_translator_is_still_refused(self):
+        """The arm that says the URI is read for what it means rather than
+        refused for how it is spelled."""
+        fields = self._fields(
+            self.MAIN,
+            self._added("Goldstein, Ann", "http://id.loc.gov/vocabulary/relators/trl"),
+        )
+
+        assert _marc_authors(fields) == "Elena Ferrante"
+
+
 class TestPersonName:
     def test_turns_catalogue_order_into_a_readable_name(self):
         assert _flip_catalogue_name("Kane, Sean P.") == "Sean P. Kane"

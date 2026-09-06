@@ -286,7 +286,8 @@ heading is dropped rather than a stored one evicted, and **which one survives is
 order**: `classifications.bounded_headings` sorts by kind and then by scheme before it slices, so a carrier is
 dropped before any subject and a Dewey number outranks a subject
 heading, and that is done there rather than in a parser because by then `_merge` has
-concatenated up to seven catalogues, which is every source that produces one. The order is DDC, LCC, GND, LCSH; the two subject
+concatenated up to seven catalogues, which is every catalogue whose reader produces one. An
+uploaded MARC file produces them too, one record at a time. The order is DDC, LCC, GND, LCSH; the two subject
 vocabularies come last because a record supplies several of each and one classification, and
 GND comes before LCSH because its number is an identifier that outlives its caption where an
 LCSH number is the caption. Re-measured on 2026-08-24, when the subject headings

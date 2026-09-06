@@ -1134,8 +1134,16 @@ def _conflict_detail(message: str, holder: Book, current_user: User) -> str | di
     deliberately sees every row, private ones included, so returning the id
     unconditionally would turn a 409 into a way to confirm that a particular
     member owns a particular book, which is exactly what `is_private` promises
-    it will not do. In that case the message goes back on its own, and it is
-    the same message, so the response does not disclose which case it was.
+    it will not do. In that case the message goes back on its own.
+
+    **What is withheld is the id, and nothing else is.** The two bodies are
+    different shapes, a string against an object, so a caller can tell which
+    case it got. That is not a leak to close: the 409 itself already says this
+    ISBN is held by some row, whatever the body carries, and the only way to
+    stop it saying so is to create the book and break the unique index. So the
+    promise here is the narrow one, and `tests/routers/test_books.py::
+    TestTheDuplicateConflictPointsAtTheBook` reads the body rather than the
+    message, because a test on the message passes under either rule.
     """
     if holder.is_private and holder.added_by_user_id != current_user.id:
         return message

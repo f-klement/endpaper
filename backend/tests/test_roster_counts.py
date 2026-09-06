@@ -20,8 +20,8 @@ six are the roster's own size and two more are equal to each other. Nothing in a
 sentence's shape says which is meant. So "eight sources" in this tree is a
 correct count of the lookup sources, a correct count of the search sources, or a
 stale count of some other subject entirely. Measured over the census below,
-**17** of its occurrences count something that is not the roster, so a scan with
-no classification fails 17 times on its first run and is switched off.
+**18** of its occurrences count something that is not the roster, so a scan with
+no classification fails 18 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -1152,7 +1152,12 @@ OUT_OF_BOUND: frozenset[str] = frozenset({
 CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ("README.md", "{n} catalogues"): [Counts("LOOKUP_SOURCES")],
     ("backend/classifications.py", "{n} catalogues"): [
-        NotTheRoster("the sources that build a Heading, which `_merge` concatenates")
+        NotTheRoster("the catalogues whose reader builds a Heading, which a merge concatenates")
+    ],
+    # The sentence above, quoted as fixture prose: the extraction that reads it
+    # is asked whether it still finds the number once the paragraph is wrapped.
+    ("backend/tests/test_classifications.py", "{n} catalogues"): [
+        NotTheRoster("a fixture sentence for the extraction under test")
     ],
     ("backend/fetch.py", "{n} catalogue"): [Counts("the whole roster")],
     ("backend/targets.py", "{n} catalogues"): [Counts("the whole roster")],

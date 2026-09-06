@@ -10,9 +10,11 @@ import ast
 import copy
 import dataclasses
 import inspect
+import os
 import re
 import warnings
 from enum import StrEnum
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Final, get_args
 
@@ -3222,8 +3224,56 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
             assert parameter.default is inspect.Parameter.empty, name
 
 
-#: The three predicates that answer "is this a digit" for far more than `0` to `9`.
-_DIGIT_PREDICATES: Final = frozenset({"isdigit", "isnumeric", "isdecimal"})
+#: The `str` predicates that answer an alphanumeric question over the whole of
+#: Unicode, where the caller means `0` to `9`, or `0` to `9` and `A` to `Z`.
+#:
+#: **The name used to say "digit" and the family was always wider than that.**
+#: `isalnum` belongs to the same defect and was missing: `isbn.normalise` filters
+#: on `character.isascii() and character.isalnum()`, and the narrowing half is
+#: what makes it agree with `frontend/src/lib/isbn.ts`, whose `[^0-9A-Za-z]` is
+#: not Unicode. Dropping that `isascii()` was reportable by nothing, because the
+#: rule below walked three names and this is the fourth.
+#:
+#: The other eight predicates have their verdict in `_PREDICATES_LEFT_ALONE`, and
+#: `test_every_str_character_class_predicate_has_a_verdict` pins the union of the
+#: two against `dir(str)`. A predicate CPython adds fails that test rather than
+#: falling through the gap this one fell through, and a name deleted from here
+#: fails it too.
+_ALPHANUMERIC_PREDICATES: Final = frozenset(
+    {"isalnum", "isdecimal", "isdigit", "isnumeric"}
+)
+
+#: Every other `str` predicate whose name begins `is`, mapped to the reason this
+#: rule is not about it.
+#:
+#: **A mapping rather than a set, so a name cannot arrive without a reason.** A
+#: comment above a run of names says nothing about which of them it covers, and
+#: the cheapest way to green the verdict test when CPython adds a predicate is one
+#: word in a set. That is how `isalnum` was lost from the rule for as long as it
+#: was: the name went in somewhere plausible and nobody was asked why.
+#:
+#: The call site counts are measured 2026-09-06 over the 74 modules
+#: `_python_sources` returns.
+_PREDICATES_LEFT_ALONE: Final = {
+    "isascii": "the narrowing call this rule demands, so it is the remedy",
+    "isalpha": (
+        "the near miss, out deliberately: 0 call sites, and an alphabetic test "
+        "over Unicode is the ordinary correct thing where a digit test over "
+        "Unicode is almost never what the caller meant"
+    ),
+    "isidentifier": "asks about Python's own grammar, which is Unicode on purpose",
+    "islower": "asks about case, not about which alphabet",
+    "isprintable": (
+        "a different question, and 3 call sites none of which is narrowed, so "
+        "adding it would be a cleanup of live code rather than a guard widening"
+    ),
+    "isspace": (
+        "a different question, and 4 call sites none of which is narrowed, so "
+        "adding it would be a cleanup of live code rather than a guard widening"
+    ),
+    "istitle": "asks about case, not about which alphabet",
+    "isupper": "asks about case, not about which alphabet",
+}
 
 
 def _receiver_key(node: ast.expr) -> str:
@@ -3260,8 +3310,16 @@ def _isascii_receivers(node: ast.AST) -> set[str]:
     }
 
 
-class TestADigitPredicateIsAlwaysNarrowedToAscii:
+class TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii:
     r"""`str.isdigit()` is not a guard for `int()`, and this is the rule that says so.
+
+    **The family is alphanumeric, not digits.** `str.isalnum()` is the same
+    defect one alphabet wider: `isbn.normalise` keeps a character when it is
+    alphanumeric, and without an `isascii()` beside it that keeps characters
+    `frontend/src/lib/isbn.ts` strips, so the two implementations answer
+    different ISBNs for one input. A rule named for digits and walking three
+    names is a rule that cannot see an instance of its own defect class, which is
+    what `_PREDICATES_LEFT_ALONE` and the verdict test below exist to stop.
 
     **Two live defects bought this test, and they failed in opposite
     directions.** `isbn.is_valid_isbn13` gated on `isdigit()` alone. A superscript
@@ -3283,14 +3341,15 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
     and that is the likeliest way to get this wrong rather than an evasion
     somebody has to think of.
 
-    **Scoped to backend modules and not the test tree**, which is where a digit
+    **Scoped to backend modules and not the test tree**, which is where such a
     predicate over committed fixture data is ordinary and carries no external
     input. `_python_sources` already draws that line for four rules above.
 
     **What it does not reach, said because the first version of this docstring
     claimed it did.** It said "every digit predicate in every backend module"
-    while enumerating three `str` methods, and there is a fourth: **`re`'s
-    `\d`**, which is `isdecimal()` rather than `isdigit()`. Measured:
+    while enumerating three `str` methods, and there is a fifth beyond the four
+    now in `_ALPHANUMERIC_PREDICATES`: **`re`'s `\d`**, which is `isdecimal()`
+    rather than `isdigit()`. Measured:
     `re.fullmatch(r"\d{3}", "٣٣٠")` matches and `"²²²"` does not, so it admits
     the quiet half of this defect and refuses the crashing half. There are
     **16** string literals containing `\d` across **five** backend modules,
@@ -3330,7 +3389,7 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
                 if not (
                     isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in _DIGIT_PREDICATES
+                    and node.func.attr in _ALPHANUMERIC_PREDICATES
                 ):
                     continue
                 receiver = _receiver_key(node.func.value)
@@ -3358,8 +3417,20 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
                     found.append(f"{path.name}:{node.lineno} .{node.func.attr}()")
         return found
 
-    def test_no_backend_module_trusts_a_digit_predicate_on_its_own(self):
+    def test_no_backend_module_trusts_an_alphanumeric_predicate_on_its_own(self):
         assert self._offenders() == []
+
+    def test_every_str_character_class_predicate_has_a_verdict(self):
+        """The two sets are read back against the runtime rather than against a
+        memory of what `str` carries. A predicate CPython adds is a gap in this
+        rule until somebody judges it, and a name deleted from
+        `_ALPHANUMERIC_PREDICATES` is the way this rule went quiet about
+        `isalnum` for as long as it did: both fail here rather than passing
+        smaller. The other set is a mapping, so the name that closes this test
+        cannot be added without the reason beside it."""
+        assert {name for name in dir(str) if name.startswith("is")} == (
+            _ALPHANUMERIC_PREDICATES | _PREDICATES_LEFT_ALONE.keys()
+        )
 
     @pytest.mark.parametrize(
         ("shape", "source"),
@@ -3368,6 +3439,7 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
             ("negated, no conjunction", "def f(s):\n    if not s.isdigit():\n        return 0"),
             ("isnumeric", "def f(s):\n    return s.isnumeric()"),
             ("isdecimal", "def f(s):\n    return s.isdecimal()"),
+            ("isalnum", "def f(s):\n    return s.isalnum()"),
             (
                 "isascii on a different receiver",
                 "def f(a, b):\n    return a.isascii() and b.isdigit()",
@@ -3410,7 +3482,11 @@ class TestADigitPredicateIsAlwaysNarrowedToAscii:
                 "a matching subscript receiver",
                 "def f(s):\n    return s[:4].isascii() and s[:4].isdigit()",
             ),
-            ("no digit predicate at all", "def f(s):\n    return s.isascii()"),
+            (
+                "isalnum narrowed on the same receiver",
+                "def f(s):\n    return s.isascii() and s.isalnum()",
+            ),
+            ("no alphanumeric predicate at all", "def f(s):\n    return s.isascii()"),
             (
                 "a walrus narrowed and then reused by name",
                 "def f(t):\n    return (x := t.strip()).isascii() and x.isdigit()",
@@ -3991,18 +4067,120 @@ class TestEveryPythonFileCompilesWithoutAWarning:
             fixture.read_text(encoding="utf-8")
 
 
-#: The Markdown a reader of the mirror opens: the root documents plus `docs/*.md`.
+#: The patterns in `.gitignore`, each with whether it is anchored to the root.
 #:
-#: **`docs/*.md` and not `docs/**/*.md`**, which is the same boundary
-#: `test_roster_counts.scope()` draws and for the same reason: every subdirectory
-#: under `docs/` is stripped from the public mirror.
+#: **This file is the repository's own statement of what is not source**, it is
+#: what `git` itself consults, and it is versioned, so a rule derived from it
+#: moves when the repository does. That is the property a list of directory
+#: names beside a walk cannot have.
 #:
-#: A file declaring itself internal is **not** dropped here, unlike in that
-#: census. An unbalanced fence in `CLAUDE.md` renders the rest of it as one code
-#: block for the next session that opens it, which is the defect either way.
-def _published_markdown() -> list[Path]:
-    repo = BACKEND.parent
-    return sorted(repo.glob("*.md")) + sorted(repo.glob("docs/*.md"))
+#: **Asking `git` would be better and is not available.** Measured 2026-09-06 in
+#: the pod the suites actually run in: no `git` binary, and no `.git`, because
+#: the runner ships a tar that excludes it. A rule calling `git ls-files` there
+#: is a rule that fails or, worse, quietly answers nothing.
+#:
+#: **A pattern this cannot evaluate exactly raises, rather than being
+#: approximated in either direction.** Approximating it wide drops a versioned
+#: file from the walk, which is the defect the walk exists to stop. Approximating
+#: it narrow walks a directory the repository ignores, which is how the publish
+#: tooling's own output came to be read as source. So the refusal is a class and
+#: not a list of forms: anything the two arms below cannot decide, which today
+#: means a negation, a `**`, and a wildcard in an anchored pattern, because that
+#: arm compares text rather than matching.
+def _ignore_patterns(root: Path) -> list[tuple[str, bool]]:
+    ignore_file = root / ".gitignore"
+    assert ignore_file.is_file(), f"no .gitignore at {root}, so the walk has no rule"
+    patterns: list[tuple[str, bool]] = []
+    for line in ignore_file.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        # A pattern with a slash left in it after the markers come off is
+        # anchored to the root, which is git's own rule and the difference
+        # between `backend/data/` meaning that one directory and meaning any
+        # `data` anywhere.
+        anchored = entry.startswith("/")
+        entry = entry.strip("/")
+        anchored = anchored or "/" in entry
+        # The anchored arm compares text rather than matching, so a wildcard
+        # there would read as "never matches" instead of raising. Refused as a
+        # class, by the characters, rather than as two more names beside `!` and
+        # `**`: naming forms one at a time is the shape this whole walk replaced.
+        assert "!" not in entry and "**" not in entry and not (
+            anchored and set(entry) & set("*?[")
+        ), f"unsupported .gitignore form, teach this walk about it: {entry}"
+        patterns.append((entry, anchored))
+    return patterns
+
+
+def _is_ignored(relative: Path, patterns: list[tuple[str, bool]]) -> bool:
+    text = str(relative)
+    return any(
+        (text == pattern or text.startswith(f"{pattern}/"))
+        if anchored
+        else any(fnmatch(part, pattern) for part in relative.parts)
+        for pattern, anchored in patterns
+    )
+
+
+#: Every Markdown file this repository versions.
+#:
+#: **An exclusion, because the inclusion it replaces went stale.** This globbed
+#: the repository root and `docs/*.md`, which reached **14** of the **18** files
+#: the publish gate publishes: measured 2026-09-06, `conformance/README.md` and
+#: three files under the two test trees sat outside it, and a document added in a
+#: directory nobody had thought of would have sat outside it too. A walk cannot
+#: be kept in step with a tree by remembering to edit it.
+#:
+#: **Then it went stale a second way, and a name list is what did it.** The
+#: replacement pruned a leading dot plus two names, which does not reach the
+#: publish tooling's output directory. Measured 2026-09-06 on a checkout where
+#: the gate had been run: **36** published files rather than 18, the extra 18
+#: being the first 18 one directory down, walked as though a build output were
+#: source. Adding that name would have been the third arm of the same list.
+#:
+#: **So the rule is what the repository versions**: not hidden, and not ignored.
+#: The gate exports a committed ref, so an ignored file cannot be published by
+#: construction, and the build output, the dependency trees, the caches, the
+#: wave plan and the wave's working notes all fall out at once. The leading dot
+#: stays beside it because `.gitignore` does not mention every hidden directory:
+#: `.claude/` is not in it and carries a worktree per agent.
+#:
+#: **A wave's own drafts leave the walk with it, and that is the trade taken.**
+#: An earlier version argued for keeping them, on the ground that a draft is what
+#: a fold reads. Giving them up is safe because a fold's destinations are
+#: versioned and still read here, so the fence that reaches a reader is still
+#: counted; what is lost is catching it one step earlier, in the draft.
+#:
+#: **Wider than what is published, deliberately.** An unbalanced fence renders
+#: everything after it as one code block for whoever opens the file next, and
+#: that is the defect whether the reader came from the mirror or from this
+#: checkout.
+#:
+#: **Pruned while walking rather than filtered afterwards**, so a directory that
+#: is out of scope is never descended.
+#:
+#: `root` is a parameter so the mechanism can be driven over a fixture tree
+#: rather than only over this one.
+def _markdown_sources(root: Path | None = None) -> list[Path]:
+    root = BACKEND.parent if root is None else root
+    patterns = _ignore_patterns(root)
+    found: list[Path] = []
+    for directory, subdirectories, files in os.walk(root):
+        here = Path(directory)
+        subdirectories[:] = [
+            name
+            for name in subdirectories
+            if not name.startswith(".")
+            and not _is_ignored((here / name).relative_to(root), patterns)
+        ]
+        found += [
+            here / name
+            for name in files
+            if name.endswith(".md")
+            and not _is_ignored((here / name).relative_to(root), patterns)
+        ]
+    return sorted(found)
 
 
 def _fence_lines(text: str) -> list[int]:
@@ -4020,7 +4198,7 @@ def _fence_lines(text: str) -> list[int]:
     return fences
 
 
-class TestEveryPublishedMarkdownFileHasBalancedCodeFences:
+class TestEveryMarkdownFileHasBalancedCodeFences:
     """An odd number of fences renders everything after the last one as code.
 
     Two published registers carried one on 2026-09-03, both left by a previous
@@ -4036,23 +4214,104 @@ class TestEveryPublishedMarkdownFileHasBalancedCodeFences:
     an even count; what it catches is the one a fold leaves behind.
     """
 
-    def test_no_published_markdown_file_has_an_odd_number_of_fences(self) -> None:
-        odd = {
-            str(path.relative_to(BACKEND.parent)): len(_fence_lines(path.read_text(encoding="utf-8")))
-            for path in _published_markdown()
-            if len(_fence_lines(path.read_text(encoding="utf-8"))) % 2
+    def test_no_markdown_file_has_an_odd_number_of_fences(self) -> None:
+        repo = BACKEND.parent
+        counts = {
+            str(path.relative_to(repo)): len(_fence_lines(path.read_text(encoding="utf-8")))
+            for path in _markdown_sources()
         }
-        assert odd == {}, odd
+        odd = {name: n for name, n in counts.items() if n % 2}
+        assert odd == {}, f"{odd}, of {len(counts)} files walked"
 
-    def test_the_walk_reaches_the_registers_a_fold_writes_into(self) -> None:
-        """Anti vacuity, and it names the two files a wave actually edits. A
-        glob that returned nothing would pass the rule above silently, which is
-        the shape this repository calls an instrument that cannot see the
-        failure reporting its absence."""
-        found = {str(p.relative_to(BACKEND.parent)) for p in _published_markdown()}
-        assert "CHANGELOG.md" in found
-        assert "docs/decisions.md" in found
-        assert len(found) > 10, found
+    def test_the_walk_never_narrows_below_the_globs_it_replaced(self) -> None:
+        """Anti vacuity, as a ratchet. A walk that returned nothing would pass
+        the rule above in silence, which is the shape this repository calls an
+        instrument that cannot see the failure reporting its absence, and the
+        way this rule was weakest was a walk narrower than the tree rather than
+        an empty one. So the floor is the two globs this replaced: whatever else
+        changes, the root documents and `docs/*.md` are still read.
+
+        The two registers are named as well because they are the files a fold
+        writes into, which is where the defect that bought this rule came from.
+
+        **The floor is the old globs minus what the repository ignores**, and
+        leaving that out made this test green only while a checkout happened to
+        hold no ignored root document. The wave plan and the technology
+        evaluation beside it are both root Markdown, so they sat inside the old
+        globs and are deliberately outside the walk now: on a checkout carrying
+        either, this failed while nothing was wrong.
+        """
+        repo = BACKEND.parent
+        patterns = _ignore_patterns(repo)
+        walked = {path.relative_to(repo) for path in _markdown_sources()}
+        replaced = {
+            path.relative_to(repo)
+            for path in [*repo.glob("*.md"), *repo.glob("docs/*.md")]
+            if not _is_ignored(path.relative_to(repo), patterns)
+        }
+        assert replaced <= walked, sorted(str(p) for p in replaced - walked)
+        assert Path("CHANGELOG.md") in walked
+        assert Path("docs/decisions.md") in walked
+
+    def test_a_file_the_repository_does_not_version_is_not_walked(
+        self, tmp_path: Path
+    ) -> None:
+        """The gate exports a committed ref, so an ignored file cannot be
+        published and has no business in a rule about published documents.
+
+        The case that bought this is the gate's own output directory. It is a
+        copy of the tree one level down, so walking it reads this rule's own
+        subjects a second time, and once the copy is stale it reads content that
+        no longer exists anywhere. Measured 2026-09-06 on a checkout where the
+        gate had been run: 36 published files rather than 18.
+        """
+        # `notes/` rather than the real name of the wave's scratch directory,
+        # which is on the publish gate's strip list. This file is published, and
+        # a published file may not point at a stripped path: the literal passes
+        # today only because the escape before it sits inside the gate's own
+        # character class, which one reformat would undo.
+        (tmp_path / ".gitignore").write_text(
+            "/public/\nnotes/\nnode_modules/\nscratch.md\n"
+        )
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "real.md").write_text("# real\n")
+        (tmp_path / "public" / "docs").mkdir(parents=True)
+        (tmp_path / "public" / "docs" / "real.md").write_text("# a copy of the above\n")
+        (tmp_path / "notes").mkdir()
+        (tmp_path / "notes" / "note.md").write_text("# a working note\n")
+        (tmp_path / "node_modules" / "left-pad").mkdir(parents=True)
+        (tmp_path / "node_modules" / "left-pad" / "README.md").write_text("# theirs\n")
+        # `docs/scratch.md` is the case the directory prune cannot reach. Every
+        # other file here is refused by pruning a directory, or by a pattern that
+        # is the whole of its own path, so an unanchored match narrowed to whole
+        # text equality lets them all through unchanged: measured, that mutation
+        # was invisible to the entire suite. This one is ignored because an
+        # unanchored pattern matches a name at any depth, which is git's rule and
+        # the only thing the segment walk in `_is_ignored` buys.
+        (tmp_path / "docs" / "scratch.md").write_text("# deeper than the pattern\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"docs/real.md"}
+
+    def test_a_hidden_directory_is_not_walked_even_where_the_ignore_file_is_silent(
+        self, tmp_path: Path
+    ) -> None:
+        """Why the leading dot rule stays beside the ignore rule. `.claude/`
+        carries a worktree per agent and is not in `.gitignore`, so the ignore
+        rule alone would walk every other agent's copy of this tree."""
+        (tmp_path / ".gitignore").write_text("\n")
+        (tmp_path / ".claude" / "worktrees" / "other").mkdir(parents=True)
+        (tmp_path / ".claude" / "worktrees" / "other" / "README.md").write_text("# x\n")
+        (tmp_path / "README.md").write_text("# x\n")
+        walked = {str(path.relative_to(tmp_path)) for path in _markdown_sources(tmp_path)}
+        assert walked == {"README.md"}
+
+    def test_an_ignore_form_this_cannot_honour_is_refused(self, tmp_path: Path) -> None:
+        """Under-excluding walks something extra and says so; over-excluding
+        drops a versioned file in silence. A negation is the form that would do
+        the second, so it raises rather than being approximated."""
+        (tmp_path / ".gitignore").write_text("docs/\n!docs/keep.md\n")
+        with pytest.raises(AssertionError, match="unsupported .gitignore form"):
+            _markdown_sources(tmp_path)
 
     def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
         fixture = tmp_path / "broken.md"

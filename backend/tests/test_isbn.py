@@ -276,8 +276,9 @@ class TestADigitIsNotAlwaysADigit:
       could no longer see a second copy as the same book.
 
     The class returning is stopped by
-    `test_house_rules.py::TestADigitPredicateIsAlwaysNarrowedToAscii`, which
-    requires an `isascii()` beside every digit predicate in every backend module.
+    `test_house_rules.py::TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii`,
+    which requires an `isascii()` beside every alphanumeric predicate in every
+    backend module.
     These pin the behaviour that rule protects.
     """
 

@@ -11,18 +11,23 @@ with a fixed column list, each field carries a list of **candidate header
 names**, matched case-insensitively against whatever the file actually has.
 Two details of theirs are load bearing and are copied deliberately:
 
-* **A matched header is removed from the pool.** Goodreads has both `ISBN` and
-  `ISBN13`; without removal the first field to want an ISBN claims both.
-* **First match wins, in the order the candidates are written.** Goodreads has
-  both `Exclusive Shelf` (the status) and `Bookshelves` (free-form tags), and
-  the status list names the former first for exactly that reason.
+* **The first candidate that is present wins, in the order the candidates are
+  written**, whatever order the file puts its columns in. A LibraryThing export
+  carries `Length` (`5.12 inches`, a shelf dimension) before `Page Count`, so a
+  590 page book imported with 4 pages while the file decided.
+* **A matched header is removed from the pool**, so two fields cannot claim one
+  column. No name is shared between two fields today, so it decides nothing yet;
+  it is what makes a name added to two lists resolve by field order rather than
+  by both reading the same column.
 
 What is ours rather than theirs: the delimiter and encoding are sniffed instead
 of being declared per service, because a file arrives here as an upload with no
 label saying where it came from. LibraryThing exports are tab separated and
-Latin-1, and asking somebody to know that is asking them to debug a CSV.
+UTF-8 with a few bytes that are not, and asking somebody to know that is asking
+them to debug a CSV.
 """
 
+import codecs
 import csv
 import io
 import logging
@@ -73,16 +78,26 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
         "author",
         ("author", "authors", "author text", "primary author", "creator", "by"),
     ),
-    # Before the looser `isbn`, so a file carrying both gives the 13 to the
-    # field that wants a 13.
+    # `ean` belongs to the 13: an EAN printed on a book is its ISBN-13. Which
+    # of the two fields a row ends up using is `parse`'s decision, not this
+    # order's, and it is stated at that site.
     ("isbn13", ("isbn13", "isbn 13", "isbns", "ean")),
     ("isbn", ("isbn", "isbn10", "isbn 10", "isbn/uid", "uid")),
-    # `exclusive shelf` first: Goodreads also has `bookshelves`, which is the
-    # tag list, and claiming that as the status imports everything as unread.
+    # Specific names before generic ones: `shelf` and `collections` are what a
+    # file calls a shelf when it has no status column at all, so a file
+    # carrying both gives this field the one that really is the status.
+    #
+    # `my status` is this app's own export column, and without it Endpaper's
+    # export did not survive Endpaper's importer.
+    #
+    # `bookshelves` is deliberately absent rather than last. It is Goodreads'
+    # free-form shelf list, it is already the first `tags` candidate, and
+    # reading it as the status imports a whole library as unread.
     (
         "status",
         (
             "exclusive shelf",
+            "my status",
             "read status",
             "status",
             "shelf",
@@ -118,7 +133,6 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ),
     ("pages", ("number of pages", "page count", "pages", "length")),
     ("format", ("format", "binding", "edition format", "media")),
-    # After `status`, so Goodreads' `bookshelves` is left for this one.
     ("tags", ("bookshelves", "tags", "genres", "labels")),
     ("notes", ("my review", "review", "private notes", "notes", "comments")),
 )
@@ -221,21 +235,111 @@ class ImportError_(Exception):
     """The file cannot be read as a book list."""
 
 
-def decode(content: bytes) -> str:
-    """Text from bytes, trying the encodings these exports actually use.
+def _stray_bytes_as_cp1252(error: UnicodeError) -> tuple[str, int]:
+    """The error handler `decode` reads a non UTF-8 byte with.
 
-    `utf-8-sig` first because a spreadsheet writes a byte order mark and a
-    plain UTF-8 decode leaves it glued to the first header, so `Title` becomes
-    `﻿Title` and matches nothing. Latin-1 last because it decodes any byte
-    sequence at all, which makes it the one that cannot fail: LibraryThing
-    exports in it, and a mangled character is better than a refused file.
+    `replace` on the inner decode because cp1252 leaves five byte values
+    undefined (0x81, 0x8d, 0x8f, 0x90, 0x9d), and a handler that raised on
+    those would put the whole file back where it started.
+
+    Deleting this and passing `errors="replace"` instead would cost every
+    accented character of a file that really is cp1252, since each of them is
+    one byte that is not UTF-8.
+
+    **It resumes at `error.end`, and one past it eats the next byte.** A 0x81
+    between `Ace` and `Books` comes back as `Ace`, the replacement character,
+    `ooks`: the `B` is consumed here and never decoded, silently and in the
+    middle of a cell. The run count `decode` budgets against cannot see it
+    either, because that count comes from a `replace` decode, which never
+    calls this.
     """
-    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-        try:
-            return content.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return content.decode("latin-1", errors="replace")
+    if not isinstance(error, UnicodeDecodeError):
+        raise error
+    return error.object[error.start : error.end].decode("cp1252", errors="replace"), error.end
+
+
+#: Registered once, at import, because the name is resolved per decode call.
+_STRAY_BYTES: Final = "endpaper.csv_import.stray_bytes"
+
+codecs.register_error(_STRAY_BYTES, _stray_bytes_as_cp1252)
+
+#: How many runs of bytes may fail UTF-8 before the file is read whole.
+#:
+#: Past this the premise is false: this is not a UTF-8 file with a few stray
+#: bytes, it is a file in a single byte encoding, and the whole file question
+#: is the right one to ask about it.
+#:
+#: **It is also what bounds the work, which is the half that bites.** The
+#: handler above is a Python call per run, measured at 1.9 microseconds, so the
+#: bound costs 95 ms and the 5 MB `MAX_UPLOAD_BYTES` allows would otherwise cost
+#: **10.2 seconds** of it, on a route any member can reach three times a minute.
+#: The count is taken before any of it is paid, and taking it is C level
+#: throughout: a file that is valid UTF-8 pays one pass and no Python call at
+#: all, and a file with a few stray bytes pays four more passes plus one call
+#: per run.
+#:
+#: The three figures were measured on one machine, which this file may not
+#: name, so what the bound rests on is the ratio between them rather than any
+#: one of them.
+_STRAY_RUN_BUDGET: Final = 50_000
+
+#: U+FFFD as UTF-8, which is what a file may already carry a lot of.
+#:
+#: Subtracting its count below is exact rather than approximate, and that rests
+#: on three properties of this sequence rather than on the one that is easiest
+#: to state. `0xef` is never a continuation byte, so no run around it can
+#: swallow it; the sequence is valid, neither overlong nor a surrogate, so it
+#: always decodes to the character; and no proper prefix of it equals a proper
+#: suffix, so `bytes.count`, which does not count overlapping matches, counts
+#: every occurrence.
+_REPLACEMENT_AS_UTF8: Final = "�".encode()
+
+
+def decode(content: bytes) -> str:
+    """Text from bytes, deciding per byte where the file is UTF-8 and per file
+    where it is not.
+
+    The byte order mark a spreadsheet writes is stripped here rather than by
+    the `utf-8-sig` codec, because both readings below have to see the same
+    bytes. Left on, it glues itself to the first header, so `Title` becomes
+    `﻿Title` and matches nothing.
+
+    **A stray byte costs its own character and nothing else.** Trying whole
+    encodings in turn let one byte re-encode a library: measured on a real
+    LibraryThing export, one MARC-8 byte at offset 927, in a column nothing
+    maps, sent the file to cp1252 and mangled every accent in it. Such a byte
+    is read as cp1252 on its own instead, which is a single byte encoding, so a
+    file that really is cp1252 comes back right on this path too: every
+    accented byte in it fails UTF-8 alone and is decoded alone.
+
+    **A file that mostly fails is read whole**, past `_STRAY_RUN_BUDGET`, which
+    gives up the valid UTF-8 inside such a file and buys what the budget states.
+    The per byte path gives up the other side of the same coin: a run of cp1252
+    bytes that happens to form a valid UTF-8 sequence is read as that sequence.
+    Both are pinned in `TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile`.
+    """
+    body = content.removeprefix(codecs.BOM_UTF8)
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    # Counted at C speed before anything is paid per byte. `replace` emits one
+    # character per invalid run and one for every U+FFFD the file already
+    # carried, and only the first is work the handler does. The second is
+    # subtracted rather than tolerated: this importer writes that character
+    # itself, so a file that has been through it once would otherwise be voted
+    # into another encoding by its own past, which is this module's own defect
+    # arriving through a second door. Measured against a counting handler over
+    # every byte string of length three or less, 16,843,008 of them: no over or
+    # undercount. An undercount is the direction that would matter, since it is
+    # what would let the work past the budget.
+    runs = body.decode("utf-8", errors="replace").count("�") - body.count(
+        _REPLACEMENT_AS_UTF8
+    )
+    if runs > _STRAY_RUN_BUDGET:
+        return body.decode("cp1252", errors="replace")
+    return body.decode("utf-8", errors=_STRAY_BYTES)
 
 
 def sniff_delimiter(sample: str) -> str:
@@ -265,24 +369,31 @@ def _normalise_term(raw: str) -> str:
 def build_mapping(headers: list[str]) -> dict[str, str | None]:
     """Guess which header holds which field.
 
-    A matched header is removed from the pool, so two fields cannot claim the
-    same column. That is what keeps `ISBN` and `ISBN13` apart on a Goodreads
-    export, and `Exclusive Shelf` apart from `Bookshelves`.
-    """
-    available = list(headers)
-    mapping: dict[str, str | None] = {}
+    **The candidates are what is iterated, and the file's column order decides
+    nothing.** Iterating the headers instead reads a LibraryThing export's
+    `Length` column (`5.12 inches`) as the page count, because it stands before
+    `Page Count` in the file: a 590 page book imports with 4 pages.
 
+    The pool a match is taken out of is a list per name, so two headers spelled
+    the same way are two entries and the first is taken.
+    """
+    # Normalised once here rather than once per candidate: Openreads writes
+    # `publication_year` and Goodreads writes `Year Published`, and a name
+    # separated by an underscore is the same name.
+    available: dict[str, list[str]] = {}
+    for header in headers:
+        available.setdefault(_normalise_term(header), []).append(header)
+
+    mapping: dict[str, str | None] = {}
     for field_name, guesses in COLUMN_GUESSES:
-        # Normalised the same way the values are: Openreads writes
-        # `publication_year` and Goodreads writes `Year Published`, and a name
-        # separated by an underscore is the same name.
-        match = next(
-            (header for header in available if _normalise_term(header) in guesses),
-            None,
-        )
-        if match is not None:
-            available.remove(match)
-        mapping[field_name] = match
+        mapping[field_name] = None
+        for guess in guesses:
+            holders = available.get(guess)
+            if holders:
+                # Removed from the pool, so a name added to two fields' lists
+                # goes to the earlier field rather than to both.
+                mapping[field_name] = holders.pop(0)
+                break
 
     return mapping
 

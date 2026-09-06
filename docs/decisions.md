@@ -7845,9 +7845,9 @@ not match. `dependencies.row_ids` had the crashing shape on a query string.
 **The helper was the obvious fix and is the weaker one.** An `is_ascii_digits()` that four
 modules import is bypassed by anybody writing `.isdigit()` directly, which is what five
 call sites had already done.
-`test_house_rules.py::TestADigitPredicateIsAlwaysNarrowedToAscii` requires an `isascii()`
-call on the **same receiver** in an enclosing `and` at every digit predicate in every
-backend module, which cannot be bypassed by writing the ordinary thing.
+`test_house_rules.py::TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii` requires an
+`isascii()` call on the **same receiver** in an enclosing `and` at every alphanumeric
+predicate in every backend module, which cannot be bypassed by writing the ordinary thing.
 
 ---
 
@@ -9932,3 +9932,208 @@ see: `parse` of `9783161484100` plus a trailing Arabic-Indic five answered
 nothing before it and answers `9783161484100` after, which is what the browser
 has always answered. The point is agreement, not strictness, and the docstring
 says so because the first version of it said the opposite.
+
+## The candidate list sets column priority, and the pool is kept though it is inert
+
+`build_mapping` iterates the candidates and looks each up among the headers. Iterating the
+headers instead, which is what it did, let the file decide: `build_mapping(["Title",
+"Shelf", "Exclusive Shelf"])` and the same two headers reversed gave different answers, and
+a LibraryThing export's `Length` column (`5.12 inches`) stood before `Page Count`, so a 590
+page book imported with 4 pages.
+
+**Why four readers agreed with it.** The rule was stated in the module docstring, in two
+inline comments, in `docs/api.md` and in a test, and every statement of it named the same
+Goodreads case: `Exclusive Shelf` before `Bookshelves`. `bookshelves` is not a status
+candidate at all, so the ordering never decided anything there. The code was defensible and
+the stated reason was wrong, which is the shape this repository already names.
+
+**The pool is the same shape and is kept anyway.** The 13 fields carry 60 candidate strings,
+60 distinct, and matching is exact after normalising, so no header can reach two fields and
+removal cannot change any outcome today. It is what decides the day somebody adds a name to
+a second list: the earlier field takes the column and the later one gets nothing, rather than
+both reading it. `TestAColumnIsClaimedOnce` runs it against a table that does share a name,
+and `TestTheCandidateTableIsWellFormed` recomputes the 60 rather than restating it.
+
+## Encoding is decided per byte where the file is UTF-8, and per file where it is not
+
+`decode` reads the file as UTF-8 and hands each byte that is not UTF-8 to cp1252, through a
+registered error handler. It used to try four encodings in order and take the first that did
+not raise, so one MARC-8 byte at offset 927 of a real LibraryThing export sent the whole
+file to cp1252 and mangled every accent in it.
+
+**Not an encoding guess list, and not `errors="replace"`.** A longer list of encodings is the
+enumerating shape; `replace` would cost every accented character of a file that really is
+cp1252, since each of those is one byte that is not UTF-8. Reading the stray byte as cp1252
+is right for both cases at once, because cp1252 is a single byte encoding.
+
+**The per byte path is bounded, and finding that out cost a review round.** The handler is a
+Python call per failing run, and nothing bounded how many: measured on the control plane
+node, a 5 MB upload of one repeated undefined byte took **10.2 seconds** of CPU against
+0.19 for the same file under the old rule, on a route any member reaches three times a
+minute. So the runs are counted first, by a C level decode, and a file past
+`_STRAY_RUN_BUDGET` is read whole as cp1252. Worst case for the decode is now between 1.31
+and 1.41 seconds, measured on that node by three seats independently, and 1.46 seconds end
+to end through `parse` at both published bounds at once, 20,000 rows and 5.07 MB. That is
+inside the 3.081 second per request figure `docs/security.md` already publishes for this
+route, which is why that file is untouched.
+
+The per call figure the constant states, 1.9 microseconds, is the higher of two
+measurements: a second instrument on the same node read 1.70. The stated figure is the
+conservative one for a bound, and the two derived numbers beside it are derived from it, so
+the band is 1.70 to 1.95 and the bound holds at either end.
+
+**The count subtracts the U+FFFD the file already carried, and that subtraction is the
+second door onto the same defect.** Both critic seats found it separately, which is the
+strongest signal this process produces. `replace` substitutes one character per failing run
+and also passes through every U+FFFD that is legitimately in the file, and this importer
+writes that character itself, so a file that had been through it once could be voted into
+cp1252 by its own past: measured, 50,001 of them plus one stray byte mangled every accent in
+an otherwise valid UTF-8 file. The subtraction is exact rather than approximate, and it
+rests on three properties of `EF BF BD` rather than on the one that is easiest to state:
+`0xef` is never a continuation byte, the sequence is valid and neither overlong nor a
+surrogate, and no proper prefix of it equals a proper suffix. Measured against a counting
+handler over every byte string of length three or less, 16,843,008 of them, and over three
+independent samples of longer ones: no over or undercount. An undercount is the direction
+that would matter, since it is what would let the work past the budget.
+
+**What each half gives up.** Above the budget, the valid UTF-8 inside a file that is mostly
+not UTF-8. Below it, a cp1252 file whose accented bytes happen to form a valid UTF-8
+sequence, which takes a byte in 0xC2..0xF4 followed by one to three in 0x80..0xBF; in cp1252
+that run reads as mojibake before this ever sees it. Both are asserted rather than described,
+in `TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile`.
+
+## The duplicate 409 withholds the id, and does not hide which case it was
+
+`_conflict_detail` returns a bare string when the holder is another member's private book and
+an object carrying `book_id` otherwise, so a caller can tell the two apart by the shape of
+the body. The docstring claimed the opposite and the code was never trying to do it: the 409
+itself says the ISBN is held by some row whatever the body carries, and the only way to stop
+it saying so is to create the book and break the unique index. So the promise is the narrow
+one, the id, and `docs/api.md` has stated it correctly all along.
+
+Tested on the body rather than on the message, over every leaf of it and over the raw text,
+because the message is identical in both cases and a test reading it passes under either
+rule.
+
+## A guard's file set is derived from the publish gate, never listed beside it
+
+The Markdown fence rule walked the repository root and `docs/*.md`. Measured 2026-09-06:
+that reached 14 of the 18 files the gate publishes, and the four it missed were
+`conformance/README.md`, both `COVERAGE.md` files and `frontend/tests/doubles/README.md`.
+Three of them predate the wave that noticed. Nothing failed, because the guard's subject was
+a list a person maintained rather than the tree it was about. It is the same shape as the
+file walk that excluded `.venv` by name and swallowed a tool cache the day CI put one
+beside it.
+
+**The walk is now what the repository versions**: not hidden, and not named by `.gitignore`.
+That is wider than what is published, deliberately, because an unbalanced fence renders the
+rest of a file as one code block for whoever opens it, mirror or not.
+
+**The first replacement was a leading dot plus two names, and it went stale the same way in
+a day.** It does not reach the publish tooling's output directory, which is a copy of the
+whole tree and exists on any checkout where somebody ran the gate before finishing, as the
+working agreement tells them to. Measured 2026-09-06 on such a checkout: **36** published
+files rather than 18, the extra 18 being the first 18 one directory down, and once that copy
+is stale the rules run against content that no longer exists in the tree. `.gitignore` is
+the repository's own statement of what is not source, the gate exports a committed ref so an
+ignored file can never be published, and asking `git` directly is not available: measured in
+the pod the suites run in, there is no `git` binary and no `.git`, because the runner ships
+a tar that excludes it. A form the parser cannot honour, a negation or a `**`, raises rather
+than being approximated, because over excluding drops a versioned file in silence.
+
+**Both directions are asserted, and the second was missing.** Containment fails when the
+walk reads too little; it cannot fail when the walk reads too much, because a superset still
+contains the published set. Reading too much is exactly how the output directory got in.
+
+**An ignored document is listed on the strip list as well, and the two are different
+backstops.** Ignoring one keeps it out of a commit; the strip list keeps it out of a publish,
+and only the second survives somebody adding it with `-f`. One internal evaluation was named
+in `.gitignore` and missing from the list, which both critic seats found separately, and a
+guard now fails on any ignored Markdown document the list does not carry rather than letting
+it surface as a walk that missed a published file.
+
+**The derivation lives in a separate file that the gate strips**, because it reads the gate's
+own script and the mirror does not carry it. What the mirror gets is the rule; what it loses
+is the proof that the rule's set is complete, which is a property of the internal checkout
+rather than of the published tree.
+
+**The two walks decide by different routes, and that is the mechanism.** The rule asks
+`.gitignore`; the derivation asks the gate for its output directory and otherwise drops only
+what is hidden or vendored. They shared one predicate for a round, which made the
+independence cosmetic: measured, one name added to it took a published file out of both sets
+at once and every assertion still passed. Two rules that can disagree are what makes a
+narrowing fail by name.
+
+**Anti vacuity is a cross check, not a second copy of the list.** The gate refuses to publish
+a file carrying the internal declaration, and this tree has several internal documents that
+carry it, so a parse that stopped matching moves those onto the published side and fails by
+name. A parse that matched too much empties the published side and fails the other
+assertion. The opposite direction, that every stripped document declares itself, is
+deliberately not asserted: the derivation reads the working tree where the gate reads a
+committed ref, so that arm would turn the suite red on an untracked working note.
+
+## The ASCII narrowing rule is about alphanumeric predicates, not digits
+
+The constant held three names and the family has four: `str.isalnum()` is the same defect
+one alphabet wider. `isbn.normalise` keeps a character when it is alphanumeric, and the
+`isascii()` beside it is what makes the backend agree with `frontend/src/lib/isbn.ts`, whose
+`[^0-9A-Za-z]` is not Unicode. Measured 2026-09-06: with `isalnum` in the set, dropping that
+`isascii()` fails
+`test_house_rules.py::TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii::test_no_backend_module_trusts_an_alphanumeric_predicate_on_its_own`;
+with the three name set it failed nothing there, which is a guard for a defect class unable
+to see an instance of it.
+
+**Widening cost 0 offenders**, measured over the 74 modules the rule walks.
+
+**The fix is the verdict, not the fourth name.** The other eight `str` predicates are held in
+a mapping from name to the reason each is out of scope, and the union of the two is pinned
+against `dir(str)`. A predicate CPython adds fails a test rather than falling through the
+gap `isalnum` fell through, and it cannot be waved through by adding a word to a set, which
+is how that gap opened. `isalpha` is the near miss and is out on purpose: 0 call sites, and
+an alphabetic test over Unicode is the ordinary correct thing where a digit test over
+Unicode is almost never meant. `isspace` has 4 unnarrowed sites and `isprintable` 3, so
+either would be a cleanup of live code rather than a guard widening.
+
+## A MARC `700` that states no role is not an author
+
+**Asked**: a record with a `100` and `700` fields carrying no `$4` keeps the main entry and
+drops every co-author, because `_marc_author_entries` requires an author relator and
+`_marc_credited_names` runs only where the credit line came back empty. Should a `700` with
+no `$4` at all be an unstated author?
+
+**Answered no, on a measurement.** 624 live records from the five MARC sources on
+2026-09-06, drawn by ISBN from the 500 in
+`tests/fixtures/catalogue_survey_2026_08_31.json`: 28 of 581 `700` fields carry no `$4`, and
+27 of the 28 are one catalogue, the BNE. The 9 distinct records pairing such a field with a
+`100` name an illustrator, a translator or an editor in 7 of them and a co-author in 2,
+which the records say themselves in `245 $c`. Admitting a bare `700` trades a credit line
+that is short for one that is wrong, on those numbers three times out of four.
+
+**What was fixed instead**, both measured on the same sample:
+
+- Every `$4` is read rather than the first. 2 of 581 fields read `$4=edt $4=aut`, an editor
+  who also wrote a chapter, and the first value is the one that is not an author.
+- A relator written as `http://id.loc.gov/vocabulary/relators/aut` says what `aut` says. 24
+  of 1,028 live `100` and `700` fields spell it that way, at the NLG and the OENB. Without
+  this a URI was refused for not being in `_AUTHOR_RELATORS` rather than for what it says,
+  so the rule read as a role test and behaved as a spelling test.
+
+**Refused, with the reason**: reading `$e`, the relator term. It would have recovered exactly
+one field in 581, and the vocabulary is open and in the record's own language, where
+`Verfasser eines Geleitworts`, the author of a foreword, contains the term for the author of
+the book.
+
+**What this does not settle.** The sample is MARC21 from five catalogues. A UNIMARC record
+puts the role in the tag, 701 for a co-author and 702 for a translator or an illustrator,
+and the Library of Congress crosswalk to MARC21 drops that distinction wherever the source
+carried no `$4`. A UNIMARC reader has to read the tag before the crosswalk runs; it cannot
+be recovered from a bare `700`.
+
+## The heading count was already derived, and the sentence around it was wrong
+
+The derivation test the heading count ticket asks for shipped earlier the same day, as
+`tests/test_classifications.py::TestHowManyCataloguescanFeedOneBooksHeadings`. What was
+still stated rather than derived was the sentence's other half: "every source that builds a
+`Heading` at all" is false, because `marc._record` builds them out of an uploaded file and
+`routers/imports` hands them to `bounded_headings` directly. Corrected to catalogues in both
+places that carry the sentence.

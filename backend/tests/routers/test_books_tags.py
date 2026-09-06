@@ -368,7 +368,7 @@ class TestTheTagFilterSurvivesADigitThatIsNotOne:
     A superscript two, `U+00B2`, satisfies the first and raises out of the
     second, so a link with one in it left the route as an unhandled
     `ValueError`. This is the second site of the pair that
-    `test_house_rules.py::TestADigitPredicateIsAlwaysNarrowedToAscii` now stops
+    `test_house_rules.py::TestAnAlphanumericPredicateIsAlwaysNarrowedToAscii` now stops
     coming back, and the one reachable without any body at all.
 
     **The contract that decides the status code is `row_ids`'s own**, stated in

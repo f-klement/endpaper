@@ -200,6 +200,27 @@ byte identical, which is about the schema and was never about this.
 
 ### Fixed
 
+- **The CSV importer's column priority is the candidate list's, not the file's.**
+  `build_mapping` iterated the file's headers, so the same two columns in the other order
+  gave a different answer: a LibraryThing export's `Length` (`5.12 inches`) stood before
+  `Page Count` and a 590 page book imported with 4 pages. The docstring, two comments, the
+  same paragraph in `docs/api.md` and a test all stated the rule the code did not follow.
+- **One byte that is not UTF-8 no longer re-encodes a whole library.** Encoding is decided a
+  byte at a time: the file is read as UTF-8 and a byte that is not is read as cp1252, so a
+  handful of MARC-8 bytes cost their own characters instead of every accent in the file. A
+  file that really is cp1252 still comes back with its accents.
+- **Endpaper's own export survives Endpaper's own importer.** The export writes `My Status`
+  and no candidate named it, so an exported library imported back came home unread.
+- A MARC `700` naming somebody who wrote the book is read where the record states the role
+  in a second `$4` or spells the relator as a URI. An editor who also wrote a chapter,
+  `$4=edt $4=aut`, was dropped from the credit line because only the first `$4` was read.
+- `classifications.bounded_headings` and `docs/data-model.md` claimed the seven catalogues
+  were every source that builds a heading. An uploaded MARC file builds them too.
+- **The rule that keeps a digit test from standing in for an ASCII one covers `isalnum`,**
+  not only the three digit predicates. Its absence made a live fix invisible to the guard
+  written for that exact defect. Every other `str` predicate now carries a recorded reason
+  for being out of scope, and a test pins the two together against `dir(str)`.
+
 - `isbn.normalise` kept any Unicode alphanumeric where the browser's copy of the
   same function kept only `0-9A-Za-z`, so the two disagreed about which strings
   are ISBNs. Given `9783161484100` and a trailing Arabic-Indic five, the browser
@@ -335,7 +356,9 @@ byte identical, which is about the schema and was never about this.
   its own scaffolding, leaving an unclosed fence in each and 42 lines of instructions
   addressed to a main session in the second. Everything below the fence was code on
   GitHub and nothing failed, because no test read a Markdown file for its shape. A house
-  rule now counts the fences in every published Markdown file.
+  rule now counts the fences in every Markdown file the repository versions, and a
+  second guard derives the published set from the publish gate's own strip list and fails
+  when the walk stops covering it.
 - A book catalogue can no longer write a value the database column cannot hold. Refreshing
   a book's metadata wrote nine fields straight from the catalogue's answer with no ceiling
   on eight of them; a value too wide now loses that one field and the refresh keeps

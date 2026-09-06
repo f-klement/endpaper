@@ -4,20 +4,22 @@ The parser exists because somebody arriving here is arriving **from** something,
 and it is as likely to be LibraryThing, StoryGraph or Libib as Goodreads. So
 the cases that matter are one real export shape per service, and the awkward
 parts of each: Goodreads wraps its identifiers in a spreadsheet formula,
-LibraryThing exports tab separated in Latin-1 with every value in brackets, and
-Openreads separates its header words with underscores.
+LibraryThing exports tab separated with every value in brackets and a few bytes
+that are not UTF-8, and Openreads separates its header words with underscores.
 
 The column-guessing approach is taken from BookWyrm's `importers/importer.py`.
-One of its properties is load bearing and is tested here directly, because
-losing it is silent: a matched header is removed from the pool. The other,
-that the first matching candidate wins, is claimed by `csv_import.py` and is
-not what the code does; `TestTheCandidateListDoesNotSetPriority` holds the
-measurement.
+Both of its properties are load bearing and losing either is silent, so both
+are tested against the whole candidate table rather than against examples:
+`TestTheCandidateListSetsPriority` for the order, `TestAColumnIsClaimedOnce`
+for the pool, and `TestTheCandidateTableIsWellFormed` for the two properties
+of the table that decide whether either can work at all.
 """
 
 import pytest
 
+import csv_import
 from csv_import import (
+    COLUMN_GUESSES,
     ImportError_,
     build_mapping,
     decode,
@@ -40,7 +42,7 @@ Number of Pages,Year Published,Date Read,Bookshelves,Exclusive Shelf,My Review
 LIBRARYTHING = (
     "Book Id\tTitle\tPrimary Author\tISBN\tRating\tDate Read\tCollections\tTags\n"
     "1\t[Der Zauberberg]\t[Mann, Thomas]\t[9783596294336]\t4\t[2019-04-02]\t"
-    "[Your library]\t[german, classics]\n"
+    "[Your library]\t[Übersetzung, klassiker]\n"
 ).encode("latin-1")
 
 STORYGRAPH = b'''Title,Authors,ISBN/UID,Format,Read Status,Last Date Read,Star Rating,Tags
@@ -99,8 +101,13 @@ class TestLibraryThing:
         assert parsed.delimiter == "\t"
         assert len(parsed.rows) == 1
 
-    def test_reads_latin_1(self):
-        assert parse(LIBRARYTHING).rows[0].title == "Der Zauberberg"
+    def test_reads_a_cell_whose_bytes_are_not_utf_8(self):
+        """Named for the byte, because that is what decides here.
+
+        The rest of this fixture is ASCII, so the umlaut is the only thing in
+        it that could have been mangled.
+        """
+        assert parse(LIBRARYTHING).rows[0].tags == ["Übersetzung", "klassiker"]
 
     def test_strips_the_brackets_around_every_value(self):
         [row] = parse(LIBRARYTHING).rows
@@ -156,20 +163,16 @@ class TestOtherServices:
 
 
 class TestColumnGuessing:
-    def test_a_matched_header_cannot_be_claimed_twice(self):
-        """Goodreads has ISBN and ISBN13; without removal one field takes both."""
+    def test_the_two_isbn_columns_go_to_the_two_isbn_fields(self):
+        """Goodreads carries both, and each is one field's name and no other's.
+
+        Not the pool: matching is exact after normalising, so `ISBN` cannot
+        reach the 13's candidates whether or not anything is removed.
+        `TestAColumnIsClaimedOnce` is what covers the pool.
+        """
         mapping = build_mapping(["Title", "ISBN", "ISBN13"])
         assert mapping["isbn13"] == "ISBN13"
         assert mapping["isbn"] == "ISBN"
-
-    def test_a_file_listing_exclusive_shelf_before_shelf_takes_the_named_one(self):
-        """Named for what it pins, which is not candidate priority.
-
-        These two headers happen to be listed in candidate order, so this
-        passes whether the candidates or the file decide.
-        """
-        mapping = build_mapping(["Title", "Exclusive Shelf", "Shelf"])
-        assert mapping["status"] == "Exclusive Shelf"
 
     def test_a_column_nothing_wants_is_left_alone(self):
         mapping = build_mapping(["Title", "Owned Copies"])
@@ -180,6 +183,57 @@ class TestColumnGuessing:
 
     def test_matching_ignores_case_and_separators(self):
         assert build_mapping(["TITLE", "date_read"])["date_read"] == "date_read"
+
+
+class TestTheCandidateTableIsWellFormed:
+    """Two properties of `COLUMN_GUESSES` that nothing else can observe.
+
+    Both fail silently in the same way: the name is written, the file has the
+    column, and the field comes back empty with no error anywhere.
+    """
+
+    def test_no_two_fields_name_the_same_column(self):
+        """Which is also why the pool is inert today. See `TestAColumnIsClaimedOnce`."""
+        names = [guess for _, guesses in COLUMN_GUESSES for guess in guesses]
+        assert sorted(names) == sorted(set(names))
+
+    def test_every_candidate_is_written_in_the_form_a_header_is_reduced_to(self):
+        """A candidate spelled `publish_date` can never match anything.
+
+        The table says so at its head and nothing enforced it.
+        """
+        names = [guess for _, guesses in COLUMN_GUESSES for guess in guesses]
+        assert [csv_import._normalise_term(name) for name in names] == names
+
+
+class TestAColumnIsClaimedOnce:
+    """A matched header leaves the pool, so two fields cannot claim it.
+
+    Inert against today's table, which names no column twice, and kept anyway.
+    Both tests here run against a table that does share a name, because a guard
+    nothing exercises is a comment.
+    """
+
+    def test_a_name_shared_by_two_fields_goes_to_the_earlier_one(self, monkeypatch):
+        """The second field gets nothing, rather than reading the same column."""
+        monkeypatch.setattr(
+            csv_import,
+            "COLUMN_GUESSES",
+            (("isbn13", ("ean", "isbn")), ("isbn", ("isbn",))),
+        )
+
+        assert build_mapping(["ISBN"]) == {"isbn13": "ISBN", "isbn": None}
+        assert build_mapping(["EAN", "ISBN"]) == {"isbn13": "EAN", "isbn": "ISBN"}
+
+    def test_a_file_naming_one_column_twice_fills_one_field_from_each(self, monkeypatch):
+        """Two headers spelled the same way are two entries in the pool."""
+        monkeypatch.setattr(
+            csv_import,
+            "COLUMN_GUESSES",
+            (("isbn13", ("isbn",)), ("isbn", ("isbn",))),
+        )
+
+        assert build_mapping(["ISBN", "isbn"]) == {"isbn13": "ISBN", "isbn": "isbn"}
 
 
 class TestOverrides:
@@ -303,8 +357,15 @@ class TestDecoding:
         parsed = parse("﻿Title,Author\nDune,Frank Herbert\n".encode())
         assert parsed.mapping["title"] is not None
 
-    def test_latin_1_never_fails(self):
-        assert decode(bytes(range(256))) is not None
+    def test_no_byte_sequence_at_all_can_refuse_to_decode(self):
+        """Every one of the 256 byte values, so nothing is left to raise.
+
+        Ascending order puts no valid multi-byte sequence in the input: every
+        lead byte is followed by one too high to continue it. So 256 in is 256
+        out, and the length is what makes this stronger than `is not None`,
+        which a decode that swallowed a byte would also satisfy.
+        """
+        assert len(decode(bytes(range(256)))) == 256
 
 
 class TestDelimiterSniffing:
@@ -391,61 +452,137 @@ MIXED_ENCODING = (
 )
 
 
-class TestTheCandidateListDoesNotSetPriority:
-    """`build_mapping` iterates the headers, so the file's column order decides.
+class TestTheCandidateListSetsPriority:
+    """The candidates decide which column wins, and the file's order decides
+    nothing.
 
-    The module docstring and two inline comments in `csv_import.py` say the
-    order the candidates are written decides. It does not, and the Goodreads
-    case they cite is safe for another reason: `bookshelves` is not in the
-    status candidates at all.
+    The whole table is the first test rather than three examples, because the
+    defect this replaces was a rule stated in four places and held by none: it
+    survived three readers and a test that happened to list its two headers in
+    candidate order.
     """
 
-    def test_the_goodreads_case_still_works(self):
-        """Which is why nothing has noticed. Kept as the control."""
-        assert build_mapping(["Title", "Bookshelves", "Exclusive Shelf"])["status"] == (
-            "Exclusive Shelf"
-        )
+    def test_no_field_answers_differently_when_the_file_reverses_its_columns(self):
+        """Every candidate of every field, in the file, both ways round.
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="Header order decides, not candidate order. Returns 'Shelf'.",
-    )
-    def test_the_first_written_candidate_wins_whatever_order_the_file_uses(self):
+        The forwards pass is the control: it agrees under either rule, which is
+        exactly how the defect stayed invisible.
+        """
+        headers = [guess for _, guesses in COLUMN_GUESSES for guess in guesses]
+        first_written = {field: guesses[0] for field, guesses in COLUMN_GUESSES}
+
+        assert build_mapping(headers) == first_written
+        assert build_mapping(list(reversed(headers))) == first_written
+
+    def test_a_named_status_column_beats_a_bare_shelf_listed_before_it(self):
         assert build_mapping(["Title", "Shelf", "Exclusive Shelf"])["status"] == (
             "Exclusive Shelf"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`Length` precedes `Page Count` in a LibraryThing export and wins.",
-    )
     def test_a_page_count_beats_a_column_that_holds_a_shelf_dimension(self):
         assert build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="Reads `5.12 inches` as 5 pages. The real 2021 export fails the same way.",
-    )
     def test_a_librarything_row_keeps_its_page_count(self):
+        """What the defect cost on a real file: 471 pages read as 5."""
         [row] = parse(LIBRARYTHING_DIMENSIONS).rows
         assert row.pages == 471
 
 
-class TestOneStrayByteDecidesTheEncodingOfTheWholeFile:
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="One MARC-8 byte in an unmapped column sends the file to cp1252.",
-    )
+class TestOneStrayByteDoesNotDecideTheEncodingOfTheWholeFile:
+    """Decoding is per byte, so a file is not voted into another encoding.
+
+    The second test is what the old rule did right and this one has to keep
+    doing: a file that really is cp1252 must still come back with its accents,
+    even though every one of them is a byte that is not UTF-8.
+
+    The last is the other side of `_STRAY_RUN_BUDGET`, asserted on what the
+    file comes back as rather than on how long it took, so it says which branch
+    ran without being a timing test.
+    """
+
     def test_an_accent_survives_a_bad_byte_in_a_column_nothing_reads(self):
         [row] = parse(MIXED_ENCODING).rows
         assert row.title == "Ein Winter in Königsberg"
 
+    def test_a_file_that_really_is_cp1252_keeps_its_accents(self):
+        content = "Title,Publisher\nDer Zauberberg,S. Fischer Müller\n".encode("cp1252")
+        [row] = parse(content).rows
+        assert row.publisher == "S. Fischer Müller"
+
+    def test_a_byte_no_encoding_defines_costs_its_own_character_and_no_more(self):
+        """cp1252 leaves 0x81 undefined, and the row either side of it stands."""
+        content = b"Title,Publisher\nDune,Ace\x81Books\n"
+        [row] = parse(content).rows
+        assert row.title == "Dune"
+        assert row.publisher == "Ace�Books"
+
+    def test_a_cp1252_pair_that_is_also_valid_utf_8_is_read_as_the_sequence(self):
+        """The cost of deciding per byte, asserted rather than described.
+
+        `Â£` in cp1252 is 0xC2 0xA3, which is also the UTF-8 for `£`, so the
+        pair is read as one character. It is mojibake in cp1252 before this
+        ever sees it, which is why the trade goes this way.
+
+        The 0x81 is what puts the file on that path at all: without a byte that
+        fails, this pair decodes strictly and the branch under test never runs.
+        """
+        assert decode(b"a\x81b," + "Â£".encode("cp1252")) == "a�b,£"
+
+    def test_a_file_carrying_replacement_characters_is_not_voted_out_by_them(self):
+        """U+FFFD in the file is not a byte that failed, and is not counted.
+
+        This importer writes that character itself, so a file can come back to
+        it carrying thousands, and counting them would send a valid UTF-8 file
+        to cp1252 over nothing: the same defect this class is named for,
+        arriving through a second door.
+        """
+        content = (
+            b"Title\n"
+            + "�".encode() * (csv_import._STRAY_RUN_BUDGET + 1)
+            + b"\x81"
+            + "…".encode()
+            + b"\n"
+        )
+
+        text = decode(content)
+
+        assert text.endswith("…\n")
+        assert text.count("�") == csv_import._STRAY_RUN_BUDGET + 2
+
+    def test_a_file_that_mostly_fails_utf_8_is_read_whole_as_another_encoding(self):
+        """Past the budget the premise is false and the whole file is the question.
+
+        Sized from the budget itself, so raising it cannot leave this passing
+        against the other branch. What it gives up is asserted rather than
+        described: the one valid UTF-8 run in this file is read as cp1252 too.
+        """
+        content = (
+            b"Title\n" + b"caf\xe9 " * (csv_import._STRAY_RUN_BUDGET + 1) + "…".encode()
+        )
+
+        text = decode(content)
+
+        assert text.count("café") == csv_import._STRAY_RUN_BUDGET + 1
+        assert text.endswith("â€¦")
+
+    def test_a_file_just_under_the_budget_keeps_its_valid_utf_8(self):
+        """The same file one run shorter, which is the diagonal of the one above."""
+        content = (
+            b"Title\n" + b"caf\xe9 " * csv_import._STRAY_RUN_BUDGET + "…".encode()
+        )
+
+        text = decode(content)
+
+        assert text.count("café") == csv_import._STRAY_RUN_BUDGET
+        assert text.endswith("…")
+
 
 class TestEndpapersOwnExportRoundTrips:
+    """The parser's half. The join with the live export route, which is what
+    keeps this fixture honest, is
+    `tests/routers/test_imports.py::TestEndpapersOwnExportSurvivesItsOwnImporter`.
+    """
+
     def test_the_columns_that_do_come_back(self):
         [row] = parse(ENDPAPER_OWN).rows
         assert row.title == "Solaris"
@@ -454,14 +591,19 @@ class TestEndpapersOwnExportRoundTrips:
         assert row.year == 1970
         assert row.format is BookFormat.PAPERBACK
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="The export writes `My Status`, which is not a status candidate.",
-    )
     def test_a_reading_status_survives_an_export_and_an_import(self):
         [row] = parse(ENDPAPER_OWN).rows
         assert row.status is ReadStatus.READ
+
+    def test_the_collection_column_is_not_read_as_the_status(self):
+        """`Collection` is one letter from `collections`, a status candidate.
+
+        Asserted against a file with no status column, because in the export
+        itself the question never arises: `My Status` is matched first and no
+        later candidate is consulted, so a fixture based version of this passes
+        whatever `Collection` would have done.
+        """
+        assert build_mapping(["Title", "Collection"])["status"] is None
 
 
 class TestOpenLibraryReadingLog:
@@ -504,11 +646,6 @@ class TestOpenLibraryReadingLog:
         [row] = parse(OPEN_LIBRARY).rows
         assert row.rating == 5
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="Header order decides, so a bare `Rating` column wins.",
-    )
     def test_a_crowd_rating_never_wins_over_the_members_own(self):
         """The hazard is finding 1 again, not a candidate name.
 

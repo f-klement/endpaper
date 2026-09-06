@@ -682,10 +682,10 @@ def _parsed(body: str) -> ElementTree.Element:
 
 # ── MARC21, shared ────────────────────────────────────────────────────────────
 #
-# Two catalogues here speak MARC21: the DNB and K10plus. The primitives that
-# take a record apart live in this block because both read the same subfields.
-# What differs is which fields a catalogue fills in and how it marks a role,
-# and that stays in each source's own section below.
+# Every source whose reader is in `decoders.MARC_READERS` speaks MARC21. The
+# primitives that take a record apart live here because all of them read the
+# same subfields. What differs is which fields a catalogue fills in and how it
+# marks a role, and that stays in each source's own section below.
 
 
 class _Subfields(dict[str, str]):
@@ -693,8 +693,8 @@ class _Subfields(dict[str, str]):
 
     Indexing gives the first occurrence, because a scalar read wants one value
     and MARC writes the primary one first. `all()` gives every occurrence, and
-    two fields in this file need it. **Remove it and both go quiet rather than
-    failing**, which is why it is a type rather than a call at each site.
+    the reads below need it. **Remove it and every one of them goes quiet rather
+    than failing**, which is why it is a type rather than a call at each site.
 
     * `082 $a` repeats. The DNB puts the Dewey number and its own Sachgruppe
       letter in one field, `$a=830 $a=B`, in 10 of 85 live records measured
@@ -704,6 +704,9 @@ class _Subfields(dict[str, str]):
       `(DE-588)118181505`, then `https://d-nb.info/gnd/118181505`, then
       `(DE-101)118181505`, so keeping the last takes one library's house number
       where the GND identifier is the point.
+    * `$4` repeats where one person had two roles: `$4=edt $4=aut` is an editor
+      who also wrote a chapter, and keeping the first drops them from the credit
+      line. `_relator_codes` carries the count.
 
     A `dict[str, str]` subclass rather than `dict[str, list[str]]`, so the
     scalar reads elsewhere in this file keep working unchanged: repeats are the
@@ -1364,7 +1367,43 @@ def _dnb_record(
 
 #: MARC relator codes for somebody who wrote the thing. Translators (`trl`) and
 #: editors (`edt`) arrive in the same field and must not become the author.
+#:
+#: **A `700` stating no role at all is not an author either, and that is a
+#: measurement rather than a default.** 28 of 581 live `700` fields carry no
+#: `$4`, measured 2026-09-06 over 624 records from the five MARC sources. The 9
+#: distinct records pairing such a field with a `100` name an illustrator, a
+#: translator or an editor in 7 of them and a co-author in 2, so admitting a
+#: bare `700` trades a credit line that is short for one that is wrong. Where a
+#: record credits nobody with writing it, `_marc_credited_names` still names
+#: everybody the record names, which is the case that fallback exists for.
 _AUTHOR_RELATORS: Final = ("aut", "cre")
+
+
+def _relator_codes(entry: _Subfields) -> list[str]:
+    """Every role one `100` or `700` states, as bare relator codes.
+
+    **Every `$4` rather than the first, because one field states more than one
+    role.** 2 of the same 581 live `700` fields read `$4=edt $4=aut`, and the
+    first value is the one that is not an author, so reading `entry["4"]` alone
+    dropped somebody the record credits with writing the book.
+
+    **A relator URI is the same statement in a different spelling.** The NLG and
+    the ÖNB write `http://id.loc.gov/vocabulary/relators/aut` where the rest
+    write `aut`: 19 of the 581 `700` fields carry one. **The last path segment
+    of any `$4` is taken, whatever vocabulary it names**, rather than one stem
+    matched: `$4` is defined as a relator, so its final segment is a relator
+    code, and a list of stems is the enumeration this would otherwise become.
+
+    **That arm moved no credit line in the sample, and it is not decoration.**
+    Every ÖNB `700` spelling a relator as a URI writes the bare code beside it,
+    and the one `700` whose only relator is a URI says `trl`, which is still
+    refused. What it changes is why: without it a URI is refused for not being
+    in `_AUTHOR_RELATORS` rather than for what it says, so the rule reads as a
+    role test and behaves as a spelling test. The NLG writes a URI as the only
+    relator on a `100` in 2 of the 44 records read from it, and which tag that
+    lands on is a matter of which record was asked for.
+    """
+    return [value.rsplit("/", 1)[-1].strip().lower() for value in entry.all("4")]
 
 
 def _isbn_entries(fields: dict[str, list[_Subfields]]) -> list[_Subfields]:
@@ -1469,6 +1508,11 @@ def _marc_author_entries(
     testing the same three conditions would make that alignment a comment, and a
     comment is what would drift the day a relator code is added to one of them.
 
+    **Which `700` counts is `_AUTHOR_RELATORS`, and a field stating no role at
+    all does not**, which is the answer to a `700` beside a `100` losing a
+    co-author. The measurement that settles it, and the fallback that covers the
+    record crediting nobody, are on that constant.
+
     Order preserved, repeats dropped: 100 and 700 can name the same person, and
     the first field naming them is the one whose `$0` is read.
     """
@@ -1479,7 +1523,11 @@ def _marc_author_entries(
     for entry in fields.get("700", []):
         # `t` marks an added entry for a *work*, not a person: the row exists
         # to link the original title, and its name is the original author's.
-        if entry.get("a") and "t" not in entry and entry.get("4") in _AUTHOR_RELATORS:
+        if (
+            entry.get("a")
+            and "t" not in entry
+            and any(code in _AUTHOR_RELATORS for code in _relator_codes(entry))
+        ):
             entries.append((_flip_catalogue_name(entry["a"]), entry))
     seen: dict[str, _Subfields] = {}
     for name, entry in entries:

@@ -10,6 +10,7 @@ before the kind column existed is ever corrected.
 import ast
 import pathlib
 import re
+from typing import Any
 from xml.etree import ElementTree
 
 import pytest
@@ -381,6 +382,19 @@ _NUMERALS = {
 }
 
 
+def _catalogues_stated_in(prose: str) -> int | None:
+    """The count a sentence spells out, or None where it no longer says.
+
+    **Whitespace is collapsed before matching, because the sentence is wrapped
+    prose and the wrap moves.** Re-flowing the paragraph put the newline between
+    the number and its noun and the guard went red on a docstring that said
+    exactly the right thing. A guard nobody can re-wrap around is one somebody
+    eventually deletes rather than fixes.
+    """
+    found = re.search(r"concatenated up to (\w+) catalogues", " ".join(prose.split()))
+    return _NUMERALS.get(found.group(1)) if found else None
+
+
 def _is_this_app(parts: tuple[str, ...]) -> bool:
     """Whether a path under `backend/` is this application's own source.
 
@@ -449,17 +463,42 @@ def _reaching(calls: dict[str, set[str]], builds: set[str]) -> set[str]:
     return reaching
 
 
+def _dispatch_tables() -> list[dict[decoders.Reader, Any]]:
+    """Every reader keyed dispatch table in `metadata`, found rather than named.
+
+    **A list of five attribute names is the shape this whole file refuses.** It
+    was one, and a sixth table wiring an already registered reader to a heading
+    builder passed all thirteen tests: the reader is not missing, so
+    `test_every_reader_is_answered_by_something` stays green, and the derived
+    count stays one short of the truth. Measured 2026-09-06 by adding
+    `{Reader.DUBLIN_CORE: _dnb_record}` to `metadata` and running this class.
+
+    The shape is the rule: a non empty `dict` whose every key is a `Reader` and
+    whose every value can be called. **The callable half is not decoration**: a
+    `dict[Reader, str]` of per reader labels is not a dispatch table, and
+    admitting one would put a value with no `__name__` into the walk, where the
+    only honest thing left to do with it is skip it silently.
+    """
+    return [
+        value
+        for value in vars(metadata).values()
+        if isinstance(value, dict)
+        and value
+        and all(isinstance(key, decoders.Reader) for key in value)
+        and all(callable(decoder) for decoder in value.values())
+    ]
+
+
 def _registered_entries() -> dict[decoders.Reader, set[str]]:
     """Which function each reader is answered by, read off the tables themselves."""
     entries: dict[decoders.Reader, set[str]] = {}
-    for table in (
-        metadata._LOOKUP_READERS,
-        metadata._SEARCH_READERS,
-        metadata._BESPOKE_LOOKUPS,
-        metadata._FREE_SEARCHES,
-        metadata._METERED_SEARCHES,
-    ):
+    for table in _dispatch_tables():
         for reader, decoder in table.items():
+            # `decoder.__name__` rather than a `getattr` default, so anything
+            # the walk cannot name raises here instead of contributing an empty
+            # name nothing can match. Two kinds reach this: a value the shape
+            # rule should not have admitted, and a callable with no `__name__`,
+            # which a `functools.partial` in a table would legitimately be.
             entries.setdefault(reader, set()).add(decoder.__name__)
     return entries
 
@@ -496,10 +535,12 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
     """`#206`: the count is derived from the code, not restated beside it.
 
     `bounded_headings` says a merge has concatenated up to *n* catalogues,
-    "which is every source that builds a `Heading` at all", and that *n* was
+    "which is every catalogue whose reader builds a `Heading`", and that *n* was
     wrong twice in two days. Both corrections were made by a reader noticing,
     which is the weakest instrument here and the one this repository has
-    repeatedly recorded as insufficient.
+    repeatedly recorded as insufficient. The clause was wrong too, and in a way
+    no count could catch: it said every **source**, where `marc._record` builds
+    headings out of an uploaded file that no catalogue ever saw.
 
     **Deliberately not a census assertion.** The roster census already holds a
     row of hand maintained figures, and a seventh would put this number under
@@ -556,16 +597,35 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         assert _is_this_app(("metadata.py",))
         assert _is_this_app(("routers", "books.py"))
 
-    def test_the_walk_reads_no_dotted_directory_on_this_machine(self):
-        """The live half of the rule above, which the pure one cannot see.
+    def test_the_walk_applies_that_rule_to_this_checkout(self):
+        """The live half: that `_modules` **applies** the rule, not what it says.
 
-        A cache present in this checkout right now would be caught here rather
-        than by a pipeline an hour later.
+        **Asked against the unfiltered tree, because asking the filtered one
+        answers itself.** `_modules` excludes on the same predicate, so a check
+        that re-tests its output for a dotted part is empty by construction and
+        cannot go red on any checkout. Two versions of this were: one reading
+        the absolute path, which also went red wherever the checkout itself sat
+        under a dotted directory, and one reading the relative path, which was
+        simply vacuous.
+
+        What is left for it to catch is a `_modules` that stops filtering while
+        `_is_this_app` stays right, which the pure test above cannot see. The
+        count would eventually go red too, saying the number is wrong rather
+        than saying this walk read a virtualenv.
         """
-        walked = _modules()
+        below = [path.relative_to(BACKEND) for path in BACKEND.rglob("*.py")]
+        tooling = [
+            path
+            for path in below
+            if any(part.startswith(".") for part in path.parts)
+        ]
+        if not tooling:
+            pytest.skip("no tooling directory in this checkout to exclude")
+
+        walked = {path.relative_to(BACKEND) for path in _modules()}
 
         assert walked
-        assert not [p for p in walked if any(part.startswith(".") for part in p.parts)]
+        assert not walked & set(tooling)
 
     def test_the_walk_finds_the_construction_sites_at_all(self):
         """Anti vacuity, and the first thing to break if `Heading` is renamed or
@@ -575,8 +635,42 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
 
         assert builds
 
+    def test_a_sixth_dispatch_table_is_found_rather_than_missed(self, monkeypatch):
+        """The evasion that passed all thirteen tests, kept as a test.
+
+        A reader already registered in one of the tables, registered again in a
+        new one pointing at a decoder that builds headings, moved nothing:
+        `test_every_reader_is_answered_by_something` compares key sets and the
+        reader was not missing, so the derived count stayed one short and the
+        docstring it is checked against stayed right by accident.
+
+        Both halves are asserted, because the second alone would pass against a
+        walk that credited every reader. **Whichever reader builds nothing
+        today**, rather than a named one: naming it would fail the day that
+        reader legitimately starts building headings, which says nothing about
+        what this is guarding.
+        """
+        builds_nothing = sorted(set(decoders.Reader) - self._derived())
+        assert builds_nothing, "every reader builds a heading, so this checks nothing"
+        reader = builds_nothing[0]
+        # The other half of the patched dict carries an assumption too, so it
+        # fails with its own reason rather than as "discovery is broken".
+        assert metadata._dnb_record.__name__ in _reaching(*_call_graph()), (
+            "the decoder this patches in no longer reaches a Heading, so the "
+            "test would prove nothing about discovery"
+        )
+
+        monkeypatch.setattr(
+            metadata,
+            "_A_TABLE_THIS_TEST_ADDED",
+            {reader: metadata._dnb_record},
+            raising=False,
+        )
+
+        assert reader in self._derived()
+
     def test_every_reader_is_answered_by_something(self):
-        """A reader missing from all five tables would be excluded silently
+        """A reader missing from every dispatch table would be excluded silently
         rather than counted as building nothing, so the count would fall with no
         finding anywhere. `metadata._check_readable` raises on this for a live
         row; this is the same rule asked of the closed set."""
@@ -625,6 +719,25 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         with nothing to classify would prove nothing about either reader."""
         assert not _marc_probe(reader, "")
 
+    def test_the_sentence_is_read_wherever_the_wrap_falls(self):
+        """The evasion that broke this guard, kept as a test.
+
+        Editing the surrounding paragraph moved the newline between the number
+        and its noun, and the extraction reported that the docstring no longer
+        made the claim at all. Loud rather than silent, but red for a reason
+        that has nothing to do with what the code does.
+
+        **One of these spells the phrase unwrapped and the rest break it**,
+        which is not only economy: the roster census scans this file too, and
+        every number beside a roster noun in it needs a verdict saying what it
+        counts. One fixture sentence carrying one, adjudicated as fixture prose,
+        is cheaper to keep true than four.
+        """
+        assert _catalogues_stated_in("concatenated up to seven catalogues") == 7
+        assert _catalogues_stated_in("concatenated up to seven\n    catalogues") == 7
+        assert _catalogues_stated_in("concatenated up\n to seven\n catalogues,") == 7
+        assert _catalogues_stated_in("a merge concatenated several catalogues") is None
+
     def test_the_stated_count_is_the_derived_one(self):
         """The claim itself. Read out of `__doc__` rather than off the source
         literal, because a docstring is dedented and its literal is not, so a
@@ -635,16 +748,14 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
             for source, target in targets.SEEDED.items()
             if target.reader in self._derived()
         }
-        stated = re.search(
-            r"concatenated up to (\w+) catalogues", bounded_headings.__doc__ or ""
-        )
+        stated = _catalogues_stated_in(bounded_headings.__doc__ or "")
 
         assert stated is not None, (
             "`bounded_headings` no longer says how many catalogues a merge can "
             "have concatenated"
         )
-        assert _NUMERALS.get(stated.group(1)) == len(derived), (
-            f"the docstring says {stated.group(1)} catalogues; the readers that "
+        assert stated == len(derived), (
+            f"the docstring says {stated} catalogues; the readers that "
             f"build a Heading are fed by {len(derived)}: "
             f"{sorted(source.value for source in derived)}"
         )
@@ -656,13 +767,12 @@ class TestHowManyCataloguescanFeedOneBooksHeadings:
         derived = sum(
             target.reader in self._derived() for target in targets.SEEDED.values()
         )
-        stated = re.search(
-            r"concatenated up to (\w+) catalogues",
-            (BACKEND.parent / "docs" / "data-model.md").read_text(),
+        stated = _catalogues_stated_in(
+            (BACKEND.parent / "docs" / "data-model.md").read_text()
         )
 
         assert stated is not None, (
             "`docs/data-model.md` no longer states how many catalogues a merge "
             "can have concatenated"
         )
-        assert _NUMERALS.get(stated.group(1)) == derived
+        assert stated == derived

@@ -52,6 +52,19 @@ def _sru_empty() -> httpx.Response:
     return httpx.Response(200, text=SRU_EMPTY, headers={"content-type": "text/xml"})
 
 
+def leaves(body: object) -> list[object]:
+    """Every scalar a JSON body carries, at any depth.
+
+    So a test can ask what a response discloses anywhere in it rather than in
+    the one field it happens to know about.
+    """
+    if isinstance(body, dict):
+        return [leaf for value in body.values() for leaf in leaves(value)]
+    if isinstance(body, list):
+        return [leaf for value in body for leaf in leaves(value)]
+    return [body]
+
+
 @pytest.fixture
 def open_library_hit():
     """Open Library answers with a complete record.
@@ -1201,13 +1214,21 @@ class TestTheDuplicateConflictPointsAtTheBook:
 
         assert "already" in res.json()["detail"]["message"]
 
-    def test_it_says_nothing_about_another_members_private_book(
+    def test_no_part_of_the_body_carries_another_members_private_book_id(
         self, client, admin, member, make_book
     ):
         """The uniqueness check sees every row, private ones included, so
         returning the id would turn a 409 into a way to confirm that a member
-        owns a particular book."""
-        make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
+        owns a particular book.
+
+        Asserted over every leaf of the body rather than over the shape of
+        `detail`, so a field added beside `message` later has to keep the
+        promise too. The message is identical in both cases, so a test reading
+        that passes whether or not the id travels.
+        """
+        holder = make_book(
+            admin["headers"], title="A diary", isbn=self.ISBN, is_private=True
+        )
 
         res = client.post(
             "/api/books",
@@ -1216,7 +1237,38 @@ class TestTheDuplicateConflictPointsAtTheBook:
         )
 
         assert res.status_code == 409
-        assert isinstance(res.json()["detail"], str)
+        assert holder["id"] not in leaves(res.json())
+        assert str(holder["id"]) not in leaves(res.json())
+        # The leaves are whole scalars, so an id interpolated into a sentence
+        # would pass them. The message is a constant carrying no digit, which
+        # is what makes this arm safe as well as strictly stronger.
+        assert str(holder["id"]) not in res.text
+
+    def test_only_the_id_is_withheld_and_the_two_bodies_stay_tellable_apart(
+        self, client, admin, member, make_book
+    ):
+        """What `_conflict_detail` promises, and the thing it does not promise.
+
+        A caller can see which case it got: one body is a string and the other
+        an object. Concealing that is not available anyway, because the 409
+        itself says the ISBN is held whatever the body carries.
+        """
+        make_book(admin["headers"], title="A diary", isbn=self.ISBN, is_private=True)
+        hidden = client.post(
+            "/api/books",
+            json={"title": "Dune", "isbn": self.ISBN},
+            headers=member["headers"],
+        )
+
+        mine = make_book(admin["headers"], title="Dune", isbn="9780261102217")
+        shown = client.post(
+            "/api/books",
+            json={"title": "Dune again", "isbn": "9780261102217"},
+            headers=admin["headers"],
+        )
+
+        assert hidden.json()["detail"] == shown.json()["detail"]["message"]
+        assert shown.json()["detail"]["book_id"] == mine["id"]
 
     def test_your_own_private_book_is_still_pointed_at(
         self, client, admin, make_book
