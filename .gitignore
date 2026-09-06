@@ -31,3 +31,17 @@ trivy-*.json
 
 # Technology evaluation, internal working notes
 capacitor_viability.md
+
+# ── The session scaffolding, ignored so `git add -A` cannot commit it ─────────
+#
+# `plan.md` and `session/` are working notes for one wave. Both are on the DENY
+# list in `ci/make-public-tree.sh`, which keeps them out of the published tree,
+# and that is a **publish time** backstop rather than a commit time one: it says
+# nothing about what reaches `main`.
+#
+# **Twice now a bare `git add -A` has swept the wave plan into a merge**, once
+# corrected by a commit whose subject says exactly that, and once by the session
+# that wrote this. A rule nobody remembers at the moment they type the command is
+# not a rule, so it is enforced here instead of stated anywhere.
+plan.md
+session/
