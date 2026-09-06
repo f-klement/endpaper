@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Endpaper ISBN conformance cases",
+  "description": "The shape of conformance/cases/isbn.json. Every runner validates the case file against this before running a single case, so a file that has drifted from the format fails rather than silently running fewer cases than it looks like it has.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "domain", "cases"],
+  "properties": {
+    "$schema": {
+      "description": "Relative path to this file, so an editor can find it.",
+      "type": "string"
+    },
+    "domain": {
+      "description": "Which rule set these cases specify. One domain per file.",
+      "const": "isbn"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "description": "The operation under test. Every implementation maps these names onto its own spelling in an explicit table, so neither language's naming wins.",
+      "enum": [
+        "normalise",
+        "is-valid-isbn10",
+        "is-valid-isbn13",
+        "isbn10-to-isbn13",
+        "parse",
+        "is-valid"
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "op", "input", "expect", "why"],
+      "properties": {
+        "id": {
+          "description": "Unique within the file. Uniqueness is asserted by the runners: JSON Schema cannot express it across array items.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "op": { "$ref": "#/$defs/operation" },
+        "input": { "type": ["string", "null"] },
+        "expect": { "type": ["string", "boolean", "null"] },
+        "why": {
+          "description": "Why this case is in the file. A measurement or a rule, never an opinion. The minimum length is there because an empty why passes a presence check and says nothing.",
+          "type": "string",
+          "minLength": 30
+        }
+      },
+      "allOf": [
+        {
+          "description": "normalise, is-valid-isbn10, is-valid-isbn13 and isbn10-to-isbn13 take a string. Only parse and is-valid are null safe on both sides.",
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "normalise",
+                  "is-valid-isbn10",
+                  "is-valid-isbn13",
+                  "isbn10-to-isbn13"
+                ]
+              }
+            },
+            "required": ["op"]
+          },
+          "then": { "properties": { "input": { "type": "string" } } }
+        },
+        {
+          "description": "The three predicates answer a boolean and nothing else.",
+          "if": {
+            "properties": {
+              "op": {
+                "enum": ["is-valid-isbn10", "is-valid-isbn13", "is-valid"]
+              }
+            },
+            "required": ["op"]
+          },
+          "then": { "properties": { "expect": { "type": "boolean" } } }
+        },
+        {
+          "description": "normalise and isbn10-to-isbn13 are total on a string and always answer a string.",
+          "if": {
+            "properties": {
+              "op": { "enum": ["normalise", "isbn10-to-isbn13"] }
+            },
+            "required": ["op"]
+          },
+          "then": { "properties": { "expect": { "type": "string" } } }
+        },
+        {
+          "description": "parse answers the canonical ISBN-13 or nothing. Never a boolean: is-valid is the predicate.",
+          "if": {
+            "properties": { "op": { "const": "parse" } },
+            "required": ["op"]
+          },
+          "then": { "properties": { "expect": { "type": ["string", "null"] } } }
+        }
+      ]
+    }
+  }
+}

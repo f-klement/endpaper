@@ -37,6 +37,25 @@ class TestNormalise:
     def test_upper_cases_the_check_digit(self):
         assert normalise("043942089x") == X_CHECK_10
 
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "978\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u06602",
+            "978\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2",
+            "185723999\uff17",
+        ],
+    )
+    def test_strips_digits_that_are_not_ascii(self, raw):
+        """`isalnum()` is Unicode and `[^0-9A-Za-z]` is not, so this used to diverge.
+
+        Measured 2026-08-31: `frontend/src/lib/isbn.ts` stripped all three of
+        these and this function kept them, which let a non-ASCII digit through
+        `parse` and into storage. The shared cases in `conformance/cases/isbn.json`
+        pin the same three on both sides; this pins them where somebody editing
+        `normalise` will look.
+        """
+        assert normalise(raw).isascii()
+
 
 class TestIsbn13Checksum:
     def test_accepts_a_real_isbn(self):

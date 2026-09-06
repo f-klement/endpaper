@@ -1,6 +1,6 @@
 # Backend test coverage
 
-**5637 tests**, in 87 files, recounted with `--collect-only` on 2026-09-06.
+**5673 tests**, in 88 files, recounted with `--collect-only` on 2026-09-06.
 
 **The headline is no longer equal to the passed count, and the difference is deliberate.** The
 gate reports `5406 passed, 16 xfailed`: sixteen tests are strict `xfail`, each recording a
@@ -9,7 +9,7 @@ is the number this table sums to; passed is the number the gate prints.** They d
 exactly the count of open recorded defects, so if they ever differ by anything else, one of the
 two is wrong.
 
-**The rows below sum to 5604, thirty three short, and the shortfall is deliberate.** Those
+**The rows below sum to 5640, thirty three short, and the shortfall is deliberate.** Those
 tests live in four files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -57,7 +57,8 @@ why the helper uses regexes.
 |---|---:|---|
 | `test_dependencies.py` | 44 | **Authorization and pagination.** The regression suite for the access-control holes described below |
 | `test_config.py` | 52 | Settings resolution, the startup secret guard, upload limits, the frontend switch |
-| `test_isbn.py` | 57 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
+| `test_isbn.py` | 60 | Parsing, check digits, ISBN-10 to ISBN-13, the equivalent forms |
+| `conformance/test_isbn.py` | 33 | **The Python half of the shared fixture set.** Holds no ISBN expectation of its own: `conformance/cases/isbn.json` is the specification, and this is a dispatch table plus the guards that stop the suite passing while testing nothing |
 | `test_ddc.py` | 29 | **Dewey headings.** That a number splits from its caption and a year does not, that the segmentation prime is stripped rather than rejected, that the projection reads the number |
 | `test_backup.py` | 88 | **The whole library out and back.** Round trip, refusing a bad archive, zip path traversal, and that an archive written before a table existed still restores. |
 | `test_lending.py` | 17 | **The loan clock.** Overdue, days overdue and days out, each arm of each; that a returned loan stops counting at its return; that `days_out`'s clamp is the reachable one |

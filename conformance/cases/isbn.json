@@ -1,0 +1,209 @@
+{
+  "$schema": "../schema/isbn.schema.json",
+  "domain": "isbn",
+  "cases": [
+    {
+      "id": "parse-canonical-isbn13",
+      "op": "parse",
+      "input": "9780306406157",
+      "expect": "9780306406157",
+      "why": "The base case. A valid Bookland EAN-13 comes back unchanged, so a scanner that already read a 13 digit barcode pays nothing."
+    },
+    {
+      "id": "parse-isbn10-converts-to-isbn13",
+      "op": "parse",
+      "input": "0306406152",
+      "expect": "9780306406157",
+      "why": "Storage is ISBN-13 only. Before that, the same book scanned from an old jacket and a new one was two rows, and the unique constraint could not see them as one."
+    },
+    {
+      "id": "isbn10-to-isbn13-discards-the-old-check-digit",
+      "op": "isbn10-to-isbn13",
+      "input": "0306406152",
+      "expect": "9780306406157",
+      "why": "The two schemes are modulus 11 and modulus 10, so the old check digit is not carried over. The trailing 2 becomes a 7, which is the visible sign that it was recomputed and not copied."
+    },
+    {
+      "id": "parse-isbn10-with-x-check-digit",
+      "op": "parse",
+      "input": "080442957X",
+      "expect": "9780804429573",
+      "why": "Roughly one ISBN-10 in eleven ends in X, and the regex this module replaced rejected every one of them, so a real slice of older books could not be scanned at all."
+    },
+    {
+      "id": "parse-isbn10-with-lowercase-x",
+      "op": "parse",
+      "input": "080442957x",
+      "expect": "9780804429573",
+      "why": "Manual entry is where a lowercase x arrives. Normalisation upper cases before validation, so the check digit test never has to know about case."
+    },
+    {
+      "id": "parse-accepts-hyphens-in-the-wrong-places",
+      "op": "parse",
+      "input": "97-8030640-6157",
+      "expect": "9780306406157",
+      "why": "Hyphen placement encodes the registration group and registrant, and it varies by publisher, so it carries nothing worth validating. A wrongly grouped ISBN is the same ISBN, and rejecting it would reject what people paste."
+    },
+    {
+      "id": "parse-rejects-a-wrong-check-digit",
+      "op": "parse",
+      "input": "9780306406158",
+      "expect": null,
+      "why": "One digit off the canonical case above. Without a checksum a single misread digit produces a plausible ISBN and a metadata lookup for a book that cannot exist."
+    },
+    {
+      "id": "parse-rejects-a-non-bookland-ean13",
+      "op": "parse",
+      "input": "4006381333931",
+      "expect": null,
+      "why": "A real EAN-13 that passes the modulus 10 check and is not a book. Only 978 and 979 are Bookland, so a food packet under the scanner must not reach the metadata lookup."
+    },
+    {
+      "id": "parse-rejects-an-empty-string",
+      "op": "parse",
+      "input": "",
+      "expect": null,
+      "why": "The empty box. Callers treat a falsy result as not a book without a second check, so this has to answer nothing rather than throw."
+    },
+    {
+      "id": "parse-rejects-a-missing-value",
+      "op": "parse",
+      "input": null,
+      "expect": null,
+      "why": "parse is the only entry point that is null safe on both sides, which is why every caller reaches for it rather than for the predicates underneath."
+    },
+    {
+      "id": "parse-rejects-arabic-indic-digits-in-an-isbn13",
+      "op": "parse",
+      "input": "978\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u06602",
+      "expect": null,
+      "why": "Measured on 2026-08-31 against both implementations: the browser answered null and the server answered the input string back, verbatim, non-ASCII digits and all. ARABIC-INDIC DIGIT ZERO is isdigit() in Python and int() reads it as 0, so the modulus 10 sum passed; JavaScript's backslash d is ASCII only, so it never got that far. That is a book stored under an ISBN no other client can ever match."
+    },
+    {
+      "id": "is-valid-isbn13-rejects-arabic-indic-digits",
+      "op": "is-valid-isbn13",
+      "input": "978\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u06602",
+      "expect": false,
+      "why": "The checksum layer, pinned separately from the door. Measured 2026-08-31: Python's isdigit() is true of ARABIC-INDIC DIGIT ZERO and int() reads it as 0, so the modulus 10 sum passed and this answered true; JavaScript's backslash d is ASCII only, so it answered false. Pinning normalise alone is not enough, because an implementation may call this predicate directly."
+    },
+    {
+      "id": "parse-rejects-superscript-twos-in-an-isbn13",
+      "op": "parse",
+      "input": "978\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2",
+      "expect": null,
+      "why": "The same divergence with the other failure mode. Measured 2026-08-31: the browser answered null, the server raised ValueError out of int(). SUPERSCRIPT TWO is isdigit() and int() refuses it, so the length check passed and the sum crashed. Found by probing a route, not by a test on either side."
+    },
+    {
+      "id": "is-valid-isbn13-rejects-superscript-twos",
+      "op": "is-valid-isbn13",
+      "input": "978\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2\u00b2",
+      "expect": false,
+      "why": "The same layer, the other failure mode. Measured 2026-08-31: SUPERSCRIPT TWO is isdigit() and int() refuses it, so this raised ValueError out of the sum instead of answering a boolean at all. A predicate that raises is a predicate no caller can trust."
+    },
+    {
+      "id": "parse-rejects-an-isbn10-body-of-arabic-indic-digits",
+      "op": "parse",
+      "input": "\u0660\u0663\u0660\u0666\u0664\u0660\u0666\u0661\u06652",
+      "expect": null,
+      "why": "The body is 030640615 written in Arabic-Indic digits with an ASCII check digit. Measured 2026-08-31: the server computed a passing modulus 11 sum and converted, returning 978 followed by the nine non-ASCII digits and a fresh check digit, which is what reached storage. The browser answered null."
+    },
+    {
+      "id": "is-valid-isbn10-rejects-a-non-ascii-body",
+      "op": "is-valid-isbn10",
+      "input": "\u0660\u0663\u0660\u0666\u0664\u0660\u0666\u0661\u06652",
+      "expect": false,
+      "why": "The body layer, which the parse case for the same string cannot reach once the door is closed. Found by the layer diagonal on 2026-09-01: dropping isascii() from the body test in is_valid_isbn10 leaves every other case in this file passing, because normalise had already stripped the input before parse got there. Stated as every other case rather than as a count, since a count goes stale the moment a case is added. A predicate has to refuse this on its own, since any implementation may call it directly."
+    },
+    {
+      "id": "parse-rejects-an-arabic-indic-check-digit-on-an-isbn10",
+      "op": "parse",
+      "input": "030640615\u0662",
+      "expect": null,
+      "why": "A spelling of the check digit, never a second identity. Swept the whole of Unicode, code points 0x0 to 0x10FFFF, on CPython 3.14.0 with unicodedata 16.0.0: 888 characters are isdigit(), 128 of those make int() raise, and the remaining 760 divide into exactly 76 per digit value. So 76 characters satisfy both isdigit() and the modulus 11 sum for this body, and because the conversion reads only the nine digit body, all 76 map to the same 9780306406157. The server accepted every one; the browser accepted none. An earlier count of 40 came from sweeping range(0x11000), which is one hex digit short and covers 6.25% of Unicode."
+    },
+    {
+      "id": "is-valid-isbn10-rejects-a-non-ascii-check-digit",
+      "op": "is-valid-isbn10",
+      "input": "030640615\u0662",
+      "expect": false,
+      "why": "76 characters satisfy isdigit() and the modulus 11 sum for this body, swept over code points 0x0 to 0x10FFFF on CPython 3.14.0 with unicodedata 16.0.0. All 76 convert to the same 9780306406157, so each is a spelling and never a second identity, and the predicate has to refuse all of them rather than leaving parse to clean up."
+    },
+    {
+      "id": "parse-rejects-a-fullwidth-seven-as-a-check-digit",
+      "op": "parse",
+      "input": "185723999\uff17",
+      "expect": null,
+      "why": "The same 76 per digit value as the case above, for a different body: this one needs a check digit of 7, so its 76 are the spellings of 7 where the case above counts the spellings of 2. Verified 2026-09-06 that no character is in both sets. It is the spelling a real keyboard produces, since a CJK input method emits it for an ordinary 7. Measured 2026-08-31: the server converted it to 9781857239997, the browser answered null."
+    },
+    {
+      "id": "parse-strips-a-trailing-non-ascii-digit",
+      "op": "parse",
+      "input": "9783161484100\u0665",
+      "expect": "9783161484100",
+      "why": "The one answer this suite's ASCII guard actually changes, and until 2026-09-06 nothing here pinned it. Measured that day against backend/isbn.py without the isascii() guard: the browser answered 9783161484100 and the server answered null, because normalise kept the ARABIC-INDIC DIGIT FIVE and left a fourteen character candidate no length test accepts. Every other non-ASCII case in this file strips to something shorter than a valid ISBN, so all of them answered null on both sides and not one of them could have caught this."
+    },
+    {
+      "id": "normalise-strips-the-publisher-grouping",
+      "op": "normalise",
+      "input": "978-0-306-40615-7",
+      "expect": "9780306406157",
+      "why": "The form printed on a jacket. Normalisation exists so validation never has to know about grouping."
+    },
+    {
+      "id": "normalise-upper-cases-the-check-digit",
+      "op": "normalise",
+      "input": "080442957x",
+      "expect": "080442957X",
+      "why": "Case folding belongs here and not in the modulus 11 check, so there is one place that knows X can arrive lowercase."
+    },
+    {
+      "id": "normalise-strips-non-ascii-digits",
+      "op": "normalise",
+      "input": "978\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u06602",
+      "expect": "9782",
+      "why": "The door, not the checksum. Measured 2026-08-31: JavaScript strips anything outside 0-9A-Za-z and answered 9782, while Python's isalnum() is Unicode and kept all thirteen characters. Pinning the ASCII answer is what makes every parse case above hold for a reason rather than by luck, and it leaves a result too short to be an ISBN, which is the honest outcome for input that was never one."
+    },
+    {
+      "id": "is-valid-isbn13-accepts-a-non-bookland-ean13",
+      "op": "is-valid-isbn13",
+      "input": "4006381333931",
+      "expect": true,
+      "why": "The split between the two layers, pinned so nobody collapses them. The checksum is an EAN-13 property and this string has a valid one; the Bookland prefix test lives in parse, which rejects it."
+    },
+    {
+      "id": "is-valid-isbn13-rejects-twelve-digits",
+      "op": "is-valid-isbn13",
+      "input": "978030640615",
+      "expect": false,
+      "why": "The canonical case with its check digit cut off. Length is tested before the sum, because a shorter string would otherwise be weighted from the wrong end."
+    },
+    {
+      "id": "is-valid-isbn10-accepts-an-x-check-digit",
+      "op": "is-valid-isbn10",
+      "input": "080442957X",
+      "expect": true,
+      "why": "X means ten, which is why modulus 11 needs an eleventh symbol at all. Asserted on the predicate as well as through parse, because parse would also pass if only the ISBN-13 branch worked."
+    },
+    {
+      "id": "is-valid-isbn10-rejects-a-wrong-check-digit",
+      "op": "is-valid-isbn10",
+      "input": "0306406153",
+      "expect": false,
+      "why": "The valid ISBN-10 above with its check digit raised by one, giving a modulus 11 sum of 133 where 132 is required."
+    },
+    {
+      "id": "is-valid-accepts-an-isbn10",
+      "op": "is-valid",
+      "input": "0306406152",
+      "expect": true,
+      "why": "The predicate every caller uses when it does not need the canonical form. It has to agree with parse rather than reimplement it."
+    },
+    {
+      "id": "is-valid-rejects-a-missing-value",
+      "op": "is-valid",
+      "input": null,
+      "expect": false,
+      "why": "The null safe half of the pair. A caller passing a nullable field straight in must get false and not an exception."
+    }
+  ]
+}

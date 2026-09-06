@@ -15,6 +15,7 @@ pages are for changing it.
 | [testing.md](testing.md) | How the mirrored test tree works and the conventions to follow when adding tests |
 | [legend.md](legend.md) | The library science vocabulary this codebase borrows: the catalogues, MARC, the classification and authority schemes, and the codes inside a record. |
 | [decisions.md](decisions.md) | Choices that look odd until you know why. Read before "fixing" one. |
+| [../conformance/README.md](../conformance/README.md) | The shared fixture set: rules that must give the same answer in Python and in TypeScript, and how to add a case |
 
 ## Orientation
 
@@ -51,6 +52,7 @@ endpaper/
 │   │   ├── lib/          pure helpers: ISBN parsing, Goodreads URLs
 │   │   └── pages/        one folder per page, with its own hooks/types/components
 │   └── tests/            mirrors frontend/src/, see its COVERAGE.md
+├── conformance/          language neutral fixtures both suites run, see its README
 └── docs/                 you are here
 ```
 

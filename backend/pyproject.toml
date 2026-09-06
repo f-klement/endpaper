@@ -44,6 +44,7 @@ dev = [
     "ruff>=0.9.4",
     "mypy>=1.14.1",
     "pip-audit>=2.9.0",
+    "jsonschema>=4.23.0",
     "keyring>=25.7.0",
 ]
 

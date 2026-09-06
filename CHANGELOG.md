@@ -4,6 +4,10 @@
 
 ### Added
 
+- A shared conformance fixture set in `conformance/`, run by both test suites.
+  Rules that must give the same answer in Python and in TypeScript are written
+  down once, as JSON, with a JSON Schema that makes a drifted case file fail
+  rather than silently run fewer cases. ISBN parsing is the first domain.
 - **A login for a catalogue that will not answer without one**, stored encrypted. Several
   national libraries answer only to an account; the login goes in Settings beside the source
   it is for, is sealed before it reaches the database, and is sent to that catalogue and
@@ -196,6 +200,10 @@ byte identical, which is about the schema and was never about this.
 
 ### Fixed
 
+- `isbn.normalise` kept any Unicode alphanumeric where the browser's copy of the
+  same function kept only `0-9A-Za-z`, so the two disagreed about which strings
+  are ISBNs. Given `9783161484100` and a trailing Arabic-Indic five, the browser
+  answered `9783161484100` and the server answered nothing.
 - **A disc is no longer a subject heading.** The German national library writes a content
   type and a carrier type into the same MARC subject fields as a subject, each carrying a
   GND number, so `CD-ROM` and `Hochschulschrift` were stored and filtered as assertions

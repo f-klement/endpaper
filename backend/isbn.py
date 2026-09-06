@@ -33,8 +33,28 @@ def normalise(raw: str) -> str:
     ISBNs are written with hyphens or spaces grouping the registration
     elements, and those groupings vary by publisher, so they carry no
     information worth keeping.
+
+    **`isascii()` beside `isalnum()`, and dropping it makes this disagree with
+    the browser.** `str.isalnum()` is Unicode and JavaScript's `[^0-9A-Za-z]` is
+    not, so `frontend/src/lib/isbn.ts`, which mirrors this module, strips
+    characters this would otherwise keep.
+
+    **The effect on `parse` is to accept more, not less**, which is the opposite
+    of what a guard named after ASCII reads like. Measured 2026-09-06: given
+    `9783161484100` followed by one ARABIC-INDIC DIGIT FIVE, `parse` answers
+    `9783161484100` both here and in the browser, and answers `None` here
+    without this line, because that trailing digit survives into a fourteen
+    character candidate that no length test accepts. The checksum predicates
+    below already refuse non-ASCII on their own, so what this adds is agreement
+    with the browser rather than a further refusal.
+
+    `conformance/cases/isbn.json` pins that agreement language neutrally, and
+    `parse-strips-a-trailing-non-ascii-digit` is the case that fails if this
+    line goes.
     """
-    return "".join(character for character in raw if character.isalnum()).upper()
+    return "".join(
+        character for character in raw if character.isascii() and character.isalnum()
+    ).upper()
 
 
 def is_valid_isbn10(candidate: str) -> bool:

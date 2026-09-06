@@ -219,6 +219,22 @@ Navigation is asserted on where the router ended up, through the `path()` that
 `renderWithProviders` returns, rather than on a spy standing in for `useNavigate`. That is
 the better assertion regardless: it says the reader arrived at the book.
 
+## The shared conformance suite
+
+Some rules have to give the same answer in Python and in TypeScript. Those rules
+are pinned by one language neutral fixture set in
+[`conformance/`](../conformance/README.md), run by
+`backend/tests/conformance/test_isbn.py` and
+`frontend/tests/conformance/isbn.test.ts`. Both read the same JSON, so a
+disagreement between the two implementations is a failing test on the side that
+is wrong rather than a support ticket a year later.
+
+**Adding a case is editing JSON, not either test file.** Each runner holds the
+mapping from an operation name onto its own spelling, plus the guards that stop
+it passing while testing nothing. Changing an expectation is changing the
+protocol, and lands on both sides together. `conformance/README.md` has the
+rules, the measurements, and why the directory exists at all.
+
 ## Conventions
 
 - **One behaviour per test**, named as a sentence about behaviour:

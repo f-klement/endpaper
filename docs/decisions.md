@@ -9910,3 +9910,25 @@ tempted; a migration is frozen and nobody opens one to add a constraint.
 links and one added by a fix: putting the removal control where a person could reach a
 pinned row was the right change, and what it also did was teach a primary key to travel.
 Nothing had constrained it because until then nothing needed to.
+
+## `conformance/` is published, and the fixtures are the specification
+
+The mirror carries it. Nothing in it names the deployment, and the whole point of
+the directory is that it outlives whichever implementation is current: when a
+rule moves to TypeScript for good and the Python side is deleted, the cases are
+what is left. A specification stripped from the published tree is a specification
+only one of the two implementations can read.
+
+The decision was taken deliberately rather than by default. `conformance/` is a
+new top level directory, so it publishes unless it is added to `DENY` in the
+publish gate, and it was checked against the forbidden string scan before being
+left off that list.
+
+## The ASCII guard in `isbn.normalise` widens the backend rather than narrowing it
+
+It reads like a refusal and is an acceptance. The checksum predicates already
+refuse non-ASCII on their own, so what the guard changes is the inputs they never
+see: `parse` of `9783161484100` plus a trailing Arabic-Indic five answered
+nothing before it and answers `9783161484100` after, which is what the browser
+has always answered. The point is agreement, not strictness, and the docstring
+says so because the first version of it said the opposite.

@@ -191,13 +191,13 @@ export default defineConfig({
     // happy-dom, not jsdom. Measured on this suite: `environment` was 160s of a
     // 322s run, paid once per test file to build a DOM, and happy-dom
     // constructs one substantially faster for the same API surface this suite
-    // uses. The eighteen DOM-free files opt out entirely with a
+    // uses. The nineteen DOM-free files opt out entirely with a
     // `@vitest-environment node` docblock and are unaffected either way.
     //
-    // **Recount that eleven with the docblock ANCHORED, or it comes out one too
+    // **Recount that nineteen with the docblock ANCHORED, or it comes out one too
     // high**:
     // `grep -rlE '^\s*\*\s*@vitest-environment node' tests | wc -l`.
-    // The obvious `grep -rl '@vitest-environment node' tests` answers twelve,
+    // The obvious `grep -rl '@vitest-environment node' tests` answers twenty,
     // because `tests/setup.ts` *mentions* the docblock in a comment explaining
     // that setup also runs for the files carrying it. `setup.ts` is not one of
     // them and does not opt out of anything. Counting the string rather than
