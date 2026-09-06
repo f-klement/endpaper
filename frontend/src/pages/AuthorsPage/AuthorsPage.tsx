@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 
+import type { AuthorSuggestionOut } from "../../api/generated/model";
 import { EmptyState, ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
 import AuthorCard from "./components/AuthorCard";
+import BatchBar from "./components/BatchBar";
 import MergeBar from "./components/MergeBar";
 import SuggestionCard from "./components/SuggestionCard";
 import { useAuthors } from "./hooks";
@@ -35,6 +37,16 @@ export default function AuthorsPage() {
   // Keys rather than whole rows: the list is refetched after every merge, so a
   // held row would be a copy of something that has just changed.
   const [selected, setSelected] = useState<string[]>([]);
+  // Which proposed groups are **not** in the batch, rather than which are.
+  // Everything the server offered is ticked to begin with, and the list is
+  // refetched after every write, so holding the included set would mean
+  // deciding what a group that has just appeared should default to.
+  const [dropped, setDropped] = useState<string[]>([]);
+  // The names a reader has taken out of a group, by group. **Here rather than
+  // inside the card, because both the card's own button and the batch have to
+  // honour them**: while this lived in the card, unticking a name left it out
+  // of that group's merge and the batch folded it anyway.
+  const [excluded, setExcluded] = useState<Record<string, string[]>>({});
 
   const matching = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
@@ -67,10 +79,104 @@ export default function AuthorsPage() {
     setSelected([]);
   }
 
+  const groupId = (group: AuthorSuggestionOut) => group.keys.join("|");
+  const excludedIn = (group: AuthorSuggestionOut) =>
+    excluded[groupId(group)] ?? [];
+  const includedIn = (group: AuthorSuggestionOut) =>
+    group.keys.filter((key) => !excludedIn(group).includes(key));
+
+  // The key of the name the server proposed keeping. Names are unique inside a
+  // group, because a key is derived from a name, so the index is unambiguous.
+  const keptKey = (group: AuthorSuggestionOut) =>
+    group.keep_name == null
+      ? undefined
+      : group.keys[group.names.indexOf(group.keep_name)];
+
+  // **One predicate decides both the checkbox and the bar**, so a checkbox can
+  // never appear with nothing on the page to act on it. A group the server held
+  // back carries no name to fold into and is not offered either way.
+  const isOfferable = (group: AuthorSuggestionOut) => group.keep_name != null;
+  const offerable = authors.suggestions.filter(isOfferable);
+  const heldBack = authors.suggestions.length - offerable.length;
+
+  // Ticked **and** still sendable. A reader who unticks the proposed name, or
+  // narrows a group below two, has withdrawn it: the server keeps one of the
+  // group's own names and needs two of them, so sending it would be a 422.
+  const isTicked = (group: AuthorSuggestionOut) => {
+    if (!isOfferable(group) || dropped.includes(groupId(group))) return false;
+    const kept = keptKey(group);
+    const included = includedIn(group);
+    return kept !== undefined && included.includes(kept) && included.length > 1;
+  };
+  const ticked = authors.suggestions.filter(isTicked);
+  // Offered by the server, not deliberately unticked, and still not sendable:
+  // the reader has narrowed it past what the batch can take. Counted apart from
+  // the held back ones, because the two have different reasons and only one of
+  // them is the reader's own doing.
+  const withdrawn = authors.suggestions.filter(
+    (group) =>
+      isOfferable(group) &&
+      !dropped.includes(groupId(group)) &&
+      !isTicked(group),
+  ).length;
+
+  // **One click, one visible change.** `checked` reads three things and this
+  // used to write only `dropped`, so a reader who had unticked the proposed name
+  // saw the box untick itself and then clicked twice more with nothing moving.
+  // Putting a group back therefore puts its names back too: that is what the
+  // batch needs to take it, and it is visible in the name checkboxes rather than
+  // in a variable nobody can see.
+  function toggleBatch(group: AuthorSuggestionOut) {
+    const id = groupId(group);
+    if (isTicked(group)) {
+      setDropped((current) => [...current, id]);
+      return;
+    }
+    setDropped((current) => current.filter((other) => other !== id));
+    setExcluded((current) => ({ ...current, [id]: [] }));
+  }
+
+  function toggleName(group: AuthorSuggestionOut, key: string) {
+    const id = groupId(group);
+    setExcluded((current) => {
+      const before = current[id] ?? [];
+      return {
+        ...current,
+        [id]: before.includes(key)
+          ? before.filter((other) => other !== key)
+          : [...before, key],
+      };
+    });
+  }
+
+  // **The request, built once and used for both the counts and the write.**
+  // The bar counted whole groups while this sent only the names still ticked,
+  // so unticking a name inside a ticked group left the sentence and the
+  // confirmation overstating what would be written. One source removes the
+  // class rather than the instance.
+  //
+  // `keys` is the names still ticked, not every name the rule grouped: the
+  // grouping is transitive, so that is the difference between folding two
+  // people together and not. `keep_name` is non-null by construction, since
+  // `isTicked` requires it; written out rather than asserted so a group that
+  // lost its name between render and click is dropped instead of sent empty.
+  const payload = ticked.map((group) => ({
+    keys: includedIn(group),
+    keep_name: group.keep_name ?? "",
+  }));
+
+  function foldBatch() {
+    authors.mergeBatch(payload);
+    setDropped([]);
+    setExcluded({});
+  }
+
   if (authors.isLoading) return <Spinner label={t("common.loading")} />;
 
-  const writeError = authors.mergeError ?? authors.undoError;
-  const isBusy = authors.isMerging || authors.isUndoing;
+  const writeError =
+    authors.mergeError ?? authors.undoError ?? authors.batchError;
+  const isBusy =
+    authors.isMerging || authors.isUndoing || authors.isMergingBatch;
 
   return (
     <Page width="narrow">
@@ -111,12 +217,25 @@ export default function AuthorsPage() {
               <p className="text-sm text-paper-600 dark:text-paper-400">
                 {t("authors.suggestionsExplain")}
               </p>
+              {offerable.length > 0 && (
+                <BatchBar
+                  payload={payload}
+                  heldBack={heldBack}
+                  withdrawn={withdrawn}
+                  isMerging={authors.isMergingBatch}
+                  onFold={foldBatch}
+                />
+              )}
               {authors.suggestions.map((group) => (
                 <SuggestionCard
-                  key={group.keys.join("|")}
+                  key={groupId(group)}
                   group={group}
-                  isMerging={authors.isMerging}
+                  isMerging={isBusy}
                   onMerge={authors.merge}
+                  isBatched={isTicked(group)}
+                  onToggleBatch={() => toggleBatch(group)}
+                  excluded={excludedIn(group)}
+                  onToggleName={(key) => toggleName(group, key)}
                 />
               ))}
             </section>

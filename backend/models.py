@@ -36,6 +36,7 @@ from enums import (
     BookFormat,
     ClassificationScheme,
     CustomFieldKind,
+    HeadingKind,
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
@@ -1438,6 +1439,30 @@ class Classification(Base):
             "number",
             unique=True,
         ),
+        # **Constrained where `scheme` beside it is not**, and the split is the
+        # one `tests/test_house_rules.py` holds: a CHECK costs a batch table
+        # rebuild every time the enum grows, which is a fair price for an enum
+        # that is closed and a recurring tax on one that is not.
+        # `ClassificationScheme` grows whenever a catalogue source is added.
+        # `HeadingKind` does not: it answers whether a record was talking about
+        # the work, its form or the object in your hand, and adding a catalogue
+        # cannot add a fourth answer.
+        #
+        # What it buys is the failure `b8e2f4c7a913` was written for.
+        # `backup.restore` inserts through Core, where neither a Pydantic model
+        # nor a `@validates` hook fires, so an archive decides this value, and
+        # `ClassificationOut`, `PublicClassificationOut` and `HeadingFacetOut`
+        # all type the field: one unrecognised row 500s the member listing, the
+        # facet endpoint and the unauthenticated public catalogue, for good.
+        # Measured on the real models, 2026-09-06, 15 of 15 hostile values.
+        # **`subject` is not one of the permitted values**, which puts
+        # `enums.HeadingKind`'s argument at its strongest rung instead of in a
+        # comment: a subject is what a null reads as, so the word would be a
+        # second spelling of one state.
+        CheckConstraint(
+            "kind IS NULL OR kind IN ('content', 'carrier')",
+            name="ck_classifications_kind",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1458,6 +1483,14 @@ class Classification(Base):
     label: Mapped[str | None] = mapped_column(
         String(CLASSIFICATION_LABEL_MAX), nullable=True
     )
+    # What the record said it was asserting: a subject, a content type or a
+    # carrier. See `enums.HeadingKind`, and `ck_classifications_kind` above for
+    # why this one is constrained where `scheme` is not.
+    #
+    # **Nullable, and the null is load bearing rather than a default nobody got
+    # round to**: it means the record never declared. `enums.HeadingKind` is
+    # where that argument lives and is not repeated here.
+    kind: Mapped[HeadingKind | None] = mapped_column(String(20), nullable=True)
     # Where this number stands on a shelf, under its own scheme's rule. See the
     # class docstring for why it is a column rather than an expression, and
     # `_file_the_number` for what keeps it in step.
@@ -1904,3 +1937,91 @@ class CatalogueTarget(Base):
     #: instead of drifting from it in silence. #130 clears it on a row somebody
     #: edits, and that row stops being reconciled.
     is_seeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class CatalogueCredential(Base):
+    """A login at one catalogue's server, sealed, and never this deployment's own.
+
+    **Not a settings row, and the distinction is the reason this table exists.**
+    Every secret `settings` holds is the app's own: an API key it uses, a mail
+    password for its own mailbox. This is an institution's account with a third
+    party, held here on its behalf, so the failure mode is leaking somebody
+    else's login rather than losing one of ours. `settings` is plaintext and
+    `backup.py` copies it wholesale.
+
+    **Two columns, and the second is the whole record.** The username is sealed
+    with the password rather than stored beside it: it is half of a login, this
+    table rides in every archive, and a masked username costs one decryption on
+    a page an admin opens by hand. Nothing readable is left in the archive.
+
+    **`source` is the target row's identity, not the `CatalogueSource` enum**,
+    although every row is one today. Keying on the closed enum would let the
+    storage shape decide which rows may carry a credential, which is the tangle
+    #180 reversed an earlier decision to undo. A row added by a curated registry,
+    or a typed host, gets a credential with no migration.
+
+    **No foreign key into `catalogue_targets`, deliberately.** `backup.restore`
+    deletes and reinserts whole tables through Core, so a constraint here would
+    let one credential for a source a later release dropped fail an entire
+    restore, over a row nobody can see. The write path validates the source
+    against the roster instead, and the delete path deliberately does not, so an
+    orphan can be removed rather than needing a database edit.
+
+    The check constraints refuse anything that is not an envelope, and any
+    source that is not a source: a hand edited archive putting a plaintext
+    password in the first, or a path in the second, is rejected at the insert
+    rather than sent to a catalogue or into a URL. See `backend/credentials.py`.
+
+    **Neither contradicts the missing foreign key above, and the difference is
+    which failures each rejects.** A foreign key would fail on legitimate
+    drift, a source a later release dropped, which is a row this application
+    wrote in good faith and whose archive it must not refuse. These reject only
+    values it could never have written, because every source it stores came
+    through a roster-validated write.
+
+    **The evidence is the orphan**: an archive naming
+    `a-catalogue-that-went-away` restores, and one naming `../../books/5?` does
+    not. So the case the missing foreign key exists to permit still passes.
+
+    This paragraph is here rather than in the migration because the mistake it
+    guards against is adding `ForeignKey("catalogue_targets.source")`, and
+    somebody is editing **this file** when they are tempted. `docs/decisions.md`
+    carries the reasoning at length.
+    """
+
+    __tablename__ = "catalogue_credentials"
+
+    __table_args__ = (
+        CheckConstraint(
+            "envelope GLOB 'v1.*.*.*' AND length(envelope) >= 40",
+            name="ck_catalogue_credentials_envelope",
+        ),
+        # **This column travels, which is why its values are closed.** The
+        # settings screen is sent the source of any login it cannot open so
+        # that somebody can remove it, and a client puts that value in a URL
+        # path. There is no foreign key and `backup.restore` inserts through
+        # Core, so an archive decides it. See `credentials.is_safe_source`.
+        # `instr(... char(0))` is not decoration: SQLite's `length` and `GLOB`
+        # both stop at the first NUL, so without it the constraint reads
+        # `bne\0../../books/5?` as `bne` and admits it, where Python's
+        # `fullmatch` refuses it. See `credentials.is_safe_source`.
+        #
+        # **`char(0)` looks like an empty string and is not**, which is worth
+        # saying because checking it the obvious way suggests this guard is
+        # broken. Measured: `length(char(0))` is 0, and
+        # `length(cast(char(0) as blob))` is 1, so the value really is one NUL
+        # byte and only `length` stops at it. `char(0) = ''` is false, and
+        # `instr('bne', '')` is 1, so were it empty this clause would reject
+        # every row rather than none. The asymmetry that caused the bug is what
+        # makes `instr` the right instrument for it.
+        CheckConstraint(
+            "length(source) BETWEEN 1 AND 32 AND instr(source, char(0)) = 0 "
+            "AND source NOT GLOB '*[^a-z0-9_-]*'",
+            name="ck_catalogue_credentials_source",
+        ),
+    )
+
+    #: The `catalogue_targets.source` this credential is for.
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    #: `v1.<generation>.<nonce>.<ciphertext>`. See `backend/credentials.py`.
+    envelope: Mapped[str] = mapped_column(Text, nullable=False)

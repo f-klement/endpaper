@@ -26,7 +26,7 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Protocol
 from urllib.parse import urljoin
 
 import httpx
@@ -142,6 +142,24 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: and the BNE's search gain was never measured. So the fan out is still eight
 #: and every figure below is unchanged.
 _IDENTITY: Final = {"accept-encoding": "identity"}
+
+
+class Credential(Protocol):
+    """What this module needs of a credential, which is one method.
+
+    **A protocol rather than an import, and the reason is a dependency
+    direction.** `credentials.Credential` is the implementation and it lives in
+    a module that reaches the ORM; this is the outbound door, and the door
+    knowing about the database would put SQLAlchemy behind every catalogue
+    request. So the door states what it needs and the store satisfies it, the
+    same shape `z3950.py` uses for its client.
+
+    The method takes the URL of the hop about to be made and answers the headers
+    that may go on it, which for anything but the origin the credential was set
+    for is nothing at all.
+    """
+
+    def header_for(self, url: str) -> dict[str, str]: ...
 
 
 class FetchRefused(httpx.HTTPError):
@@ -314,19 +332,31 @@ async def _walk_hops(
     url: str,
     params: Mapping[str, str] | None,
     cap: int,
+    credential: Credential | None,
 ) -> Fetched:
     """The redirect walk and the capped read. Time is `get`'s problem, not this.
 
     Split out so the budget is enforced in exactly one place, around this whole
     call, rather than recomputed at each step. Recomputing was the bug: see
     `get`.
+
+    **The credential is asked for a header per hop, never carried on the
+    client.** `_same_host_hop` already refuses a hop that leaves the host, so on
+    this module's own rules the question never arises; it is asked anyway
+    because the two guards defend different losses. A redirect that leaks a page
+    is an information leak, and that is this module's to refuse. A redirect that
+    carries an `Authorization` header off host is account theft, and
+    `Credential.header_for` refuses it whatever happens here: set on the client
+    the header would be attached by httpx to whatever the client is next used
+    for, which is precisely the arrangement neither guard could see.
     """
     target = url
     query = params
 
     for _ in range(MAX_REDIRECTS + 1):
+        headers = credential.header_for(target) if credential is not None else {}
         try:
-            async with client.stream("GET", target, params=query) as response:
+            async with client.stream("GET", target, params=query, headers=headers) as response:
                 if response.is_redirect:
                     target = _same_host_hop(response)
                     # The Location carries the whole URL, so re-appending the
@@ -410,11 +440,19 @@ async def get(
     params: Mapping[str, str] | None = None,
     limit: int | None = None,
     deadline: float | None = None,
+    credential: Credential | None = None,
 ) -> Fetched:
     """GET a catalogue, bounded four ways.
 
     At most `limit` bytes, at most `MAX_REDIRECTS` hops, none of them leaving
     the host, and all of it inside `deadline`.
+
+    **`credential` is offered to every hop and attached by none of them but its
+    own.** It is a login at a catalogue this deployment holds on an
+    institution's behalf, and the rule that it never leaves the origin it was
+    set for is the secret's rather than this module's: see
+    `credentials.Credential.header_for`, and `_walk_hops` for why both guards
+    exist.
 
     **`aiter_raw`, not `aiter_bytes`.** The second decodes the content encoding
     first, so the allocation this cap exists to prevent happens before the cap
@@ -447,7 +485,7 @@ async def get(
 
     try:
         async with asyncio.timeout(left):
-            return await _walk_hops(client, url, params, cap)
+            return await _walk_hops(client, url, params, cap, credential)
     except TimeoutError:
         # `from None`: the cancellation is machinery, and every caller catches
         # `httpx.HTTPError` rather than reading a chain.
@@ -460,7 +498,15 @@ async def get_once(
     params: Mapping[str, str] | None = None,
     limit: int | None = None,
     deadline: float | None = None,
+    credential: Credential | None = None,
 ) -> Fetched:
     """One bounded GET, with a client of its own."""
     async with catalogue_client() as client:
-        return await get(client, url, params=params, limit=limit, deadline=deadline)
+        return await get(
+            client,
+            url,
+            params=params,
+            limit=limit,
+            deadline=deadline,
+            credential=credential,
+        )

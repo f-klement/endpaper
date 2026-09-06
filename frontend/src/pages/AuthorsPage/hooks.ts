@@ -29,10 +29,13 @@ import {
   useListAuthorSuggestions,
   useListAuthors,
   useMergeAuthors,
+  useMergeAuthorsBatch,
   useUnmergeAuthor,
 } from "../../api/generated/endpoints/books/books";
 import {
   AuthorityScheme,
+  MatcherName,
+  type AuthorMergeGroup,
   type AuthorOut,
   type AuthorSuggestionOut,
   type AuthorWikipediaOut,
@@ -69,6 +72,11 @@ export interface UseAuthorsResult {
   undo: (aliasId: number) => void;
   isUndoing: boolean;
   undoError: unknown;
+
+  /** Fold several proposed groups in one request. All of them, or none. */
+  mergeBatch: (groups: AuthorMergeGroup[]) => void;
+  isMergingBatch: boolean;
+  batchError: unknown;
 }
 
 export function useAuthors(): UseAuthorsResult {
@@ -77,7 +85,15 @@ export function useAuthors(): UseAuthorsResult {
   const toast = useToast();
   const { t, locale } = useTranslation();
   const authors = useListAuthors({ query: { retry: false } });
-  const suggestions = useListAuthorSuggestions({ query: { retry: false } });
+  // The default matcher, named rather than left out, because the endpoint now
+  // takes one and a page that says which strategy it asked for is a page whose
+  // list can be explained. `exact` is the other, and nothing here offers it: a
+  // narrower matcher takes rules away from a reader who can already see what
+  // each one proposed and untick it.
+  const suggestions = useListAuthorSuggestions(
+    { matcher: MatcherName.default },
+    { query: { retry: false } },
+  );
 
   // **Asked only when somebody on this page could carry a link, and only for
   // the locale the reader chose.** A library that has confirmed nobody makes no
@@ -159,6 +175,11 @@ export function useAuthors(): UseAuthorsResult {
     },
   });
   const undo = useUnmergeAuthor({ mutation: { onSuccess: refresh } });
+  // No per group toast, and no per group error either: the batch is one
+  // transaction on the server, so there is one outcome to report. A refusal
+  // leaves the shelf exactly as it was and the refetched proposal is what the
+  // reader looks at next.
+  const mergeBatch = useMergeAuthorsBatch({ mutation: { onSuccess: refresh } });
 
   return {
     authors: ordered,
@@ -187,5 +208,9 @@ export function useAuthors(): UseAuthorsResult {
     undo: (aliasId) => undo.mutate({ aliasId }),
     isUndoing: undo.isPending,
     undoError: undo.error,
+
+    mergeBatch: (groups) => mergeBatch.mutate({ data: { groups } }),
+    isMergingBatch: mergeBatch.isPending,
+    batchError: mergeBatch.error,
   };
 }

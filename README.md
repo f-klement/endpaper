@@ -215,13 +215,33 @@ Environment variables:
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | none | For reminders sent to a Telegram chat |
 | `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
 | `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
+| `CREDENTIAL_ENCRYPTION_KEY` | none | The 24 word recovery phrase that encrypts catalogue logins. Leave it unset and the app makes one for itself the first time you ask it to |
+| `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive this way |
+| `CATALOGUE_CREDENTIAL_<SOURCE>` | none | Pins one catalogue's login, as `username:password`, e.g. `CATALOGUE_CREDENTIAL_BNE` |
 
 **Where a credential lives.** By default an admin pastes it into Settings and it is stored
 in the database. Setting the matching environment variable instead hands that job to the
 deployment: the environment value **wins**, the field in Settings is greyed out, and the
 app refuses to overwrite it rather than accepting a change that would be undone at the next
 restart. Either way it is never shown again once set. This holds for
-`GOOGLE_BOOKS_API_KEY`, the seven `MAIL_*` names and the two `TELEGRAM_*` ones alike.
+`GOOGLE_BOOKS_API_KEY`, the seven `MAIL_*` names and the two `TELEGRAM_*` ones alike, and
+for `CATALOGUE_CREDENTIAL_<SOURCE>`.
+
+**A catalogue login is different from the rest, and is stored encrypted.** The others are
+this deployment's own secrets; a catalogue login is an account at somebody else's library,
+held here on its behalf. Those go in their own table as sealed envelopes, and the key is
+never written to the database, so a backup archive carries logins that nobody can read
+without it.
+
+The key is **24 words**, in the shape a wallet recovery phrase takes, and it is checksummed:
+a mistyped or misread word is refused rather than quietly becoming a different key. With no
+key configured the app starts and simply cannot store a login; Settings then offers to make
+one and shows you the words **once**. It keeps them in the machine's keychain where there is
+one, otherwise in a file only the app's own account can read.
+
+**Write the words down.** If the key is lost or replaced, every stored catalogue login has to
+be entered again, and restoring a backup onto a different machine needs the phrase, because
+the archive deliberately does not carry the key.
 
 **Directory sign-in.** `AUTH_MODE=ldap` checks credentials against a directory instead of
 this app's own table. Accounts are created here on first sign-in, so books and notes still

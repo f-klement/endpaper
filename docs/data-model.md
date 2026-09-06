@@ -169,6 +169,26 @@ sorts and a GND number does not. `sort=ddc` and `sort=lcc` are what read that di
 each orders a shelf under its own scheme's filing rule, and there is no equivalent for
 GND or LCSH, which are subject vocabularies with no order to offer.
 
+**A heading also records what it was asserting** (migration `a1e7c93b60df`). `kind` holds
+`content` or `carrier`, read from the record's MARC `$2`, or nothing at all. The German national
+library writes a content type and a carrier type into the same subject fields as a subject,
+each with a `(DE-588)` number on it, so `Hochschulschrift` and `CD-ROM` were stored as
+assertions about what a book is about. A carrier is the physical form of the thing.
+
+**A column rather than two more schemes**, because `$2 gnd`, `$2 gnd-content` and
+`$2 gnd-carrier` all name the GND: the number means the same thing and resolves at the same
+address under all three, so the code says what the record was doing with it and not which
+file it is in. Moving those rows into a scheme of their own would also change the key the
+unique index is on, so the next enrichment of a book that carries one would deposit the
+concept a second time.
+
+**Null means the record never said**, which is every row written before that revision, every
+Dewey number and every LCSH heading. `classifications.kind_of` is the one place that reads a
+null as a subject, and `ck_classifications_kind` permits `content`, `carrier` and the null
+only: the word `subject` is not a value the column holds, because that state **is** the
+null. The null is kept rather than defaulted because it is what lets a later record fill one
+in; the migration says why nothing can correct a stored row from stored data.
+
 **The shelf position is stored, not computed** (migration `f1c30ab27d84`).
 `classifications.sort_key` holds what the scheme's filing rule returned for that number,
 written by a `@validates` hook on the model in the way `collections.name_folded` is, and
@@ -263,7 +283,8 @@ reinstates a database rather than adding to one): they are additive across reque
 nor the merge carries a rate limiter, and `BookOut.classifications` is on every listing row,
 so an inflated book is paid for on every page that contains it. At the ceiling an incoming
 heading is dropped rather than a stored one evicted, and **which one survives is decided by
-order**: `classifications.bounded_headings` sorts by scheme before it slices, so a Dewey number outranks a subject
+order**: `classifications.bounded_headings` sorts by kind and then by scheme before it slices, so a carrier is
+dropped before any subject and a Dewey number outranks a subject
 heading, and that is done there rather than in a parser because by then `_merge` has
 concatenated up to seven catalogues, which is every source that produces one. The order is DDC, LCC, GND, LCSH; the two subject
 vocabularies come last because a record supplies several of each and one classification, and
@@ -806,6 +827,63 @@ to every book's value for it.
 Privacy can be changed by the book's owner or by an admin. Admins can also delete anyone's
 note. There is no other privilege difference, and admin does not bypass the visibility
 predicate in listings.
+
+### A private book never leaves the instance
+
+**Never sent, not never shown**, and the difference is which side of the wire has to be
+trusted. "Never shown" is a rule every client has to carry, including clients written
+against this API by people this project cannot correct. "Never sent" is a property of the
+payload, so it holds whatever reads it.
+
+**A private book is absent, not redacted.** A row with its fields stripped still says the
+book is there and lets a stranger count how many were withheld.
+
+The rule has one home per question, the same way the query side does:
+
+| Question | Answered by |
+|---|---|
+| Which rows may a stranger see? | `Shelf.seen_by_the_public`, which has no ownership arm |
+| How do those rows stay marked as such? | `shelf.Outbound`, minted by the shelf alone |
+| Which serialiser may build the payload? | whichever takes an `Outbound` |
+
+`Shelf.outbound_page` and `Shelf.outbound_first` are the two ways to a value of that type,
+and both refuse a shelf built for a member. So `books_to_public_out` cannot be handed one
+member's shelf, which it could when it took a `Sequence[Book]`: a member's shelf carries
+that member's own private books and satisfied that annotation exactly.
+
+**Those are the two ways, not merely the two intended ones.** `Outbound.__post_init__`
+reads its caller's frame and refuses one outside `shelf.py`, so `dataclasses.replace`,
+`copy.replace` and `type(rows)(...)` are refused as well. That check exists because the
+weaker rule underneath it could not deliver the claim: an *empty* `Outbound` is one
+`Shelf.seen_by_the_public(db).outbound_page(0, 0)` away, and those three then mint one
+holding any rows at all while naming the type nowhere, which is a hole a rule reading
+source cannot see. What is still reachable, named rather than closed, is fabricating an
+instance without calling it into being at all (`__new__` with `object.__setattr__`), which
+is not construction and which nobody arrives at by accident.
+
+**`marc.write` still takes a plain iterable of books, on purpose.** Its caller is a member
+exporting their own shelf, which legitimately carries that member's own private books to
+the member who added them. Two serialisers with two types is the evidence the boundary is
+on the right axis: `Outbound` does not mean "serialised", it means "addressed to somebody
+this instance cannot name".
+
+Four things enforce it, each seeing what the others cannot:
+
+- **mypy**, at every call site, because the type is on the signature.
+- `Outbound.__post_init__`, at run time, whatever spelling the class is reached by. It is
+  the only one of the four that does not depend on somebody having named the type.
+- `backend/tests/test_shelf.py::TestOnlyTheShelfSaysWhatMayLeave`, which reports any
+  construction **that names the type** outside `shelf.py`. It is not made redundant by the
+  check above: it fails in CI on a construction that is merely written, where the run time
+  check fails only when the line is reached.
+- `backend/tests/test_nothing_private_leaves.py`, which drives **every route this
+  application answers with no member resolved**, derived from the live route table, and
+  asserts a marked private book comes back from none of them.
+
+**What none of them covers**: anything leaving by something that is not a route. The digest
+mailer sends titles to members, a backup carries every row deliberately and is admin only
+for that reason, and a catalogue lookup sends an ISBN to a third party. Each is argued
+where it lives rather than here.
 
 ## Reading it from the API
 

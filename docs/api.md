@@ -93,8 +93,9 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | GET | `/api/books/search?q=&harder=` | user | Free-text search for the add flow. Needs no API key. `harder` also asks the slow catalogues |
 | GET | `/api/books/series` | user | Every series, with the gaps in it |
 | GET | `/api/books/authors` | user | Everybody credited on the shelf, with counts, spellings and merges |
-| GET | `/api/books/authors/suggestions` | user | Names that look like one person |
+| GET | `/api/books/authors/suggestions` | user | Names that look like one person, each with the name a batch would keep. `matcher` names the strategy: `default` is every rule, `exact` keeps only the rules that group on an equal value and drops the ones that compare names in pairs. A matcher can only take rules away, so none proposes a group `default` does not. `keep_name` is **null** where the group is held back, which is where folding it would repoint a merge somebody already made |
 | POST | `/api/books/authors/merge` | user | `{keys, keep_name}`. Says two spellings are one person. **404** for an author the caller cannot see |
+| POST | `/api/books/authors/merge/batch` | user | `{groups: [{keys, keep_name}]}`. Folds several groups as one transaction: all of them or none. Each group keeps one of its **own** names, at least two keys, groups may not share a spelling, and the batch is bounded twice: by groups, because a batch cannot honestly exceed what one proposal offers, and by spellings, because the spellings are what is written. **404** for an author the caller cannot see, **409** for a group that would repoint a merge somebody already made |
 | DELETE | `/api/books/authors/aliases/{id}` | user | 204. Undoes one merge. **404** for one the caller cannot see |
 | GET | `/api/books/authors/authority` | user | What the authority files hold under a name. `author` is a key or any spelling; `q` retypes the search and forces the name route. Writes nothing. **503** if the file is unreachable, because nothing here is blocked by that |
 | GET | `/api/books/authors/wikipedia` | user | `lang` is `en` or `de`, the language the reader chose in the app rather than the browser's. One row per author carrying a confirmed `wikidata` identifier and none for anybody else, so the button a client draws from this is a property of the shelf rather than of the network. `language` names the Wikipedia edition `url` points at, or is **null** where the URL is the Wikidata item's own page, which is what an author with no article anywhere and an unreachable Wikidata both fall to. Never **503**: nothing here is a supplier, so an outage costs the language and not the link. Reads which language editions exist and no article text: `docs/featurelist.md` refuses author biographies and this does not touch that |
@@ -130,8 +131,8 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 is public or yours; write additionally means public books are a shared shelf any member may
 curate.
 
-`/authors` and `/authors/suggestions` are declared before `/{book_id}` too, or the first
-would be a request for the book with id "authors".
+`/authors` and every literal path under it are declared before `/{book_id}` too, or the
+first would be a request for the book with id "authors".
 
 `/search` and `/bulk` are declared **before** the `/{book_id}` routes. FastAPI matches in
 declaration order, so `/search` would otherwise be a request for the book with id
@@ -1305,6 +1306,12 @@ does.
 | GET | `/api/settings` | **admin** | The full record, API key masked |
 | PUT | `/api/settings` | **admin** | Partial update; absent fields are left alone |
 | GET | `/api/settings/sender-health` | **admin** | What each switched-on reminder channel last did. See the Loans section |
+| GET | `/api/settings/credential-key` | **admin** | Whether an encryption key is in place, and where from. Never the key |
+| POST | `/api/settings/credential-key` | **admin** | Makes one and returns the recovery phrase. **409** when one already exists |
+| PUT | `/api/settings/credential-key` | **admin** | Takes a recovery phrase back in. **422** on a phrase that fails its checksum |
+| DELETE | `/api/settings/credential-key` | **admin** | Discards the key, so a new one can be made. Reports how many logins it stranded |
+| PUT | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Stores one catalogue's login, sealed |
+| DELETE | `/api/settings/catalogue-sources/{source}/credential` | **admin** | Drops it. Succeeds whether or not one was stored |
 | GET | `/api/stats` | user | Totals, per-member, per-tag, per-month, pages read |
 | GET | `/api/users` | user | The member list |
 | GET | `/api/users/test-accounts` | **admin** | The accounts an admin may switch into |
@@ -1400,6 +1407,70 @@ always submitted every field would blank the key whenever an admin toggled somet
 since the browser never received the real value to send back. An **empty string clears the
 key**, deliberately and distinctly from omitting it.
 
+### A catalogue login, and the key that seals it
+
+A catalogue login is not one of this deployment's own secrets: it is an account at somebody
+else's library, held here on its behalf. So it is not a settings field. It lives in its own
+table as a sealed envelope, and `GET /api/settings` reports four things about each roster
+row and none of the login itself: `has_credential`, a masked `credential_username_preview`,
+`credential_from_env`, and `credential_unreadable`.
+
+That last one is the interesting field. **A login can be held and unopenable**, and a screen
+that could only say "one is stored" would leave a member's search to discover the difference.
+The envelope records which key generation wrote it, which is what turns a silent failure into
+a sentence somebody can act on.
+
+**It says that it cannot be read and not why**, because the remedy is not the row's. A
+rotated key, an absent key, a locked keychain and a pinned variable set to something that is
+not a credential all present here as one unreadable login, and for three of those the fix is
+on the key and recovers every login at once. `GET /api/settings/credential-key` carries the
+diagnosis: `configured`, `location` as a token, `problem`, and `unreadable_sources`.
+
+**`unreadable_sources` names them rather than counting them, and is read off the credentials
+table rather than the roster.** Those two go together: the table carries no foreign key on
+purpose, so a restored archive can hold a login for a catalogue this build dropped. Counting
+the roster made `POST /api/settings/credential-key` refuse over a login the settings screen
+showed nothing to remove.
+
+**The generation tag itself is deliberately not served.** It is derived from the key, and a
+boolean tells an admin everything they can act on without publishing key-derived material to
+every admin session.
+
+**`POST /api/settings/credential-key` is the one response body in this API that carries a
+secret.** It returns the 24 word recovery phrase, and it refuses with **409** when a key
+already exists, so no call renders a key that is already in being: shown once is a property
+of the server rather than a promise the client makes. It **also** refuses when sealed logins
+exist and no key does, which is a restore onto a new machine: ciphertext is proof a key
+existed, so the answer there is the phrase rather than a second key.
+
+`PUT` on the same path takes a phrase back in, absorbing capitals and stray whitespace, and
+answers **422** on one that fails its checksum rather than storing a key that would open
+nothing. 422 rather than 409 because a mistyped phrase is a bad request while a key the
+deployment pinned elsewhere is a conflict with the deployment, and one status for both told
+a client nothing it could act on differently. **A 422 body carries no `input`**, so the
+rejected phrase is not echoed back.
+
+`DELETE` discards the key. It is the way back from closing the tab without writing the words
+down, and it strands whatever the key was opening, which the response names rather than
+hides. **409** when the environment pins the key, since a process cannot unset a variable for
+its own next start, and **409** when a key is held somewhere this app cannot write, which a
+read-only secret mount is: answering 200 there reported a key as discarded while it stayed in
+force.
+
+An unknown source is **404** on the write. The delete reaches a stored row whose catalogue is
+no longer in the roster, because `catalogue_credentials` carries no foreign key on purpose
+and an orphan nothing can remove would need a database edit; deleting sends nothing anywhere,
+so the roster check buys nothing there.
+
+A source whose login the deployment pinned through `CATALOGUE_CREDENTIAL_<SOURCE>` is **409**
+on the write, naming the variable, the same rule every other pinned setting follows. **On the
+delete it is 409 only when nothing is stored**, and that distinction is load bearing rather
+than a nicety: a stored login for a pinned source is still sealed ciphertext, so it blocks
+`POST /api/settings/credential-key` by name, and refusing to delete it made a dead end whose
+only exit was unsetting the variable and restarting. Deleting a sealed row does not touch the
+pinned value: the environment still supplies the credential and the next request still
+carries it.
+
 The login image GET is public because the login page renders before anyone is signed in.
 `/api/users` is readable by every member because the book detail page needs it for the
 "Loan to…" picker; it exposes usernames and the admin flag, never password hashes.
@@ -1462,7 +1533,9 @@ alone", an empty string clears. `overdue_reminder_days` is 1 to 365; zero would 
 resending the same list on every tick.
 
 **Ten of these settings may be pinned by the deployment**, through `GOOGLE_BOOKS_API_KEY`,
-the seven standard `MAIL_*` variables, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Where
+the seven standard `MAIL_*` variables, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. A
+catalogue login is pinned the same way and is counted separately, because it is keyed by a
+catalogue row rather than by a settings key. Where
 one is set it **wins over the stored value**, `GET /api/settings` reports the value in
 force rather than the row, and `PUT` answers **409** naming the variable rather than
 storing something nothing will read. `mail_from_env` lists which of the mail settings that

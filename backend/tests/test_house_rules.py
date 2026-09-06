@@ -625,7 +625,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **91** models under `schemas/`, **31** of
+    Measured on the tree as it stands: **98** models under `schemas/`, **35** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -1561,11 +1561,17 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
 #: migration every time the enum grows. That is a fair price for an enum that is
 #: closed and a recurring tax on one that is not.
 #:
-#: **Each of these degrades at the read end instead**, in the shape
+#: **Each of these is meant to degrade at the read end instead**, in the shape
 #: `custom_fields._kind_of` uses: an unrecognised value becomes a safe default
 #: and is logged. That is quieter than a 500 on every read of the row, and it is
 #: still data loss nobody can see, which is why the degrade logs rather than
 #: passing silently.
+#:
+#: **Meant to, and three of these six do not**, which is stated here rather than
+#: left as a promise the list makes and the code does not keep. Measured
+#: 2026-09-06: a restored `classifications.scheme` of `udc`, which
+#: `test_backup.py` restores and asserts a 200 on, makes `PublicBookOut` raise,
+#: so it 500s the unauthenticated public catalogue. Nothing here degrades that.
 GROWING_ENUM_COLUMNS: dict[str, str] = {
     "user_books.status": (
         "ReadStatus has already grown once: WANT_TO_READ was added later and "
@@ -1581,6 +1587,50 @@ GROWING_ENUM_COLUMNS: dict[str, str] = {
         "work touches it."
     ),
 }
+
+#: Enum columns nobody has decided about, as opposed to the ones above.
+#:
+#: **A separate constant because it holds a different thing.** An entry above is
+#: a decision with a reason: this enum grows, so it pays at the read end
+#: instead. An entry here is the absence of one. Both keep the rule green, and
+#: merging them would let the second be mistaken for the first, which is exactly
+#: what a list named "with a reason" invites.
+#:
+#: These three became visible on 2026-09-06, when the walk above was fixed to
+#: descend into `Mapped[Enum | None]` and went from seeing 7 enum columns to
+#: seeing 11. Neither half of the bargain above holds for any of them: none
+#: carries a CHECK, and none degrades at the read end, so a restored value
+#: outside the enum raises inside `BookOut` and 500s the listing. The same is
+#: true of `classifications.scheme` above, where it is measured: a restored
+#: `udc`, which `test_backup.py` restores and asserts a 200 on, makes
+#: `PublicBookOut` raise.
+#:
+#: **Membership is pinned below**, so a fourth column cannot be parked here by a
+#: later wave without editing a test and saying why.
+#:
+#: **Names only, where `GROWING_ENUM_COLUMNS` above maps to reasons.** The first
+#: version mapped each to its enum's name, which `_enum_columns` already
+#: derives, and that redundancy made the pin untestable: a mutation replacing
+#: the walk's answer with this constant's own values could not be caught,
+#: because the two agree on any tree where the constant is right. A pin holding
+#: no derived data has nothing to quote itself from.
+UNDECIDED_ENUM_COLUMNS: frozenset[str] = frozenset(
+    {"books.format", "books.condition", "books.lending"}
+)
+
+
+def _enum_types(annotation: object) -> list[type[StrEnum]]:
+    """Every `StrEnum` anywhere inside an annotation, at any depth.
+
+    Recursive rather than one level, so `Mapped[X]`, `Mapped[X | None]` and
+    anything a later column is written as are all one rule. Reading at a fixed
+    depth is what let every nullable column through.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, StrEnum):
+        return [annotation]
+    return [
+        found for arg in get_args(annotation) for found in _enum_types(arg)
+    ]
 
 
 def _enum_columns() -> dict[str, str]:
@@ -1609,13 +1659,57 @@ def _enum_columns() -> dict[str, str]:
             # `[OwnershipStatus]` finds nothing while looking correct. This rule
             # was written that way first, and the tripwire below is what caught
             # it, which is the rule's own warning applied to itself.
-            for arg in get_args(annotation):
-                if isinstance(arg, type) and issubclass(arg, StrEnum):
-                    found[f"{table.name}.{attr.columns[0].name}"] = arg.__name__
+            #
+            # **Descended rather than read at one depth, and that is the same
+            # defect a second time.** A nullable column is
+            # `Mapped[HeadingKind | None]`, whose single argument is the union,
+            # so `isinstance(arg, type)` was False and the walk saw **none** of
+            # them: measured 2026-09-06, 7 columns found against 11 that exist,
+            # and the 4 it missed were every nullable one. The tripwire below
+            # did not catch it because all three columns it names are
+            # non-nullable, which is a fixture agreeing with the case it covers.
+            for arg in _enum_types(annotation):
+                found[f"{table.name}.{attr.columns[0].name}"] = arg.__name__
     return found
 
 
+def _bounds_column(sqltext: str, column_name: str) -> bool:
+    """Whether a CHECK's text restricts this column to a list of values.
+
+    **Bounds it, rather than mentions it, and the difference is live in this
+    tree.** `author_identifiers.provenance` appears in two constraints:
+    `ck_author_identifiers_provenance`, which is `provenance IN (...)`, and
+    `ck_author_identifiers_asserter`, which is
+    `provenance <> 'catalogue' OR created_by_user_id IS NULL` and restricts the
+    column to nothing at all. A rule asking only whether some CHECK names the
+    column reports it constrained on the strength of the second, so deleting the
+    first leaves this green. Measured 2026-09-06: 5 enum columns are mentioned
+    by a CHECK, 5 are bounded by one, and `provenance` is the column where those
+    two sets are reached by different constraints.
+
+    **At a word boundary**, because a bare `in` test reports a column
+    constrained off another column whose name contains it: over all 143 mapped
+    columns, `loans.id` reads as constrained off `loaned_to_user_id` and
+    `author_identifiers.id` off three constraints naming `identifier` and
+    `created_by_user_id`. No enum column collides today, which is what made it
+    safe to be wrong.
+
+    Still a text match on SQL rather than a parse, so it has a known blind spot
+    with no live instance: a column name inside a quoted literal in a CHECK on
+    the same table. Parsing SQL to close that is not a cheap fix and is recorded
+    rather than done.
+    """
+    return bool(
+        re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(column_name)}\s+IN\s*\(",
+            sqltext,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _has_check(qualified: str) -> bool:
+    """Whether a CHECK on this column's table bounds this column's values."""
     from sqlalchemy import Table
 
     from database import Base
@@ -1626,8 +1720,8 @@ def _has_check(qualified: str) -> bool:
         if not isinstance(table, Table) or table.name != table_name:
             continue
         for constraint in table.constraints:
-            if isinstance(constraint, CheckConstraint) and column_name in str(
-                constraint.sqltext
+            if isinstance(constraint, CheckConstraint) and _bounds_column(
+                str(constraint.sqltext), column_name
             ):
                 return True
     return False
@@ -1648,7 +1742,9 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         unaccounted = {
             column: enum
             for column, enum in _enum_columns().items()
-            if not _has_check(column) and column not in GROWING_ENUM_COLUMNS
+            if not _has_check(column)
+            and column not in GROWING_ENUM_COLUMNS
+            and column not in UNDECIDED_ENUM_COLUMNS
         }
         assert not unaccounted, (
             "These map a StrEnum and carry no CheckConstraint, so a restored row "
@@ -1660,18 +1756,105 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
     def test_the_exemption_list_names_only_real_columns(self):
         """An exemption for a column that no longer exists is an exemption
         nobody notices is doing nothing."""
-        stale = set(GROWING_ENUM_COLUMNS) - set(_enum_columns())
+        exempted = set(GROWING_ENUM_COLUMNS) | set(UNDECIDED_ENUM_COLUMNS)
+        stale = exempted - set(_enum_columns())
         assert not stale, f"exempted columns that do not exist: {sorted(stale)}"
+
+    def test_a_column_is_not_bounded_by_another_columns_name(self):
+        """`id` is not constrained by a clause about `loaned_to_user_id`.
+
+        A substring match reports it constrained because the longer name
+        contains it, which would exempt a future enum column from the rule above
+        with nothing going red. Measured over all 143 mapped columns on
+        2026-09-06: two answer differently under the two spellings, `loans.id`
+        and `author_identifiers.id`, and no enum column does, which is why the
+        rule above was right today and was not safe.
+
+        Both halves, so the boundary cannot be satisfied by refusing
+        everything.
+        """
+        assert not _bounds_column("loaned_to_user_id IN ('a', 'b')", "id")
+        assert _bounds_column("id IN ('a', 'b')", "id")
+        assert not _has_check("loans.id")
+
+    def test_a_check_that_only_mentions_a_column_does_not_count(self):
+        """The two live constraints on `author_identifiers.provenance`.
+
+        One restricts the column and the other merely names it. A rule that
+        accepted the second would let the first be deleted with nothing red,
+        which is the evasion this pair pins rather than describes.
+        """
+        assert _bounds_column("provenance IN ('catalogue', 'member')", "provenance")
+        assert not _bounds_column(
+            "provenance <> 'catalogue' OR created_by_user_id IS NULL", "provenance"
+        )
+        assert _has_check("author_identifiers.provenance")
+
+    def test_the_growing_list_does_not_grow_without_somebody_saying_so(self):
+        """The other half of the exemption, pinned the same way.
+
+        **Splitting the list moved the escape hatch rather than closing it.**
+        Pinning only the undecided half left this one open, and nothing tests
+        that a reason string is true: measured 2026-09-06, moving `books.format`
+        here with the invented reason "looks like it grows to me" leaves the
+        whole suite green. A future wave wanting green reaches for the list with
+        no pin, so both lists have one and every exemption is a two place edit.
+        """
+        assert set(GROWING_ENUM_COLUMNS) == {
+            "user_books.status",
+            "classifications.scheme",
+            "tags.category",
+        }
+
+    def test_the_undecided_list_does_not_grow_without_somebody_saying_so(self):
+        """The exemption above catches a stale entry and never a new one.
+
+        Without this, a later wave adds a fourth column with no reason and the
+        rule stays green for good, which is how a list of three exceptions
+        becomes the rule. Pinned to the exact set, so growing it is a test edit
+        with a name on it. Shrinking it is the same edit, and that is the
+        direction somebody should want.
+
+        **A set of names and nothing derived**, which is what makes this
+        testable. Two earlier versions carried each column's enum name beside
+        it, once behind a helper that read it back through `_enum_columns` so
+        the pin could not quote itself. Both were mutated to quote the constant
+        instead, and **neither mutation was caught**, because a duplicated fact
+        and the thing it duplicates agree on every tree where the duplicate is
+        correct. The redundancy was the defect; the indirection only hid it.
+
+        That the three columns still exist is `test_the_exemption_list_names_
+        only_real_columns` above, which walks the same union.
+        """
+        assert set(UNDECIDED_ENUM_COLUMNS) == {
+            "books.format",
+            "books.condition",
+            "books.lending",
+        }
 
     def test_the_reader_finds_the_columns_it_is_meant_to(self):
         """A tripwire. An empty or half built mapping makes both tests above
         pass while enforcing nothing, which is the shape of every guard defect
-        found in this repository."""
+        found in this repository.
+
+        **Every name here is nullable or not on purpose.** The three this
+        started with were all `Mapped[Enum]`, so the walk could miss every
+        `Mapped[Enum | None]` column in the tree and still pass: it did, for
+        four of them. A tripwire whose fixtures all sit on one side of a
+        distinction cannot see that side being dropped.
+        """
+        # No `len(found) >= 5` here, and its absence is the point: 11 enum
+        # columns existed when this was written on 2026-09-06 and the walk this
+        # tripwire was extended for found 7, so the inequality passed through the
+        # exact regression it read as bounding. The named columns below are the
+        # bound, and unlike a count they do not go stale on the twelfth column.
         found = _enum_columns()
-        assert len(found) >= 5, f"the mapper walk found too little: {found}"
         assert found.get("custom_fields.kind") == "CustomFieldKind"
         assert found.get("books.ownership") == "OwnershipStatus"
         assert found.get("user_books.status") == "ReadStatus"
+        # Nullable, which is the half the walk used to drop entirely.
+        assert found.get("classifications.kind") == "HeadingKind"
+        assert found.get("books.format") == "BookFormat"
 
 
 #: The one bot id a fixture may use. Real Telegram bot ids are eight to ten

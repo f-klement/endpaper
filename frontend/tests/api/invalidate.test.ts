@@ -86,6 +86,7 @@ const KEYS: Record<string, readonly unknown[]> = {
   getFeatureFlags: settings.getGetFeatureFlagsQueryKey(),
   getLoginImage: settings.getGetLoginImageQueryKey(),
   getSenderHealth: settings.getGetSenderHealthQueryKey(),
+  getCredentialKey: settings.getGetCredentialKeyQueryKey(),
   listUsers: users.getListUsersQueryKey(),
   getMyAppearance: users.getGetMyAppearanceQueryKey(),
   getMyEmail: users.getGetMyEmailQueryKey(),
@@ -181,8 +182,16 @@ describe("the inventory is complete", () => {
     // src/api/generated/endpoints/ | sort -u | wc -l`. The classification facet
     // list is the arrival, and it generated exactly one getter, which is the
     // case the paragraph above warns is not guaranteed.
+    //
+    // 48 on 2026-09-06, counted with that same command rather than as 47 plus
+    // one. The catalogue credential work is the arrival, and it generated
+    // exactly one getter: `getGetCredentialKeyQueryKey`. Its four sibling
+    // routes are all writes, which produce no key at all, so the delta an
+    // implementer would have guessed from "five routes" is wrong in the other
+    // direction this time. That is the same lesson as the paragraph above and
+    // is why the command is written out rather than the arithmetic.
     expect(Object.keys(MODULES).length).toBeGreaterThan(5);
-    expect(Object.keys(KEYS).length).toBe(47);
+    expect(Object.keys(KEYS).length).toBe(48);
   });
 });
 

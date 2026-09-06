@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ClassificationScheme,
+  HeadingKind,
   type ClassificationFacets,
 } from "../../../../src/api/generated/model";
 import ClassificationPicker, {
@@ -133,5 +134,74 @@ describe("the wire spelling", () => {
         book_count: 1,
       }),
     ).toBe("lcsh:Mental health, Public");
+  });
+});
+
+describe("what a heading chip shows against what it filters on", () => {
+  // `#147`. The identifier is the key, which is what makes one concept one
+  // filter across catalogues; the words are what a member picks. Before this
+  // the chip showed the key, so a GND heading read `4203576-4`.
+  const GERMAN = {
+    scheme: ClassificationScheme.gnd,
+    number: "4203576-4",
+    label: "Schatz",
+    kind: null,
+    book_count: 4,
+  };
+
+  it("shows the caption where the record carried one", () => {
+    renderPicker({ facets: { divisions: [], headings: [GERMAN] } });
+
+    expect(screen.getByRole("button", { name: /Schatz/ })).toBeInTheDocument();
+  });
+
+  it("shows the identifier where there is no caption", () => {
+    // Every Dewey number and every LCSH heading, which is the case the chip
+    // already handled and must go on handling.
+    renderPicker();
+
+    expect(
+      screen.getByRole("button", { name: /Stress management/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("filters on the identifier even while showing the words", async () => {
+    const props = renderPicker({
+      facets: { divisions: [], headings: [GERMAN] },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /Schatz/ }));
+
+    expect(props.onToggleHeading).toHaveBeenCalledWith("gnd:4203576-4");
+  });
+
+  it("marks a carrier so it is not read as a subject", () => {
+    renderPicker({
+      facets: {
+        divisions: [],
+        headings: [
+          {
+            scheme: ClassificationScheme.gnd,
+            number: "4139307-7",
+            label: "CD-ROM",
+            kind: HeadingKind.carrier,
+            book_count: 1,
+          },
+        ],
+      },
+    });
+
+    expect(
+      screen.getByRole("button", { name: /CD-ROM.*Carrier type/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("marks nothing on a subject", () => {
+    // Anti vacuity: a chip printing a kind on everything would pass the test
+    // above and distinguish nothing.
+    renderPicker({ facets: { divisions: [], headings: [GERMAN] } });
+
+    expect(screen.queryByText("Carrier type")).not.toBeInTheDocument();
+    expect(screen.queryByText("Content type")).not.toBeInTheDocument();
   });
 });

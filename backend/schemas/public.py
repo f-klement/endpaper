@@ -50,7 +50,13 @@ from enum import StrEnum
 from pydantic import BaseModel, field_validator, model_validator
 
 from authors import split_authors
-from enums import BookFormat, BookSort, ClassificationScheme, TagCategory
+from enums import (
+    BookFormat,
+    BookSort,
+    ClassificationScheme,
+    HeadingKind,
+    TagCategory,
+)
 from google_books import split_categories
 from schemas.tag import KnownTagKey
 
@@ -120,6 +126,17 @@ class PublicClassificationOut(BaseModel):
     #: Absent where the source carried the number alone, which is every MARC
     #: 082. A client showing a heading has to be ready for the number by itself.
     label: str | None = None
+    #: What this heading asserts, and it is published deliberately rather than
+    #: by having been added next door.
+    #:
+    #: **Withholding it is the disclosing choice here, not the safe one.** The
+    #: heading is already public; what the kind adds is that `CD-ROM` is a disc
+    #: rather than a claim about what the book is about, so a public record
+    #: without it states something untrue about the work. It carries nothing
+    #: about a member: it is read from the catalogue record, is the same for
+    #: every library holding that edition, and no private book reaches this
+    #: model at all.
+    kind: HeadingKind | None = None
     model_config = {"from_attributes": True}
 
 

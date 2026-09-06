@@ -280,7 +280,7 @@ class TestEnrichmentCandidates:
 
         assert res.status_code == 200
         assert res.json()[0]["classifications"] == [
-            {"scheme": "ddc", "number": "004", "label": None}
+            {"scheme": "ddc", "number": "004", "label": None, "kind": None}
         ]
         assert (
             db.query(Classification)

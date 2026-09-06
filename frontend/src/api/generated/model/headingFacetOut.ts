@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationScheme } from "./classificationScheme.ts";
+import type { HeadingKind } from "./headingKind.ts";
 
 /**
  * One distinct heading in the library, with how many Books carry it.
@@ -15,6 +16,7 @@ import type { ClassificationScheme } from "./classificationScheme.ts";
  */
 export interface HeadingFacetOut {
   book_count: number;
+  kind?: HeadingKind | null;
   label?: string | null;
   number: string;
   scheme: ClassificationScheme;

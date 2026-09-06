@@ -8,12 +8,14 @@ from pathlib import Path
 
 import pytest
 
+import credentials
 import metadata
 import notifications
 import settings_store
 import sources
 from enums import OverdueNotifyReason, OverdueSender
 from routers import settings as settings_router
+from schemas import RecoveryPhraseOut
 from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
 
 PNG = PNG_BYTES
@@ -1568,3 +1570,449 @@ class TestTheLookupCacheIsDroppedByEveryWriteThatChangesWhatIsAsked:
         somebody changed the mail port."""
         client.put("/api/settings", json={field: value}, headers=admin["headers"])
         assert cleared == []
+
+
+# ── The encryption key and the catalogue credentials ──────────────────────────
+
+
+class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
+    def test_a_fresh_deployment_says_it_has_none(self, client, admin):
+        body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert body["configured"] is False
+        assert body["location"] == ""
+        assert body["unreadable_sources"] == []
+
+    def test_creating_one_hands_back_twenty_four_words(self, client, admin):
+        body = client.post("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert len(body["phrase"].split()) == 24
+
+    def test_and_then_reports_where_it_lives_without_showing_it(self, client, admin):
+        phrase = client.post(
+            "/api/settings/credential-key", headers=admin["headers"]
+        ).json()["phrase"]
+        body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert body["configured"] is True
+        assert body["location"] == "file"
+        assert phrase not in str(body)
+        assert "phrase" not in body
+
+    def test_a_second_creation_is_refused_rather_than_re_displaying_it(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        response = client.post("/api/settings/credential-key", headers=admin["headers"])
+        assert response.status_code == 409
+
+    def test_a_phrase_can_be_typed_back_in(self, client, admin):
+        phrase = client.post(
+            "/api/settings/credential-key", headers=admin["headers"]
+        ).json()["phrase"]
+        credentials.key_file().unlink()
+        response = client.put(
+            "/api/settings/credential-key",
+            json={"phrase": phrase.upper()},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200
+        assert response.json()["configured"] is True
+
+    def test_a_mistyped_phrase_is_a_422_rather_than_a_conflict(self, client, admin):
+        """A phrase somebody mistyped is a bad request; a pinned key is a conflict."""
+        words = credentials.generate_phrase().split()
+        response = client.put(
+            "/api/settings/credential-key",
+            json={"phrase": " ".join([*words[:-1], "endpaper"])},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 422
+        assert "endpaper" not in response.text
+
+    def test_and_the_rejected_phrase_is_not_echoed_back(self, client, admin):
+        """pydantic puts the submitted value in the 422 body unless it is dropped."""
+        phrase = credentials.generate_phrase()
+        response = client.put(
+            "/api/settings/credential-key",
+            json={"phrase": phrase + " " + phrase},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 422
+        assert phrase not in response.text
+
+    def test_a_key_the_environment_pins_is_a_409(self, client, admin, monkeypatch):
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
+        response = client.put(
+            "/api/settings/credential-key",
+            json={"phrase": credentials.generate_phrase()},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 409
+
+    def test_the_key_can_be_discarded_and_a_new_one_made(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        discarded = client.delete("/api/settings/credential-key", headers=admin["headers"])
+        assert discarded.status_code == 200
+        assert discarded.json()["configured"] is False
+        again = client.post("/api/settings/credential-key", headers=admin["headers"])
+        assert again.status_code == 200
+
+    def test_discarding_reports_what_it_stranded(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        body = client.delete(
+            "/api/settings/credential-key", headers=admin["headers"]
+        ).json()
+        assert body["unreadable_sources"] == ["bne"]
+
+    def test_a_new_key_is_refused_while_sealed_logins_are_stranded(self, client, admin):
+        """The restore onto a new machine. The phrase is the answer, not a new key."""
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        client.delete("/api/settings/credential-key", headers=admin["headers"])
+        response = client.post("/api/settings/credential-key", headers=admin["headers"])
+        assert response.status_code == 409
+        assert "recovery phrase" in response.json()["detail"]
+
+    def test_and_removing_the_logins_clears_the_way(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        client.delete("/api/settings/credential-key", headers=admin["headers"])
+        client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
+        )
+        assert (
+            client.post("/api/settings/credential-key", headers=admin["headers"]).status_code
+            == 200
+        )
+
+    def test_discarding_the_key_is_admin_only(self, client, member):
+        response = client.delete("/api/settings/credential-key", headers=member["headers"])
+        assert response.status_code == 403
+
+    def test_and_needs_a_session(self, client):
+        assert client.delete("/api/settings/credential-key").status_code == 401
+
+    def test_a_configuration_problem_is_reported_rather_than_500ing(
+        self, client, admin, monkeypatch
+    ):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", credentials.generate_phrase())
+        body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert body["configured"] is False
+        assert "Different encryption keys" in body["problem"]
+
+    def test_reading_it_is_admin_only(self, client, member):
+        response = client.get("/api/settings/credential-key", headers=member["headers"])
+        assert response.status_code == 403
+
+    def test_creating_one_is_admin_only(self, client, member):
+        response = client.post("/api/settings/credential-key", headers=member["headers"])
+        assert response.status_code == 403
+
+    def test_typing_one_in_is_admin_only(self, client, member):
+        response = client.put(
+            "/api/settings/credential-key",
+            json={"phrase": credentials.generate_phrase()},
+            headers=member["headers"],
+        )
+        assert response.status_code == 403
+
+    def test_none_of_the_three_is_reachable_without_a_session(self, client):
+        assert client.get("/api/settings/credential-key").status_code == 401
+        assert client.post("/api/settings/credential-key").status_code == 401
+        assert (
+            client.put(
+                "/api/settings/credential-key",
+                json={"phrase": credentials.generate_phrase()},
+            ).status_code
+            == 401
+        )
+
+
+class TestOnlyOneRouteInThisApplicationReturnsKeyMaterial:
+    """The show-once property, checked structurally rather than promised.
+
+    A second route declaring `RecoveryPhraseOut` would be a second way to read a
+    key, and the one that exists refuses when a key is already in place. This is
+    the assertion that has to be argued with before a third arrives.
+    """
+
+    def test_exactly_one_route_declares_the_phrase_response(self):
+        declaring = [
+            getattr(route, "path", "")
+            for route in settings_router.router.routes
+            if getattr(route, "response_model", None) is RecoveryPhraseOut
+        ]
+        assert declaring == ["/api/settings/credential-key"]
+
+    def test_and_it_is_the_creating_method(self):
+        creating = [
+            sorted(getattr(route, "methods", set()))
+            for route in settings_router.router.routes
+            if getattr(route, "response_model", None) is RecoveryPhraseOut
+        ]
+        assert creating == [["POST"]]
+
+
+class TestACredentialIsStoredSealedAndShownMasked:
+    @pytest.fixture
+    def keyed(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        return admin
+
+    def _row(self, body, source):
+        return next(
+            entry for entry in body["catalogue_sources"] if entry["source"] == source
+        )
+
+    def test_a_roster_row_starts_with_none(self, client, admin):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        row = self._row(body, "bne")
+        assert row["has_credential"] is False
+        assert row["credential_username_preview"] == ""
+        assert row["credential_unreadable"] is False
+
+    def test_storing_one_reports_it_masked(self, client, keyed):
+        body = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "a-long-username", "password": "hunter2"},
+            headers=keyed["headers"],
+        ).json()
+        row = self._row(body, "bne")
+        assert row["has_credential"] is True
+        assert row["credential_username_preview"].endswith("name")
+        assert "hunter2" not in str(body)
+
+    def test_and_the_password_is_nowhere_in_the_settings_response(self, client, keyed):
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        body = client.get("/api/settings", headers=keyed["headers"]).text
+        assert "hunter2" not in body
+
+    def test_storing_one_without_a_key_is_refused_with_advice(self, client, admin):
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 409
+        assert "CREDENTIAL_ENCRYPTION_KEY" in response.json()["detail"]
+
+    def test_a_rotated_key_is_reported_as_needing_re_entry(self, client, keyed):
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        credentials.store_key(credentials.generate_phrase())
+        body = client.get("/api/settings", headers=keyed["headers"]).json()
+        row = self._row(body, "bne")
+        assert row["has_credential"] is True
+        assert row["credential_unreadable"] is True
+        assert row["credential_username_preview"] == ""
+
+    def test_and_the_key_screen_counts_it(self, client, keyed):
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        credentials.store_key(credentials.generate_phrase())
+        body = client.get("/api/settings/credential-key", headers=keyed["headers"]).json()
+        assert body["unreadable_sources"] == ["bne"]
+
+    def test_removing_one_leaves_the_row_empty(self, client, keyed):
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        body = client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"]
+        ).json()
+        assert self._row(body, "bne")["has_credential"] is False
+
+    def test_removing_one_that_is_not_there_is_not_an_error(self, client, keyed):
+        response = client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"]
+        )
+        assert response.status_code == 200
+
+    def test_a_username_with_a_colon_is_a_422(self, client, keyed):
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice:smith", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        assert response.status_code == 422
+
+    def test_and_a_422_does_not_echo_the_password_back(self, client, keyed):
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice:smith", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        assert response.status_code == 422
+        assert "hunter2" not in response.text
+        assert "alice:smith" not in response.text
+
+    def test_a_pinned_variable_that_is_not_a_credential_is_shown_as_broken(
+        self, client, keyed, monkeypatch
+    ):
+        """Ignoring it offered an edit while the stored login was used instead."""
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob")
+        body = client.get("/api/settings", headers=keyed["headers"]).json()
+        row = self._row(body, "bne")
+        assert row["credential_from_env"] is True
+        assert row["credential_unreadable"] is True
+
+    def test_a_stored_login_for_a_source_the_roster_lost_can_still_be_removed(
+        self, client, keyed, db
+    ):
+        """No foreign key, on purpose, so an orphan must be removable."""
+        credentials.put(db, "a-catalogue-that-went-away", "alice", "hunter2")
+        response = client.delete(
+            "/api/settings/catalogue-sources/a-catalogue-that-went-away/credential",
+            headers=keyed["headers"],
+        )
+        assert response.status_code == 200
+        assert credentials.stored_envelope(db, "a-catalogue-that-went-away") == ""
+
+    def test_an_unknown_source_is_404(self, client, keyed):
+        response = client.put(
+            "/api/settings/catalogue-sources/no-such-place/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        assert response.status_code == 404
+
+    def test_a_pinned_credential_refuses_the_write_and_names_the_variable(
+        self, client, keyed, monkeypatch
+    ):
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=keyed["headers"],
+        )
+        assert response.status_code == 409
+        assert "CATALOGUE_CREDENTIAL_BNE" in response.json()["detail"]
+        assert "correcthorse" not in response.json()["detail"]
+
+    def test_a_pinned_credential_is_reported_as_such(self, client, keyed, monkeypatch):
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+        body = client.get("/api/settings", headers=keyed["headers"]).json()
+        row = self._row(body, "bne")
+        assert row["credential_from_env"] is True
+        assert row["has_credential"] is True
+        assert "correcthorse" not in str(body)
+
+    def test_the_write_is_admin_only(self, client, member):
+        response = client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=member["headers"],
+        )
+        assert response.status_code == 403
+
+    def test_the_delete_is_admin_only(self, client, member):
+        response = client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=member["headers"]
+        )
+        assert response.status_code == 403
+
+    def test_neither_is_reachable_without_a_session(self, client):
+        assert (
+            client.put(
+                "/api/settings/catalogue-sources/bne/credential",
+                json={"username": "alice", "password": "hunter2"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.delete("/api/settings/catalogue-sources/bne/credential").status_code
+            == 401
+        )
+
+
+class TestNoCredentialReachesTheUnauthenticatedFlags:
+    def test_the_feature_flags_carry_nothing_about_a_credential(self, client, admin):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        body = client.get("/api/settings/features").text
+        assert "credential" not in body
+        assert "alice" not in body
+        assert "hunter2" not in body
+
+
+class TestASealedRowUnderAPinnedSourceIsNotADeadEnd:
+    """It blocks key creation, so it has to be removable.
+
+    Reachable without doing anything unusual: an archive carries
+    `catalogue_credentials`, so restoring one onto a deployment that pins that
+    source arrives here. The delete used to answer 409 saying there was nothing
+    stored to remove, which stopped being true the moment the create-key
+    refusal started counting a pinned source's sealed row.
+    """
+
+    def test_the_row_blocks_a_new_key(self, client, admin, db, monkeypatch):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        client.delete("/api/settings/credential-key", headers=admin["headers"])
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+        response = client.post("/api/settings/credential-key", headers=admin["headers"])
+        assert response.status_code == 409
+        assert "bne" in response.json()["detail"]
+
+    def test_and_can_be_removed_so_the_key_can_be_made(
+        self, client, admin, db, monkeypatch
+    ):
+        client.post("/api/settings/credential-key", headers=admin["headers"])
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        client.delete("/api/settings/credential-key", headers=admin["headers"])
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+
+        removed = client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
+        )
+        assert removed.status_code == 200
+        assert (
+            client.post(
+                "/api/settings/credential-key", headers=admin["headers"]
+            ).status_code
+            == 200
+        )
+
+    def test_with_nothing_stored_the_pinned_refusal_is_honest_again(
+        self, client, admin, monkeypatch
+    ):
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+        response = client.delete(
+            "/api/settings/catalogue-sources/bne/credential", headers=admin["headers"]
+        )
+        assert response.status_code == 409
+        assert "CATALOGUE_CREDENTIAL_BNE" in response.json()["detail"]

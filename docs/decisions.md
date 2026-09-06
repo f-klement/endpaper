@@ -9613,7 +9613,7 @@ which is the coverage gap the authority feature exists to close.
 **A VIAF cluster id is still stored, and that is not a contradiction.** `author_identifiers`
 holds cross references beside the confirmed record; the identity is the record a Member
 confirmed. What the ruling forbids is a cluster id **deciding** who somebody is, and that is
-now true by construction rather than by convention: `authors.IDENTITY_SPINE` is the one
+now true by construction rather than by convention: `authorship.IDENTITY_SPINE` is the one
 place that names the scheme, and
 `tests/test_authorship.py::TestOnlyTheSpineSaysTwoSpellingsAreOnePerson` asks every member
 of `AuthorityScheme` in turn and fails if any but ISNI acquires the power.
@@ -9765,3 +9765,148 @@ The capability declaration did not become stored data. `catalogue_targets` keeps
 boolean columns, `main.seed_catalogue_targets` writes them from the row exactly as before,
 and nothing reads the table back (`targets.SEEDED` is what the runtime asks). The closed set
 of what a source can do is code, so widening it is an enum member rather than DDL.
+
+## A guard that duplicates what it checks cannot be attacked
+
+`tests/test_house_rules.py`'s enum column rule keeps a list of columns exempt from carrying a
+`CheckConstraint`. The exempt list first mapped each column to its enum's name, which
+`_enum_columns` already derives from the mapper, and it was pinned by a test that read those
+names **back through the walk** so that the pin could not quote itself.
+
+**Two mutations replacing that read with the constant's own values were not caught**, once
+through the helper and once with the walk inlined into the test. The miss is structural
+rather than a gap in the harness: a duplicated fact and the thing it duplicates agree on
+every tree where the duplicate is correct, so no assertion can separate them. Routing the
+comparison through the deriving function hid the redundancy instead of removing it.
+
+The list now holds column names and nothing derived, and the same mutations land.
+
+**The rule this leaves**: where a guard states a fact the code already derives, the fix is to
+delete the statement, not to route it through the derivation. An indirection a test cannot
+see through is one the test is not really using. This sits beside the register's existing
+note that a guard which enumerates something open needs a structural fix rather than a
+further arm.
+
+## Splitting an exemption list is not the same as pinning it
+
+The same rule keeps two exempt lists, one for enums that grow and one for columns nobody has
+decided about. Pinning the membership of the second and not the first **moved the escape
+hatch rather than closing it**: measured 2026-09-06, a column moved into the unpinned list
+with the invented reason "looks like it grows to me" left the whole suite green, because
+nothing tests that a reason string is true. A required reason is a speed bump; the pin is the
+gate. Both lists carry one.
+
+## The matcher is named, and naming it could only take rules away
+
+The rules that propose a merge are `authors._RULES`, keyed by the `SuggestionReason` they
+report, and a `Matcher` is a name and a subset of them. That subset property is the whole
+safety argument: no matcher can propose a pairing `DEFAULT_MATCHER` does not, so making the
+strategy swappable added no way to be wrong that was not already there.
+`test_a_matcher_can_only_take_rules_away` is that as a test.
+
+**`EXACT_MATCHER` is derived and not listed.** It is the rules whose `spends_budget` is
+false, and that flag is checked against the rule rather than believed: each rule is run
+against a spent budget, and one flagged as spending it must then answer with nothing while
+one flagged as not must answer identically. A fifth budget spending rule falls outside
+`exact` without anybody remembering to exclude it.
+
+**The flag is named for what the guard can see, which is narrower than the property that
+matters.** Whether a rule compares pairs is what a reader cares about and no test here can
+observe it. The two coincide because a pairwise rule must take the shared budget: an
+unbudgeted one is the denial of service `MAX_COMPARISONS` exists to bound, so it is a defect
+rather than a rule the table could describe. Naming the flag for the checkable property is
+what keeps the gap visible instead of implied.
+
+**The matcher suggests and the spine decides, unchanged.** A matcher selects rules that each
+produce a suggestion somebody confirms; nothing here folds anything.
+`IDENTITY_SPINE` and `TestOnlyTheSpineSaysTwoSpellingsAreOnePerson` are untouched.
+
+## A batch relink is one transaction, and a decision is never repointed
+
+**The batch honours the per name checkboxes**, which is what makes `exact` an option rather
+than a safety rail. The grouping is transitive, so a group can hold two people; every name
+carries its own checkbox and the batch sends only the names still ticked. A batch that
+ignored them would make the wrong answer the easy one, at a hundred groups at a time.
+
+**No second endpoint.** The proposal is `keep_name` on `AuthorSuggestionOut` rather than a
+`/authors/matches` of its own, which was built first and withdrawn: two endpoints answering
+one question is two places for the next change to land, which is the reason `/bulk/ownership`
+was removed, and the difference between them was one computed field.
+
+**What may not change is the person a row points at**, which is `authorship._would_repoint`,
+used by the proposal and by the write so there is one definition rather than two. Rewriting a
+row's `canonical_name` to a different spelling of the same person changes nothing it asserts,
+so the comparison is on `author_key`.
+
+**"Somebody has already decided about this key" is read off the alias table whole**, which is
+library wide, rather than off `entry.alias_keys`, which is viewer filtered. The two fail in
+opposite directions and only one of them is acceptable: filtered, a decision whose folded
+spelling survives only on somebody else's private book looks like no decision at all and the
+batch repoints it silently. Whole, the batch declines to touch a group and says only that it
+declined. What that concedes is what "The alias mapping is library wide" already concedes: a
+name means somebody. It never says a book exists, and the held back group carries no detail.
+
+**A batch group keeps one of its own names.** A single merge accepts a name no book carries,
+which is the catalogue order repair and is the point of it; a batch may not, and that refusal
+is what makes the groups provably independent. Every group then writes rows keyed inside
+itself pointing at a key inside itself, so one group's writes cannot change what
+`_would_repoint` answers for another, and validating all of them against the state the batch
+started in is sound rather than merely convenient.
+
+**There is no partial failure and therefore no per group outcome to report.** Two index
+reads whatever the batch holds, one pass, one commit. A refusal leaves the library as it was, which is what makes the
+proposal a review rather than a decoration.
+
+**The proposal is asked once per request, not once per group.** `_would_repoint` answers
+from an index of the alias table built once, because scanning the table inside a per group
+question made a plain `GET` cost groups times rows. The regression is guarded by counting
+normalisations rather than seconds: doubling the alias table must cost one `author_key` per
+row added, and a scan costs one per row per group. A guard asserting only that the index is
+built once passes on exactly that regression, which is why there are two arms.
+
+**No job runner, and the reason is a bound rather than an argument.** The batch is bounded by
+`MAX_BATCH_KEYS` spellings rather than by the size of the shelf, and the full cap is exercised
+through the handler by a named test. The measurement and the runner it was taken on are in the
+session notes, because a duration from one of this project's two runners is not comparable
+with the other's.
+
+## A catalogue credential's source is constrained, and that is not the foreign key by another name
+
+`catalogue_credentials` deliberately has **no** foreign key into `catalogue_targets`, and it
+does have a CHECK constraint on the same column. Those look like the same decision taken
+twice, in opposite directions, so this records why they are not.
+
+**They reject different failures.** A foreign key fails on **legitimate drift**: a source a
+later release dropped from the roster is a row this application wrote in good faith, and
+`backup.restore` deletes and reinserts whole tables through Core, so one such row would fail
+an entire restore over something nobody can see. That is a library losing its archive to a
+constraint. The charset rule rejects only values this application **could never have
+written**, because every source it stores came through a roster-validated write.
+
+**The orphan is the evidence.** An archive naming `a-catalogue-that-went-away` restores; one
+naming `../../books/5?` does not. The case the missing foreign key exists to permit still
+passes, which is the test that distinguishes the two rules rather than an argument that they
+differ.
+
+**Why the column is constrained at all, when no other primary key here is.** It travels. The
+settings screen is sent the source of any stored login the current key cannot open, so that
+somebody can remove one, and a generated client interpolates that value into a URL path with
+no encoding: it is the only string path segment in that client, every other being a numeric
+id. An archive decides the value. So a source of `../../books/5?` turned "remove this
+stranded login" into `DELETE /api/books/5` under the admin's own bearer token, from a page
+telling them they were tidying up.
+
+**The rule is not in the generated client**, and could not be: that tree is committed, CI
+diffs it against a fresh generation, and the next `api:generate` reverts a hand-added
+`encodeURIComponent`. It is at the data boundary, which closes it for every consumer rather
+than for one URL.
+
+**The trap is stated where somebody meets it.** `models.CatalogueCredential` carries the
+paragraph, not the migration, because the mistake it guards against is adding
+`ForeignKey("catalogue_targets.source")` and somebody is editing `models.py` when they are
+tempted; a migration is frozen and nobody opens one to add a constraint.
+
+**What made this findable, and it is the transferable part.** The chain was four standing
+links and one added by a fix: putting the removal control where a person could reach a
+pinned row was the right change, and what it also did was teach a primary key to travel.
+Nothing had constrained it because until then nothing needed to.

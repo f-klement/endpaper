@@ -24,7 +24,11 @@ export interface CatalogueSourceOut {
   answers_lookup: boolean;
   answers_search: boolean;
   asked_first: boolean;
+  credential_from_env?: boolean;
+  credential_unreadable?: boolean;
+  credential_username_preview?: string;
   enabled: boolean;
+  has_credential?: boolean;
   has_key: boolean;
   needs_a_key: boolean;
   ready: boolean;

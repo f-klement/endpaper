@@ -97,7 +97,7 @@ class TestAddingABookWithHeadings:
 
         assert res.status_code == 201
         assert res.json()["classifications"] == [
-            {"scheme": "ddc", "number": "004", "label": "Informatik"}
+            {"scheme": "ddc", "number": "004", "label": "Informatik", "kind": None}
         ]
         assert len(headings(res.json()["id"], db)) == 1
 
@@ -256,8 +256,13 @@ class TestTheLookup:
 
         assert res.status_code == 200
         assert res.json()["classifications"] == [
-            {"scheme": "ddc", "number": "004", "label": None},
-            {"scheme": "gnd", "number": "4026894-9", "label": "Informatik"},
+            {"scheme": "ddc", "number": "004", "label": None, "kind": None},
+            {
+                "scheme": "gnd",
+                "number": "4026894-9",
+                "label": "Informatik",
+                "kind": None,
+            },
         ]
 
     def test_a_german_caption_still_suggests_the_curated_tag(
@@ -344,7 +349,7 @@ class TestTheLookup:
         # The Dewey number is untouched: one unusable entry costs its own row
         # and not the record.
         assert res.json()["classifications"] == [
-            {"scheme": "ddc", "number": "004", "label": None}
+            {"scheme": "ddc", "number": "004", "label": None, "kind": None}
         ]
 
     def test_a_second_catalogues_dewey_number_survives_the_ceiling(
@@ -397,7 +402,12 @@ class TestTheLookup:
 
         headings_out = res.json()["classifications"]
         assert len(headings_out) == MAX_CLASSIFICATIONS_PER_BOOK
-        assert headings_out[0] == {"scheme": "ddc", "number": "004", "label": None}
+        assert headings_out[0] == {
+            "scheme": "ddc",
+            "number": "004",
+            "label": None,
+            "kind": None,
+        }
 
     def test_the_lookup_writes_no_tag_by_itself(self, client, admin, db):
         """The server offers the ids and writes nothing, not even the book.

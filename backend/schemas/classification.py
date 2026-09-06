@@ -3,7 +3,7 @@ import unicodedata
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 import filing
-from enums import ClassificationScheme
+from enums import ClassificationScheme, HeadingKind
 from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 
 #: The most headings one book may carry, full stop.
@@ -73,6 +73,30 @@ class ClassificationIn(BaseModel):
     scheme: ClassificationScheme
     number: str = Field(min_length=1, max_length=CLASSIFICATION_NUMBER_MAX)
     label: str | None = Field(default=None, max_length=CLASSIFICATION_LABEL_MAX)
+    #: What the record said it was asserting, where it said. A closed enum, so
+    #: a client cannot invent one; absent is the ordinary answer and means the
+    #: record declared nothing. See `enums.HeadingKind`.
+    kind: HeadingKind | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def a_subject_is_the_absence_of_a_kind(
+        cls, value: HeadingKind | None
+    ) -> HeadingKind | None:
+        """`subject` posted by a client is stored as the null it means.
+
+        **The client-facing half of `ck_classifications_kind`**, which refuses
+        the word outright. Normalised rather than refused, because a client
+        sending it has said something true and this model is what a member's own
+        browser posts back after a lookup: a 422 would fail the whole book over
+        a value the server can read perfectly well.
+
+        What a stored `subject` would cost is `enums.HeadingKind`'s argument and
+        is not repeated here. What this site adds is the reach: both routes into
+        it, `POST /api/books` and `enrich/apply`, take this model from the
+        client.
+        """
+        return None if value is HeadingKind.SUBJECT else value
 
     @field_validator("number")
     @classmethod
@@ -197,6 +221,10 @@ class ClassificationOut(BaseModel):
     #: Absent where the source carried the number alone, which is every MARC
     #: 082. A client showing a heading has to be ready for the number by itself.
     label: str | None = None
+    #: What this heading asserts. Absent means the record never said, which a
+    #: client reads as a subject: that is what `classifications.kind_of` does
+    #: on the server and the two must not disagree.
+    kind: HeadingKind | None = None
     model_config = {"from_attributes": True}
 
 
@@ -210,6 +238,16 @@ class HeadingFacetOut(BaseModel):
     scheme: ClassificationScheme
     number: str
     label: str | None = None
+    #: What this heading asserts, absent where no record ever said. The same
+    #: shape `ClassificationOut` carries, so a client has one rule for the
+    #: field rather than one per endpoint.
+    #:
+    #: **Not grouped on**, for the reason the label is not: the grouping is the
+    #: unique index's own key, and adding this to it would split one heading
+    #: into two facet rows the moment one book's copy has been corrected and
+    #: another's has not. `max` picks between them, and here that is a rule
+    #: rather than a representative, since a declared kind beats a null.
+    kind: HeadingKind | None = None
     book_count: int
 
 

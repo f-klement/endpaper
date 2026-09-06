@@ -28,7 +28,10 @@ from sqlalchemy.orm import Session
 
 from authors import (
     AUTHOR_NAME_MAX,
+    DEFAULT_MATCHER,
     AuthorEntry,
+    AuthorSuggestion,
+    Matcher,
     author_key,
     build_index,
     resolve_alias_map,
@@ -45,7 +48,9 @@ from models import (
     Book,
 )
 from schemas.author import (
+    AuthorBatchMergeOut,
     AuthorIdentifierOut,
+    AuthorMergeGroup,
     AuthorMergeOut,
     AuthorOut,
     AuthorSuggestionOut,
@@ -139,6 +144,35 @@ class RecordedAssertions:
 
     stored: list[AuthorIdentifier]
     refused: list[RefusedAssertion]
+
+
+class DecisionStands(Exception):
+    """A batch group would repoint an alias row somebody already wrote.
+
+    **The refusal is the feature, exactly as it is for `IdentifierConflict`.** A
+    merge somebody made is an assertion that two spellings are one person; a
+    matcher's proposal is a guess. Applying the guess over the assertion is the
+    one thing a batch may not do, so the group is refused rather than applied
+    with the assertion quietly rewritten.
+
+    It refuses the **whole batch** and not the one group, because a batch is one
+    transaction: there is no partially applied state to describe, and reporting
+    per group outcomes would invent one. The preview marks such a group held
+    back, so a Member reaching this has either raced somebody else's merge or
+    written the request by hand.
+
+    `keys` names the group back so a client can say which one, and nothing about
+    the standing decision itself: whose row it is and which spelling it folds
+    are not this caller's to be told.
+
+    The router maps this to 409 rather than 422, for the reason
+    `IdentifierConflict` gives: the request is well formed and the state is what
+    refuses it.
+    """
+
+    def __init__(self, keys: Sequence[str]) -> None:
+        super().__init__("A decision already standing would be repointed.")
+        self.keys = tuple(keys)
 
 
 class IdentifierConflict(Exception):
@@ -260,13 +294,22 @@ class Authorship:
             grouped.setdefault(row.author_key, []).append(row)
         return grouped
 
-    def suggestions(self) -> list[AuthorSuggestionOut]:
-        """Names that are probably one person.
+    def suggestions(self, matcher: Matcher = DEFAULT_MATCHER) -> list[AuthorSuggestionOut]:
+        """Names that are probably one person, and what a batch would do with them.
 
         A suggestion and never a verdict: accepting one writes an alias row,
         and deleting that row puts the shelf back exactly as it was. That is
         true of the `identity` rule as well, which is what keeps a stored ISNI
         from folding two spellings on its own: see `_edges_on_identity`.
+
+        **`matcher` chooses which rules propose**, and it can only ever take
+        some away: see `authors.Matcher`. A matcher proposes and never decides,
+        so naming the strategy added no way for this to fold anything.
+
+        **`keep_name` is what makes this a review rather than a list.** It is
+        the name `merge_batch` would fold each group into, so what is on screen
+        is what would be applied. Null means the group is held back: see
+        `_batch_keep_name`. Nothing here writes.
 
         Returns the schema type, like `listing()` and `merge()`. Returning the
         domain `AuthorSuggestion` left the router knowing its field names,
@@ -278,13 +321,34 @@ class Authorship:
         read whole and grouped in Python than joined against every visible key.
         `entries`, `book_ids_for`, `merge` and `unmerge` still cost two.
         """
-        entries = self.entries
+        groups, entries, aliases = self._proposed(matcher)
+        by_key = {entry.key: entry for entry in entries}
+        # Once per request, not once per group. `_AliasIndex` carries the
+        # measurement that makes the difference.
+        index = _AliasIndex.of(aliases)
+        decided = index.decided
         return [
             AuthorSuggestionOut(
-                keys=list(group.keys), names=list(group.names), reasons=list(group.reasons)
+                keys=list(group.keys),
+                names=list(group.names),
+                reasons=list(group.reasons),
+                keep_name=_batch_keep_name(group, by_key, index, decided),
             )
-            for group in suggest_merges(entries, self._spines(entries))
+            for group in groups
         ]
+
+    def _proposed(
+        self, matcher: Matcher
+    ) -> tuple[list[AuthorSuggestion], list[AuthorEntry], list[AuthorAlias]]:
+        """What one matcher proposes, with the rows it was derived from.
+
+        The alias rows come back because the proposal needs them and the shelf
+        has already been read for them: `keep_name` has to know which keys
+        somebody has already decided about, and re-reading the table to find out
+        would make a second answer to a question this load already answered.
+        """
+        entries, aliases = self._load()
+        return suggest_merges(entries, self._spines(entries), matcher), entries, aliases
 
     def _spines(self, entries: Sequence[AuthorEntry]) -> dict[str, frozenset[str]]:
         """Each author's ISNI, which is the only scheme identity is read from.
@@ -510,6 +574,106 @@ class Authorship:
         if existing_target is not None and existing_target.alias_key not in requested:
             return existing_target.canonical_name
         return keep_name
+
+    def merge_batch(
+        self, groups: Sequence[AuthorMergeGroup], *, by_user_id: int
+    ) -> AuthorBatchMergeOut:
+        """Apply several merges as one, or none of them.
+
+        **Two index reads, one pass, one commit, whatever the batch holds**: one
+        read to validate and write against, one to answer with. Calling `merge`
+        per group would read the whole visible shelf twice and commit once per
+        group, so a hundred groups would be two hundred scans of `books` and a
+        hundred transactions.
+
+        **It only ever adds rows.** A key that already carries a row is skipped
+        rather than rewritten, so no batch changes what an existing row says or
+        which spelling it says it in. That is the literal form of the rule the
+        whole feature turns on, and it is checked on the raw column rather than
+        through `author_key`, which would normalise exactly the difference away.
+
+        **There is no partial failure, which is what makes a batch reviewable.**
+        Every group is checked before any row is written, so a refusal leaves
+        the Library exactly as it was and the Member re-reads the preview rather
+        than working out which half happened. Raises `AuthorNotFound` for a key
+        naming nobody they can see, the same rule `merge` applies, and
+        `DecisionStands` where applying a group would repoint a row somebody
+        already wrote.
+
+        **Groups do not interact, and that is by construction rather than by
+        care.** `AuthorMergeBatchRequest` refuses a spelling appearing in two
+        groups, and `AuthorMergeGroup` refuses a `keep_name` that is not one of
+        the group's own, so every group writes rows keyed inside itself pointing
+        at a key inside itself. A group's rows therefore cannot change what
+        `_would_repoint` answers for another, which is what makes validating all
+        of them against the state the batch started in sound.
+
+        That same rule is why `_resolved_keep_name` is not called here and its
+        absence is not an omission: it follows a `keep_name` that is itself
+        already folded, and a name inside the group is a name the index still
+        carries, so there is nothing to follow.
+        """
+        entries, aliases = self._load()
+        by_key = {entry.key: entry for entry in entries}
+        reachable = by_key.keys() | {key for entry in entries for key in entry.alias_keys}
+        # One pass over the alias table for the whole batch, not one per group.
+        index = _AliasIndex.of(aliases)
+        by_alias_key = {row.alias_key: row for row in aliases}
+
+        planned: list[tuple[list[str], str]] = []
+        for group in groups:
+            requested = {author_key(key) for key in group.keys}
+            if any(key not in reachable for key in requested):
+                raise AuthorNotFound
+            keep_key = author_key(group.keep_name)
+            if _would_repoint(index, requested, keep_key):
+                raise DecisionStands(sorted(requested))
+            planned.append((sorted(requested), group.keep_name))
+
+        for requested_keys, keep_name in planned:
+            for key in requested_keys:
+                existing = by_alias_key.get(key)
+                if existing is not None:
+                    # **Left exactly as it is, which is where this pass departs
+                    # from `merge`'s deliberately.** `_would_repoint` has
+                    # already proved the row names the same person, so an
+                    # assignment could only change the *spelling* stored in
+                    # `canonical_name`, and `build_index` reads the displayed
+                    # name out of that column. Writing it would mean a batch
+                    # renaming somebody on the strength of a `keep_name` that
+                    # merely normalises to the same key, which is what "the
+                    # batch only ever adds rows" says it does not do.
+                    #
+                    # `merge` may still do it: one merge is a person choosing a
+                    # name, and renaming is the thing it is for.
+                    continue
+                else:
+                    row = AuthorAlias(
+                        alias_key=key,
+                        canonical_name=keep_name,
+                        created_by_user_id=by_user_id,
+                    )
+                    self._db.add(row)
+                    by_alias_key[key] = row
+
+        self._db.commit()
+
+        entries, aliases = self._load()
+        alias_ids = {row.alias_key: row.id for row in aliases}
+        identifiers = self._identifiers_by_key()
+        merged: list[AuthorOut] = []
+        for _requested_keys, keep_name in planned:
+            entry = next(
+                (item for item in entries if item.key == author_key(keep_name)), None
+            )
+            # Unreachable while every key named an author with a visible Book,
+            # which the check above enforces. Here for the race `merge` records:
+            # another Member trashing the last of those Books between the two
+            # reads leaves an author with nothing to show.
+            if entry is None:
+                raise AuthorNotFound
+            merged.append(self._out(entry, alias_ids, identifiers))
+        return AuthorBatchMergeOut(merged=merged)
 
     def unmerge(self, alias_id: int) -> None:
         """Undo one merge. The spelling becomes its own author again.
@@ -895,6 +1059,166 @@ class Authorship:
     def _visible_keys(self) -> set[str]:
         """Every spelling key that resolves to somebody on this Member's shelf."""
         return {key for entry in self.entries for key in _evidenced_keys(entry)}
+
+
+@dataclass(frozen=True, slots=True)
+class _AliasIndex:
+    """The alias table keyed both ways, built once per request.
+
+    **Built once because the alternative was quadratic on a plain GET.** The
+    proposal asks `_would_repoint` per group, and a hundred groups against an
+    alias table scanned whole is a hundred passes over it. Measured on one
+    machine, in process and **not on a suite runner**, so these figures are
+    comparable with each other and with nothing else. `suggestions()` with the
+    returned groups pinned at 100:
+
+        alias rows     0        1,000     10,000
+        suggestions()  0.01s    0.36s     4.35s
+
+    Linear in both factors, and the second one is not bounded by anything a
+    reader controls: `alias_key` is unique per spelling, a row outlives the Book
+    it was created for (`models.AuthorAlias`), so the table only grows, and the
+    published image runs uvicorn without `--workers`. Indexed, both callers pay
+    one pass over the table and then dictionary lookups.
+
+    **Re-derived after the fix by counting `author_key` calls rather than
+    seconds**, because a count is comparable across machines and a duration is
+    not. At 100 groups the calls are now `rows + groups`, measured 100 / 1,100 /
+    10,100 / 50,100 at 0 / 1,000 / 10,000 / 50,000 rows, where the scan was
+    `rows x groups` and would have been a million at ten thousand rows. The
+    seconds on that same machine fell from 4.35 to 0.037 at ten thousand. **The
+    count is the figure that transfers; the seconds are not.**
+
+    **`by_target` holds a list rather than one key**, because several spellings
+    fold into one person and every one of them is a row that would be repointed.
+    """
+
+    #: `alias_key` -> the key of the person that spelling means.
+    by_alias: dict[str, str]
+    #: The key of a person -> every `alias_key` that means them.
+    by_target: dict[str, list[str]]
+
+    @classmethod
+    def of(cls, aliases: Sequence[AuthorAlias]) -> _AliasIndex:
+        by_alias: dict[str, str] = {}
+        by_target: dict[str, list[str]] = {}
+        for row in aliases:
+            target = author_key(row.canonical_name)
+            by_alias[row.alias_key] = target
+            by_target.setdefault(target, []).append(row.alias_key)
+        return cls(by_alias=by_alias, by_target=by_target)
+
+    @property
+    def decided(self) -> set[str]:
+        """Every key an alias row already says something about.
+
+        Both ends of every row: the spelling it folds, and the person it folds
+        that spelling into. **Both ends, because neither alone is the set.** A
+        merge writes a row per key it was *given*, which is every spelling when
+        the page sends them and need not include the kept one, so the person
+        folded into is reached through the canonical end and the spellings
+        through the other.
+
+        **Read off the alias table whole, which is library wide, and not off
+        `entry.alias_keys`, which is filtered to what this Member can see.**
+        That is a deliberate choice against the narrower set and the reason is
+        which way the two fail. Filtered, a decision whose folded spelling
+        survives only on somebody else's Private Book looks like no decision at
+        all, and the batch silently repoints it, which is the one thing this
+        feature refuses. Whole, the batch declines to touch a group and says
+        only that it declined.
+
+        What that concedes is the disclosure `docs/decisions.md` already
+        concedes under "The alias mapping is library wide": that a name means
+        somebody. It does not say which spelling was folded, who folded it, or
+        that any Book exists, and `AuthorSuggestionOut.keep_name` carries no
+        detail beyond the group being held back.
+        """
+        return set(self.by_alias) | set(self.by_target)
+
+
+def _would_repoint(index: _AliasIndex, requested: set[str], keep_key: str) -> bool:
+    """Whether folding these keys into that one changes who an existing row means.
+
+    **The one definition of "a member's decision is not cleared", used by the
+    preview and by the write.** A decision is "this spelling means that person",
+    so what may not change is the person a row points at. Rewriting a row's
+    `canonical_name` to a different spelling of the same person changes nothing
+    it asserts, and the comparison is on `author_key` for exactly that reason.
+
+    The two arms are the two passes `merge` runs, read for their effect rather
+    than for their shape:
+
+    * a row **for** one of these keys is repointed at `keep_key`, which changes
+      it unless it already pointed there;
+    * a row **at** one of these keys is repointed at `keep_key` too, unless it
+      is the kept key's own row, and that changes it unless it already pointed
+      there.
+
+    Nothing here is deleted by either pass, so a row surviving unchanged is a
+    decision surviving intact.
+
+    **Lookups rather than a scan**, which is why it takes the index: see
+    `_AliasIndex` for the measurement that made the scan untenable.
+    """
+    for key in requested:
+        if (target := index.by_alias.get(key)) is not None and target != keep_key:
+            return True
+    for key in requested:
+        if key == keep_key:
+            continue
+        if any(alias != keep_key for alias in index.by_target.get(key, ())):
+            return True
+    return False
+
+
+def _batch_keep_name(
+    group: AuthorSuggestion,
+    by_key: Mapping[str, AuthorEntry],
+    index: _AliasIndex,
+    decided: set[str],
+) -> str | None:
+    """The name a batch would fold this group into, or None where it is held back.
+
+    **A decided name wins.** Where exactly one name in the group is one somebody
+    has already merged into, that is the name kept, and that case is what makes
+    a batch worth having: an import creates a new spelling of a person a Member
+    established months ago, and the batch files it under the name they chose
+    rather than under whichever spelling happens to be commonest today.
+
+    **Otherwise the most credited name**, ties broken by the order the index is
+    sorted in, so two runs over one shelf propose the same name. It is a count
+    over Books this Member can see, so two Members may be offered different
+    names for one group; that is the same filtering every count in this API
+    carries, and the name is on screen before anything is written.
+
+    **None means held back**, and the only thing that holds a group back is
+    `_would_repoint`: two names in it that somebody has already decided about,
+    or one whose decision this fold would rewrite. Deciding it by asking
+    `_would_repoint` rather than by counting the decided names is the point:
+    the count is a proxy and this is the rule itself.
+    """
+    requested = set(group.keys)
+    entries = [by_key[key] for key in group.keys if key in by_key]
+    if not entries:
+        return None
+    already = sorted(requested & decided)
+    if already:
+        candidate = next(
+            (entry.name for entry in entries if entry.key == already[0]), None
+        )
+    else:
+        # Most Books first, then the index's own order, which is what
+        # `build_index` sorts by. `min` on the negated count keeps both
+        # directions in one key.
+        candidate = min(
+            entries, key=lambda entry: (-len(entry.book_ids), entry.name.casefold(), entry.key)
+        ).name
+    if candidate is None:
+        return None
+    if _would_repoint(index, requested, author_key(candidate)):
+        return None
+    return candidate
 
 
 def _evidenced_keys(entry: AuthorEntry) -> set[str]:

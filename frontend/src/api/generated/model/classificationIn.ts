@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationScheme } from "./classificationScheme.ts";
+import type { HeadingKind } from "./headingKind.ts";
 
 /**
  * One heading, as a client posts it back after a lookup.
@@ -16,6 +17,7 @@ import type { ClassificationScheme } from "./classificationScheme.ts";
  * scheme is a closed enum, and both strings are bounded and stripped.
  */
 export interface ClassificationIn {
+  kind?: HeadingKind | null;
   label?: string | null;
   /**
    * @minLength 1

@@ -37,7 +37,7 @@ from typing import Any, Final
 
 import covers
 import google_books
-from enums import AuthorityScheme, ClassificationScheme
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from models import (
     AUTHOR_LINE_MAX,
     COVER_URL_MAX,
@@ -80,11 +80,17 @@ class Heading:
     `number` is the half that identifies the heading and `label` is the caption,
     which most sources omit: MARC 082 carries the notation alone everywhere, and
     the printed Dewey schedule carries the words.
+
+    `kind` is what the record said it was asserting, and None is the ordinary
+    answer: only a MARC `$2` declares one, so every Dewey number, every call
+    number and every LCSH string arrives without. See `enums.HeadingKind` for
+    why that null is kept rather than defaulted.
     """
 
     scheme: ClassificationScheme
     number: str
     label: str | None = None
+    kind: HeadingKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -960,7 +966,7 @@ def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssert
 
 
 def _union(headings: Iterable[Heading]) -> tuple[Heading, ...]:
-    """One heading per scheme and number, keeping the caption if any source had one.
+    """One heading per scheme and number, keeping any caption and any kind a source had.
 
     The captions are what differ. **No source supplies a Dewey caption today**:
     the DNB returned `830 Deutsche Literatur` until it moved to MARC21 on
@@ -970,6 +976,20 @@ def _union(headings: Iterable[Heading]) -> tuple[Heading, ...]:
     which is the live path: the number decides identity, the caption is filled
     in from wherever it exists, and a later source never overwrites a caption
     already found.
+
+    **`kind` is filled in on the same rule, and the pair it serves is a field
+    that declares nothing arriving before one that does.** One record restates
+    itself: a `689` chain repeats the `600`, `650` and `651` headings it was
+    built from and declares no `$2` of its own. What decides is
+    `metadata._DNB_SUBJECT_TAGS`, whose order is `650 651 655 689 600`, so an
+    undeclared `650` or `651` reaches this loop **before** the `655` that names
+    the same concept as a content type, and without the fill-in the undeclared
+    copy would keep the place and the declaration would be dropped.
+
+    The reverse is not the case, and saying so is the point: `655` already
+    precedes `689` in that tuple, so a content type never loses to the chain
+    that merely repeated it. Which arrives first is that tuple's order rather
+    than a fact about the heading, so it cannot be the thing that decides.
     """
     kept: dict[tuple[ClassificationScheme, str], Heading] = {}
     for heading in headings:
@@ -977,6 +997,9 @@ def _union(headings: Iterable[Heading]) -> tuple[Heading, ...]:
         existing = kept.get(key)
         if existing is None:
             kept[key] = heading
-        elif existing.label is None and heading.label is not None:
-            kept[key] = dataclasses.replace(existing, label=heading.label)
+            continue
+        label = existing.label if existing.label is not None else heading.label
+        kind = existing.kind if existing.kind is not None else heading.kind
+        if label is not existing.label or kind is not existing.kind:
+            kept[key] = dataclasses.replace(existing, label=label, kind=kind)
     return tuple(kept.values())

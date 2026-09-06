@@ -8,7 +8,12 @@ import {
   type DivisionFacetOut,
   type HeadingFacetOut,
 } from "../../../api/generated/model";
-import { SCHEME_LABEL } from "../../../lib/classificationLabels";
+import {
+  KIND_LABEL,
+  SCHEME_LABEL,
+  headingKind,
+  headingText,
+} from "../../../lib/classificationLabels";
 
 interface ClassificationPickerProps {
   facets: ClassificationFacets | undefined;
@@ -142,18 +147,32 @@ export default function ClassificationPicker({
   function headingChip(facet: HeadingFacetOut) {
     const key = headingKey(facet);
     const selected = selectedHeadings.includes(key);
+    const kind = KIND_LABEL[headingKind(facet.kind)];
     return (
       <button
         key={key}
         type="button"
         aria-pressed={selected}
-        onClick={() => onToggleHeading(key)}
+        // The same sentence the book page's chip carries, rather than the bare
+        // wire key: `gnd:4203576-4` is a spelling that appears nowhere else in
+        // the interface, and a `title` is unreachable by keyboard and on touch,
+        // so it is the wrong home for the identifier. The identifier's readable
+        // home is the book page, where it is rendered on the face of the chip.
+        title={t("classification.filterBy", { heading: headingText(facet) })}
         className={`${CHIP} ${selected ? CHOSEN : UNCHOSEN}`}
+        onClick={() => onToggleHeading(key)}
       >
         <span className={selected ? "opacity-80" : "opacity-70"}>
           {t(SCHEME_LABEL[facet.scheme])}
         </span>
-        <span className="font-medium">{facet.number}</span>
+        {/* The caption where the record carried one, the identifier where it
+            did not. A GND chip showing `facet.number` is a row of digits. */}
+        <span className="font-medium">{headingText(facet)}</span>
+        {kind && (
+          <span className={selected ? "opacity-80" : "opacity-70"}>
+            {t(kind)}
+          </span>
+        )}
         <span className="opacity-70">{facet.book_count}</span>
       </button>
     );

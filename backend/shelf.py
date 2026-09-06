@@ -23,6 +23,14 @@ that.
 this file rather than left as comments: the table wide uniqueness check, and the
 re-read of rows a caller already filtered.
 
+**`Outbound` is the same rule one step past the query.** A `Book` in a list no
+longer records whose shelf produced it, so a member's own shelf and the public
+one are the same `list[Book]` to every serialiser downstream. `Outbound` carries
+that missing fact, and `outbound_page` and `outbound_first` are the two ways to
+one: both refuse a shelf that has a viewer. A private Book therefore never
+reaches a payload addressed to somebody this instance cannot name, which is
+`docs/data-model.md`'s "a private book never leaves the instance".
+
 **The anchoring fixes the join direction and nothing else.** It does not stop a
 caller forgetting the join: measured, both the filtered and the unfiltered
 spelling compile to two FROMs and a cartesian product SQLite answers rather than
@@ -50,7 +58,8 @@ Book's. Reading one outside this module is reading a Book's data without a Book,
 which is what the fourth house rule pass exists to report.
 """
 
-from collections.abc import Collection, Sequence
+import sys
+from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Self
@@ -376,12 +385,109 @@ MAX_HEADING_FACETS = 500
 
 
 @dataclass(frozen=True, slots=True)
+class Outbound:
+    """Books that may leave this instance, and the only rows a serialiser for a
+    stranger will accept.
+
+    **The rule is "never sent", not "never shown".** A private Book is one this
+    household does not publish, and "never shown" would put a copy of that rule
+    in every client anybody ever writes against this API, including clients this
+    project does not control. "Never sent" is a property of the payload, so it
+    can be enforced where the payload is built.
+
+    `Shelf.outbound_page` and `Shelf.outbound_first` are the two ways to a value
+    of this type, and both refuse a Shelf that has a viewer. The only Shelf with
+    no viewer is `seen_by_the_public`, which has no ownership arm at all, so
+    **there is no input any caller can supply that puts a private Book in one**.
+    That is the same construction argument `seen_by_the_public` makes, one step
+    further out: the shelf makes the rows safe, and this makes them stay safe
+    after the query has returned.
+
+    **`__post_init__` refuses a caller outside this module, so those two are the
+    only two constructions.** A name based rule cannot say that: an *empty* `Outbound` is a
+    call away (`outbound_page(0, 0)`), and `dataclasses.replace(empty,
+    books=...)`, `copy.replace(...)` and `type(empty)(...)` then mint one holding
+    any rows at all, naming the type nowhere. Measured: all three passed mypy and
+    both shelf guards, and only the route sweep noticed.
+
+    **The frame is read at depth two, and depth one is the trap.** A dataclass's
+    generated `__init__` executes with *this* module's globals whatever calls it,
+    so a check one frame up sees `shelf` for every caller and refuses nothing. Two
+    frames up is the caller: `shelf` for the two methods below, `dataclasses` for
+    both `replace` spellings, and the offender's own module for everything else.
+    `tests/test_shelf.py::TestOnlyTheShelfCanMintOne` drives all four.
+
+    CPython only, and this backend is pinned to CPython 3.14. **It refuses
+    constructions and nothing else**: `__new__` with `object.__setattr__`,
+    `copy.deepcopy` and `pickle` all rebuild an instance without running
+    `__init__`, so none of them reaches this check. Named rather than closed,
+    which is this module's standard for a way round: none is a shape anybody
+    arrives at by accident, and a caller doing it has written the words.
+
+    `tests/test_shelf.py::TestOnlyTheShelfSaysWhatMayLeave` is the second half
+    and is not made redundant by this: it fails in CI on a construction that is
+    merely *written*, where this one fails only when the line is reached.
+
+    **What the old arrangement accepted.** `books_to_public_out` took a
+    `Sequence[Book]`, so `books_to_public_out(Shelf.seen_by(db, alice).all())`
+    type checked, ran, and published Alice's private Books through
+    `PublicBookOut` with nothing red anywhere. Only a reviewer stood between
+    that and a deployment.
+
+    **`marc.write` deliberately still takes a plain iterable**, because it
+    serialises a member's own shelf for that member. This type does not mean
+    "serialised", it means "addressed to somebody this instance cannot name".
+    `docs/data-model.md` §A private book never leaves the instance argues it.
+
+    Iterable and sized, so a caller writes `for book in outbound` and
+    `if not outbound` rather than reaching for the tuple.
+    """
+
+    books: tuple[Book, ...]
+
+    def __post_init__(self) -> None:
+        # Depth two, never one: see the class docstring for what depth one
+        # answers and why it refuses nothing. Removing this check makes every
+        # sentence above it false and is caught by `TestOnlyTheShelfCanMintOne`.
+        # Too shallow a stack raises `ValueError` from `_getframe` rather than
+        # returning, which is a refusal too, so both failure modes deny.
+        if sys._getframe(2).f_globals.get("__name__") != __name__:
+            raise TypeError(
+                "An Outbound says its rows came off a shelf with no viewer, "
+                "which is a fact only this module can establish. Ask "
+                "Shelf.seen_by_the_public(db).outbound_page(...) or "
+                ".outbound_first() for one."
+            )
+
+    def __iter__(self) -> Iterator[Book]:
+        return iter(self.books)
+
+    def __len__(self) -> int:
+        return len(self.books)
+
+
+@dataclass(frozen=True, slots=True)
 class HeadingCount:
     """One distinct heading on a shelf, and how many Books carry it."""
 
     scheme: ClassificationScheme
     number: str
     label: str | None
+    #: What this heading asserts, null where no record ever said.
+    #:
+    #: **`str | None` rather than the enum, because that is what the column
+    #: hands back** and this row is not coerced the way `scheme` beside it is.
+    #: Coercing here would be the one place that raises on a value
+    #: `ck_classifications_kind` did not exist to refuse when the row was
+    #: written; `HeadingFacetOut` types the field and is where the coercion
+    #: belongs.
+    #:
+    #: **Not resolved to `subject` here**, though this is a derived view and
+    #: could be. The book's own headings go out nullable, so resolving it on
+    #: this one endpoint would give one field two shapes and every client two
+    #: rules for reading it. The fallback has one home on each side:
+    #: `classifications.kind_of` and the client's `headingKind`.
+    kind: str | None
     book_count: int
 
 
@@ -778,6 +884,52 @@ class Shelf:
         )
         return books, total
 
+    def _refuse_a_viewer(self, method: str) -> None:
+        """Refuse to hand rows to an outbound payload unless nobody is named.
+
+        A shelf built for a member carries that member's own private Books by
+        design, so it is exactly the wrong source for a payload addressed to
+        somebody else. The failure is silent otherwise: the rows are correct
+        for the viewer they were fetched for and wrong for the reader they
+        reach, and no query, status code or type would say so.
+        """
+        if self._viewer_id is not None:
+            raise ValueError(
+                f"{method}() is for rows leaving this instance, and this shelf "
+                "was built for one member, so it carries that member's own "
+                "private Books. Build it with Shelf.seen_by_the_public()."
+            )
+
+    def outbound_page(
+        self,
+        offset: int,
+        limit: int,
+        *order: UnaryExpression[Any],
+        load: Loading = Loading.NOTHING,
+    ) -> tuple[Outbound, int]:
+        """One page of this shelf as rows that may leave, and the total.
+
+        `page()` with the audience attached. Everything about the query is the
+        same; what differs is that the result carries the fact that it came off
+        a shelf with no ownership arm, so a serialiser can demand it.
+        """
+        self._refuse_a_viewer("outbound_page")
+        books, total = self.page(offset, limit, *order, load=load)
+        return Outbound(books=tuple(books)), total
+
+    def outbound_first(self, *, load: Loading = Loading.NOTHING) -> Outbound:
+        """One Book from this shelf as rows that may leave, or none of them.
+
+        Empty rather than `None`, so the caller's 404 is written against the
+        same value the serialiser takes and there is no bare `Book` in between
+        for somebody to pass along. **Empty for every reason**: a Book that does
+        not exist, one somebody trashed and one a member marked private are the
+        same answer here, which is what stops the 404 confirming an id.
+        """
+        self._refuse_a_viewer("outbound_first")
+        book = self.first(load=load)
+        return Outbound(books=() if book is None else (book,))
+
     def classification_facets(self) -> tuple[list[HeadingCount], list[DivisionCount]]:
         """Every heading on this shelf and every Dewey division, each with a count.
 
@@ -808,6 +960,22 @@ class Shelf:
         Book each. `max` is a representative rather than a judgement, and the
         halves it chooses between are the same assertion.
 
+        **`kind` is `max` for a reason where the label is `max` for want of
+        one.** SQL's `max` skips nulls, and a null here means no record ever
+        declared, so this returns a declared kind wherever any Book's copy of
+        the heading has one. That is what a facet list needs while shipped rows
+        are still healing: one Book enriched since `a1e7c93b60df` is enough for
+        `CD-ROM` to stop being offered as a subject, and it cannot be grouped on
+        without splitting one heading into a corrected row and an uncorrected
+        one.
+
+        Two Books whose catalogues **disagree** about a declared kind are the
+        one case where this picks, and it picks `content` over `carrier` by
+        alphabet. `subject` cannot win by being the last word because the column
+        refuses it: `ck_classifications_kind` permits `content`, `carrier` and
+        the null, which is the enforcement rather than a convention this reads
+        as one.
+
         A plain `count` rather than a count of distinct Books, because that same
         constraint makes one row per Book per heading already.
 
@@ -833,6 +1001,7 @@ class Shelf:
                 Classification.scheme,
                 Classification.number,
                 func.max(Classification.label),
+                func.max(Classification.kind),
                 func.count(Classification.book_id).label("book_count"),
             )
             .join(Classification, Classification.book_id == Book.id)
@@ -846,9 +1015,10 @@ class Shelf:
                 scheme=ClassificationScheme(scheme),
                 number=number,
                 label=label,
+                kind=kind,
                 book_count=count,
             )
-            for scheme, number, label, count in rows
+            for scheme, number, label, kind, count in rows
         ]
 
     def _division_counts(self) -> list[DivisionCount]:

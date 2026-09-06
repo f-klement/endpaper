@@ -126,6 +126,8 @@ export const en = {
   "classification.scheme.lcc": "Library of Congress",
   "classification.scheme.gnd": "GND",
   "classification.scheme.lcsh": "Subject heading",
+  "classification.kind.content": "Content type",
+  "classification.kind.carrier": "Carrier type",
 
   // ── Book detail ─────────────────────────────────────────────────────────
   "book.uploadCover": "Upload Cover",
@@ -608,6 +610,72 @@ export const en = {
   "settings.apiKeyHint":
     "Create one in the Google Cloud console and enable the Books API for it. The key is never shown again after saving.",
 
+  // ── Catalogue logins, and the key that protects them ────────────────────
+  //
+  // The cost sentence appears beside the field rather than only in the docs,
+  // because losing the key is the failure this whole feature is shaped around
+  // and the person who has to act on it is standing here.
+  "settings.catalogueLogins": "Catalogue logins",
+  "settings.catalogueLoginsHint":
+    "Some national libraries answer only to an account. A login is stored encrypted and is sent to that catalogue and nowhere else.",
+  "settings.credentialUsername": "Username",
+  "settings.credentialPassword": "Password",
+  "settings.credentialSet": "A login is stored ({preview}).",
+  "settings.credentialMissing": "No login stored.",
+  "settings.credentialSave": "Save login",
+  "settings.credentialClear": "Remove stored login",
+  "settings.credentialFromEnv":
+    "This login is supplied by the server's configuration, so it cannot be changed or shown here. Change {variable} where the app is deployed.",
+  // Says only that it cannot be read. For three of the four causes the remedy
+  // is on the key and brings every login back at once, so the diagnosis lives
+  // in the key section rather than being guessed at here.
+  "settings.credentialUnreadable":
+    "A login is stored for this catalogue and cannot be read. See the encryption key below.",
+  "settings.credentialFromEnvBroken":
+    "{variable} is set to something that is not a username and a password separated by a colon, so no login is being sent.",
+
+  "settings.credentialKey": "Encryption key",
+  "settings.credentialKeyHint":
+    "Catalogue logins are encrypted with this key. It is never written to the database, so a backup carries logins nobody can read without it.",
+  "settings.credentialKeyCost":
+    "If this key is lost or replaced, every catalogue login stored here has to be entered again. Restoring a backup onto another machine needs the recovery phrase.",
+  "settings.credentialKeyMissing":
+    "No encryption key yet, so no login can be stored.",
+  "settings.credentialKeyPresent": "A key is in place, held in {location}.",
+  "settings.credentialKeyLocationEnv": "the server's configuration",
+  "settings.credentialKeyLocationKeychain": "this machine's keychain",
+  "settings.credentialKeyLocationFile": "a file on this machine",
+  // Names them as well as counting them. The count is read off the table and
+  // a stored login can name a catalogue this build's roster no longer has, so
+  // a bare number could point at something the list above does not show.
+  // **Names the two ways out without claiming which applies.** `unreadable`
+  // covers a missing key, a rotated key, a key-level refusal and a damaged row.
+  // The phrase answers the first two, nothing but removal answers the last, and
+  // the backend keeps `WrongKeyGeneration` and `UnreadableCredential` apart on
+  // purpose. A sentence promising the phrase would collapse the distinction the
+  // generation tag exists to maintain.
+  "settings.credentialKeyUnreadable":
+    "{count} stored logins cannot be read as things stand. Enter the recovery phrase, or remove them.",
+  "settings.credentialKeyForget": "Discard this key",
+  "settings.credentialKeyForgetHint":
+    "Only if the recovery phrase is lost. Every login stored under this key has to be entered again afterwards.",
+  "settings.credentialKeyCreate": "Create an encryption key",
+  "settings.credentialKeyShownOnce":
+    "Write these 24 words down now and keep them somewhere safe. They are the key, so this is the only time they are shown.",
+  "settings.credentialKeyPhraseTitle": "Your recovery phrase",
+  "settings.credentialKeyDone": "I have written it down",
+  "settings.credentialKeyRestore": "Enter a recovery phrase",
+  "settings.credentialKeyRestoreHint":
+    "Type the 24 words in the order you wrote them. Capitals and extra spaces do not matter, and a wrong word is refused rather than accepted.",
+  "settings.credentialKeyRestoreSave": "Use this phrase",
+  "settings.credentialAdd": "Add a login for",
+  "settings.credentialAddChoose": "Choose a catalogue",
+  "settings.credentialChange": "Change login",
+  "settings.credentialNeedsKeyFirst":
+    "Make an encryption key below before storing a login.",
+  "settings.credentialKeyDismissConfirm":
+    "These words will not be shown again. Have you written them down?",
+
   "settings.testAccounts": "Test accounts",
   "settings.testAccountsHint":
     "Accounts with a password you set, for seeing the library the way an ordinary member sees it. They are never admins, and they are not offered at the login screen.",
@@ -919,6 +987,17 @@ export const en = {
   "authors.reasonSpelling": "same name, spaced differently",
   "authors.reasonInitials": "an initial against a full name",
   "authors.reasonFragment": "part of a longer name",
+  "authors.wouldKeep": "Fold into {name}",
+  "authors.heldBack":
+    "Folding all leaves this group alone: a merge somebody already made covers it. The buttons below still fold it one group at a time.",
+  "authors.foldAll": "Fold the ticked groups",
+  "authors.batchExplain":
+    "{count} groups ticked, {spellings} spellings in all. No book is touched, and each fold can be undone from the author.",
+  "authors.batchHeldBackCount":
+    "{count} more are left out: a merge already made covers them.",
+  "authors.batchWithdrawnCount":
+    "{count} more are out until the name they would be folded into is ticked again.",
+  "authors.batchConfirm": "Fold {count} groups, {spellings} spellings in all?",
   "authors.include": "Include {name}",
 
   // ── Duplicates ──────────────────────────────────────────────────────────

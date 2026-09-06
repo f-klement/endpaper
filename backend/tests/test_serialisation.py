@@ -520,22 +520,30 @@ class TestThePublicSerialiserCannotAskWhoIsAsking:
         statement. That is a stronger statement than counting statements: it
         fails on the attempt rather than on the cost of it.
         """
-        from sqlalchemy.orm import selectinload
-
         from database import SessionLocal
         from models import Book
         from serialisation import books_to_public_out
+        from shelf import Loading, Shelf
 
         session = SessionLocal()
         try:
             session.add(Book(title="Public", author="A Writer"))
             session.commit()
-            books = (
-                session.query(Book)
-                .options(selectinload(Book.tags), selectinload(Book.classifications))
-                .all()
+            books, _ = Shelf.seen_by_the_public(session).outbound_page(
+                0, 10, Book.title.asc(), load=Loading.PUBLISHED
             )
         finally:
             session.close()
 
         assert [out.title for out in books_to_public_out(books)] == ["Public"]
+
+    def test_the_rows_it_takes_can_only_have_come_from_a_shelf_with_no_viewer(self):
+        """The signature is the boundary, so the type on it is the assertion.
+
+        A list of Books says nothing about whose shelf produced it, which is
+        what `shelf.Outbound` exists to carry. Asserted here because a
+        signature is the one place it can be read off.
+        """
+        from shelf import Outbound
+
+        assert self._annotations()["books"] is Outbound

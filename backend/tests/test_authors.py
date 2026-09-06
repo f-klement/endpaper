@@ -8,9 +8,18 @@ row is a decision and is the only thing here that is stored.
 
 import time
 
+import pytest
+
 from authors import (
+    _RULES,
+    DEFAULT_MATCHER,
+    EXACT_MATCHER,
+    MATCHERS,
     MAX_BUCKET,
+    MAX_COMPARISONS,
     MAX_SUGGESTIONS,
+    MatcherName,
+    _Budget,
     author_key,
     build_index,
     resolve_alias_map,
@@ -492,3 +501,125 @@ class TestTheIdentitySpine:
         [identity] = [group for group in groups if Reason.IDENTITY in group.reasons]
         assert len(identity.keys) == MAX_BUCKET + 1
         assert any(Reason.INITIALS in group.reasons for group in groups)
+
+
+class TestTheMatcherIsNamed:
+    """Which rules run, under one name, and what that name may not become.
+
+    The naming is only safe because a matcher **selects** from `_RULES`: every
+    matcher is therefore a subset of the default and cannot propose a pairing
+    the default does not. These tests are that property, the table being
+    complete, and the one flag `EXACT_MATCHER` is derived from being true of the
+    rules rather than merely written beside them.
+    """
+
+    def _shelf(self):
+        """One shelf reaching all four rules, so a narrowing is visible."""
+        return build_index(
+            [
+                (1, "Boz"),
+                (2, "Charles Dickens"),
+                (3, "JRR Tolkien"),
+                (4, "J. R. R. Tolkien"),
+                (5, "U. K. Le Guin"),
+                (6, "Ursula K. Le Guin"),
+                (7, "Le Guin, Ursula K."),
+            ],
+            {},
+        )
+
+    def _spines(self):
+        return {
+            author_key("Boz"): frozenset({DICKENS}),
+            author_key("Charles Dickens"): frozenset({DICKENS}),
+        }
+
+    def test_every_reason_has_a_rule(self):
+        """Derived from the enum rather than listed, so a fifth rule that nobody
+        wired into the table fails here instead of silently never running."""
+        assert set(_RULES) == set(Reason)
+
+    def test_every_matcher_name_has_a_matcher(self):
+        assert set(MATCHERS) == set(MatcherName)
+
+    def test_the_default_matcher_holds_every_rule(self):
+        assert DEFAULT_MATCHER.rules == set(Reason)
+
+    def test_the_default_is_what_a_caller_naming_nothing_gets(self):
+        entries = self._shelf()
+
+        assert suggest_merges(entries, self._spines()) == suggest_merges(
+            entries, self._spines(), DEFAULT_MATCHER
+        )
+
+    def test_a_matcher_can_only_take_rules_away(self):
+        """The safety argument for making the strategy swappable, as a test.
+
+        Every matcher's pairings are a subset of the default's, so naming the
+        strategy adds no pairing that was not already offered. A matcher that
+        grew a rule of its own would fail here.
+        """
+        entries, spines = self._shelf(), self._spines()
+        default = {
+            frozenset(pair)
+            for group in suggest_merges(entries, spines, DEFAULT_MATCHER)
+            for pair in ((group.keys[index], other)
+                         for index in range(len(group.keys))
+                         for other in group.keys[index + 1:])
+        }
+        for matcher in MATCHERS.values():
+            pairs = {
+                frozenset(pair)
+                for group in suggest_merges(entries, spines, matcher)
+                for pair in ((group.keys[index], other)
+                             for index in range(len(group.keys))
+                             for other in group.keys[index + 1:])
+            }
+            assert pairs <= default, matcher.name
+
+    def test_the_exact_matcher_drops_the_rules_that_spend_the_budget(self):
+        reasons = {
+            reason
+            for group in suggest_merges(self._shelf(), self._spines(), EXACT_MATCHER)
+            for reason in group.reasons
+        }
+
+        assert reasons == {Reason.IDENTITY, Reason.SPELLING}
+
+    def test_the_exact_matcher_still_reaches_both_of_the_rules_it_keeps(self):
+        """The other half of the diagonal above: a matcher that returned nothing
+        would pass that test and be useless."""
+        groups = suggest_merges(self._shelf(), self._spines(), EXACT_MATCHER)
+
+        assert {frozenset(group.names) for group in groups} == {
+            frozenset({"Boz", "Charles Dickens"}),
+            frozenset({"JRR Tolkien", "J. R. R. Tolkien"}),
+        }
+
+    @pytest.mark.parametrize("reason", list(Reason))
+    def test_the_budget_flag_is_checked_against_the_rule(self, reason):
+        """`spends_budget` is what `EXACT_MATCHER` is derived from, so it is
+        asked of the rule rather than believed.
+
+        A rule that spends the budget answers with nothing once it is gone; a
+        rule that buckets on an equal value answers the same either way. The two
+        arms are opposite, so a flag written the wrong way round fails one of
+        them.
+
+        **This is what the flag is named for, and it is narrower than the
+        property a reader cares about.** Nothing here can see whether a rule
+        compares pairs; it can only see whether the budget changes the answer.
+        `_RuleSpec` records why the two coincide.
+        """
+        entries, spines = self._shelf(), self._spines()
+        by_key = {entry.key: entry for entry in entries}
+        rule = _RULES[reason]
+
+        spent = rule.edges(by_key, spines, _Budget(0))
+        unlimited = rule.edges(by_key, spines, _Budget(MAX_COMPARISONS))
+
+        assert unlimited, reason
+        if rule.spends_budget:
+            assert spent == []
+        else:
+            assert spent == unlimited

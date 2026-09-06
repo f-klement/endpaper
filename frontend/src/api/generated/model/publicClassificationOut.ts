@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationScheme } from "./classificationScheme.ts";
+import type { HeadingKind } from "./headingKind.ts";
 
 /**
  * A published scheme heading: the call number and what it was captioned.
@@ -23,6 +24,7 @@ import type { ClassificationScheme } from "./classificationScheme.ts";
  * argument for sharing it. What differs is who may change it without a review.
  */
 export interface PublicClassificationOut {
+  kind?: HeadingKind | null;
   label?: string | null;
   number: string;
   scheme: ClassificationScheme;

@@ -1054,3 +1054,71 @@ class TestThisIsTheOnlyDoorOutwards:
     @pytest.mark.parametrize("shape", INNOCENT.values(), ids=INNOCENT.keys())
     def test_the_rule_leaves_an_unrelated_call_alone(self, shape):
         assert not _http_offences(shape)
+
+
+class TestACredentialGoesOnlyToTheOriginItWasSetFor:
+    """The header is asked for per hop, and it is never set on the client.
+
+    Set on the client, httpx attaches it to whatever that client is next used
+    for, which is the one arrangement neither this module's redirect guard nor
+    the credential's own rule could see.
+    """
+
+    class _Credential:
+        """The protocol `fetch` declares, with a record of what it was asked."""
+
+        def __init__(self, origin: str) -> None:
+            self.origin = origin
+            self.asked: list[str] = []
+
+        def header_for(self, url: str) -> dict[str, str]:
+            self.asked.append(url)
+            return {"Authorization": "Basic secret"} if url.startswith(self.origin) else {}
+
+    @respx.mock
+    async def test_it_is_sent_to_the_target(self):
+        route = respx.get("https://catalogue.test/sru").mock(
+            return_value=httpx.Response(200, text="ok")
+        )
+        credential = self._Credential("https://catalogue.test")
+        await fetch.get_once("https://catalogue.test/sru", credential=credential)
+        assert route.calls.last.request.headers["authorization"] == "Basic secret"
+
+    @respx.mock
+    async def test_nothing_is_sent_when_no_credential_is_given(self):
+        route = respx.get("https://catalogue.test/sru").mock(
+            return_value=httpx.Response(200, text="ok")
+        )
+        await fetch.get_once("https://catalogue.test/sru")
+        assert "authorization" not in route.calls.last.request.headers
+
+    @respx.mock
+    async def test_the_credential_is_asked_again_on_a_redirect(self):
+        """Per hop, so the second hop's URL is what decides, not the first's."""
+        respx.get("https://catalogue.test/a").mock(
+            return_value=httpx.Response(302, headers={"location": "https://catalogue.test/b"})
+        )
+        respx.get("https://catalogue.test/b").mock(
+            return_value=httpx.Response(200, text="ok")
+        )
+        credential = self._Credential("https://catalogue.test")
+        await fetch.get_once("https://catalogue.test/a", credential=credential)
+        assert credential.asked == [
+            "https://catalogue.test/a",
+            "https://catalogue.test/b",
+        ]
+
+    @respx.mock
+    async def test_the_header_is_not_left_on_the_client_for_the_next_request(self):
+        first = respx.get("https://catalogue.test/sru").mock(
+            return_value=httpx.Response(200, text="ok")
+        )
+        second = respx.get("https://elsewhere.test/sru").mock(
+            return_value=httpx.Response(200, text="ok")
+        )
+        credential = self._Credential("https://catalogue.test")
+        async with fetch.catalogue_client() as client:
+            await fetch.get(client, "https://catalogue.test/sru", credential=credential)
+            await fetch.get(client, "https://elsewhere.test/sru", credential=credential)
+        assert first.calls.last.request.headers["authorization"] == "Basic secret"
+        assert "authorization" not in second.calls.last.request.headers

@@ -52,6 +52,16 @@
  * `author_identifiers` table, which is a different store keyed on a name
  * rather than on a book.
  *
+ * **`gnd-content` and `gnd-carrier` are not two more members**, though they
+ * are `$2` codes beside `gnd` and were nearly added here. They fail this
+ * enum's own test: a scheme is what gives a number a reading, and those codes
+ * give `(DE-588)4113937-9` the same reading `gnd` does, in the same file, at
+ * the same address. What they say is what the record was asserting with it,
+ * which is `HeadingKind` and a separate column. Storing them here would also
+ * change the key `uq_classifications_book_scheme_number` is on, so the next
+ * enrichment of a book that already carries one would deposit the concept a
+ * second time rather than finding the row it has.
+ *
  * Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
  * now: a book shows the headings it carries, and any of them can be filtered
  * on. What DDC has that the others do not is a second reading, the division,

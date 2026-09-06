@@ -17,6 +17,28 @@ beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
+/** Two proposed groups, each carrying the name a batch would keep. */
+const TOLKIEN = {
+  keys: ["jrr tolkien", "j r r tolkien"],
+  names: ["JRR Tolkien", "J. R. R. Tolkien"],
+  reasons: ["spelling"],
+  keep_name: "J. R. R. Tolkien",
+};
+
+const SMITHS = {
+  keys: ["j smith", "james smith", "john smith"],
+  names: ["J. Smith", "James Smith", "John Smith"],
+  reasons: ["initials"],
+  keep_name: "J. Smith",
+};
+
+const LE_GUIN = {
+  keys: ["le guin", "ursula k", "ursula k le guin"],
+  names: ["Le Guin", "Ursula K.", "Ursula K. Le Guin"],
+  reasons: ["fragment"],
+  keep_name: "Ursula K. Le Guin",
+};
+
 function author(overrides: Record<string, unknown> = {}) {
   return {
     key: "frank herbert",
@@ -145,6 +167,238 @@ describe("AuthorsPage", () => {
         keep_name: "Ursula K. Le Guin",
       }),
     );
+  });
+
+  it("folds every ticked group in one request", async () => {
+    stub([author()], [TOLKIEN, LE_GUIN]);
+    // Registered after `/merge`, because a matcher is a substring and the later
+    // registration wins: the shorter path first would answer this one.
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "Fold the ticked groups" }),
+      );
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [
+          { keys: TOLKIEN.keys, keep_name: "J. R. R. Tolkien" },
+          { keys: LE_GUIN.keys, keep_name: "Ursula K. Le Guin" },
+        ],
+      }),
+    );
+  });
+
+  it("leaves out a group that was unticked", async () => {
+    stub([author()], [TOLKIEN, LE_GUIN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByLabelText("Fold into J. R. R. Tolkien"),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [{ keys: LE_GUIN.keys, keep_name: "Ursula K. Le Guin" }],
+      }),
+    );
+  });
+
+  it("leaves out a name the reader unticked inside a group", async () => {
+    // The control the card exists for: the grouping is transitive, so a name
+    // taken out of a group has to stay out of the batch as well as out of that
+    // group's own merge. While the checkbox was the card's own state, the batch
+    // folded the unticked name anyway.
+    stub([author()], [SMITHS, TOLKIEN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByLabelText("Include James Smith"));
+    await user.click(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [
+          { keys: ["j smith", "john smith"], keep_name: "J. Smith" },
+          { keys: TOLKIEN.keys, keep_name: "J. R. R. Tolkien" },
+        ],
+      }),
+    );
+  });
+
+  it("withdraws a group whose kept name the reader unticked", async () => {
+    // The server keeps one of the group's own names, so a group without it is
+    // a 422 rather than a merge. It leaves the batch instead of being sent.
+    stub([author()], [SMITHS, TOLKIEN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByLabelText("Include J. Smith"));
+
+    expect(screen.getByText(/1 groups ticked/)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    );
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [{ keys: TOLKIEN.keys, keep_name: "J. R. R. Tolkien" }],
+      }),
+    );
+  });
+
+  it("counts what it would send, not the groups it came from", async () => {
+    // The last checkable fact before a write. While the bar counted whole
+    // groups and the request sent only the names still ticked, unticking one
+    // name left both the sentence and the confirmation overstating the write.
+    stub([author()], [SMITHS, TOLKIEN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    expect(
+      await screen.findByText(/2 groups ticked, 5 spellings in all/),
+    ).toBeInTheDocument();
+
+    // James Smith is not the kept name, so the group stays ticked and the
+    // request loses exactly one key.
+    await user.click(screen.getByLabelText("Include James Smith"));
+
+    expect(
+      screen.getByText(/2 groups ticked, 4 spellings in all/),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    );
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "Fold 2 groups, 4 spellings in all?",
+    );
+    // The body itself rather than a sum of it: four keys, which is the number
+    // the sentence and the confirmation both just claimed.
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [
+          { keys: ["j smith", "john smith"], keep_name: "J. Smith" },
+          { keys: TOLKIEN.keys, keep_name: "J. R. R. Tolkien" },
+        ],
+      }),
+    );
+  });
+
+  it("puts a narrowed group back when its tick is clicked again", async () => {
+    // One click, one visible change. While `checked` read the narrowing and
+    // `onChange` wrote only the tick, this click moved nothing on screen and
+    // flipped a variable the reader could not see.
+    stub([author()], [SMITHS, TOLKIEN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByLabelText("Include J. Smith"));
+    expect(screen.getByText(/1 groups ticked/)).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Fold into J. Smith"));
+
+    expect(screen.getByText(/2 groups ticked/)).toBeInTheDocument();
+    // The names it needs came back with it, which is what makes the click
+    // visible rather than merely effective.
+    expect(screen.getByLabelText("Include J. Smith")).toBeChecked();
+    expect(screen.getByLabelText("Fold into J. Smith")).toBeChecked();
+  });
+
+  it("says a narrowed group is out for the reader's own reason", async () => {
+    stub([author()], [SMITHS, TOLKIEN]);
+    renderWithProviders(<AuthorsPage />);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByLabelText("Include J. Smith"));
+
+    expect(
+      screen.getByText(
+        /1 more are out until the name they would be folded into/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/more are left out/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer a held back group for folding", async () => {
+    // No `keep_name`: folding it would repoint a merge somebody already made,
+    // so the server would answer 409 and there is no button to reach it with.
+    stub([author()], [TOLKIEN, { ...LE_GUIN, keep_name: null }]);
+    renderWithProviders(<AuthorsPage />);
+
+    // It says the batch leaves it alone, not that it cannot be folded: the
+    // buttons on the same card still reach the single merge, which does repoint
+    // that standing row.
+    expect(
+      await screen.findByText(/Folding all leaves this group alone/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Keep this name" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByLabelText("Fold into Ursula K. Le Guin"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/1 groups ticked/)).toBeInTheDocument();
+    expect(screen.getByText(/1 more are left out/)).toBeInTheDocument();
+  });
+
+  it("shows the batch and the tick together, or neither", async () => {
+    // One predicate decides both. While the bar needed two groups and the tick
+    // needed only a name, a single group rendered a ticked checkbox with
+    // nothing on the page to act on it.
+    stub([author()], [TOLKIEN]);
+    renderWithProviders(<AuthorsPage />);
+
+    expect(
+      await screen.findByLabelText("Fold into J. R. R. Tolkien"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows neither when every group is held back", async () => {
+    stub([author()], [{ ...TOLKIEN, keep_name: null }]);
+    renderWithProviders(<AuthorsPage />);
+    await screen.findByText("Probably the same person");
+
+    expect(
+      screen.queryByRole("button", { name: "Fold the ticked groups" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Fold into J. R. R. Tolkien"),
+    ).not.toBeInTheDocument();
   });
 
   it("merges two names that no rule would ever suggest", async () => {

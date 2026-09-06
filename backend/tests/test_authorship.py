@@ -27,13 +27,15 @@ from pathlib import Path
 import pytest
 from sqlalchemy import event
 
+import authorship as authorship_module
+from authors import DEFAULT_MATCHER, EXACT_MATCHER, author_key, resolve_alias_map
 from authors import SuggestionReason as Reason
-from authors import author_key
 from authorship import (
     IDENTITY_SPINE,
     MAX_ASSERTIONS_PER_RECORD,
     AuthorNotFound,
     Authorship,
+    DecisionStands,
     IdentifierConflict,
 )
 from catalogue import AuthorityAssertion
@@ -46,6 +48,7 @@ from models import (
     Book,
     User,
 )
+from schemas.author import AuthorMergeGroup, AuthorSuggestionOut
 
 KANE = AuthorityAssertion("Sean P. Kane", AuthorityScheme.GND, "1042243212")
 
@@ -1430,3 +1433,521 @@ class TestIdentityIsDerivedAndNeverMinted:
         }
 
         assert referenced <= {"users"}
+
+
+def _group(suggestions, *names: str) -> AuthorSuggestionOut:
+    """The suggested group holding exactly these names."""
+    wanted = set(names)
+    return next(group for group in suggestions if set(group.names) == wanted)
+
+
+class _NoScan(dict):
+    """A dict that answers a lookup and refuses to be walked.
+
+    For asking `_would_repoint` whether it scans. `dict.get` and `in` are
+    untouched; everything that iterates the whole table raises, which is what
+    the alias table must never be subjected to once per group.
+
+    **Five names, and they are the surface rather than an enumeration of it**,
+    which was checked rather than assumed because a list of names is the shape
+    that usually leaks. `copy()`, `dict(d)` and `{**d}` all refuse as well:
+    CPython's fast path is for an exact `dict`, so a subclass falls back to
+    `keys`. `__reversed__` is here because it was the one real escape, found by
+    probing rather than by reading.
+    """
+
+    def _refuse(self, *args, **kwargs):
+        raise AssertionError("the alias table was walked rather than looked up")
+
+    __iter__ = _refuse
+    __reversed__ = _refuse
+    keys = _refuse
+    values = _refuse
+    items = _refuse
+
+
+def _points_at(db) -> dict[str, str]:
+    """Which person every alias row currently means, keyed by the spelling."""
+    return {
+        row.alias_key: author_key(row.canonical_name)
+        for row in db.query(AuthorAlias).all()
+    }
+
+
+class TestWhatABatchWouldFold:
+    """The preview: every group, with the name it would be folded into.
+
+    A group with no `keep_name` is held back, and the only thing that holds one
+    back is that applying it would repoint a row somebody wrote.
+    """
+
+    @staticmethod
+    def _split_le_guin(db, user) -> None:
+        """One person on the shelf three ways, the catalogue order split among
+        them, and the whole name on the fewest Books.
+
+        Written this way round on purpose: the most credited name is `Le Guin`,
+        so a proposal naming `Ursula K. Le Guin` can only have come from a
+        decision rather than from the count.
+        """
+        shelve(db, user, "Le Guin, Ursula K.", "Le Guin, Ursula K.", "Le Guin, Ursula K.")
+        shelve(db, user, "Ursula K. Le Guin")
+
+    def test_with_nothing_decided_the_most_credited_name_is_proposed(self, db, user):
+        self._split_le_guin(db, user)
+
+        groups = Authorship.seen_by(db, user.id).suggestions()
+
+        assert _group(groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin").keep_name == (
+            "Le Guin"
+        )
+
+    def test_a_name_somebody_merged_into_wins_over_the_count(self, db, user):
+        """The case a batch exists for: an import creates a spelling of somebody
+        a Member established, and it is filed under the name they chose."""
+        self._split_le_guin(db, user)
+        authorship = Authorship.seen_by(db, user.id)
+        shelve(db, user, "U. K. Le Guin")
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+
+        groups = authorship.suggestions()
+
+        assert _group(
+            groups, "Le Guin", "Ursula K.", "Ursula K. Le Guin"
+        ).keep_name == "Ursula K. Le Guin"
+
+    def test_two_decided_names_in_one_group_hold_it_back(self, db, user):
+        """No rule here is entitled to pick between two people's decisions."""
+        self._split_le_guin(db, user)
+        authorship = Authorship.seen_by(db, user.id)
+        shelve(db, user, "U. K. Le Guin", "Ursula Le Guin")
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+        authorship.merge(
+            [author_key("Ursula Le Guin"), author_key("Le Guin")],
+            "Le Guin",
+            by_user_id=user.id,
+        )
+
+        held = _group(authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin")
+
+        assert held.keep_name is None
+        assert held.names  # still listed, so a reader knows it was considered
+
+    def test_a_decision_only_visible_to_somebody_else_still_holds_the_name(
+        self, db, user, other
+    ):
+        """The privacy shaped half, and it runs the other way from the usual one.
+
+        A decision whose folded spelling is on a Private Book is invisible to
+        this Member. Read off `entry.alias_keys` it would look like no decision
+        at all and the batch would repoint it, so the alias table is read whole.
+        What that costs is stated in `_decided_keys`; what it buys is here.
+        """
+        shelve(db, other, "Boz", private=True)
+        Authorship.seen_by(db, other.id).merge(
+            [author_key("Boz")], "Charles Dickens", by_user_id=other.id
+        )
+        shelve(db, user, "C. Dickens", "C. Dickens", "C. Dickens")
+        shelve(db, user, "Charles Dickens")
+
+        groups = Authorship.seen_by(db, user.id).suggestions()
+
+        assert _group(groups, "C. Dickens", "Charles Dickens").keep_name == (
+            "Charles Dickens"
+        )
+
+    def test_and_without_that_row_the_count_would_have_won(self, db, user):
+        """The control the test above needs: `C. Dickens` is the more credited
+        name, so the proposal is only evidence of anything if it changes."""
+        shelve(db, user, "C. Dickens", "C. Dickens", "C. Dickens")
+        shelve(db, user, "Charles Dickens")
+
+        groups = Authorship.seen_by(db, user.id).suggestions()
+
+        assert _group(groups, "C. Dickens", "Charles Dickens").keep_name == "C. Dickens"
+
+    def test_the_preview_writes_nothing(self, db, user):
+        self._split_le_guin(db, user)
+
+        Authorship.seen_by(db, user.id).suggestions()
+
+        assert db.query(AuthorAlias).count() == 0
+
+    def test_a_narrower_matcher_proposes_fewer_groups(self, db, user):
+        self._split_le_guin(db, user)
+        authorship = Authorship.seen_by(db, user.id)
+
+        assert authorship.suggestions(EXACT_MATCHER) == []
+        assert authorship.suggestions(DEFAULT_MATCHER) != []
+
+
+class TestABatchIsOneTransactionOrNothing:
+    """Every confirmed group applies, or none does and the Library is untouched.
+
+    That is what makes the preview a review: a Member who reads a refusal has
+    nothing to reconstruct, because there is no half applied state to describe.
+    """
+
+    @staticmethod
+    def _two_groups(db, user) -> list[AuthorMergeGroup]:
+        shelve(db, user, "JRR Tolkien", "J. R. R. Tolkien")
+        shelve(db, user, "U. K. Le Guin", "Ursula K. Le Guin")
+        return [
+            AuthorMergeGroup(
+                keys=[author_key("JRR Tolkien"), author_key("J. R. R. Tolkien")],
+                keep_name="J. R. R. Tolkien",
+            ),
+            AuthorMergeGroup(
+                keys=[author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+                keep_name="Ursula K. Le Guin",
+            ),
+        ]
+
+    def test_every_group_is_applied(self, db, user):
+        groups = self._two_groups(db, user)
+
+        answered = Authorship.seen_by(db, user.id).merge_batch(
+            groups, by_user_id=user.id
+        )
+
+        assert [author.name for author in answered.merged] == [
+            "J. R. R. Tolkien",
+            "Ursula K. Le Guin",
+        ]
+        assert db.query(AuthorAlias).count() == 4
+
+    def test_nothing_in_books_is_written(self, db, user):
+        groups = self._two_groups(db, user)
+        before = sorted(book.author for book in db.query(Book).all())
+
+        Authorship.seen_by(db, user.id).merge_batch(groups, by_user_id=user.id)
+
+        assert sorted(book.author for book in db.query(Book).all()) == before
+
+    def test_a_key_naming_nobody_visible_refuses_the_whole_batch(self, db, user, other):
+        shelve(db, other, "Sean P. Kane", private=True)
+        groups = self._two_groups(db, user)
+        groups.append(
+            AuthorMergeGroup(
+                keys=[author_key("Sean P. Kane"), author_key("S. P. Kane")],
+                keep_name="Sean P. Kane",
+            )
+        )
+
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, user.id).merge_batch(groups, by_user_id=user.id)
+
+        assert db.query(AuthorAlias).count() == 0
+
+    def test_a_group_that_would_repoint_a_decision_refuses_the_whole_batch(
+        self, db, user
+    ):
+        groups = self._two_groups(db, user)
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("JRR Tolkien"), author_key("J. R. R. Tolkien")],
+            "J. R. R. Tolkien",
+            by_user_id=user.id,
+        )
+        # The same two spellings, folded the other way round. One merge would be
+        # allowed to do this; a batch may not, because nobody reviewed it.
+        contradicting = [
+            AuthorMergeGroup(
+                keys=[author_key("JRR Tolkien"), author_key("J. R. R. Tolkien")],
+                keep_name="JRR Tolkien",
+            ),
+            groups[1],
+        ]
+        before = _points_at(db)
+
+        with pytest.raises(DecisionStands) as refused:
+            authorship.merge_batch(contradicting, by_user_id=user.id)
+
+        assert refused.value.keys == (
+            author_key("J. R. R. Tolkien"),
+            author_key("JRR Tolkien"),
+        )
+        # The second group was good and is not applied either.
+        assert _points_at(db) == before
+
+    @staticmethod
+    def _two_groups_and_planted_rows(db, user, planted: int) -> None:
+        """Two suggestion groups, and alias rows that touch neither of them."""
+        shelve(db, user, "Le Guin, Ursula K.", "Ursula K. Le Guin")
+        shelve(db, user, "JRR Tolkien", "J. R. R. Tolkien")
+        db.add_all(
+            AuthorAlias(
+                alias_key=f"planted {index}",
+                canonical_name=f"Planted {index}",
+                created_by_user_id=user.id,
+            )
+            for index in range(planted)
+        )
+        db.commit()
+
+    @staticmethod
+    def _author_key_calls(monkeypatch, call) -> int:
+        """How many times **`authorship`** normalises a name during one call.
+
+        **The scoping to this one module is load bearing, not tidiness.**
+        `build_index` and `resolve_alias_map` normalise through `authors`' own
+        binding and are excluded, which is what makes the equality in the arm
+        below exact: the planted rows are self rows, so widening the patch to
+        reach `authors.author_key` would count four more per row and turn a
+        delta of one per row into five. A later reader widening it to be
+        thorough breaks a green test for a reason nothing else would explain.
+        """
+        counted = 0
+        # The same object the module imported, named through `authors` because
+        # `authorship` re-exports it and a re-export is not an export.
+        real = author_key
+
+        def counting(name):
+            nonlocal counted
+            counted += 1
+            return real(name)
+
+        monkeypatch.setattr(authorship_module, "author_key", counting)
+        try:
+            call()
+        finally:
+            monkeypatch.setattr(authorship_module, "author_key", real)
+        return counted
+
+    def test_the_alias_table_is_indexed_once_and_not_once_per_group(
+        self, db, user, monkeypatch
+    ):
+        """Building it once is one arm of this and is **not** the property that
+        matters, which is why the second arm exists below."""
+        self._two_groups_and_planted_rows(db, user, 0)
+        authorship = Authorship.seen_by(db, user.id)
+        built = 0
+        real = authorship_module._AliasIndex.of
+
+        def counted(aliases):
+            nonlocal built
+            built += 1
+            return real(aliases)
+
+        monkeypatch.setattr(authorship_module._AliasIndex, "of", counted)
+
+        groups = authorship.suggestions()
+
+        assert len(groups) > 1, "the shelf has to produce more than one group"
+        assert built == 1
+
+    def test_would_repoint_looks_up_rather_than_walking_the_table(self):
+        """The guard against scanning, asked of the code rather than of a count.
+
+        **A count measures a side effect of scanning; this measures scanning.**
+        Handed an index whose two dictionaries answer a lookup and raise on any
+        attempt to walk them, `_would_repoint` passes only if it looks up. Both
+        scan shaped regressions raise here, including the one that re-normalises
+        nothing and is therefore invisible to a count.
+
+        A rung above the arms below as well: deleting this test is loud, because
+        nothing else refuses a walk.
+        """
+        index = authorship_module._AliasIndex(
+            by_alias=_NoScan({"boz": "charles dickens"}),
+            by_target=_NoScan({"charles dickens": ["boz"]}),
+        )
+
+        # A row already pointing at the kept person changes nothing.
+        assert (
+            authorship_module._would_repoint(index, {"boz"}, "charles dickens")
+            is False
+        )
+        # The same row, folded somewhere else, would be repointed.
+        assert authorship_module._would_repoint(index, {"boz"}, "boz") is True
+
+    def test_adding_alias_rows_costs_one_normalisation_each_not_one_per_group(
+        self, db, user, monkeypatch
+    ):
+        """What the quadratic cost, in numbers rather than in a refusal.
+
+        **Measured as a difference rather than as a total**, so nothing here has
+        to model the constant: doubling the alias table must cost one
+        `author_key` per row added, because `_AliasIndex.of` normalises each row
+        once and `_would_repoint` normalises none. Scanning the table inside
+        `_would_repoint` instead costs one per row **per group**, which is what
+        made a plain GET quadratic.
+
+        **What it catches, measured rather than asserted**: a scan that
+        re-normalises per row, which is the shape the code actually had. That
+        mutant reads 157 and 307 against this arm's 57 and 107, so the delta
+        goes from 50 to 150 and the equality fails.
+
+        **What it does not catch, and this sentence used to claim otherwise**: a
+        scan over `index.by_alias.items()` that compares the already normalised
+        keys. It calls `author_key` zero times, so it reads 57 and 107, exactly
+        like the shipped code, and passes. It is nonetheless `groups x rows` in
+        wall time. `test_would_repoint_looks_up_rather_than_walking_the_table`
+        is the arm that refuses it, and it is the one to read first.
+
+        So this arm states the normalisation cost in numbers; it is not the
+        guard against scanning.
+        """
+        rows = 50
+        self._two_groups_and_planted_rows(db, user, rows)
+        authorship = Authorship.seen_by(db, user.id)
+        groups = len(authorship.suggestions())
+        assert groups > 1, "one group cannot tell the two costs apart"
+
+        first = self._author_key_calls(monkeypatch, authorship.suggestions)
+        db.add_all(
+            AuthorAlias(
+                alias_key=f"more {index}",
+                canonical_name=f"More {index}",
+                created_by_user_id=user.id,
+            )
+            for index in range(rows)
+        )
+        db.commit()
+        second = self._author_key_calls(monkeypatch, authorship.suggestions)
+
+        assert second - first == rows
+
+    def test_it_costs_two_index_reads_whatever_the_batch_holds(self, db, user):
+        """Two, not two per group, which is the whole reason this is not a loop
+        over `merge`: that would scan every visible Book twice per group."""
+        groups = self._two_groups(db, user)
+        authorship = Authorship.seen_by(db, user.id)
+
+        statements = selects(
+            lambda: authorship.merge_batch(groups, by_user_id=user.id)
+        )
+
+        assert sum(1 for line in statements if "FROM books" in line) == 2
+
+
+class TestABatchNeverClearsADecision:
+    """A merge somebody made is an assertion; a matcher's grouping is a guess.
+
+    So a batch only ever adds rows: after one, every row that existed before
+    still means the same person.
+    """
+
+    def test_an_existing_row_still_means_the_same_person(self, db, user):
+        shelve(db, user, "Le Guin, Ursula K.", "Ursula K. Le Guin", "U. K. Le Guin")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+        before = _points_at(db)
+        proposed = _group(
+            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
+        )
+
+        authorship.merge_batch(
+            [
+                AuthorMergeGroup(
+                    keys=list(proposed.keys), keep_name=proposed.keep_name or ""
+                )
+            ],
+            by_user_id=user.id,
+        )
+
+        after = _points_at(db)
+        assert all(after[key] == target for key, target in before.items())
+
+    def test_an_existing_row_is_not_rewritten_even_to_the_same_person(self, db, user):
+        """**Asserted on the raw column, not through `author_key`.**
+
+        `_points_at` normalises, so it cannot see a row rewritten from `Ursula
+        K. Le Guin` to a differently punctuated spelling of the same key, and
+        `build_index` reads the displayed name out of exactly that column. A
+        batch doing it would be renaming somebody on the strength of a
+        `keep_name` that merely normalises to the same key, which is what "it
+        only ever adds rows" says it does not do.
+        """
+        shelve(db, user, "Le Guin, Ursula K.", "Ursula K. Le Guin", "U. K. Le Guin")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+        before = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+        proposed = _group(
+            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
+        )
+
+        authorship.merge_batch(
+            [
+                AuthorMergeGroup(
+                    # A spelling of the kept name that `author_key` folds to the
+                    # same key, which is what the write pass must not adopt.
+                    keys=list(proposed.keys),
+                    keep_name="Ursula  K.   Le Guin",
+                )
+            ],
+            by_user_id=user.id,
+        )
+
+        after = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+        assert all(after[key] == name for key, name in before.items())
+        assert set(after) > set(before)
+
+    def test_the_alias_map_is_still_flat_afterwards(self, db, user):
+        """A chain resolves differently depending on the order rows are read in,
+        which is what `resolve_alias_map` guards and what nothing should need."""
+        shelve(db, user, "Le Guin, Ursula K.", "Ursula K. Le Guin", "U. K. Le Guin")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+        proposed = _group(
+            authorship.suggestions(), "Le Guin", "Ursula K.", "Ursula K. Le Guin"
+        )
+        authorship.merge_batch(
+            [
+                AuthorMergeGroup(
+                    keys=list(proposed.keys), keep_name=proposed.keep_name or ""
+                )
+            ],
+            by_user_id=user.id,
+        )
+
+        rows = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+
+        # Flat means one lookup is always enough, which is exactly resolution
+        # being a fixed point. Compared on the key, because a row rewritten to a
+        # different spelling of the same person is not a chain.
+        assert {key: author_key(name) for key, name in resolve_alias_map(rows).items()} == {
+            key: author_key(name) for key, name in rows.items()
+        }
+
+    def test_every_group_the_preview_offers_can_be_applied(self, db, user):
+        """The diagonal: a preview whose proposals the writer then refuses would
+        pass every test above and be useless."""
+        shelve(db, user, "Le Guin, Ursula K.", "Ursula K. Le Guin", "U. K. Le Guin")
+        shelve(db, user, "JRR Tolkien", "J. R. R. Tolkien")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge(
+            [author_key("U. K. Le Guin"), author_key("Ursula K. Le Guin")],
+            "Ursula K. Le Guin",
+            by_user_id=user.id,
+        )
+        offered = [
+            AuthorMergeGroup(keys=list(match.keys), keep_name=match.keep_name)
+            for match in authorship.suggestions()
+            if match.keep_name is not None
+        ]
+
+        assert offered
+        assert len(authorship.merge_batch(offered, by_user_id=user.id).merged) == len(
+            offered
+        )

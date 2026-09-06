@@ -3,8 +3,8 @@
 **This is the first surface in the application reachable without a session**,
 and everything unusual about this module follows from that one fact.
 
-Five rules apply here that apply nowhere else, and each is enforced in a
-different place on purpose, because a single check that did all five would be a
+Six rules apply here that apply nowhere else, and each is enforced in a
+different place on purpose, because a single check that did all six would be a
 single check to get wrong:
 
 | Question | Answered by |
@@ -12,10 +12,18 @@ single check to get wrong:
 | Is anything published at all? | `settings_store.public_catalogue_is_published` |
 | Which **rows** may be shown? | `Shelf.seen_by_the_public` |
 | Which **columns** may be shown? | `schemas/public.py` |
+| May these rows leave the instance? | `shelf.Outbound` |
 | How fast may a stranger ask? | `ratelimit.public_catalogue_limiter` |
 | May a crawler index it? | `middleware.SecurityHeadersMiddleware` |
 
-**The fifth is in the middleware and not here, and that placement was a
+**`Outbound` is the type the rows arrive in, and it is the one rule here that
+is not about this request.** The row filter and the column model are both
+properties of one request; `Outbound` is a property of the rows themselves, so
+it is what a serialiser demands rather than what a handler remembers. It is here
+because this router is the first place in the application that addresses a
+payload to somebody it cannot name, and it will not be the last.
+
+**The crawler rule is in the middleware and not here, and that placement was a
 correction.** A header set from a route dependency merges onto the success path
 only, and cannot reach the SPA mount at all, so the pages a crawler actually
 indexes never carried it. It is unconditional in the middleware now and the
@@ -175,7 +183,7 @@ def list_public_books(
     books, total = (
         Shelf.seen_by_the_public(db)
         .matching(filters)
-        .page(
+        .outbound_page(
             paging.offset,
             paging.limit,
             *order_for(sort.as_book_sort()),
@@ -212,16 +220,16 @@ def get_public_book(
     reused: it depends on `get_current_user`, so it 401s before it ever reaches
     a Book. This is the same shape written against the shelf that has no viewer.
     """
-    book = (
+    books = (
         Shelf.seen_by_the_public(db)
         .where(Book.id == book_id)
-        .first(load=Loading.PUBLISHED)
+        .outbound_first(load=Loading.PUBLISHED)
     )
-    if book is None:
+    if not books:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Book not found"
         )
-    return books_to_public_out([book])[0]
+    return books_to_public_out(books)[0]
 
 
 @router.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)

@@ -133,9 +133,24 @@ async def validation_exception_handler(request: Request, exc: Exception) -> Resp
     # for a request that was merely invalid. FastAPI's own handler does the
     # same encode, which is why this only surfaced once a validator here
     # started raising.
-    return _json_error(
-        status.HTTP_422_UNPROCESSABLE_CONTENT, jsonable_encoder(exc.errors())
-    )
+    #
+    # **`input` is dropped from every entry, and that is the load bearing
+    # line.** pydantic puts the value it rejected into the entry, so a 422
+    # echoed the whole submitted value back in the response body: measured
+    # 2026-09-06, a recovery phrase and a catalogue password each came back in
+    # full, and `SecretStr` does not change it. The echo is to the same caller,
+    # so nothing reaches a third party, but a secret in a response body is a
+    # secret in whatever logs that response, and `docs/security.md` states the
+    # rule without qualification. Dropped here rather than per field, because
+    # the next secret field would otherwise have to remember.
+    #
+    # The client flattens the remaining `loc`, `msg` and `type` into a message,
+    # which is what it always rendered; nothing displayed `input`.
+    reported = [
+        {key: value for key, value in entry.items() if key != "input"}
+        for entry in jsonable_encoder(exc.errors())
+    ]
+    return _json_error(status.HTTP_422_UNPROCESSABLE_CONTENT, reported)
 
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:

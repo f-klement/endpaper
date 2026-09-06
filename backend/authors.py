@@ -43,6 +43,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 #: The longest canonical name a caller may choose when merging.
 #:
@@ -414,9 +415,56 @@ class AuthorSuggestion:
     reasons: tuple[SuggestionReason, ...]
 
 
+class MatcherName(StrEnum):
+    """The matchers a caller may ask for by name.
+
+    An enum rather than free strings, for the reason `SuggestionReason` is one:
+    the value crosses the API, so the client gets a union and an unknown name is
+    a 422 from FastAPI rather than a silent fall back to whatever the server
+    would have done anyway.
+    """
+
+    DEFAULT = "default"
+    EXACT = "exact"
+
+
+@dataclass(frozen=True, slots=True)
+class Matcher:
+    """Which rules may propose that two spellings are one person.
+
+    **A matcher proposes and never decides.** Every rule it can hold produces a
+    suggestion somebody confirms, and what a confirmation writes is an alias row
+    that deleting undoes. `authorship.IDENTITY_SPINE` names the one thing that
+    says two spellings *are* one person, and nothing here acquires that: a
+    matcher selects from the rules in `_RULES` and can therefore only ever offer
+    a subset of what the pass already offered.
+
+    That subset property is the whole safety argument for making this
+    swappable. A second matcher cannot reach a pairing the default does not,
+    so naming the strategy adds no way to be wrong that was not already there.
+
+    One concept rather than several under one name: the rules exist, and are
+    already identified one to one by the `SuggestionReason` they report. A
+    matcher is the choice of which of them run, and nothing else. It carries no
+    thresholds and no per rule options, because a rule that needed one would be
+    a different rule with its own reason.
+    """
+
+    name: MatcherName
+    rules: frozenset[SuggestionReason]
+
+
+#: Every rule, which is what shipped before matchers were named.
+#:
+#: `EXACT_MATCHER` and the registry sit at the foot of this file, beside the
+#: `_RULES` table they are derived from.
+DEFAULT_MATCHER = Matcher(name=MatcherName.DEFAULT, rules=frozenset(SuggestionReason))
+
+
 def suggest_merges(
     entries: Sequence[AuthorEntry],
     spines: Mapping[str, frozenset[str]] | None = None,
+    matcher: Matcher = DEFAULT_MATCHER,
 ) -> list[AuthorSuggestion]:
     """Groups of names that look like one person.
 
@@ -460,16 +508,23 @@ def suggest_merges(
     they were offered before, because the identity rule contributes no edge for
     a key it holds nothing for. A shelf where nobody has confirmed an authority
     record is that case for every author on it.
+
+    **`matcher` chooses which of the four run**, and it can only ever take some
+    away: the rules are `_RULES` and a matcher names a subset of them, so no
+    matcher proposes a pairing `DEFAULT_MATCHER` does not. A caller that wants
+    the strategy it got before passes nothing.
+
+    The rules spend one shared budget in the order `_RULES` declares, which is
+    what `_Budget` says out loud. Dropping a rule leaves the survivors more of
+    it, so a narrower matcher is never a weaker one for the rules it keeps.
     """
     by_key = {entry.key: entry for entry in entries}
     budget = _Budget(MAX_COMPARISONS)
     edges = [
-        # No budget: bucketed by an exact key, so it is one pass over the names
-        # and compares nothing.
-        *_edges_on_identity(by_key, spines or {}),
-        *_edges_on_squashed_key(by_key),
-        *_edges_on_initials(by_key, budget),
-        *_edges_on_fragments(by_key, budget),
+        edge
+        for reason, rule in _RULES.items()
+        if reason in matcher.rules
+        for edge in rule.edges(by_key, spines or {}, budget)
     ]
 
     parent = {key: key for key in by_key}
@@ -516,8 +571,29 @@ def suggest_merges(
 _Edge = tuple[str, str, SuggestionReason]
 
 
+class _Rule(Protocol):
+    """One suggestion rule, as `_RULES` holds it.
+
+    **One signature for all four, so the table can hold them**, which is what
+    lets `suggest_merges` iterate the rules instead of naming them. A rule
+    ignoring `spines` or `budget` is not an oversight: ignoring the budget is
+    exactly the property `_RuleSpec.spends_budget` records, and
+    `test_authors.py` checks the flag against that behaviour rather than
+    believing it.
+    """
+
+    def __call__(
+        self,
+        by_key: Mapping[str, AuthorEntry],
+        spines: Mapping[str, frozenset[str]],
+        budget: _Budget,
+    ) -> list[_Edge]: ...
+
+
 def _edges_on_identity(
-    by_key: Mapping[str, AuthorEntry], spines: Mapping[str, frozenset[str]]
+    by_key: Mapping[str, AuthorEntry],
+    spines: Mapping[str, frozenset[str]],
+    budget: _Budget,
 ) -> list[_Edge]:
     """Two spellings carrying the same ISNI are one person, and say so.
 
@@ -575,7 +651,17 @@ def _edges_on_identity(
     ]
 
 
-def _edges_on_squashed_key(by_key: Mapping[str, AuthorEntry]) -> list[_Edge]:
+def _edges_on_squashed_key(
+    by_key: Mapping[str, AuthorEntry],
+    spines: Mapping[str, frozenset[str]],
+    budget: _Budget,
+) -> list[_Edge]:
+    """The same name with the spaces moved, bucketed on the squashed key.
+
+    No budget and no bucket cap, for the reason `_edges_on_identity` states:
+    grouping is by an exact value, so this is one pass over the names and
+    compares no pair.
+    """
     buckets: defaultdict[str, list[str]] = defaultdict(list)
     for key, entry in by_key.items():
         buckets[squashed_key(entry.name)].append(key)
@@ -587,7 +673,9 @@ def _edges_on_squashed_key(by_key: Mapping[str, AuthorEntry]) -> list[_Edge]:
 
 
 def _edges_on_initials(
-    by_key: Mapping[str, AuthorEntry], budget: _Budget
+    by_key: Mapping[str, AuthorEntry],
+    spines: Mapping[str, frozenset[str]],
+    budget: _Budget,
 ) -> list[_Edge]:
     """Same surname, same first initial, at least one side abbreviated.
 
@@ -636,7 +724,9 @@ def _edges_on_initials(
 
 
 def _edges_on_fragments(
-    by_key: Mapping[str, AuthorEntry], budget: _Budget
+    by_key: Mapping[str, AuthorEntry],
+    spines: Mapping[str, frozenset[str]],
+    budget: _Budget,
 ) -> list[_Edge]:
     """One name's words are all inside another's, and the shorter has two.
 
@@ -686,3 +776,82 @@ def _edges_on_fragments(
                 if len(shorter) >= 2 and shorter < longer:
                     edges.append((key, other, SuggestionReason.FRAGMENT))
     return edges
+
+
+@dataclass(frozen=True, slots=True)
+class _RuleSpec:
+    """One rule and the one thing a matcher needs to know about it.
+
+    **`spends_budget`, named for what is checked rather than for why it is
+    interesting.** The check is behavioural: `tests/test_authors.py` runs each
+    rule against a spent budget, and a rule flagged True must then answer with
+    nothing while one flagged False must answer identically. A flag nobody
+    checks is a comment, and a flag whose name claims more than the check
+    covers is worse than one that does not.
+
+    **The property a reader cares about is whether a rule compares pairs, and
+    no test here can see that.** The two coincide because a rule that compares
+    pairs must take the shared budget: an unbudgeted pairwise rule is the denial
+    of service `MAX_COMPARISONS` exists to bound, so it is a defect rather than
+    a rule this table could honestly describe. A rule that buckets on an equal
+    value spends nothing and cannot be starved.
+    """
+
+    edges: _Rule
+    spends_budget: bool
+
+
+#: Every rule, keyed by the reason it reports, in the order they spend the budget.
+#:
+#: **Keyed by `SuggestionReason` because the two are one to one**, and that is
+#: enforced rather than assumed: `tests/test_authors.py` asks the enum for its
+#: members and fails if any lacks a rule here. A fifth rule is a fifth member,
+#: which the enum's own docstring already makes a typecheck failure on the
+#: client.
+#:
+#: The order is load bearing and is the order the four calls used to be written
+#: in: `_Budget` is shared, so a hostile shelf exhausts it on the pairwise rules
+#: in this sequence. See that class.
+_RULES: Mapping[SuggestionReason, _RuleSpec] = {
+    SuggestionReason.IDENTITY: _RuleSpec(_edges_on_identity, spends_budget=False),
+    SuggestionReason.SPELLING: _RuleSpec(_edges_on_squashed_key, spends_budget=False),
+    SuggestionReason.INITIALS: _RuleSpec(_edges_on_initials, spends_budget=True),
+    SuggestionReason.FRAGMENT: _RuleSpec(_edges_on_fragments, spends_budget=True),
+}
+
+#: Only the rules that no shelf can starve, which today are the ones that group
+#: on an equal value: a shared ISNI, or one name that is another with the spaces
+#: moved.
+#:
+#: **Derived from `_RULES` rather than listed**, which is the difference between
+#: this and an inclusion list that goes stale: a fifth rule that spends the
+#: comparison budget is outside this matcher without anybody remembering, and a
+#: fifth rule that buckets joins it.
+#:
+#: **Derived from `spends_budget`, which is what the guard can check**, and not
+#: from "compares pairs", which is the property a reader cares about and which
+#: no test here can see. `_RuleSpec` states why the two coincide and what would
+#: have to be true for them to come apart.
+#:
+#: **A narrower proposal, and not a safety rail.** The rules it leaves out are
+#: the ones whose group a reader has to weigh name by name: `initials` puts
+#: `John Smith` and `James Smith` together the moment a `J. Smith` exists, and
+#: `fragment` is transitive across a catalogue order split. What protects
+#: against those is the per name checkbox, which every group has and which a
+#: batch honours, so this matcher is for a caller who would rather not be shown
+#: the guesses at all. It is an option and never the default: taking a rule away
+#: from somebody who can see what it proposed is not this matcher's job.
+EXACT_MATCHER = Matcher(
+    name=MatcherName.EXACT,
+    rules=frozenset(
+        reason for reason, rule in _RULES.items() if not rule.spends_budget
+    ),
+)
+
+#: Every matcher a caller may name, so the API and the rules have one home each.
+#:
+#: Keyed by the enum rather than by a string, and `tests/test_authors.py` asks
+#: `MatcherName` for its members and fails on one with no matcher here.
+MATCHERS: Mapping[MatcherName, Matcher] = {
+    matcher.name: matcher for matcher in (DEFAULT_MATCHER, EXACT_MATCHER)
+}

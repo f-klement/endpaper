@@ -3103,7 +3103,7 @@ class TestTheFanOutIsBoundedInTimeAsWellAsInCount:
         again."""
         seen: list[float | None] = []
 
-        async def record(url, *, params=None, limit=None, deadline=None):
+        async def record(url, *, params=None, limit=None, deadline=None, credential=None):
             seen.append(deadline)
             body = LOBID_RECORD if "lobid" in url else WIKIDATA_ITEM
             return httpx.Response(200, json=body)

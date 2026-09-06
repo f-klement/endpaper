@@ -47,7 +47,12 @@ import sources
 import targets
 import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject
-from enums import AuthorityScheme, CatalogueSource, ClassificationScheme
+from enums import (
+    AuthorityScheme,
+    CatalogueSource,
+    ClassificationScheme,
+    HeadingKind,
+)
 from isbn import registration_group
 from metadata import (
     Outcome,
@@ -63,6 +68,7 @@ from metadata import (
     _pages_from_extent,
     _parsed,
     _subject_identifier,
+    _subject_kind,
     _subject_vocabulary,
 )
 from schemas import MAX_CLASSIFICATIONS_PER_BOOK
@@ -1923,6 +1929,78 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         assert record.subjects == (
             Subject("Informatik", "gnd", "(DE-588)4026894-9"),
         )
+
+
+class TestTheVocabularyDecidesWhatAHeadingAsserts:
+    """`#162`: the DNB writes a content type and a carrier into the same subject
+    fields as a subject, each with a `(DE-588)` number on it, so before this a
+    disc was stored as an assertion about what the book is about.
+
+    The measurement that made it a defect rather than a curiosity: `gnd-content`
+    carries a `(DE-588)` on 34 of 34 fields at the DNB, 26 of 26 at the OeNB and
+    27 of 27 at K10plus, and `_gnd_identifier` accepts every one of them.
+    """
+
+    def _headings(self, datafields):
+        return _dnb_subjects(_marc_fields(_marc_element(datafields)))[1]
+
+    def test_a_carrier_is_still_a_heading_and_says_it_is_a_carrier(self):
+        """Still `scheme=gnd`, because `(DE-588)4139307-7` is a GND record and
+        resolves as one whichever `$2` cites it. What changed is the kind."""
+        assert self._headings(
+            '<datafield tag="655" ind1=" " ind2="7">'
+            '<subfield code="a">CD-ROM</subfield>'
+            '<subfield code="0">(DE-588)4139307-7</subfield>'
+            '<subfield code="2">gnd-carrier</subfield></datafield>'
+        ) == [
+            Heading(
+                ClassificationScheme.GND, "4139307-7", "CD-ROM", HeadingKind.CARRIER
+            )
+        ]
+
+    def test_a_content_type_is_kept_rather_than_refused(self):
+        """The reason the fix is not a filter on the vocabulary code. Refusing
+        `gnd-content` outright would drop this heading, which is a content type
+        worth keeping and is why `655` is on `_DNB_SUBJECT_TAGS` at all."""
+        assert self._headings(
+            '<datafield tag="655" ind1=" " ind2="7">'
+            '<subfield code="a">Fiktionale Darstellung</subfield>'
+            '<subfield code="0">(DE-588)1071854844</subfield>'
+            '<subfield code="2">gnd-content</subfield></datafield>'
+        ) == [
+            Heading(
+                ClassificationScheme.GND,
+                "1071854844",
+                "Fiktionale Darstellung",
+                HeadingKind.CONTENT,
+            )
+        ]
+
+    def test_a_plain_gnd_subject_is_left_undeclared(self):
+        """`subject` is never written to the column: it is what
+        `classifications.kind_of` answers for a null. Storing it would put the
+        fallback's own answer in the row, and a stored value cannot be filled in
+        later by the record that names the heading properly."""
+        assert self._headings(
+            '<datafield tag="650" ind1=" " ind2="7">'
+            '<subfield code="a">Informatik</subfield>'
+            '<subfield code="0">(DE-588)4026894-9</subfield>'
+            '<subfield code="2">gnd</subfield></datafield>'
+        ) == [Heading(ClassificationScheme.GND, "4026894-9", "Informatik", None)]
+
+    @pytest.mark.parametrize("code", ["nlgaf", "gatbeg", "bisacsh", "local", "sswd"])
+    def test_a_vocabulary_this_app_has_no_reading_for_declares_no_kind(self, code):
+        """Twelve distinct `$2` codes turned up in one day's sampling of four
+        catalogues, against a MARC source code list holding hundreds. Reading
+        any of the rest as a kind is the crosswalk #134 refuses."""
+        assert _subject_kind(code) is None
+
+    def test_the_reader_is_asked_the_folded_code_and_not_the_field(self):
+        """`$2` is the Dewey **edition** on `082`, which is why
+        `_subject_vocabulary` takes a tag and raises. This takes the code that
+        reader already folded, so the case rule is not spelled twice."""
+        assert _subject_kind("GND-CARRIER".lower()) is HeadingKind.CARRIER
+        assert _subject_kind(None) is None
 
 
 class TestASubfieldReaderIsNotTwoReaders:
@@ -4405,9 +4483,15 @@ class TestTheAustrianNationalLibrary:
         assert result.record is not None
         headings = result.record.headings
         assert Heading(ClassificationScheme.DDC, "853.92") in headings
+        # The heading arrives from `655 $2 gnd-content`, so it is kept and it
+        # says what it is. Refusing that vocabulary was the obvious fix for the
+        # carrier defect and would have dropped exactly this row.
         assert (
             Heading(
-                ClassificationScheme.GND, "1071854844", "Fiktionale Darstellung"
+                ClassificationScheme.GND,
+                "1071854844",
+                "Fiktionale Darstellung",
+                HeadingKind.CONTENT,
             )
             in headings
         )

@@ -6,8 +6,10 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationScheme } from "./classificationScheme.ts";
+import type { HeadingKind } from "./headingKind.ts";
 
 export interface ClassificationOut {
+  kind?: HeadingKind | null;
   label?: string | null;
   number: string;
   scheme: ClassificationScheme;

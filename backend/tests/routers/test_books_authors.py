@@ -15,7 +15,8 @@ from sqlalchemy import event
 
 from authors import author_key
 from database import engine
-from models import AuthorAlias, AuthorIdentifier
+from models import AuthorAlias, AuthorIdentifier, Book
+from schemas.author import MAX_BATCH_KEYS
 from tests.helpers import DNB, silence_catalogues, sru_response
 
 AUTHORS = "/api/books/authors"
@@ -1556,12 +1557,12 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
 
         seen: list[float | None] = []
 
-        async def once(url, *, params=None, limit=None, deadline=None):
+        async def once(url, *, params=None, limit=None, deadline=None, credential=None):
             seen.append(deadline)
             body = LOBID_RECORD if "lobid" in url else WIKIDATA_ITEM
             return fetch.Fetched(200, httpx.Response(200, json=body).content, None)
 
-        async def get(client, url, *, params=None, limit=None, deadline=None):
+        async def get(client, url, *, params=None, limit=None, deadline=None, credential=None):
             seen.append(deadline)
             return fetch.Fetched(
                 200, httpx.Response(200, json=VIAF_CLUSTER).content, None
@@ -1923,3 +1924,270 @@ class TestTheOutwardWikipediaLink:
         res = client.get(f"{AUTHORS}/wikipedia")
 
         assert res.status_code == 401, res.text
+
+
+def proposals(client, headers, matcher: str | None = None):
+    params = {} if matcher is None else {"matcher": matcher}
+    return client.get(f"{AUTHORS}/suggestions", params=params, headers=headers)
+
+
+def merge_batch(client, headers, groups: list[dict]):
+    return client.post(
+        f"{AUTHORS}/merge/batch", json={"groups": groups}, headers=headers
+    )
+
+
+class TestWhatABatchWouldFold:
+    """The suggestion list read as a review: every group carries the name a
+    batch would keep, and a held back group carries none.
+
+    On `/authors/suggestions` rather than on an endpoint of its own, because a
+    second endpoint answering the same question is a second place for the next
+    change to land. That is this repository's own lesson, recorded where
+    `/bulk/ownership` was removed for it.
+    """
+
+    def test_every_group_carries_the_name_it_would_keep(self, client, admin, make_book):
+        make_book(admin["headers"], title="Rocannon", author="Le Guin, Ursula K.")
+        make_book(admin["headers"], title="The Dispossessed", author="Ursula K. Le Guin")
+
+        [group] = proposals(client, admin["headers"]).json()
+
+        assert set(group["names"]) == {"Le Guin", "Ursula K.", "Ursula K. Le Guin"}
+        assert group["keep_name"] in group["names"]
+
+    def test_nothing_is_written(self, client, admin, make_book, db):
+        make_book(admin["headers"], title="Rocannon", author="Le Guin, Ursula K.")
+        make_book(admin["headers"], title="The Dispossessed", author="Ursula K. Le Guin")
+
+        proposals(client, admin["headers"])
+
+        assert db.query(AuthorAlias).count() == 0
+
+    def test_a_narrower_matcher_can_be_named(self, client, admin, make_book):
+        make_book(admin["headers"], title="Rocannon", author="Le Guin, Ursula K.")
+        make_book(admin["headers"], title="The Dispossessed", author="Ursula K. Le Guin")
+
+        assert proposals(client, admin["headers"], "exact").json() == []
+
+    def test_a_matcher_nobody_defined_is_refused(self, client, admin):
+        assert proposals(client, admin["headers"], "whatever").status_code == 422
+
+    def test_another_members_private_author_is_not_proposed(
+        self, client, admin, member, make_book
+    ):
+        make_book(
+            admin["headers"],
+            title="Rocannon",
+            author="Le Guin, Ursula K.",
+            is_private=True,
+        )
+        make_book(
+            admin["headers"],
+            title="The Dispossessed",
+            author="Ursula K. Le Guin",
+            is_private=True,
+        )
+
+        assert proposals(client, member["headers"]).json() == []
+
+
+class TestFoldingABatch:
+    """Several groups at once, applied exactly as they were confirmed."""
+
+    @staticmethod
+    def _two_groups(client, admin, make_book) -> list[dict]:
+        make_book(admin["headers"], title="Rocannon", author="U. K. Le Guin")
+        make_book(admin["headers"], title="The Dispossessed", author="Ursula K. Le Guin")
+        make_book(admin["headers"], title="The Hobbit", author="JRR Tolkien")
+        make_book(admin["headers"], title="The Silmarillion", author="J. R. R. Tolkien")
+        return [
+            {
+                "keys": ["u k le guin", "ursula k le guin"],
+                "keep_name": "Ursula K. Le Guin",
+            },
+            {"keys": ["jrr tolkien", "j r r tolkien"], "keep_name": "J. R. R. Tolkien"},
+        ]
+
+    def test_every_group_is_folded(self, client, admin, make_book):
+        groups = self._two_groups(client, admin, make_book)
+
+        res = merge_batch(client, admin["headers"], groups)
+
+        assert res.status_code == 200
+        assert [row["name"] for row in res.json()["merged"]] == [
+            "Ursula K. Le Guin",
+            "J. R. R. Tolkien",
+        ]
+        index = client.get(AUTHORS, headers=admin["headers"]).json()
+        assert sorted(row["name"] for row in index) == [
+            "J. R. R. Tolkien",
+            "Ursula K. Le Guin",
+        ]
+
+    def test_the_books_are_not_touched(self, client, admin, make_book):
+        groups = self._two_groups(client, admin, make_book)
+
+        merge_batch(client, admin["headers"], groups)
+
+        body = client.get("/api/books", headers=admin["headers"]).json()
+        assert sorted(row["author"] for row in body["items"]) == [
+            "J. R. R. Tolkien",
+            "JRR Tolkien",
+            "U. K. Le Guin",
+            "Ursula K. Le Guin",
+        ]
+
+    def test_what_the_preview_offers_is_what_the_batch_accepts(
+        self, client, admin, make_book
+    ):
+        """The two halves are one feature or they are two features: a proposal
+        the write refuses is a review of nothing."""
+        self._two_groups(client, admin, make_book)
+        offered = [
+            {"keys": group["keys"], "keep_name": group["keep_name"]}
+            for group in proposals(client, admin["headers"]).json()
+            if group["keep_name"] is not None
+        ]
+
+        res = merge_batch(client, admin["headers"], offered)
+
+        assert res.status_code == 200
+        assert len(res.json()["merged"]) == len(offered)
+
+    def test_an_author_nobody_can_see_is_404_not_403(
+        self, client, admin, member, make_book
+    ):
+        make_book(
+            admin["headers"], title="Rocannon", author="U. K. Le Guin", is_private=True
+        )
+        make_book(
+            admin["headers"],
+            title="The Dispossessed",
+            author="Ursula K. Le Guin",
+            is_private=True,
+        )
+
+        res = merge_batch(
+            client,
+            member["headers"],
+            [
+                {
+                    "keys": ["u k le guin", "ursula k le guin"],
+                    "keep_name": "Ursula K. Le Guin",
+                }
+            ],
+        )
+
+        assert res.status_code == 404
+
+    def test_a_group_that_would_repoint_a_decision_is_409(
+        self, client, admin, make_book, db
+    ):
+        groups = self._two_groups(client, admin, make_book)
+        merge(
+            client,
+            admin["headers"],
+            ["jrr tolkien", "j r r tolkien"],
+            "J. R. R. Tolkien",
+        )
+        before = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+
+        res = merge_batch(
+            client,
+            admin["headers"],
+            [
+                groups[0],
+                {"keys": ["jrr tolkien", "j r r tolkien"], "keep_name": "JRR Tolkien"},
+            ],
+        )
+
+        assert res.status_code == 409
+        after = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+        assert after == before
+
+    def test_a_name_none_of_them_has_is_refused(self, client, admin, make_book):
+        """The catalogue order repair stays the single merge's job. A batch that
+        could invent a name could fold away the name another group is keeping."""
+        groups = self._two_groups(client, admin, make_book)
+        groups[0]["keep_name"] = "Ursula Kroeber Le Guin"
+
+        assert merge_batch(client, admin["headers"], groups).status_code == 422
+
+    def test_one_spelling_in_two_groups_is_refused(self, client, admin, make_book):
+        groups = self._two_groups(client, admin, make_book)
+        groups[1]["keys"] = ["jrr tolkien", "ursula k le guin"]
+        groups[1]["keep_name"] = "JRR Tolkien"
+
+        assert merge_batch(client, admin["headers"], groups).status_code == 422
+
+    def test_a_group_of_one_is_refused(self, client, admin, make_book):
+        """A group folding nothing is a rename, which is the single merge's job
+        and reads as an accident here."""
+        self._two_groups(client, admin, make_book)
+
+        res = merge_batch(
+            client,
+            admin["headers"],
+            [{"keys": ["jrr tolkien"], "keep_name": "JRR Tolkien"}],
+        )
+
+        assert res.status_code == 422
+
+    def test_a_batch_past_the_spelling_cap_is_refused(self, client, admin, make_book):
+        """`MAX_BATCH_KEYS` bounds the spellings and not the groups, because the
+        spellings are what is written."""
+        self._two_groups(client, admin, make_book)
+        oversized = [
+            {
+                "keys": [f"name {index} a", f"name {index} b"],
+                "keep_name": f"name {index} a",
+            }
+            for index in range((MAX_BATCH_KEYS // 2) + 1)
+        ]
+
+        assert merge_batch(client, admin["headers"], oversized).status_code == 422
+
+    def test_a_batch_at_the_cap_is_one_request_rather_than_a_job(
+        self, client, admin, db
+    ):
+        """The measurement behind `MAX_BATCH_KEYS`, taken through the handler.
+
+        The cap's worth of spellings, which is `MAX_SUGGESTIONS` groups of ten,
+        applied in one request: two index reads over the whole shelf, one pass,
+        one commit. That is the evidence for there being no background job, and
+        it is the full cap rather than a fraction of it, because a fraction
+        measures a shape the cap allows and nobody ran.
+
+        Asserted on the answer rather than on a clock. A duration measured on
+        one runner says nothing about another, so the timing lives in the
+        session notes with the node beside it and what is pinned here is that
+        the work completes in a request at all.
+        """
+        per_group = 10
+        groups = []
+        books = []
+        for index in range(MAX_BATCH_KEYS // per_group):
+            spellings = [f"Ann{part} Author{index}" for part in range(per_group)]
+            books += [
+                Book(
+                    title=f"Book {index} {part}",
+                    author=spelling,
+                    added_by_user_id=admin["user"]["id"],
+                )
+                for part, spelling in enumerate(spellings)
+            ]
+            groups.append(
+                {
+                    "keys": [author_key(name) for name in spellings],
+                    "keep_name": spellings[0],
+                }
+            )
+        db.add_all(books)
+        db.commit()
+
+        res = merge_batch(client, admin["headers"], groups)
+
+        assert res.status_code == 200
+        assert len(res.json()["merged"]) == len(groups)
+        assert db.query(AuthorAlias).count() == MAX_BATCH_KEYS

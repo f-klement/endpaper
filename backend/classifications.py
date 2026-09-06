@@ -35,7 +35,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from catalogue import Heading
-from enums import ClassificationScheme
+from enums import ClassificationScheme, HeadingKind
 from models import Book, Classification
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK, ClassificationIn
 
@@ -91,6 +91,53 @@ SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
 }
 
 
+#: Which kind of heading survives a full book, most worth keeping first.
+#:
+#: A subject leads because it is what the store is for: `models.Classification`
+#: opens "one published scheme's assertion about what a book is about", and the
+#: other two are not that. A content type comes next because it is still about
+#: the work, a genre or a form somebody would browse by. A carrier is last
+#: because it describes the object in the member's hand, which they can see.
+#:
+#: **Only the carrier is demoted, and a content type deliberately ties with a
+#: subject.** This outranks `SCHEME_ORDER`, so a rank of its own is a heading
+#: dropped before every subject from every scheme. That is the right answer for
+#: a disc and the wrong one for `Fiktionale Darstellung`, which is the heading
+#: `#162` names as the reason not to refuse the content vocabulary at all: given
+#: its own rank it would be dropped before any Library of Congress subject,
+#: where `SCHEME_ORDER` alone had kept it ahead of one. So a content type ties
+#: and falls through to the scheme order it had before, and the only behaviour
+#: this changes is the carrier's.
+#:
+#: The tie is what makes that true, so it is a rank two of them share rather
+#: than a comment saying they are close.
+KIND_ORDER: Final[dict[HeadingKind, int]] = {
+    HeadingKind.SUBJECT: 0,
+    HeadingKind.CONTENT: 0,
+    HeadingKind.CARRIER: 1,
+}
+
+
+def kind_of(kind: HeadingKind | None) -> HeadingKind:
+    """What a heading asserts, reading an undeclared one as a subject.
+
+    **The one place the null is interpreted**, so the fallback is stated once
+    rather than at each of the readers. Every row written before
+    `a1e7c93b60df` carries a null, as does every Dewey number and every call
+    number today, and a subject is what all of those are.
+
+    **Narrow rather than tolerant, and the first version was tolerant for a
+    reason that turned out to be false.** It took `object` and degraded, citing
+    `filing.sort_key_for` and the archive `backup.restore` inserts through Core.
+    That analogy does not hold: `sort_key_for` **is** called on the restore
+    value, at `backup._parse_row`, and this is not called on a column value
+    anywhere. What guards the column is `ck_classifications_kind`, which is the
+    strong side of the split `tests/test_house_rules.py` holds, so the tolerance
+    guarded nothing while reading as though it did.
+    """
+    return kind if kind is not None else HeadingKind.SUBJECT
+
+
 def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     """The classifications in a catalogue record, through the schema a client posts.
 
@@ -107,8 +154,11 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     entries hide a ninth good one, which is the opposite of what dropping a bad
     entry is for.
 
-    **Ordered by scheme before the slice, and this is the only place that can
-    be.** A parser can only order the record in front of it, and by the time a
+    **Ordered by kind, then by scheme, before the slice, and this is the only
+    place that can be.** The kind leads: a disc the DNB wrote into a subject
+    field is the first thing a full book should lose, and before this it was
+    kept ahead of a Library of Congress subject heading because its number
+    happened to be a GND one. A parser can only order the record in front of it, and by the time a
     list reaches here a merge has concatenated up to seven catalogues, which is
     every source that builds a `Heading` at all: the
     leading source's subject headings sit in front of the second catalogue's
@@ -121,14 +171,22 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
         try:
             headings.append(
                 ClassificationIn(
-                    scheme=entry.scheme, number=entry.number, label=entry.label
+                    scheme=entry.scheme,
+                    number=entry.number,
+                    label=entry.label,
+                    kind=entry.kind,
                 )
             )
         except ValidationError:
             logger.info("Discarded an unusable classification: %s", clipped(entry))
-    # Stable, so within one scheme the catalogues keep the order they answered
-    # in and the leading source still wins.
-    headings.sort(key=lambda heading: SCHEME_ORDER.get(heading.scheme, len(SCHEME_ORDER)))
+    # Stable, so within one kind and scheme the catalogues keep the order they
+    # answered in and the leading source still wins.
+    headings.sort(
+        key=lambda heading: (
+            KIND_ORDER[kind_of(heading.kind)],
+            SCHEME_ORDER.get(heading.scheme, len(SCHEME_ORDER)),
+        )
+    )
     return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
 
 
@@ -167,6 +225,15 @@ def add_headings(
     missing one is the exception, because a caption where there was none is
     strictly more than before.
 
+    **`kind` fills in on the same rule, and that is the only thing that ever
+    corrects a row written before `a1e7c93b60df`.** Those rows carry a null
+    because the `$2` that would have said was never stored, so no migration can
+    tell a disc from a subject among them; a record that declares one is the
+    only place the answer exists. It reaches a book when that book is next
+    enriched and not before, which is worth knowing rather than assuming. Not an
+    overwrite, for the same reason the caption is not: a stored `subject` came
+    from a catalogue saying so.
+
     **The ceiling is counted against the book, not against the payload.** Every
     caller is bounded per request and this writer is additive across requests,
     so without the count here the per book total is unbounded: `enrich/apply`
@@ -190,8 +257,14 @@ def add_headings(
         key = (ClassificationScheme(heading.scheme), heading.number)
         stored = existing.get(key)
         if stored is not None:
+            filled = False
             if stored.label is None and heading.label is not None:
                 stored.label = heading.label
+                filled = True
+            if stored.kind is None and heading.kind is not None:
+                stored.kind = heading.kind
+                filled = True
+            if filled:
                 changed.append(heading.number)
             continue
         if len(existing) >= MAX_CLASSIFICATIONS_PER_BOOK:
@@ -207,6 +280,7 @@ def add_headings(
             scheme=heading.scheme,
             number=heading.number,
             label=heading.label,
+            kind=heading.kind,
         )
         db.add(row)
         existing[key] = row

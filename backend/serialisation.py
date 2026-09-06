@@ -32,7 +32,7 @@ from schemas import (
     PublicBookOut,
     UserOut,
 )
-from shelf import Shelf, rereading_filtered_rows
+from shelf import Outbound, Shelf, rereading_filtered_rows
 
 # The metadata sources themselves live in `metadata.py`. What is here is the
 # part that is ours rather than theirs: mapping whatever subject headings a
@@ -425,8 +425,13 @@ def book_to_out(book: Book, current_user: User, db: Session) -> BookOut:
 
 
 
-def books_to_public_out(books: Sequence[Book]) -> list[PublicBookOut]:
+def books_to_public_out(books: Outbound) -> list[PublicBookOut]:
     """Serialise Books for a reader with no account.
+
+    **`Outbound` and not `Sequence[Book]`.** The rows in one came off a shelf
+    with no ownership arm, so this function cannot be handed a member's own
+    shelf; it could when the parameter was a list, and a list says nothing about
+    whose shelf produced it. See `shelf.Outbound`.
 
     **It takes no `Session` and no `User`, and that signature is the guarantee
     rather than a convenience.** `books_to_out` above needs both because half

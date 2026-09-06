@@ -1099,6 +1099,134 @@ time under a 1.0 second read timeout completed in **18.0 seconds**, and at the s
 settings that is roughly 109 days of held request. The same trickle now raises
 `DeadlineExceeded` at 1.001 seconds.
 
+### A catalogue credential is somebody else's login, so it is sealed at rest
+
+Every other secret this application stores is **its own**: an API key it uses, a mail
+password for its own mailbox, a webhook secret it signs with. A catalogue credential is
+**an institution's account with a third party**, held here on its behalf, and the failure
+mode is leaking somebody else's login rather than losing one of ours. That is why it does
+not live in the settings table, which is written in plaintext and which `backup.py` copies
+wholesale.
+
+**Three kinds of secret, and they are not interchangeable.**
+
+| Kind | Owner | Where | Who may replace it | If that person goes |
+|---|---|---|---|---|
+| The app's own | the deployment | `settings`, plaintext | any admin | nothing happens |
+| A catalogue account | the library | `catalogue_credentials`, sealed | any admin | nothing happens |
+| A member's own login elsewhere | one member | its own table, when it exists | that member | deleted with them |
+
+The third does not exist yet and will **not** be a nullable column on the second's table:
+ownership changes the deletion rule, the visibility rule and the read path, and one table
+answering two access-control questions is how the answer to one gets applied to the other.
+The distinction is enforced rather than described. Every sealed value is bound to
+additional authenticated data naming its kind and its subject
+(`endpaper/v1/catalogue-credential/<source>`), so a ciphertext moved between rows, between
+kinds or between subjects by a hand-edited archive fails authentication instead of
+decrypting into somebody else's request.
+
+**AES-256-GCM, one key, and the key is never in the database.** The archive therefore
+carries ciphertext that is useless without something the archive does not contain, which is
+what makes credentials an admin can add at runtime affordable rather than reckless. Note
+what that does *not* claim: on a single machine the key file and the database sit on the
+same disk, so this defends the archive and a stolen database file, not somebody holding the
+whole volume.
+
+**Every ciphertext records which key generation wrote it.** Four bytes derived from the key,
+written outside the ciphertext where it can be read without one and inside the
+authenticated data where it cannot be rewritten. Without it a restore under a rotated key
+fails identically to a corrupted row, and an admin is left unable to tell "type it again"
+from "this is damaged".
+
+**The key is a 24 word recovery phrase, and that is its only form.** BIP-39 English, 256
+bits of entropy and an 8 bit checksum, in the environment variable, in the keychain, in the
+file and on the screen alike. One representation, because two encodings of one key are two
+things that can disagree silently. The checksum is the point: a mistyped or misread word
+fails at input rather than producing a different key, which is the same silent wrongness
+the generation tag exists to prevent. No refusal ever names a word, only a position, since
+the phrase **is** the key.
+
+**A key comes from one of three places**, in this order: `CREDENTIAL_ENCRYPTION_KEY`, this
+machine's keychain, or a key file (`CREDENTIAL_ENCRYPTION_KEY_FILE`, else
+`credential-key` under the data directory, narrowed to 0600 with `fchmod` on the descriptor
+**before** the phrase is written, and opened `O_NOFOLLOW`). The mode is not left to
+`O_CREAT`, which applies one only when it creates: a file that already existed at 0644 held
+the phrase at 0644 for the length of the write. Two places holding the *same* key is
+ordinary; two holding *different* keys is refused, loudly, because whichever won the other's
+owner would watch their credentials stop opening and be told nothing. A key in a place this
+app cannot write to is refused rather than skipped when it is asked to discard one, since
+skipping it reported a key as discarded while it stayed in force.
+
+**An install with no key starts.** Credentials cannot be stored, any already stored are
+reported as held and unopenable, and nothing outbound carries one. **No default key is shipped**, in
+any artefact. Creating one is a deliberate act on the settings screen, and it is the one
+route in this application whose response body carries a secret: it returns the phrase and
+refuses when a key already exists, so "shown once" is a property of the server rather than a
+promise the browser makes.
+
+**A lost or rotated key makes every stored credential unreadable, and they must be entered
+again. That cost is new**, and saying so is part of the design: the arrangement this
+replaced held no catalogue credential at all, so there was nothing a lost key could destroy.
+The recovery phrase mitigates the cost rather than removing it. Said beside the field on the
+settings screen, not only here. On a machine nobody
+administers this is also the restore story: a backup carries the sealed rows and never the
+key, so restoring onto a new machine needs the phrase. That is why there is one.
+
+**A hosted multi-tenant deployment may not offer this**, and that is structural rather than
+a policy. One deployment holds one Library, and there is no multi tenancy anywhere in this
+application: one database, one roster, one `is_admin` flag and one key in one process. So a
+credential an admin supplies is exercised by every other member's lookups, and nothing in
+the schema could scope it to one group of readers. The environment-only design this replaced
+answered the same question by accident, because the operator held the credential and nobody
+else could supply one; this design has to answer it on purpose.
+
+**A credential does not cross a mirror between instances.** A mirror carries a library; a
+credential is a login at a server the receiving instance was never given.
+
+**The credential never leaves the origin it was set for**, and that is a property of the
+secret rather than of the transport. `fetch.py` already refuses a redirect that leaves the
+host, and it should: a redirect leaking a page is an information leak. But a redirect
+carrying an `Authorization` header off host is account theft, so
+`credentials.Credential.header_for` recomputes the header per hop from the origin the
+credential carries and answers nothing anywhere else. The header is never set on the
+client, which is the arrangement neither guard could see. Both halves of the credential are
+`repr=False` with `__str__` overridden, so a `logger.exception` cannot print one.
+
+**A source is a closed value, because it travels.** The key section is sent the source of
+any login it cannot open so that somebody can remove one, and a client puts that value in a
+URL path. `catalogue_credentials` carries no foreign key and a restore inserts through Core,
+so an archive decides it, and an archive is a file an admin was handed on the strength of it
+carrying only ciphertext. A source of `../../books/5?` turned that removal into a
+`DELETE /api/books/5` under the admin's own token. `ck_catalogue_credentials_source` limits
+it to lowercase, digits, underscore and hyphen, at most 32; `credentials.is_safe_source` is
+the same rule in Python, which is what makes a hostile archive a 400 rather than a 500, and
+one test walks both over one battery so the pair cannot drift.
+
+**Nothing about a credential reaches a response body beyond a masked username**, and the
+generation tag is deliberately not served either: it is derived from the key, and a boolean
+tells an admin everything they can act on without publishing key-derived material to every
+admin session. A 422 is part of that surface: `errors.validation_exception_handler` drops
+pydantic's `input` from every entry, because it otherwise echoes the rejected value, and the
+rejected value on these routes is a password or a recovery phrase.
+
+**A login that is held and cannot be opened is reported as exactly that**, and not as "type
+it in again". The remedy differs by cause: a rotated key, an absent key, a locked keychain
+and a pinned variable set to something that is not a credential all present as one
+unreadable login, and for three of the four the fix is on the key and recovers every login
+at once. So the row says only that it cannot be read, and the diagnosis sits on the key.
+
+**A key can be discarded.** Closing the tab on the phrase leaves a deployment behind a key
+protecting nothing, so `DELETE /api/settings/credential-key` clears it and names the logins
+it stranded. Making a key is refused while sealed logins exist and no key does, because
+ciphertext is proof a key existed and the answer there is the phrase, not a second key.
+
+**What blocks that refusal has to be removable, including under a pinned source.** A stored
+login is sealed ciphertext whether or not the environment also supplies one for that
+catalogue, so it counts towards the refusal; deleting it touches nothing the pin supplies.
+The screen offers the removal beside the name in the key section rather than on the source's
+own card, because a client cannot tell a pinned card has a sealed row behind it: the
+per-source answer stops at the pin without reading the envelope.
+
 ## Response headers
 
 `backend/middleware.py` sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
@@ -1307,9 +1435,11 @@ Worth knowing before exposing this beyond a private network:
   from a refusal, and every refusal in `mailer.py` and `notifications.py` names the shape of
   what is wrong rather than the value: "The Telegram bot token is not a bot token", never
   the token. It is admin only regardless.
-- **The backup carries every stored secret in plaintext.** `backup._TABLES` includes
-  `settings`, so `endpaper.json` holds `mail_password`, `telegram_bot_token`,
-  `overdue_webhook_secret` and `google_books_api_key` in full, unmasked. That is not an
+- **The backup carries every stored secret in plaintext, except catalogue credentials.**
+  `backup._TABLES` includes `settings`, so `endpaper.json` holds `mail_password`,
+  `telegram_bot_token`, `overdue_webhook_secret` and `google_books_api_key` in full,
+  unmasked. `catalogue_credentials` is the one table in the archive that is not: it holds
+  sealed envelopes and the key is never in the database. That is not an
   escalation: a backup is admin only and an admin already sets those values. It matters
   because of what they are rather than who can read them, and a household mail account is
   usually the same account as everything else that household owns, so the archive deserves

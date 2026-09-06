@@ -2,8 +2,10 @@
 
 import pytest
 
+import credentials
 import settings_store
-from enums import Locale, SettingKey
+import sources
+from enums import CatalogueSource, Locale, SettingKey
 
 
 class TestDefaults:
@@ -210,3 +212,49 @@ class TestLibraryModeAndThePublicCatalogue:
             "a catalogue has to stay a runtime decision an admin can undo without "
             "a redeploy."
         )
+
+
+class TestACredentialMakesASourceReady:
+    """The generalisation, not the Google Books special case beside it.
+
+    `sources.NEEDS_A_KEY` is Google Books alone on this date, so the roster
+    cannot exercise this: the rule is written for the set rather than for the
+    member, because the next source to declare that capability is the reason
+    #180 exists. The roster is widened here rather than the rule being spelled
+    per source.
+    """
+
+    @pytest.fixture
+    def needs_a_credential(self, monkeypatch):
+        """Pretend the BNE declares that it needs a credential."""
+        widened = sources.NEEDS_A_KEY | {CatalogueSource.BNE}
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset(widened))
+        return CatalogueSource.BNE
+
+    def test_it_is_neither_held_nor_ready_without_one(self, db, needs_a_credential):
+        assert needs_a_credential not in settings_store.source_credentials(db)
+        assert needs_a_credential not in settings_store.ready_sources(db)
+
+    def test_storing_one_makes_it_both(self, db, needs_a_credential):
+        credentials.generate_key(db)
+        credentials.put(db, needs_a_credential.value, "alice", "hunter2")
+        assert needs_a_credential in settings_store.source_credentials(db)
+        assert needs_a_credential in settings_store.ready_sources(db)
+
+    def test_a_credential_under_a_lost_key_makes_it_neither(self, db, needs_a_credential):
+        """Reporting it as ready leaves a member's search to discover otherwise."""
+        credentials.generate_key(db)
+        credentials.put(db, needs_a_credential.value, "alice", "hunter2")
+        credentials.store_key(credentials.generate_phrase())
+        assert needs_a_credential not in settings_store.source_credentials(db)
+        assert needs_a_credential not in settings_store.ready_sources(db)
+
+    def test_a_pinned_one_counts(self, db, needs_a_credential, monkeypatch):
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
+        assert needs_a_credential in settings_store.source_credentials(db)
+
+    def test_google_books_is_still_decided_by_its_own_key(self, db):
+        """Its credential is an API key in a query string, not a login."""
+        credentials.generate_key(db)
+        credentials.put(db, CatalogueSource.GOOGLE_BOOKS.value, "alice", "hunter2")
+        assert CatalogueSource.GOOGLE_BOOKS not in settings_store.source_credentials(db)

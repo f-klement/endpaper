@@ -23,12 +23,16 @@ import type {
 
 import type {
   BodySetLoginImage,
+  CredentialKeyOut,
   FeatureFlagsOut,
   HTTPValidationError,
   LoginImageOut,
+  RecoveryPhraseIn,
+  RecoveryPhraseOut,
   SenderHealth,
   SettingsOut,
   SettingsUpdate,
+  SourceCredentialIn,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
@@ -292,6 +296,704 @@ export const useUpdateSettings = <
   TContext
 > => {
   return useMutation(getUpdateSettingsMutationOptions(options), queryClient);
+};
+export const getForgetSourceCredentialUrl = (source: string) => {
+  return `/api/settings/catalogue-sources/${source}/credential`;
+};
+
+/**
+ * Drop a stored login for one catalogue.
+ *
+ * **Succeeds whether or not one was stored**, and needs no key to do it: a
+ * credential nobody can read is exactly the one somebody most wants to be rid
+ * of, and requiring the key to delete it would make a rotated key
+ * unrecoverable without a database edit. It is also what lets somebody who
+ * lost the recovery phrase reach a state where a new key may be made.
+ *
+ * **Reaches a row whose catalogue is no longer in the roster**, which the
+ * write above does not. `catalogue_credentials` carries no foreign key, on
+ * purpose, so that one credential for a source a later release dropped cannot
+ * fail an entire restore; the cost of that is an orphan, and an orphan nothing
+ * can delete would be a row needing a database edit to remove. Deleting sends
+ * nothing anywhere, so the roster check buys nothing here and costs that.
+ *
+ * **The pinned check fires only when nothing is stored, and that ordering is
+ * load bearing.** It read "there is nothing stored to remove", which stopped
+ * being true the moment `unreadable_sources` began counting a pinned source's
+ * sealed row: a login stored for a source the environment also pins **blocks
+ * key creation**, and refusing to delete it made that a dead end whose only
+ * exit was unsetting the variable, deleting, and setting it again, with
+ * nothing on screen saying so. An archive carries `catalogue_credentials`, so
+ * a restore onto a deployment that pins that source arrives there without
+ * anybody doing anything unusual.
+ *
+ * So: a row is a row, pinned or not, and deleting one sends nothing anywhere
+ * and does not touch the environment. With nothing stored the 409 is honest
+ * again, because then there really is nothing here to remove and the
+ * environment's is not this route's to clear.
+ * @summary Forget Source Credential
+ */
+export const forgetSourceCredential = async (
+  source: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<SettingsOut> => {
+  return customFetch<SettingsOut>(getForgetSourceCredentialUrl(source), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetSourceCredentialMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetSourceCredential>>,
+    TError,
+    ForgetSourceCredentialMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetSourceCredential>>,
+  TError,
+  ForgetSourceCredentialMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["forgetSourceCredential"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetSourceCredential>>,
+    ForgetSourceCredentialMutationVariables
+  > = (props) => {
+    const { source } = props ?? {};
+
+    return forgetSourceCredential(source, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetSourceCredentialMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetSourceCredential>>
+>;
+
+export type ForgetSourceCredentialMutationError = HTTPValidationError;
+export type ForgetSourceCredentialMutationVariables = { source: string };
+
+/**
+ * @summary Forget Source Credential
+ */
+export const useForgetSourceCredential = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetSourceCredential>>,
+      TError,
+      ForgetSourceCredentialMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetSourceCredential>>,
+  TError,
+  ForgetSourceCredentialMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getForgetSourceCredentialMutationOptions(options),
+    queryClient,
+  );
+};
+export const getSetSourceCredentialUrl = (source: string) => {
+  return `/api/settings/catalogue-sources/${source}/credential`;
+};
+
+/**
+ * Store a login for one catalogue, sealed.
+ *
+ * **Any roster source, not only one that declares it needs a credential.** A
+ * library may hold an account at a catalogue that also answers anonymously,
+ * and refusing it would be the storage deciding who may have an account
+ * somewhere else.
+ *
+ * 409 when the deployment pinned this source's credential, the same rule and
+ * the same reason `_refuse_if_pinned` states for a settings row: a value the
+ * environment supplies wins, so storing a different one produces a screen that
+ * disagrees with what the next request actually sends.
+ * @summary Set Source Credential
+ */
+export const setSourceCredential = async (
+  source: string,
+  sourceCredentialIn: SourceCredentialIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<SettingsOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<SettingsOut>(getSetSourceCredentialUrl(source), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(sourceCredentialIn),
+  });
+};
+
+export const getSetSourceCredentialMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setSourceCredential>>,
+    TError,
+    SetSourceCredentialMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setSourceCredential>>,
+  TError,
+  SetSourceCredentialMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["setSourceCredential"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setSourceCredential>>,
+    SetSourceCredentialMutationVariables
+  > = (props) => {
+    const { source, data } = props ?? {};
+
+    return setSourceCredential(source, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetSourceCredentialMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setSourceCredential>>
+>;
+export type SetSourceCredentialMutationBody = SourceCredentialIn;
+export type SetSourceCredentialMutationError = HTTPValidationError;
+export type SetSourceCredentialMutationVariables = {
+  source: string;
+  data: SourceCredentialIn;
+};
+
+/**
+ * @summary Set Source Credential
+ */
+export const useSetSourceCredential = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof setSourceCredential>>,
+      TError,
+      SetSourceCredentialMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof setSourceCredential>>,
+  TError,
+  SetSourceCredentialMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getSetSourceCredentialMutationOptions(options),
+    queryClient,
+  );
+};
+export const getForgetCredentialKeyUrl = () => {
+  return `/api/settings/credential-key`;
+};
+
+/**
+ * Drop the key this machine holds, so a new one can be made.
+ *
+ * **The way back from closing the tab without writing the words down.**
+ * Without this, `POST` refuses because a key exists, `PUT` wants a phrase
+ * nobody has, and the deployment is stuck behind a key protecting nothing.
+ *
+ * **It strands whatever the key was opening, and the response says how many**
+ * rather than this route hiding it: `unreadable_credentials` on the way out is
+ * the count of stored logins that now have to be typed again. Removing those
+ * logins first is the way to reach a clean state, and `DELETE` on a source's
+ * credential needs no key for exactly that reason.
+ *
+ * 409 when the deployment pinned the key through the environment: a process
+ * cannot unset a variable for its own next start, so there is nothing here to
+ * clear.
+ * @summary Forget Credential Key
+ */
+export const forgetCredentialKey = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CredentialKeyOut> => {
+  return customFetch<CredentialKeyOut>(getForgetCredentialKeyUrl(), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getForgetCredentialKeyMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof forgetCredentialKey>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof forgetCredentialKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["forgetCredentialKey"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof forgetCredentialKey>>,
+    void
+  > = () => {
+    return forgetCredentialKey(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ForgetCredentialKeyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof forgetCredentialKey>>
+>;
+
+export type ForgetCredentialKeyMutationError = unknown;
+
+/**
+ * @summary Forget Credential Key
+ */
+export const useForgetCredentialKey = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof forgetCredentialKey>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof forgetCredentialKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(
+    getForgetCredentialKeyMutationOptions(options),
+    queryClient,
+  );
+};
+export const getGetCredentialKeyUrl = () => {
+  return `/api/settings/credential-key`;
+};
+
+/**
+ * Whether this deployment holds an encryption key, and where from.
+ *
+ * Never the key. A phrase leaves this application through exactly one route,
+ * the POST below, and only when there was nothing to overwrite.
+ * @summary Get Credential Key
+ */
+export const getCredentialKey = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CredentialKeyOut> => {
+  return customFetch<CredentialKeyOut>(getGetCredentialKeyUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCredentialKeyQueryKey = () => {
+  return [`/api/settings/credential-key`] as const;
+};
+
+export const getGetCredentialKeyQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCredentialKey>>,
+  TError = unknown,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getCredentialKey>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCredentialKeyQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCredentialKey>>
+  > = ({ signal }) => getCredentialKey({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCredentialKey>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetCredentialKeyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCredentialKey>>
+>;
+export type GetCredentialKeyQueryError = unknown;
+
+export function useGetCredentialKey<
+  TData = Awaited<ReturnType<typeof getCredentialKey>>,
+  TError = unknown,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCredentialKey>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCredentialKey>>,
+          TError,
+          Awaited<ReturnType<typeof getCredentialKey>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCredentialKey<
+  TData = Awaited<ReturnType<typeof getCredentialKey>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCredentialKey>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCredentialKey>>,
+          TError,
+          Awaited<ReturnType<typeof getCredentialKey>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetCredentialKey<
+  TData = Awaited<ReturnType<typeof getCredentialKey>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCredentialKey>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get Credential Key
+ */
+
+export function useGetCredentialKey<
+  TData = Awaited<ReturnType<typeof getCredentialKey>>,
+  TError = unknown,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCredentialKey>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetCredentialKeyQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateCredentialKeyUrl = () => {
+  return `/api/settings/credential-key`;
+};
+
+/**
+ * Make an encryption key, store it, and return the phrase **once**.
+ *
+ * **The one response in this application that carries a secret**, and the
+ * exception is bounded by the route rather than by a promise: it refuses when
+ * a key already exists, so replaying it cannot re-display one. Write the words
+ * down; there is no second chance to read them, by construction.
+ *
+ * Where the key is kept is this machine's business: its keychain where it has
+ * one, otherwise a file readable only by the account the app runs as. Neither
+ * travels in a backup archive, which is what makes the archive safe to hand
+ * around and is also why the phrase matters.
+ * @summary Create Credential Key
+ */
+export const createCredentialKey = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<RecoveryPhraseOut> => {
+  return customFetch<RecoveryPhraseOut>(getCreateCredentialKeyUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCreateCredentialKeyMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createCredentialKey>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createCredentialKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["createCredentialKey"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createCredentialKey>>,
+    void
+  > = () => {
+    return createCredentialKey(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateCredentialKeyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createCredentialKey>>
+>;
+
+export type CreateCredentialKeyMutationError = unknown;
+
+/**
+ * @summary Create Credential Key
+ */
+export const useCreateCredentialKey = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createCredentialKey>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createCredentialKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(
+    getCreateCredentialKeyMutationOptions(options),
+    queryClient,
+  );
+};
+export const getRestoreCredentialKeyUrl = () => {
+  return `/api/settings/credential-key`;
+};
+
+/**
+ * Take a recovery phrase back in, on a new machine or after one was lost.
+ *
+ * **The checksum is what makes a wrong word an error rather than a different
+ * key.** A phrase with a word mistyped, misread off paper, or two words
+ * swapped is refused here; without it this route would cheerfully store a key
+ * that opens nothing and report success.
+ *
+ * Replacing a key that currently works is allowed and is not guarded against:
+ * it is what a person restoring a backup onto a new machine is doing, and the
+ * response says how many stored credentials the new key cannot open, which is
+ * the only honest report available.
+ * @summary Restore Credential Key
+ */
+export const restoreCredentialKey = async (
+  recoveryPhraseIn: RecoveryPhraseIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CredentialKeyOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<CredentialKeyOut>(getRestoreCredentialKeyUrl(), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(recoveryPhraseIn),
+  });
+};
+
+export const getRestoreCredentialKeyMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreCredentialKey>>,
+    TError,
+    RestoreCredentialKeyMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreCredentialKey>>,
+  TError,
+  RestoreCredentialKeyMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["restoreCredentialKey"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreCredentialKey>>,
+    RestoreCredentialKeyMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return restoreCredentialKey(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreCredentialKeyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreCredentialKey>>
+>;
+export type RestoreCredentialKeyMutationBody = RecoveryPhraseIn;
+export type RestoreCredentialKeyMutationError = HTTPValidationError;
+export type RestoreCredentialKeyMutationVariables = { data: RecoveryPhraseIn };
+
+/**
+ * @summary Restore Credential Key
+ */
+export const useRestoreCredentialKey = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreCredentialKey>>,
+      TError,
+      RestoreCredentialKeyMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreCredentialKey>>,
+  TError,
+  RestoreCredentialKeyMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRestoreCredentialKeyMutationOptions(options),
+    queryClient,
+  );
 };
 export const getGetFeatureFlagsUrl = () => {
   return `/api/settings/features`;

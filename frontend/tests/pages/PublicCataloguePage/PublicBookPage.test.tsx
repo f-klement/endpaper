@@ -79,6 +79,37 @@ describe("PublicBookPage", () => {
     expect(screen.getByText("American fiction")).toBeInTheDocument();
   });
 
+  it("says a carrier is a carrier rather than a subject", async () => {
+    // `#162`. A public record showing `CD-ROM` unmarked asserts that the book
+    // is about CD-ROM, which is not what the catalogue said. The heading is
+    // already public; the kind is what makes it read correctly.
+    api.on(/\/api\/public\/books\/12/, {
+      body: {
+        ...RECORD,
+        classifications: [
+          {
+            scheme: "gnd",
+            number: "4139307-7",
+            label: "CD-ROM",
+            kind: "carrier",
+          },
+        ],
+      },
+    });
+    render();
+
+    expect(await screen.findByText("Carrier type")).toBeInTheDocument();
+  });
+
+  it("marks nothing on an ordinary subject", async () => {
+    // Anti vacuity for the case above.
+    render();
+
+    expect(await screen.findByText("813.54")).toBeInTheDocument();
+    expect(screen.queryByText("Carrier type")).not.toBeInTheDocument();
+    expect(screen.queryByText("Content type")).not.toBeInTheDocument();
+  });
+
   it("answers a book that is not published with the same not found", async () => {
     // The server answers 404 for a book that never existed, one in the trash
     // and one marked private alike, so that a stranger cannot count through

@@ -1,6 +1,6 @@
 """SRU, served rather than consumed, which is the other direction from `targets.py`.
 
-## The second surface reachable without a session, answering the same five
+## The second surface reachable without a session, answering the same six
 ## questions as the first
 
 `routers/public.py` names them, and this module's whole placement is that it must
@@ -11,6 +11,7 @@ not answer any of them a second, different way:
 | Is anything published at all? | `public_catalogue_is_published`, through `public_reader` |
 | Which **rows** may be shown? | `Shelf.seen_by_the_public` |
 | Which **columns** may be shown? | `marc.py`'s field mapping, pinned against `schemas/public.py` |
+| May these rows leave the instance? | `shelf.Outbound`, from `Shelf.outbound_page` |
 | How fast may a stranger ask? | `ratelimit.public_catalogue_limiter`, the same counter |
 | May a crawler index it? | `middleware.SecurityHeadersMiddleware` |
 
@@ -64,7 +65,7 @@ from sqlalchemy.sql.elements import ColumnElement
 import marc
 from enums import BookSort
 from models import Book, Tag
-from shelf import Loading, Shelf, order_for
+from shelf import Loading, Outbound, Shelf, order_for
 
 # ── The diagnostic register ───────────────────────────────────────────────────
 
@@ -1683,6 +1684,28 @@ def _explain_response(version: str, server: Server) -> str:
     return _serialise(root)
 
 
+def _records_element(
+    root: ElementTree.Element, books: Outbound, start_record: int
+) -> None:
+    """The `<records>` block, from rows that are allowed to leave the instance.
+
+    **`Outbound` and not `Sequence[Book]`, which is what makes the rule
+    structural here rather than a habit.** These records go to another
+    institution's software, so this is the plainest case of a payload leaving
+    this instance, and this signature is what refuses rows fetched for a member.
+    Written as its own function for exactly that reason: inline in
+    `_search_response` the type was whatever the shelf happened to return, so an
+    edit swapping `outbound_page` for `page` would have compiled and harvested.
+    """
+    records = _element(root, "records")
+    for offset, book in enumerate(books):
+        record = _element(records, "record")
+        _element(record, "recordSchema", MARCXML_SCHEMA)
+        _element(record, "recordPacking", "xml")
+        _element(record, "recordData").append(marc.record_element(book))
+        _element(record, "recordPosition", str(start_record + offset))
+
+
 def _search_response(request: _Request, db: Session) -> str:
     """One `searchRetrieve`, from the parse to the records.
 
@@ -1692,6 +1715,12 @@ def _search_response(request: _Request, db: Session) -> str:
     reaching past it: that is the property
     `tests/test_sru.py::TestNoIndexReachesAPrivateBook` asserts index by index,
     because one unfiltered index is the whole leak.
+
+    **`outbound_page`, not `page`, and the difference outlives this function.**
+    These records go to another institution's software, which is the plainest
+    case of a payload leaving this instance. `shelf.Outbound` refuses a shelf
+    built for a member, so a later edit that reached for a viewer to widen an
+    index would fail here rather than harvest well.
     """
     predicate = criteria(parse(request.query))
     # **`page`, never `all` and a Python slice.** The slice reads the whole
@@ -1707,7 +1736,7 @@ def _search_response(request: _Request, db: Session) -> str:
     books, total = (
         Shelf.seen_by_the_public(db)
         .where(predicate)
-        .page(
+        .outbound_page(
             request.start_record - 1,
             request.maximum_records,
             *order_for(BookSort.TITLE_ASC),
@@ -1728,13 +1757,7 @@ def _search_response(request: _Request, db: Session) -> str:
     _element(root, "version", request.version)
     _element(root, "numberOfRecords", str(total))
     if books:
-        records = _element(root, "records")
-        for offset, book in enumerate(books):
-            record = _element(records, "record")
-            _element(record, "recordSchema", MARCXML_SCHEMA)
-            _element(record, "recordPacking", "xml")
-            _element(record, "recordData").append(marc.record_element(book))
-            _element(record, "recordPosition", str(request.start_record + offset))
+        _records_element(root, books, request.start_record)
     following = request.start_record + len(books)
     if books and following <= total:
         _element(root, "nextRecordPosition", str(following))

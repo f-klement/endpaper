@@ -21,7 +21,18 @@ dependencies = [
     "alembic>=1.14",
     "ldap3>=2.9.1",
     "rapidfuzz>=3.14.5",
+    "cryptography>=50.0.1",
+    "mnemonic>=0.21",
 ]
+
+[project.optional-dependencies]
+# The OS keychain, and it is deliberately not a hard dependency. The published
+# image is Alpine with no session bus and no keychain, so `keyring` there is
+# four packages that can only ever answer "no backend available". The desktop
+# and mobile builds install this extra; `credentials._keyring` reports the
+# source unavailable without it, and the dev group carries it so the suite
+# exercises that path rather than asserting it.
+desktop = ["keyring>=25.7.0"]
 
 [dependency-groups]
 dev = [
@@ -33,6 +44,7 @@ dev = [
     "ruff>=0.9.4",
     "mypy>=1.14.1",
     "pip-audit>=2.9.0",
+    "keyring>=25.7.0",
 ]
 
 [tool.pytest.ini_options]

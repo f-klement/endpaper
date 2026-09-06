@@ -75,7 +75,7 @@ subject heading in one and a person in the other, and they are not the same clai
 | `(DE-588)` | The MARC organisation code for the GND. It labels a number as a GND number, which is why the table stores the bare number and keeps the scheme in its own column. |
 | `(DE-101)` | The DNB's own organisation code. One authority record commonly carries this and `(DE-588)` for the same entity. |
 | `$0` | Authority record control number: the subfield where an identifier such as a GND number lives. |
-| `$2` | Names the vocabulary a heading came from. `gnd` and `gnd-content` are GND; `gatbeg` is not, which is why the value is read rather than assumed. |
+| `$2` | Names the vocabulary a heading came from. `gnd` and `gnd-content` are GND; `gatbeg` is not, which is why the value is read rather than assumed. It is also what says a heading is a content type or a carrier rather than a subject: see `classifications.kind`. |
 | `$4` | A relator code, saying what a name did. `pbl` is publisher, which is how four corporate names were once read as authors. |
 
 ## The MARC fields this code reads

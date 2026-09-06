@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   BookSort,
   ClassificationScheme,
+  HeadingKind,
   OwnershipStatus,
   ReadStatus,
   type BookOut,
@@ -11,7 +12,11 @@ import {
 } from "../../../api/generated/model";
 import { Icon, Skeleton } from "../../../components";
 import { tagName, useTranslation, type Translate } from "../../../i18n";
-import { SCHEME_LABEL } from "../../../lib/classificationLabels";
+import {
+  SCHEME_LABEL,
+  headingKind,
+  headingText,
+} from "../../../lib/classificationLabels";
 import {
   COLUMN_KEYS,
   COLUMN_SPECS,
@@ -92,9 +97,21 @@ function callNumbers(book: BookOut): ClassificationOut[] {
   );
 }
 
+/**
+ * The headings that are about what the book is about.
+ *
+ * **Two tests, not one, and the second is the whole of `#162`.** A heading is a
+ * subject if its scheme is not a shelf order *and* the record did not mark it
+ * as a content type or a carrier. This column's header is the word "Subjects",
+ * so a `CD-ROM` row rendered here is the defect stated in the table's own
+ * heading. It is still shown on the book page and in the filter panel, where it
+ * is marked for what it is.
+ */
 function subjectHeadings(book: BookOut): ClassificationOut[] {
   return (book.classifications ?? []).filter(
-    (entry) => !CALL_NUMBER_SCHEMES.includes(entry.scheme),
+    (entry) =>
+      !CALL_NUMBER_SCHEMES.includes(entry.scheme) &&
+      headingKind(entry.kind) === HeadingKind.subject,
   );
 }
 
@@ -176,16 +193,11 @@ const COLUMNS: Record<ColumnKey, Column> = {
   },
   classification: {
     sort: [],
-    // The caption where there is one, the identifier where there is not, and
-    // no scheme name: a subject heading is words rather than a notation, so
-    // the argument for prefixing the call number does not reach it. GND is
-    // why the fallback is that way round: its `number` is an opaque id
-    // (`4203576-4`) and its `label` is the heading, while LCSH carries the
-    // heading in `number` and no label at all.
-    render: (book) =>
-      subjectHeadings(book)
-        .map((entry) => entry.label ?? entry.number)
-        .join(", "),
+    // No scheme name: a subject heading is words rather than a notation, so
+    // the argument for prefixing the call number does not reach it. Which of
+    // the two columns a heading reads as is `headingText`, which the book page
+    // and the filter panel ask too.
+    render: (book) => subjectHeadings(book).map(headingText).join(", "),
   },
   format: {
     sort: [],

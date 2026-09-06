@@ -30,6 +30,7 @@ import type { SuggestionReason } from "./suggestionReason.ts";
  * then decide per name: any of them can be dropped before merging.
  */
 export interface AuthorSuggestionOut {
+  keep_name?: string | null;
   keys: string[];
   names: string[];
   reasons: SuggestionReason[];

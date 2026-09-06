@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 import backup
+import credentials
 import filing
 from authors import author_key
 from backup import RestoreError
@@ -1477,3 +1478,105 @@ class TestRestoringTheShelfKey:
         assert res.status_code == 200, res.text
         db.expire_all()
         assert db.query(Classification).one().sort_key == self.NUMBER
+
+
+class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
+    """The property that makes a runtime credential affordable rather than reckless.
+
+    The archive is admin downloadable and travels; the key never enters the
+    database, so what travels is useless without something the zip does not
+    contain. The same property is the trap on a machine nobody administers: a
+    restore onto a new machine brings these rows back unreadable unless the
+    person kept the recovery phrase, which is why there is one.
+    """
+
+    @pytest.fixture
+    def stored(self, client, admin, db):
+        credentials.generate_key(db)
+        credentials.put(db, "bne", "alice", "hunter2")
+        return client.get("/api/backup", headers=admin["headers"]).content
+
+    def test_the_row_is_in_the_manifest(self, stored):
+        rows = read_manifest(stored)["tables"]["catalogue_credentials"]
+        assert [row["source"] for row in rows] == ["bne"]
+
+    def test_and_neither_half_of_the_login_is_anywhere_in_it(self, stored):
+        assert b"hunter2" not in stored
+        assert b"alice" not in stored
+
+    def test_what_it_carries_is_an_envelope(self, stored):
+        rows = read_manifest(stored)["tables"]["catalogue_credentials"]
+        assert rows[0]["envelope"].startswith("v1.")
+
+    def test_a_restore_brings_it_back_openable_under_the_same_key(
+        self, client, admin, db, stored
+    ):
+        credentials.forget(db, "bne")
+        assert credentials.stored_envelope(db, "bne") == ""
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", stored, "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["catalogue_credentials"] == 1
+        db.expire_all()
+        assert credentials.stored(db, "bne") == ("alice", "hunter2")
+
+    def test_a_restore_under_a_different_key_says_so_rather_than_returning_nonsense(
+        self, client, admin, db, stored
+    ):
+        """The generation tag, and the whole reason it is written down."""
+        credentials.store_key(credentials.generate_phrase())
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", stored, "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        with pytest.raises(credentials.WrongKeyGeneration):
+            credentials.stored(db, "bne")
+        assert credentials.view(db, "bne").unreadable is True
+
+    def test_an_archive_naming_a_source_shaped_like_a_path_is_refused(
+        self, client, admin, stored
+    ):
+        """The archive picks this value, and the screen now hands it to a client.
+
+        A login the key cannot open is listed with a remove button, and the
+        generated client interpolates the source into a URL path unencoded. A
+        source of `../../books/5?` turned that button into
+        `DELETE /api/books/5` under the admin's own token, from a page telling
+        them they were tidying up.
+        """
+        manifest = read_manifest(stored)
+        row = dict(manifest["tables"]["catalogue_credentials"][0])
+        row["source"] = "../../books/5?"
+        manifest["tables"]["catalogue_credentials"] = [row]
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", rewrite(stored, manifest), "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 400
+        assert "not a catalogue" in response.json()["detail"]
+
+    def test_an_archive_carrying_a_plaintext_password_is_refused(
+        self, client, admin, stored
+    ):
+        """The CHECK constraint, and what stands between a hand edit and a send."""
+        manifest = read_manifest(stored)
+        manifest["tables"]["catalogue_credentials"] = [
+            {"source": "bne", "envelope": "alice:hunter2"}
+        ]
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", rewrite(stored, manifest), "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+        assert response.status_code != 200

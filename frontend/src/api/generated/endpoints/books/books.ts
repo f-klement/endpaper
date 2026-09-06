@@ -28,7 +28,9 @@ import type {
 import type {
   ApplyEnrichmentParams,
   AuthorAuthorityParams,
+  AuthorBatchMergeOut,
   AuthorIdentifierRequest,
+  AuthorMergeBatchRequest,
   AuthorMergeRequest,
   AuthorOut,
   AuthorSuggestionOut,
@@ -63,6 +65,7 @@ import type {
   EnrichBookParams,
   ExportBooksParams,
   HTTPValidationError,
+  ListAuthorSuggestionsParams,
   ListBooksParams,
   ListQuotesParams,
   ListTrashParams,
@@ -1355,52 +1358,215 @@ export const useMergeAuthors = <
 > => {
   return useMutation(getMergeAuthorsMutationOptions(options), queryClient);
 };
-export const getListAuthorSuggestionsUrl = () => {
-  return `/api/books/authors/suggestions`;
+export const getMergeAuthorsBatchUrl = () => {
+  return `/api/books/authors/merge/batch`;
 };
 
 /**
- * Names that are probably one person.
+ * Fold several groups at once, or none of them.
  *
- * A suggestion and never a verdict: it is offered because accepting one
- * writes an alias row and deleting that row puts the shelf back exactly as it
- * was. `authors.suggest_merges` records which rule produced each group so a
- * reader can tell a near-certainty from a guess before pressing anything.
- * @summary List Author Suggestions
+ * **What the caller confirmed, not what a matcher proposed.** The groups are
+ * applied as sent, which is what makes `GET /authors/suggestions` a review rather
+ * than a decoration. Each group folds its spellings into one of its own names;
+ * a name none of them has is the single merge's job, because a batch that
+ * could invent a name could also fold away the name another group in the same
+ * request is keeping.
+ *
+ * **All of it or none of it.** Every group is checked before any row is
+ * written, so a refusal leaves the library exactly as it was and there is no
+ * half applied state for anybody to reconstruct. Nothing in `books` is
+ * written by any of it, and deleting the rows undoes it one group at a time.
+ *
+ * An author nobody can see is **404**, exactly as it is for one merge. A group
+ * that would repoint an alias row somebody already wrote is **409**: a merge
+ * a person made is an assertion and a rule's grouping is a guess, so the
+ * assertion wins and the batch is refused rather than applied over it.
+ * @summary Merge Authors Batch
  */
-export const listAuthorSuggestions = async (
+export const mergeAuthorsBatch = async (
+  authorMergeBatchRequest: AuthorMergeBatchRequest,
   options?: Parameters<typeof customFetch>[1],
-): Promise<AuthorSuggestionOut[]> => {
-  return customFetch<AuthorSuggestionOut[]>(getListAuthorSuggestionsUrl(), {
+): Promise<AuthorBatchMergeOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+  return customFetch<AuthorBatchMergeOut>(getMergeAuthorsBatchUrl(), {
     ...options,
-    method: "GET",
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(authorMergeBatchRequest),
   });
 };
 
-export const getListAuthorSuggestionsQueryKey = () => {
-  return [`/api/books/authors/suggestions`] as const;
+export const getMergeAuthorsBatchMutationOptions = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof mergeAuthorsBatch>>,
+    TError,
+    MergeAuthorsBatchMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof mergeAuthorsBatch>>,
+  TError,
+  MergeAuthorsBatchMutationVariables,
+  TContext
+> => {
+  const mutationKey = ["mergeAuthorsBatch"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof mergeAuthorsBatch>>,
+    MergeAuthorsBatchMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return mergeAuthorsBatch(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MergeAuthorsBatchMutationResult = NonNullable<
+  Awaited<ReturnType<typeof mergeAuthorsBatch>>
+>;
+export type MergeAuthorsBatchMutationBody = AuthorMergeBatchRequest;
+export type MergeAuthorsBatchMutationError = HTTPValidationError;
+export type MergeAuthorsBatchMutationVariables = {
+  data: AuthorMergeBatchRequest;
+};
+
+/**
+ * @summary Merge Authors Batch
+ */
+export const useMergeAuthorsBatch = <
+  TError = HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof mergeAuthorsBatch>>,
+      TError,
+      MergeAuthorsBatchMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof mergeAuthorsBatch>>,
+  TError,
+  MergeAuthorsBatchMutationVariables,
+  TContext
+> => {
+  return useMutation(getMergeAuthorsBatchMutationOptions(options), queryClient);
+};
+export const getListAuthorSuggestionsUrl = (
+  params?: ListAuthorSuggestionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/authors/suggestions?${stringifiedParams}`
+    : `/api/books/authors/suggestions`;
+};
+
+/**
+ * Names that are probably one person, and what folding them would keep.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `reasons` records which rule produced each group so a reader can tell a
+ * near-certainty from a guess before pressing anything.
+ *
+ * `matcher` names the strategy. `default` is every rule. `exact` keeps only
+ * the rules that group on an equal value, a shared authority record or one
+ * name that is another with the spaces moved, and drops the two that compare
+ * names in pairs. A matcher can only ever take rules away, so no strategy
+ * proposes a group `default` does not.
+ *
+ * **`keep_name` is what `POST /authors/merge/batch` would fold each group
+ * into**, so this list is the review a batch is confirmed against rather than
+ * a summary of one. Null means the group is held back: applying it would
+ * repoint an alias row somebody already wrote, and a merge somebody made
+ * outranks a rule's guess. Nothing says whose row it was, which is not this
+ * caller's to know.
+ *
+ * Nothing here writes.
+ * @summary List Author Suggestions
+ */
+export const listAuthorSuggestions = async (
+  params?: ListAuthorSuggestionsParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuthorSuggestionOut[]> => {
+  return customFetch<AuthorSuggestionOut[]>(
+    getListAuthorSuggestionsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListAuthorSuggestionsQueryKey = (
+  params?: ListAuthorSuggestionsParams,
+) => {
+  return [
+    `/api/books/authors/suggestions`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getListAuthorSuggestionsQueryOptions = <
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = unknown,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<
-      Awaited<ReturnType<typeof listAuthorSuggestions>>,
-      TError,
-      TData
-    >
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+  TError = HTTPValidationError,
+>(
+  params?: ListAuthorSuggestionsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuthorSuggestions>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListAuthorSuggestionsQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getListAuthorSuggestionsQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof listAuthorSuggestions>>
-  > = ({ signal }) => listAuthorSuggestions({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    listAuthorSuggestions(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listAuthorSuggestions>>,
@@ -1412,12 +1578,13 @@ export const getListAuthorSuggestionsQueryOptions = <
 export type ListAuthorSuggestionsQueryResult = NonNullable<
   Awaited<ReturnType<typeof listAuthorSuggestions>>
 >;
-export type ListAuthorSuggestionsQueryError = unknown;
+export type ListAuthorSuggestionsQueryError = HTTPValidationError;
 
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = unknown,
+  TError = HTTPValidationError,
 >(
+  params: undefined | ListAuthorSuggestionsParams,
   options: {
     query: Partial<
       UseQueryOptions<
@@ -1442,8 +1609,9 @@ export function useListAuthorSuggestions<
 };
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = unknown,
+  TError = HTTPValidationError,
 >(
+  params?: ListAuthorSuggestionsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1468,8 +1636,9 @@ export function useListAuthorSuggestions<
 };
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = unknown,
+  TError = HTTPValidationError,
 >(
+  params?: ListAuthorSuggestionsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1490,8 +1659,9 @@ export function useListAuthorSuggestions<
 
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
-  TError = unknown,
+  TError = HTTPValidationError,
 >(
+  params?: ListAuthorSuggestionsParams,
   options?: {
     query?: Partial<
       UseQueryOptions<
@@ -1506,7 +1676,7 @@ export function useListAuthorSuggestions<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getListAuthorSuggestionsQueryOptions(options);
+  const queryOptions = getListAuthorSuggestionsQueryOptions(params, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

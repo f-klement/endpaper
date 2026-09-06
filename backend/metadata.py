@@ -55,7 +55,13 @@ import sources
 import targets
 import z3950
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
-from enums import AuthorityScheme, Capability, CatalogueSource, ClassificationScheme
+from enums import (
+    AuthorityScheme,
+    Capability,
+    CatalogueSource,
+    ClassificationScheme,
+    HeadingKind,
+)
 from isbn import parse as parse_isbn
 from isbn import registration_group
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
@@ -873,6 +879,37 @@ def _subject_vocabulary(tag: str, entry: _Subfields) -> str | None:
     return value.lower() if value else None
 
 
+#: The `$2` codes that say a field is asserting something other than a subject.
+#:
+#: **Only those two, and the omissions are the rule rather than a short list.**
+#: A code this map does not name leaves `Heading.kind` null, and a null reads as
+#: a subject, so `gnd` and `lcsh` are deliberately absent. `enums.HeadingKind`
+#: says why writing the word costs something rather than merely being
+#: redundant; `ck_classifications_kind` is what refuses it.
+#:
+#: **This is not a second `ClassificationScheme`.** It maps a code onto what the
+#: record was doing, never onto a vocabulary: `gnd`, `gnd-content` and
+#: `gnd-carrier` are all the GND, so all three still write `scheme=gnd`. Twelve
+#: distinct `$2` codes turned up in one day's sampling of four catalogues
+#: against a MARC source code list holding hundreds, and reading any of the rest
+#: as a kind would be the crosswalk #134 refuses. `catalogue.Subject` carries
+#: the code itself for anybody who wants to read it.
+_KIND_BY_VOCABULARY: Final[dict[str, HeadingKind]] = {
+    "gnd-content": HeadingKind.CONTENT,
+    "gnd-carrier": HeadingKind.CARRIER,
+}
+
+
+def _subject_kind(vocabulary: str | None) -> HeadingKind | None:
+    """What a `$2` says the field asserts, or None where it says nothing this reads.
+
+    Takes the lower cased code `_subject_vocabulary` already produced rather
+    than the field, so the case folding is not spelled twice and this cannot be
+    handed an `082` whose `$2` is a Dewey edition.
+    """
+    return _KIND_BY_VOCABULARY.get(vocabulary) if vocabulary else None
+
+
 def _subject_identifier(entry: _Subfields) -> str | None:
     """The identifier a subject field's `$0` carries, whole, or None.
 
@@ -1119,14 +1156,24 @@ def _dnb_subjects(
     of its own. Deleting them is the point of the seam being typed: the rule has
     one owner, and the next source added inherits it rather than copying it.
 
-    **`$2` and `$0` are read since #134, and the classification path is
-    unchanged.** A subject now carries the vocabulary the record declared and
-    the identifier it gave, whatever file that identifier is in. What still
-    decides a `classifications` row is `_gnd_identifier` alone, because that
-    table's `scheme` is a closed four member set and a `$2` naming the Greek
-    national authority file is not one of its members. So the Greek `651` that
-    prompted the ticket keeps its label **and** its `urn:nbn:gr:nlg:`
-    identifier, and still writes no heading. Storing it is #143.
+    **`$2` and `$0` are read since #134. What a `$2` decides is the kind, never
+    the scheme.** A subject carries the vocabulary the record declared and the
+    identifier it gave, whatever file that identifier is in. What decides
+    whether a `classifications` row is written at all is still `_gnd_identifier`
+    alone, because that table's `scheme` is a closed four member set and a `$2`
+    naming the Greek national authority file is not one of its members. So the
+    Greek `651` that prompted the ticket keeps its label **and** its
+    `urn:nbn:gr:nlg:` identifier, and still writes no heading. Storing it is
+    #143.
+
+    **The `$2` does decide `Heading.kind`, and that is what stops a disc being
+    a subject.** `655 $2 gnd-carrier $0 (DE-588)4139307-7 $a CD-ROM` carries a
+    GND number like any other, so it became a heading about what the book is
+    about. It is still a heading and still `scheme=gnd`, because the number is
+    a GND number and resolves as one; what changed is that it now says it is a
+    carrier. Refusing the field instead was the obvious fix and is wrong: the
+    same vocabulary carries `Fiktionale Darstellung`, which is why `655` is on
+    the tag list at all, and it is stored nowhere else.
 
     **Which is why nothing here maps a `$2` onto a scheme.** Twelve distinct
     codes turned up in one day's sampling of four catalogues and the MARC source
@@ -1154,16 +1201,20 @@ def _dnb_subjects(
             heading = _strip_marc_punctuation(entry.get("a", ""))
             if not heading:
                 continue
+            vocabulary = _subject_vocabulary(tag, entry)
             subjects.append(
-                Subject(
-                    heading,
-                    _subject_vocabulary(tag, entry),
-                    _subject_identifier(entry),
-                )
+                Subject(heading, vocabulary, _subject_identifier(entry))
             )
             number = _gnd_identifier(entry)
             if number is not None:
-                headings.append(Heading(ClassificationScheme.GND, number, heading))
+                headings.append(
+                    Heading(
+                        ClassificationScheme.GND,
+                        number,
+                        heading,
+                        _subject_kind(vocabulary),
+                    )
+                )
     return subjects, headings
 
 

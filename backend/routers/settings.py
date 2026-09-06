@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import config
 import covers
+import credentials
 import metadata
 import notifications
 import settings_store
@@ -13,15 +14,19 @@ import sources
 from auth import require_admin
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from dependencies import DbSession
-from enums import SettingKey
+from enums import CatalogueSource, SettingKey
 from models import User
 from schemas import (
     CatalogueSourceOut,
+    CredentialKeyOut,
     FeatureFlagsOut,
     LoginImageOut,
+    RecoveryPhraseIn,
+    RecoveryPhraseOut,
     SenderHealth,
     SettingsOut,
     SettingsUpdate,
+    SourceCredentialIn,
 )
 from uploads import read_image_upload, replace_image
 
@@ -169,7 +174,30 @@ async def set_login_image(
 # ── Runtime settings ──────────────────────────────────────────────────────────
 
 
+def _credential_view(
+    db: DbSession, source: CatalogueSource, state: credentials.KeyState
+) -> dict[str, Any]:
+    """The three credential fields on one roster row, and no secret among them.
+
+    **Built here rather than in `sources.describe`**, which is where the other
+    derived fields come from. That module owns which catalogues are asked and in
+    what order, holds no database by design, and a credential is neither of
+    those things. Masking is here for the same reason it is here for the mail
+    password: it is presentation, and `settings_store.mask` is the one rule.
+    """
+    held = credentials.view(db, source.value, state)
+    return {
+        "has_credential": held.has_credential,
+        "credential_username_preview": settings_store.mask(held.username),
+        "credential_from_env": held.from_env,
+        "credential_unreadable": held.unreadable,
+    }
+
+
 def _read_settings(db: DbSession) -> SettingsOut:
+    # Resolved once for the whole roster. Per row it was one keychain round trip
+    # per stored credential on a desktop; see `credentials.KeyState`.
+    encryption_key = credentials.key_state()
     from_env = config.google_books_api_key_from_env()
     # The one in force, which is the environment's when it has one. Showing the
     # stored key's preview while a different key is actually being used would
@@ -251,7 +279,9 @@ def _read_settings(db: DbSession) -> SettingsOut:
         # would be one they cannot use, since they would switch it on and watch
         # it come back off. `ready` beside it is what says it cannot answer yet.
         catalogue_sources=[
-            CatalogueSourceOut(**vars(described))
+            CatalogueSourceOut(
+                **vars(described), **_credential_view(db, described.source, encryption_key)
+            )
             for described in sources.describe(
                 settings_store.stored_catalogue_sources(db),
                 ready=settings_store.ready_sources(db),
@@ -449,4 +479,254 @@ def update_settings(
     ):
         metadata.clear_cache()
 
+    return _read_settings(db)
+
+
+# ── The encryption key, and the credentials it protects ───────────────────────
+#
+# **Five routes, and the split between them is the show-once property.** Only
+# `create_credential_key` ever returns key material, and it refuses when a key
+# exists, so there is no call in this application that renders a key already in
+# being. Everything else here reports *about* the key: whether one is
+# configured, where it came from, and how many stored credentials it cannot
+# open. Reporting where a value comes from is not reporting the value, which is
+# the rule the mail and Telegram fields already run on.
+#
+# Not rate limited, deliberately, unlike `/auth/login` beside them. Every route
+# here is admin only, and the one that takes a secret takes a 24 word phrase:
+# the search space is 2^256, so a limiter would be defending an entrance nobody
+# can walk through against callers who are already inside.
+
+
+def _known_source(source: str) -> CatalogueSource:
+    """The roster row this path names, or 404.
+
+    **404 rather than 422**, because a path segment that names no resource is a
+    missing resource, and the enum happens to be how the roster is spelled today
+    rather than what is being validated.
+
+    **Validated against the roster, while the store is keyed on the target
+    row.** The two agree on this date because every row is a `CatalogueSource`.
+    They are written apart on purpose: keying storage on the closed enum would
+    let the storage shape decide which rows may carry a credential, which is the
+    tangle #180 reversed an earlier decision to undo. When a curated registry
+    can add a row, this check moves to `catalogue_targets` and nothing below it
+    changes.
+    """
+    try:
+        return CatalogueSource(source)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="No such catalogue source.") from None
+
+
+def _read_credential_key(db: DbSession) -> CredentialKeyOut:
+    """What can be said about the key, with a configuration problem said plainly.
+
+    A deployment can configure something unusable: two stores holding different
+    keys, a phrase that failed its checksum, a locked keychain. That is a
+    **state to report on this screen**, not a 500 on the settings page, which is
+    what `credentials.key_state` turns it into.
+    """
+    state = credentials.key_state()
+    return CredentialKeyOut(
+        configured=state.material is not None,
+        location=credentials.key_location() if state.material is not None else "",
+        can_generate=any(source.writable for source in credentials.KEY_SOURCES),
+        problem=state.problem,
+        # Off the table, not the roster. `credentials.unreadable_sources` says
+        # why, and `generate_key` refuses against the same function, so the
+        # refusal cannot quote a number this screen denies.
+        unreadable_sources=credentials.unreadable_sources(db, state),
+    )
+
+
+@router.get("/credential-key", response_model=CredentialKeyOut)
+def get_credential_key(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> CredentialKeyOut:
+    """Whether this deployment holds an encryption key, and where from.
+
+    Never the key. A phrase leaves this application through exactly one route,
+    the POST below, and only when there was nothing to overwrite.
+    """
+    return _read_credential_key(db)
+
+
+@router.post("/credential-key", response_model=RecoveryPhraseOut)
+def create_credential_key(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> RecoveryPhraseOut:
+    """Make an encryption key, store it, and return the phrase **once**.
+
+    **The one response in this application that carries a secret**, and the
+    exception is bounded by the route rather than by a promise: it refuses when
+    a key already exists, so replaying it cannot re-display one. Write the words
+    down; there is no second chance to read them, by construction.
+
+    Where the key is kept is this machine's business: its keychain where it has
+    one, otherwise a file readable only by the account the app runs as. Neither
+    travels in a backup archive, which is what makes the archive safe to hand
+    around and is also why the phrase matters.
+    """
+    try:
+        phrase, _ = credentials.generate_key(db)
+    except credentials.KeyConfigurationError as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
+    return RecoveryPhraseOut(phrase=phrase)
+
+
+@router.put("/credential-key", response_model=CredentialKeyOut)
+def restore_credential_key(
+    payload: RecoveryPhraseIn,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> CredentialKeyOut:
+    """Take a recovery phrase back in, on a new machine or after one was lost.
+
+    **The checksum is what makes a wrong word an error rather than a different
+    key.** A phrase with a word mistyped, misread off paper, or two words
+    swapped is refused here; without it this route would cheerfully store a key
+    that opens nothing and report success.
+
+    Replacing a key that currently works is allowed and is not guarded against:
+    it is what a person restoring a backup onto a new machine is doing, and the
+    response says how many stored credentials the new key cannot open, which is
+    the only honest report available.
+    """
+    try:
+        credentials.store_key(payload.phrase)
+    except credentials.BadRecoveryPhrase as refusal:
+        # 422 rather than 409: a phrase somebody mistyped is a bad request, and
+        # a key the deployment pinned elsewhere is a conflict with the
+        # deployment. One status for both told a client nothing it could act on.
+        raise HTTPException(status_code=422, detail=str(refusal)) from None
+    except credentials.KeyConfigurationError as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
+    return _read_credential_key(db)
+
+
+@router.delete("/credential-key", response_model=CredentialKeyOut)
+def forget_credential_key(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> CredentialKeyOut:
+    """Drop the key this machine holds, so a new one can be made.
+
+    **The way back from closing the tab without writing the words down.**
+    Without this, `POST` refuses because a key exists, `PUT` wants a phrase
+    nobody has, and the deployment is stuck behind a key protecting nothing.
+
+    **It strands whatever the key was opening, and the response says how many**
+    rather than this route hiding it: `unreadable_credentials` on the way out is
+    the count of stored logins that now have to be typed again. Removing those
+    logins first is the way to reach a clean state, and `DELETE` on a source's
+    credential needs no key for exactly that reason.
+
+    409 when the deployment pinned the key through the environment: a process
+    cannot unset a variable for its own next start, so there is nothing here to
+    clear.
+    """
+    try:
+        credentials.forget_key()
+    except credentials.KeyConfigurationError as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
+    return _read_credential_key(db)
+
+
+@router.put("/catalogue-sources/{source}/credential", response_model=SettingsOut)
+def set_source_credential(
+    source: str,
+    payload: SourceCredentialIn,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> SettingsOut:
+    """Store a login for one catalogue, sealed.
+
+    **Any roster source, not only one that declares it needs a credential.** A
+    library may hold an account at a catalogue that also answers anonymously,
+    and refusing it would be the storage deciding who may have an account
+    somewhere else.
+
+    409 when the deployment pinned this source's credential, the same rule and
+    the same reason `_refuse_if_pinned` states for a settings row: a value the
+    environment supplies wins, so storing a different one produces a screen that
+    disagrees with what the next request actually sends.
+    """
+    known = _known_source(source)
+    if credentials.is_from_env(known.value):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{credentials.env_variable_name(known.value)} is supplied by this "
+                "deployment's environment and cannot be changed here. Change it "
+                "where the app is configured."
+            ),
+        )
+    try:
+        credentials.put(db, known.value, payload.username, payload.password)
+    except credentials.NoKeyConfigured as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
+    except credentials.KeyConfigurationError as refusal:
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
+    except credentials.CredentialError as refusal:
+        raise HTTPException(status_code=400, detail=str(refusal)) from None
+    # A credential can make a source ready, which changes which catalogues the
+    # next lookup asks. Same reason the three writes in `update_settings` do it.
+    metadata.clear_cache()
+    return _read_settings(db)
+
+
+@router.delete("/catalogue-sources/{source}/credential", response_model=SettingsOut)
+def forget_source_credential(
+    source: str,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> SettingsOut:
+    """Drop a stored login for one catalogue.
+
+    **Succeeds whether or not one was stored**, and needs no key to do it: a
+    credential nobody can read is exactly the one somebody most wants to be rid
+    of, and requiring the key to delete it would make a rotated key
+    unrecoverable without a database edit. It is also what lets somebody who
+    lost the recovery phrase reach a state where a new key may be made.
+
+    **Reaches a row whose catalogue is no longer in the roster**, which the
+    write above does not. `catalogue_credentials` carries no foreign key, on
+    purpose, so that one credential for a source a later release dropped cannot
+    fail an entire restore; the cost of that is an orphan, and an orphan nothing
+    can delete would be a row needing a database edit to remove. Deleting sends
+    nothing anywhere, so the roster check buys nothing here and costs that.
+
+    **The pinned check fires only when nothing is stored, and that ordering is
+    load bearing.** It read "there is nothing stored to remove", which stopped
+    being true the moment `unreadable_sources` began counting a pinned source's
+    sealed row: a login stored for a source the environment also pins **blocks
+    key creation**, and refusing to delete it made that a dead end whose only
+    exit was unsetting the variable, deleting, and setting it again, with
+    nothing on screen saying so. An archive carries `catalogue_credentials`, so
+    a restore onto a deployment that pins that source arrives there without
+    anybody doing anything unusual.
+
+    So: a row is a row, pinned or not, and deleting one sends nothing anywhere
+    and does not touch the environment. With nothing stored the 409 is honest
+    again, because then there really is nothing here to remove and the
+    environment's is not this route's to clear.
+    """
+    if not credentials.stored_envelope(db, source):
+        # Nothing stored, so the source has to be one this build knows; that is
+        # what turns a typo into a 404 rather than a silent success.
+        _known_source(source)
+        if credentials.is_from_env(source):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{credentials.env_variable_name(source)} is supplied by this "
+                    "deployment's environment and cannot be changed here. Change it "
+                    "where the app is configured."
+                ),
+            )
+    credentials.forget(db, source)
+    metadata.clear_cache()
     return _read_settings(db)

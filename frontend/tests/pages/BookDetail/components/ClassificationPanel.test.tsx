@@ -3,7 +3,10 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { ClassificationScheme } from "../../../../src/api/generated/model";
+import {
+  ClassificationScheme,
+  HeadingKind,
+} from "../../../../src/api/generated/model";
 import ClassificationPanel, {
   headingHref,
 } from "../../../../src/pages/BookDetail/components/ClassificationPanel";
@@ -63,6 +66,85 @@ describe("what the panel shows", () => {
 
     expect(screen.getByText("Schatz")).toBeInTheDocument();
     expect(screen.getByText("4203576-4")).toBeInTheDocument();
+  });
+});
+
+describe("a heading that is not about what the book is about", () => {
+  // `#162`: the DNB writes a carrier and a content type into the same subject
+  // fields as a subject, each with a GND number on it, so an unmarked chip says
+  // this book is about CD-ROM.
+  const CARRIER = {
+    scheme: ClassificationScheme.gnd,
+    number: "4139307-7",
+    label: "CD-ROM",
+    kind: HeadingKind.carrier,
+  };
+
+  it("says a carrier is a carrier", () => {
+    renderLocalised(<ClassificationPanel classifications={[CARRIER]} />);
+
+    expect(screen.getByText("Carrier type")).toBeInTheDocument();
+    expect(screen.getByText("CD-ROM")).toBeInTheDocument();
+  });
+
+  it("says a content type is one", () => {
+    renderLocalised(
+      <ClassificationPanel
+        classifications={[
+          {
+            scheme: ClassificationScheme.gnd,
+            number: "1071854844",
+            label: "Fiktionale Darstellung",
+            kind: HeadingKind.content,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Content type")).toBeInTheDocument();
+  });
+
+  it("marks nothing on an ordinary subject", () => {
+    // Anti vacuity for the two above: a panel that printed a kind on every
+    // chip would pass them and say nothing.
+    const { container } = renderLocalised(
+      <ClassificationPanel classifications={[DEWEY, SUBJECT]} />,
+    );
+
+    expect(container.textContent).not.toContain("Carrier type");
+    expect(container.textContent).not.toContain("Content type");
+  });
+
+  it("marks nothing on a heading no record ever declared for", () => {
+    // Every row written before the column existed reads as a subject, which is
+    // what almost all of them are.
+    const { container } = renderLocalised(
+      <ClassificationPanel
+        classifications={[
+          {
+            scheme: ClassificationScheme.gnd,
+            number: "4203576-4",
+            label: "Schatz",
+            kind: null,
+          },
+        ]}
+      />,
+    );
+
+    expect(container.textContent).not.toContain("Carrier type");
+    expect(container.textContent).not.toContain("Content type");
+  });
+
+  it("still filters on the identifier and not on the words", () => {
+    // `#147`: the words are what a reader picks and the identifier is what the
+    // filter carries. `CD-ROM` is a caption two catalogues may spell
+    // differently; `4139307-7` is not.
+    renderLocalised(<ClassificationPanel classifications={[CARRIER]} />);
+
+    expect(screen.getByRole("link", { name: /CD-ROM/ })).toHaveAttribute(
+      "href",
+      "/?classification=gnd%3A4139307-7",
+    );
   });
 });
 

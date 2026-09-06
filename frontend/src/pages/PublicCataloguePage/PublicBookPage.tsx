@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { TagCategory } from "../../api/generated/model";
 import { EmptyState, ErrorState, Spinner } from "../../components";
+import { KIND_LABEL, headingKind } from "../../lib/classificationLabels";
 import { tagName, useTranslation } from "../../i18n";
 import { Page } from "../components";
 import CoverImage from "../components/CoverImage";
@@ -159,6 +160,14 @@ export default function PublicBookPage() {
                   </span>
                   <span className="tabular-nums">{entry.number}</span>
                   {entry.label && <span className="ml-2">{entry.label}</span>}
+                  {/* A carrier and a content type arrive in the same MARC field
+                      as a subject and are not one. Unmarked, a public record
+                      says this book is about CD-ROM. */}
+                  {KIND_LABEL[headingKind(entry.kind)] && (
+                    <span className="ml-2 text-xs text-paper-600 dark:text-paper-400">
+                      {t(KIND_LABEL[headingKind(entry.kind)]!)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

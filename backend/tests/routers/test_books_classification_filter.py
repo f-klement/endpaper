@@ -14,8 +14,66 @@ returning one of them.
 FACETS = "/api/books/classifications"
 
 
-def heading(scheme: str, number: str, label: str | None = None) -> dict:
-    return {"scheme": scheme, "number": number, "label": label}
+def heading(
+    scheme: str, number: str, label: str | None = None, kind: str | None = None
+) -> dict:
+    return {"scheme": scheme, "number": number, "label": label, "kind": kind}
+
+
+class TestTheFacetListSaysWhatEachHeadingAsserts:
+    """`#162`: a carrier offered as a subject filter is the defect on the
+    surface a member actually meets."""
+
+    def test_a_carrier_is_offered_as_a_carrier(self, client, admin, make_book):
+        make_book(
+            admin["headers"],
+            classifications=[heading("gnd", "4139307-7", "CD-ROM", "carrier")],
+        )
+
+        rows = client.get(FACETS, headers=admin["headers"]).json()["headings"]
+
+        assert [(row["number"], row["kind"]) for row in rows] == [
+            ("4139307-7", "carrier")
+        ]
+
+    def test_a_heading_no_record_declared_for_carries_no_kind(
+        self, client, admin, make_book
+    ):
+        """Null on the wire, not `subject`. The client reads it as a subject,
+        and the two spellings mean different things: one is a catalogue saying
+        so and the other is nobody having said."""
+        make_book(admin["headers"], classifications=[heading("ddc", "004")])
+
+        rows = client.get(FACETS, headers=admin["headers"]).json()["headings"]
+
+        assert rows[0]["kind"] is None
+
+    def test_one_corrected_book_is_enough_for_the_whole_facet_row(
+        self, client, admin, make_book
+    ):
+        """`max` over the group rather than grouping on the kind.
+
+        A heading is corrected book by book as each is re-enriched, so during
+        that window two books carry one heading with different kinds. Grouping
+        on it would offer `CD-ROM` twice, once as a carrier and once as a
+        subject, which is worse than either answer alone.
+        """
+        make_book(
+            admin["headers"],
+            title="Corrected",
+            classifications=[heading("gnd", "4139307-7", "CD-ROM", "carrier")],
+        )
+        make_book(
+            admin["headers"],
+            title="Not yet",
+            classifications=[heading("gnd", "4139307-7", "CD-ROM")],
+        )
+
+        rows = client.get(FACETS, headers=admin["headers"]).json()["headings"]
+
+        assert [(row["number"], row["kind"], row["book_count"]) for row in rows] == [
+            ("4139307-7", "carrier", 2)
+        ]
 
 
 class TestTheFacetList:

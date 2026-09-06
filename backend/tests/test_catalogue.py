@@ -21,7 +21,7 @@ import google_books
 import isbn as isbn_utils
 import metadata
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
-from enums import AuthorityScheme, ClassificationScheme
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind
 from models import DESCRIPTION_MAX, ISBN_MAX, Book
 from schemas.book import BookCreate, BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
@@ -182,6 +182,55 @@ class TestARecordFoldsWhatOneSourceRepeats:
         record = Record(headings=(DDC_004_CAPTIONED, other))
 
         assert record.headings == (DDC_004_CAPTIONED,)
+
+    def test_a_declared_kind_is_taken_from_whichever_entry_carries_one(self):
+        """The pair this actually serves, which is a field declaring nothing
+        arriving **before** one that declares.
+
+        `metadata._DNB_SUBJECT_TAGS` is read in the order `650 651 655 689 600`,
+        so an undeclared `650` naming a concept reaches the fold before the
+        `655 $2 gnd-content` that says what it is. Without the fill-in the
+        undeclared copy keeps the place and the declaration is dropped.
+        """
+        undeclared = Heading(ClassificationScheme.GND, "1071854844", "Fiktionale")
+        declared = Heading(
+            ClassificationScheme.GND, "1071854844", "Fiktionale", HeadingKind.CONTENT
+        )
+        record = Record(headings=(undeclared, declared))
+
+        assert record.headings == (declared,)
+
+    def test_a_later_kind_never_replaces_one_already_declared(self):
+        """The caption rule, applied to the other column: a heading already
+        marked came from a catalogue too, and the last writer is not the better
+        one."""
+        record = Record(
+            headings=(
+                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
+                        HeadingKind.CARRIER),
+                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
+                        HeadingKind.CONTENT),
+            )
+        )
+
+        assert record.headings[0].kind is HeadingKind.CARRIER
+
+    def test_a_caption_and_a_kind_fill_in_from_two_different_entries(self):
+        """Both columns fill independently, so an entry supplying one does not
+        have to supply the other."""
+        record = Record(
+            headings=(
+                Heading(ClassificationScheme.GND, "4139307-7"),
+                Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM"),
+                Heading(ClassificationScheme.GND, "4139307-7", None,
+                        HeadingKind.CARRIER),
+            )
+        )
+
+        assert record.headings == (
+            Heading(ClassificationScheme.GND, "4139307-7", "CD-ROM",
+                    HeadingKind.CARRIER),
+        )
 
     def test_two_numbers_under_one_scheme_are_two_headings(self):
         """`005.133` and `004` are two catalogues' answers, not a duplicate."""

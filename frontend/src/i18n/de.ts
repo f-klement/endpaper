@@ -161,6 +161,8 @@ export const de: Messages = {
   "classification.scheme.lcc": "Library of Congress",
   "classification.scheme.gnd": "GND",
   "classification.scheme.lcsh": "Schlagwort",
+  "classification.kind.content": "Inhaltstyp",
+  "classification.kind.carrier": "Datenträgertyp",
 
   // ── Buchdetails ─────────────────────────────────────────────────────────
   "book.uploadCover": "Cover hochladen",
@@ -573,6 +575,56 @@ export const de: Messages = {
   "settings.apiKeyHint":
     "Einen in der Google Cloud Console anlegen und dafür die Books API aktivieren. Der Schlüssel wird nach dem Speichern nicht mehr angezeigt.",
 
+  "settings.catalogueLogins": "Katalogzugänge",
+  "settings.catalogueLoginsHint":
+    "Manche Nationalbibliotheken antworten nur mit Zugangsdaten. Ein Zugang wird verschlüsselt gespeichert und ausschließlich an diesen Katalog gesendet.",
+  "settings.credentialUsername": "Benutzername",
+  "settings.credentialPassword": "Passwort",
+  "settings.credentialSet": "Ein Zugang ist gespeichert ({preview}).",
+  "settings.credentialMissing": "Kein Zugang gespeichert.",
+  "settings.credentialSave": "Zugang speichern",
+  "settings.credentialClear": "Gespeicherten Zugang entfernen",
+  "settings.credentialFromEnv":
+    "Dieser Zugang stammt aus der Serverkonfiguration und lässt sich hier weder ändern noch anzeigen. {variable} dort ändern, wo die App bereitgestellt wird.",
+  "settings.credentialUnreadable":
+    "Für diesen Katalog ist ein Zugang gespeichert, der sich nicht lesen lässt. Siehe den Verschlüsselungsschlüssel weiter unten.",
+  "settings.credentialFromEnvBroken":
+    "{variable} enthält keinen Benutzernamen und kein Passwort, getrennt durch einen Doppelpunkt, deshalb wird kein Zugang gesendet.",
+
+  "settings.credentialKey": "Verschlüsselungsschlüssel",
+  "settings.credentialKeyHint":
+    "Katalogzugänge werden mit diesem Schlüssel verschlüsselt. Er wird nie in die Datenbank geschrieben, deshalb enthält eine Sicherung nur Zugänge, die ohne ihn niemand lesen kann.",
+  "settings.credentialKeyCost":
+    "Geht dieser Schlüssel verloren oder wird er ersetzt, muss jeder hier gespeicherte Katalogzugang erneut eingegeben werden. Für das Wiederherstellen einer Sicherung auf einem anderen Gerät wird die Wiederherstellungsphrase gebraucht.",
+  "settings.credentialKeyMissing":
+    "Noch kein Verschlüsselungsschlüssel, deshalb lässt sich kein Zugang speichern.",
+  "settings.credentialKeyPresent":
+    "Ein Schlüssel liegt vor, verwahrt in {location}.",
+  "settings.credentialKeyLocationEnv": "der Serverkonfiguration",
+  "settings.credentialKeyLocationKeychain": "dem Schlüsselbund dieses Geräts",
+  "settings.credentialKeyLocationFile": "einer Datei auf diesem Gerät",
+  "settings.credentialKeyUnreadable":
+    "{count} gespeicherte Zugänge lassen sich derzeit nicht lesen. Die Wiederherstellungsphrase eingeben oder die Zugänge entfernen.",
+  "settings.credentialKeyForget": "Diesen Schlüssel verwerfen",
+  "settings.credentialKeyForgetHint":
+    "Nur wenn die Wiederherstellungsphrase verloren ist. Jeder unter diesem Schlüssel gespeicherte Zugang muss danach erneut eingegeben werden.",
+  "settings.credentialKeyCreate": "Verschlüsselungsschlüssel erstellen",
+  "settings.credentialKeyShownOnce":
+    "Diese 24 Wörter jetzt notieren und sicher verwahren. Die Wörter sind der Schlüssel, deshalb werden sie nur dieses eine Mal angezeigt.",
+  "settings.credentialKeyPhraseTitle": "Die Wiederherstellungsphrase",
+  "settings.credentialKeyDone": "Ist notiert",
+  "settings.credentialKeyRestore": "Wiederherstellungsphrase eingeben",
+  "settings.credentialKeyRestoreHint":
+    "Die 24 Wörter in der notierten Reihenfolge eintippen. Groß- und Kleinschreibung sowie zusätzliche Leerzeichen spielen keine Rolle, ein falsches Wort wird abgelehnt statt übernommen.",
+  "settings.credentialKeyRestoreSave": "Diese Phrase verwenden",
+  "settings.credentialAdd": "Zugang hinzufügen für",
+  "settings.credentialAddChoose": "Katalog auswählen",
+  "settings.credentialChange": "Zugang ändern",
+  "settings.credentialNeedsKeyFirst":
+    "Zuerst unten einen Verschlüsselungsschlüssel erstellen, dann lässt sich ein Zugang speichern.",
+  "settings.credentialKeyDismissConfirm":
+    "Diese Wörter werden nicht erneut angezeigt. Sind sie notiert?",
+
   "settings.testAccounts": "Testkonten",
   "settings.testAccountsHint":
     "Konten mit einem selbst gewählten Passwort, um die Bibliothek so zu sehen, wie ein gewöhnliches Mitglied sie sieht. Diese Konten sind nie Administratoren und werden auf der Anmeldeseite nicht angeboten.",
@@ -854,6 +906,18 @@ export const de: Messages = {
   "authors.reasonSpelling": "derselbe Name, anders getrennt",
   "authors.reasonInitials": "eine Abkürzung gegen einen ausgeschriebenen Namen",
   "authors.reasonFragment": "Teil eines längeren Namens",
+  "authors.wouldKeep": "Unter {name} zusammenführen",
+  "authors.heldBack":
+    "Beim Zusammenführen aller bleibt diese Gruppe unberührt: eine bereits getroffene Zusammenführung betrifft sie. Über die Schaltflächen darunter lässt sie sich einzeln zusammenführen.",
+  "authors.foldAll": "Ausgewählte Gruppen zusammenführen",
+  "authors.batchExplain":
+    "{count} Gruppen ausgewählt, insgesamt {spellings} Schreibweisen. Kein Buch wird geändert, und jede Zusammenführung lässt sich über die Person rückgängig machen.",
+  "authors.batchHeldBackCount":
+    "{count} weitere bleiben außen vor: eine bereits getroffene Zusammenführung betrifft sie.",
+  "authors.batchWithdrawnCount":
+    "{count} weitere bleiben draußen, bis der Name, unter dem sie zusammengeführt würden, wieder ausgewählt ist.",
+  "authors.batchConfirm":
+    "{count} Gruppen mit insgesamt {spellings} Schreibweisen zusammenführen?",
   "authors.include": "{name} einbeziehen",
 
   // ── Doppelte Einträge ───────────────────────────────────────────────────

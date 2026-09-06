@@ -4,6 +4,34 @@
 
 ### Added
 
+- **A login for a catalogue that will not answer without one**, stored encrypted. Several
+  national libraries answer only to an account; the login goes in Settings beside the source
+  it is for, is sealed before it reaches the database, and is sent to that catalogue and
+  nowhere else. An operator may pin one through `CATALOGUE_CREDENTIAL_<SOURCE>` instead.
+- **A 24 word recovery phrase for the key that seals them.** The app makes one for itself
+  the first time it is asked and shows it once; it is kept in the machine's keychain where
+  there is one, otherwise in a file only the app can read, and never in the database. It can
+  be typed back in on another machine, and a mistyped or misread word is refused rather than
+  becoming a different key. `CREDENTIAL_ENCRYPTION_KEY` and `CREDENTIAL_ENCRYPTION_KEY_FILE`
+  supply one instead.
+- A backup archive therefore carries catalogue logins that nobody can read without the key,
+  which the archive deliberately does not contain. **Restoring onto a different machine needs
+  the recovery phrase**, and Settings says so beside the field.
+- **The rule that decides two spellings are one person has a name, and several groups can be
+  folded at once.** The merge suggestions panel now says which name each group would be folded
+  into, and one button folds every group ticked: all of them or none, in one request, with
+  nothing written to any book. A group is held back where folding it would repoint a merge
+  somebody already made, because a decision a person made outranks a rule's guess. The
+  strategy is `matcher` on `GET /api/books/authors/suggestions`: `default` is every rule and
+  `exact` keeps only the rules that group on an equal value, such as a shared ISNI. A matcher
+  can only take rules away, so none of them proposes a grouping the default does not, and none
+  of them folds anything: a stored ISNI is still the only thing that says two spellings are one
+  person. Every name in a group keeps its own checkbox, and the batch folds only the names
+  still ticked.
+- **The classification filter shows a heading's words and still filters on its
+  identifier.** A GND heading read as `4203576-4` in the filter panel and now reads as
+  `Schatz`, while the filter itself still matches on the scheme and number together, which
+  is what keeps one concept one filter rather than one per catalogue and per language.
 - **The Spanish National Library joins the catalogue chain.** A book with a Spanish ISBN
   now resolves against the Biblioteca Nacional de España rather than only against whatever
   Open Library or Google Books happens to hold. Measured over the 500 ISBN sample committed
@@ -56,6 +84,9 @@
 
 ### Changed
 
+- `GET /api/settings` reports four new facts about each catalogue source: whether a login is
+  held, a masked username, whether the deployment pinned it, and **whether one is stored that
+  the current key cannot read**. The last is the state that would otherwise be silent.
 - The provider list in Settings gains a tenth catalogue, enabled by default and reorderable
   like the rest.
 - The shelf order reads a stored key instead of building one. A classification row now
@@ -165,6 +196,13 @@ byte identical, which is about the schema and was never about this.
 
 ### Fixed
 
+- **A disc is no longer a subject heading.** The German national library writes a content
+  type and a carrier type into the same MARC subject fields as a subject, each carrying a
+  GND number, so `CD-ROM` and `Hochschulschrift` were stored and filtered as assertions
+  about what a book is about. A heading now records what it was asserting, and the book
+  page, the filter panel and the public record all say so. Headings already stored say
+  nothing, which is honest: the subfield that would have told us was never kept, and they
+  are corrected as each book is next enriched.
 - A cover URL a member posts is now bounded against what the database stores rather than
   against what arrives. The ORM upgrades `http://` to `https://` on every write, which
   lengthens the value by one, so a 500 character URL was accepted and stored as 501 against

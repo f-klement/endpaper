@@ -1,6 +1,6 @@
 """Tests for backend/shelf.py: the seam every many-Book query goes through.
 
-Two kinds of test live here and they answer different questions.
+Three kinds of test live here and they answer different questions.
 
 `TestTheShelfIsTheOnlyWayIn` is the **house rule**, and it is what replaced
 `TestEveryBookQueryIsFiltered` in `test_models.py`. That guard walked the AST of
@@ -163,11 +163,20 @@ about user-carrying tables carried a number that did not reproduce by any
 method, and the entry this one replaced described a hole that a later round
 closed in eight lines.
 
+`TestOnlyTheShelfSaysWhatMayLeave` is the third, and it is a rule about the
+other side of a query: it reports any construction of `shelf.Outbound` **that
+names the type** outside `shelf.py`, so the fact that a row came off a shelf
+with no viewer cannot be asserted by a caller that merely believes it. Every
+other spelling is refused at run time by `Outbound.__post_init__`, which
+`TestOnlyTheShelfCanMintOne` drives. Its own blind spots are listed on the
+class, and the sweep it works with is `tests/test_nothing_private_leaves.py`.
+
 The rest of the file tests the Shelf's behaviour.
 """
 
 import ast
 import importlib
+import inspect
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -598,17 +607,22 @@ def _statement_at(source: str, line: int) -> str:
     return " ".join((ast.get_source_segment(source, widest) or "").split())
 
 
-def _entity_aliases(tree: ast.Module, roots: frozenset[str]) -> set[str]:
+def _entity_aliases(
+    tree: ast.Module, roots: frozenset[str], module: str = "models"
+) -> set[str]:
     """Every local name bound to one of `roots` in one module.
 
     Resolved rather than assumed, because `from models import Book as B` binds
     a name this rule would otherwise never look for.
 
-    **One resolver for both rules**, and it takes the entities rather than
-    naming `Book`, for the reason `_bindings` gives one paragraph down: a
-    second implementation of "which names mean this model" is a second thing to
-    get the `AnnAssign` half of wrong. `_BOOK` is what the three original
-    passes hand it; `BOOK_OWNED` is what the fourth does.
+    **One resolver for every rule in this file**, and it takes the entities and
+    the module rather than naming `Book` and `models`, for the reason `_bindings`
+    gives one paragraph down: a second implementation of "which names mean this
+    thing" is a second thing to get the `AnnAssign` half of wrong. `_BOOK` is
+    what the three original passes hand it, `BOOK_OWNED` is what the fourth does,
+    and `_OUTBOUND` with `module="shelf"` is what the fifth does. That fifth rule
+    read the import and not the rebinding when it was written on its own, and
+    `Mk = Outbound` walked past it.
 
     Three assignment forms are followed as well: `X = Book`, `X = models.Book`
     and `X = aliased(Book)`. The third is not hypothetical here,
@@ -623,7 +637,7 @@ def _entity_aliases(tree: ast.Module, roots: frozenset[str]) -> set[str]:
     """
     names = set(roots)
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "models":
+        if isinstance(node, ast.ImportFrom) and node.module == module:
             names |= {a.asname or a.name for a in node.names if a.name in roots}
 
     # A second pass, because an alias may be assigned above or below the import
@@ -4154,3 +4168,287 @@ class TestTheRoutesThisDocstringCounts:
         mine = [r for r in self._routes() if r[1] == "book_for_read"]
         silent = [r for r in mine if r[2] in ("nothing", "sub_resource")]
         assert (len(silent), len(mine)) == (int(stated.group(1)), int(stated.group(2)))
+
+
+# ── What may leave the instance ───────────────────────────────────────────────
+
+
+#: The type that says a set of rows may leave the instance.
+_OUTBOUND = frozenset({"Outbound"})
+
+
+def _outbound_constructions(source: str) -> list[str]:
+    """Every construction of `shelf.Outbound` in one module, as `name:line`.
+
+    **Which local names mean that type is `_entity_aliases`' question**, asked
+    of `shelf` rather than of `models`. Written with its own import scan it
+    followed `from shelf import Outbound as Rows` and walked past
+    `Mk = Outbound`, which is the rebinding the shared resolver has followed
+    since it was written for `Book`.
+
+    The attribute arm is this rule's own, because `shelf.Outbound(...)` binds no
+    local name at all. It is deliberately blunt and reports `x.Outbound(...)`
+    for any `x`: a false report on some other module's `Outbound` costs a person
+    one look, and a missed one costs a private Book.
+
+    **Three shapes name the type nowhere and this rule cannot see any of them**:
+    `dataclasses.replace(rows, ...)`, `copy.replace(rows, ...)` and
+    `type(rows)(...)`. The reason first written here was that all three need a
+    genuine `Outbound` in hand and so only widen rows a caller was already
+    given. **That was wrong**, and the security seat measured it: an empty
+    `Outbound` is one `outbound_page(0, 0)` away, so the value in hand is a token
+    rather than a constraint on the rows. `Outbound.__post_init__` is what
+    actually refuses all three; this rule is the half that fails in CI on a
+    construction that is merely written.
+    """
+    tree = ast.parse(source)
+    local_names = _entity_aliases(tree, _OUTBOUND, module="shelf")
+
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        by_name = isinstance(func, ast.Name) and func.id in local_names
+        by_attribute = isinstance(func, ast.Attribute) and func.attr == "Outbound"
+        if by_name or by_attribute:
+            found.append(str(node.lineno))
+    return found
+
+
+class TestOnlyTheShelfSaysWhatMayLeave:
+    """The privacy rule at the boundary: a private Book is never **sent**.
+
+    `TestTheShelfIsTheOnlyWayIn` above holds the query side, and it stops where
+    a query returns: once a `Book` is in a list, nothing on it records whose
+    shelf produced it. `shelf.Outbound` is the type that carries the missing
+    fact, and these are the two halves that make it worth anything: that nothing
+    but `shelf.py` mints one, and that the only shelf which can mint one has no
+    ownership arm.
+
+    **What it cannot see**, because a guard whose limits are unstated is read as
+    a guarantee it never made:
+
+    * **A payload that is not built by a serialiser taking `Outbound`.** MARC's
+      `record_element` takes a bare `Book` and always will, for the reason
+      `shelf.Outbound` gives. `sru._records_element` is what holds the SRU
+      server, because it takes the type and the loop is inside it.
+    * **Anything that leaves by something other than a route.**
+      `tests/test_nothing_private_leaves.py` sweeps the routes and its docstring
+      lists what that misses.
+    * **Disclosure that is not a row.** A count, a gap in the ids, the number of
+      records an SRU response reports: none is a Book and none is caught here.
+      `schemas/public.py` records the id gap as a known one.
+    * **Any construction that does not name the type**, which is the family
+      `Outbound.__post_init__` exists to refuse rather than this rule.
+    * **A construction in a test**, since `_source_modules()` excludes `tests/`.
+      That is not a hatch any more: `__post_init__` refuses a test like anything
+      else, which `TestOnlyTheShelfCanMintOne` asserts, and nothing in the tree
+      relies on minting one by hand.
+    * **Fabricating an instance without constructing one.**
+      `Outbound.__new__(Outbound)` then `object.__setattr__(o, "books", ...)`
+      holds any rows and is seen by neither guard, because it never runs
+      `__init__`. Named rather than closed: it is not a shape anybody reaches
+      for by accident, and this file's standard is that a way round is named.
+    """
+
+    def test_nothing_outside_the_shelf_constructs_one(self):
+        offenders = sorted(
+            f"{name}:{line}"
+            for name, source in _source_modules().items()
+            if name != "shelf.py"
+            for line in _outbound_constructions(source)
+        )
+        assert offenders == [], (
+            f"These statements mint an Outbound outside shelf.py: {offenders}. "
+            "That type means the rows came off a shelf with no viewer, and "
+            "building one by hand is asserting that rather than proving it. "
+            "Ask `Shelf.seen_by_the_public(db).outbound_page(...)` instead, or "
+            "bring the reason here the way the two named ways past a viewer do."
+        )
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "from shelf import Outbound\nrows = Outbound(books=())\n",
+            "from shelf import Outbound as Rows\nrows = Rows(books=())\n",
+            "import shelf\nrows = shelf.Outbound(books=())\n",
+            "from shelf import Outbound\nMk = Outbound\nrows = Mk(books=())\n",
+            "from shelf import Outbound\nMk: type = Outbound\nrows = Mk(books=())\n",
+        ],
+        ids=["imported", "aliased", "attribute", "rebound", "rebound annotated"],
+    )
+    def test_the_rule_catches_each_spelling(self, spelling):
+        """The diagonal, one mutation each.
+
+        Each spelling is asserted on its own, because a sample carrying two of
+        them would pass with either arm deleted and would never say which arm
+        caught it. **No count here**: this docstring carried one, the list grew
+        by two, and the number went stale in the round that fixed another stale
+        number.
+        """
+        assert _outbound_constructions(spelling) != []
+
+    def test_the_rule_does_not_report_an_annotation_or_an_import(self):
+        """The other side of the diagonal: reporting every mention would make
+        the rule above unusable, since the serialisers must name the type to
+        take it, and an unusable rule is one somebody deletes."""
+        assert _outbound_constructions(
+            "from shelf import Outbound\ndef f(rows: Outbound) -> int:\n    return len(rows)\n"
+        ) == []
+
+    def test_the_only_shelf_with_no_viewer_is_the_public_one(self, db):
+        """The value the rule above rests on, pinned where the rule cannot see
+        it move.
+
+        `Outbound` is worth something only because a shelf with no viewer is a
+        shelf with no ownership arm. That is true of `seen_by_the_public` and of
+        nothing else today, and a second viewerless constructor added tomorrow
+        would widen what may leave the instance without touching a line of the
+        guard above.
+
+        **Derived from the class**, so a constructor added and not classified
+        fails this rather than passing unnoticed.
+        """
+        viewerless = set()
+        for name in dir(shelf_module.Shelf):
+            attribute = inspect.getattr_static(shelf_module.Shelf, name)
+            if not isinstance(attribute, classmethod):
+                continue
+            parameters = list(
+                inspect.signature(getattr(shelf_module.Shelf, name)).parameters
+            )
+            built = (
+                getattr(shelf_module.Shelf, name)(db)
+                if parameters == ["db"]
+                else getattr(shelf_module.Shelf, name)(db, 1)
+            )
+            if built._viewer_id is None:
+                viewerless.add(name)
+        assert viewerless == {"seen_by_the_public"}, (
+            f"{sorted(viewerless)} build a Shelf with no viewer. Every one of "
+            "them can mint an Outbound, so every one of them has to apply a "
+            "predicate with no ownership arm, and only `seen_by_the_public` is "
+            "argued to."
+        )
+
+    def test_there_are_constructors_to_classify(self):
+        """Anti vacuity for the test above: an empty scan of the class would
+        satisfy an equality against a set it never filled."""
+        classmethods = [
+            name
+            for name in dir(shelf_module.Shelf)
+            if isinstance(inspect.getattr_static(shelf_module.Shelf, name), classmethod)
+        ]
+        assert len(classmethods) >= 3
+
+
+class TestOnlyTheShelfCanMintOne:
+    """The runtime half: `Outbound.__post_init__` refuses a caller outside
+    `shelf.py`, whatever spelling it reaches the class by.
+
+    The ast rule above reads names, so it is blind to every reflective
+    construction. Each of those is driven here rather than argued, because the
+    argument written in its place ("they only widen rows already handed over")
+    was wrong: an empty `Outbound` is one call away and is a token, not a
+    constraint.
+    """
+
+    @staticmethod
+    def _an_empty_one(db):
+        """A genuine `Outbound`, minted the only way there is.
+
+        This is also the value that makes the reflective shapes below reachable
+        at all, which is the whole finding.
+        """
+        return shelf_module.Shelf.seen_by_the_public(db).outbound_page(0, 0)[0]
+
+    def test_the_shelf_can_mint_one(self, db):
+        """The control. Without it every refusal below would pass on a class
+        that refuses everybody."""
+        assert len(self._an_empty_one(db)) == 0
+
+    def test_a_direct_call_from_another_module_is_refused(self, db, user):
+        db.add(Book(title="Not published", added_by_user_id=user.id, is_private=True))
+        db.commit()
+        with pytest.raises(TypeError, match="shelf with no viewer"):
+            shelf_module.Outbound(books=(db.query(Book).one(),))
+
+    def test_dataclasses_replace_is_refused(self, db):
+        import dataclasses
+
+        with pytest.raises(TypeError, match="shelf with no viewer"):
+            dataclasses.replace(self._an_empty_one(db), books=())
+
+    def test_copy_replace_is_refused(self, db):
+        """The 3.13 spelling of the same thing, and the one nothing named until
+        the security seat drove it."""
+        import copy
+
+        with pytest.raises(TypeError, match="shelf with no viewer"):
+            copy.replace(self._an_empty_one(db), books=())
+
+    def test_reaching_the_class_through_a_value_is_refused(self, db):
+        rows = self._an_empty_one(db)
+        with pytest.raises(TypeError, match="shelf with no viewer"):
+            type(rows)(books=())
+
+
+class TestRowsThatMayLeaveTheInstance:
+    """The behaviour of the two read methods, against a real shelf."""
+
+    def test_a_members_shelf_refuses_to_hand_over_rows_that_may_leave(self, db, user):
+        db.add(Book(title="Anything", added_by_user_id=user.id))
+        db.commit()
+        with pytest.raises(ValueError, match="one member"):
+            shelf_module.Shelf.seen_by(db, user.id).outbound_page(0, 10)
+
+    def test_the_trash_shelf_refuses_too(self, db, user):
+        """The other per member constructor, asserted separately. One of the two
+        passing proves nothing about the other, and the trash shelf is the one
+        somebody reaches for when a purge needs a payload."""
+        with pytest.raises(ValueError, match="one member"):
+            shelf_module.Shelf.trashed_by(db, user.id).outbound_first()
+
+    def test_the_public_shelf_hands_over_its_rows(self, db, user):
+        db.add(Book(title="Published", added_by_user_id=user.id))
+        db.commit()
+        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(
+            0, 10, Book.title.asc()
+        )
+        assert total == 1
+        assert [book.title for book in rows] == ["Published"]
+
+    def test_a_private_book_is_absent_rather_than_stripped(self, db, user):
+        """Absent, which is the answer the ticket settled: a row with its fields
+        blanked still says a Book is there and lets a stranger count them."""
+        db.add(Book(title="Published", added_by_user_id=user.id))
+        db.add(Book(title="Not published", added_by_user_id=user.id, is_private=True))
+        db.commit()
+        rows, total = shelf_module.Shelf.seen_by_the_public(db).outbound_page(
+            0, 10, Book.title.asc()
+        )
+        assert total == 1
+        assert len(rows) == 1
+
+    def test_one_book_comes_back_as_rows_rather_than_a_book(self, db, user):
+        """`outbound_first` answers with the same type as the page, so a handler
+        has no bare `Book` in hand between the shelf and the serialiser."""
+        db.add(Book(title="Published", added_by_user_id=user.id))
+        db.commit()
+        rows = shelf_module.Shelf.seen_by_the_public(db).outbound_first()
+        assert isinstance(rows, shelf_module.Outbound)
+        assert len(rows) == 1
+
+    def test_a_private_book_asked_for_by_id_comes_back_empty(self, db, user):
+        private = Book(title="Not published", added_by_user_id=user.id, is_private=True)
+        db.add(private)
+        db.commit()
+        db.refresh(private)
+        rows = (
+            shelf_module.Shelf.seen_by_the_public(db)
+            .where(Book.id == private.id)
+            .outbound_first()
+        )
+        assert len(rows) == 0
+        assert not rows

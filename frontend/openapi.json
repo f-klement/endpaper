@@ -109,6 +109,20 @@
         "title": "AuthMode",
         "type": "string"
       },
+      "AuthorBatchMergeOut": {
+        "description": "Every author the batch left standing, one per group it applied.\n\nThe same `AuthorOut` the single merge answers with, once per group, so a\nclient renders one shape rather than two. There is no per group outcome\nfield because there are no per group outcomes: the batch is one transaction\nand either all of it happened or none of it did.",
+        "properties": {
+          "merged": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorOut"
+            },
+            "title": "Merged",
+            "type": "array"
+          }
+        },
+        "title": "AuthorBatchMergeOut",
+        "type": "object"
+      },
       "AuthorIdentifierOut": {
         "description": "Which record in an authority file one spelling of this name means.\n\n`spelling` rather than the key it is filed under, for the reason\n`AuthorMergeOut` carries one: the key is normalised past the point of being\nreadable, and the whole use of this field is to say *which* of a merged\nauthor's spellings carries this number when two of them disagree.\n\n`provenance` is an explicit value and never a null. A member auditing the\nlist has to be able to tell an assertion a catalogue made from one somebody\nchose, and inferring it from an absent user id would make a deleted account\nlook like a machine. See `enums.AuthorityProvenance`.",
         "properties": {
@@ -166,6 +180,53 @@
           "identifier"
         ],
         "title": "AuthorIdentifierRequest",
+        "type": "object"
+      },
+      "AuthorMergeBatchRequest": {
+        "description": "Fold several groups at once, each exactly as one merge folds one.\n\n**What a Member confirmed, not what the matcher proposed.** The server does\nnot re-derive the groups from a matcher at write time: it applies the list\nin front of the person who pressed the button, which is what makes the\npreview a review rather than a decoration. Every group is checked against\nthe rule that a decision already standing is never repointed, and one group\nfailing it refuses the whole request.\n\nBounded twice, and the two bounds answer different questions.\n`MAX_SUGGESTIONS` is how many groups, because a batch cannot honestly exceed\nwhat a preview can offer. `MAX_BATCH_KEYS` is how many spellings, because\nthat is what is written.",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/AuthorMergeGroup"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "title": "AuthorMergeBatchRequest",
+        "type": "object"
+      },
+      "AuthorMergeGroup": {
+        "description": "One group inside a batch: fold these spellings into one of them.\n\n**`keep_name` has to be one of the group's own names, and that is the whole\ndifference from `AuthorMergeRequest`.** A single merge accepts a name no\nBook carries, which is the catalogue order repair and is the point of it. A\nbatch may not, and that refusal is what keeps the groups independent: every\ngroup then writes rows pointing at a key inside itself, so a group cannot\nfold away the name another group in the same request is keeping, and\nvalidating each group against the state the batch started in stays honest\nfor every one of them. It rests on a rule rather than on care, and the rule\nis enforced below: `test_a_name_none_of_them_has_is_refused` and\n`test_one_spelling_in_two_groups_is_refused` are the two halves of it.\n\nNothing is lost. The preview only ever proposes one of the group's own\nnames, and a typed name is one selection and one field away on the same\npage.\n\nTwo names minimum, because a group of one folds nothing: that is a rename,\nwhich is the single merge's job and reads as an accident here.",
+        "properties": {
+          "keep_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Keep Name",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys",
+          "keep_name"
+        ],
+        "title": "AuthorMergeGroup",
         "type": "object"
       },
       "AuthorMergeOut": {
@@ -271,6 +332,17 @@
       "AuthorSuggestionOut": {
         "description": "Names that are probably one person, and the rules that said so.\n\nA suggestion, never a verdict. `reasons` is returned so a reader can tell a\ncertainty from a guess: `identity` is a confirmed ISNI shared inside the\ngroup, `spelling` is the same name with the spaces moved, `initials` is an\nabbreviated given name, and `fragment` is one name's words sitting inside\nanother's, which is what a credit line stored in catalogue order splits\ninto.\n\n`identity` is the only one that reads a stored fact rather than the letters\nof a name, so it is the only one that reaches a pen name, a transliteration\nor a married name. It is still a suggestion: an ISNI says two spellings are\none person, and whether this Library folds them is a decision somebody makes\nand can undo.\n\n**The reasons are the union over the whole group and never a label on one\nname.** Two rules reaching overlapping pairs make one group, so `identity`\non a group of three says that a pair inside it shares an ISNI, not that\nevery name in it does. Read them as why these names arrived together and\nthen decide per name: any of them can be dropped before merging.",
         "properties": {
+          "keep_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Name"
+          },
           "keys": {
             "items": {
               "type": "string"
@@ -2031,8 +2103,28 @@
             "title": "Asked First",
             "type": "boolean"
           },
+          "credential_from_env": {
+            "default": false,
+            "title": "Credential From Env",
+            "type": "boolean"
+          },
+          "credential_unreadable": {
+            "default": false,
+            "title": "Credential Unreadable",
+            "type": "boolean"
+          },
+          "credential_username_preview": {
+            "default": "",
+            "title": "Credential Username Preview",
+            "type": "string"
+          },
           "enabled": {
             "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "default": false,
+            "title": "Has Credential",
             "type": "boolean"
           },
           "has_key": {
@@ -2123,6 +2215,16 @@
       "ClassificationIn": {
         "description": "One heading, as a client posts it back after a lookup.\n\nAccepted from the client rather than re-fetched, because the lookup that\nproduced it is the expensive part and the member may sit on the confirm\nscreen for a while. Nothing here is trusted beyond its own bounds: the\nscheme is a closed enum, and both strings are bounded and stripped.",
         "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadingKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -2154,6 +2256,16 @@
       },
       "ClassificationOut": {
         "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadingKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -2181,7 +2293,7 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that\nplace a book on one, each under its own rule in `filing.py`, and there is\ndeliberately no counterpart for GND or LCSH because a subject vocabulary\nhas no order to offer.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable as well as filterable. **Sortable is no\nlonger one of the things it has alone**: every scheme names a filing rule\nin `filing.py`, and LCC's orders a shelf too.",
+        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that\nplace a book on one, each under its own rule in `filing.py`, and there is\ndeliberately no counterpart for GND or LCSH because a subject vocabulary\nhas no order to offer.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\n**`gnd-content` and `gnd-carrier` are not two more members**, though they\nare `$2` codes beside `gnd` and were nearly added here. They fail this\nenum's own test: a scheme is what gives a number a reading, and those codes\ngive `(DE-588)4113937-9` the same reading `gnd` does, in the same file, at\nthe same address. What they say is what the record was asserting with it,\nwhich is `HeadingKind` and a separate column. Storing them here would also\nchange the key `uq_classifications_book_scheme_number` is on, so the next\nenrichment of a book that already carries one would deposit the concept a\nsecond time rather than finding the row it has.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable as well as filterable. **Sortable is no\nlonger one of the things it has alone**: every scheme names a filing rule\nin `filing.py`, and LCC's orders a shelf too.",
         "enum": [
           "ddc",
           "lcc",
@@ -2472,6 +2584,40 @@
         "title": "CoverBackfillOut",
         "type": "object"
       },
+      "CredentialKeyOut": {
+        "description": "What this deployment can say about its encryption key, and never the key.\n\nEvery field here is *about* the key. Reporting where a value comes from is\nnot reporting the value, which is the rule `mail_from_env` already runs on,\nand it is what lets this be served beside a screen that holds secrets.",
+        "properties": {
+          "can_generate": {
+            "default": false,
+            "title": "Can Generate",
+            "type": "boolean"
+          },
+          "configured": {
+            "default": false,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "location": {
+            "default": "",
+            "title": "Location",
+            "type": "string"
+          },
+          "problem": {
+            "default": "",
+            "title": "Problem",
+            "type": "string"
+          },
+          "unreadable_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unreadable Sources",
+            "type": "array"
+          }
+        },
+        "title": "CredentialKeyOut",
+        "type": "object"
+      },
       "CustomFieldCreate": {
         "description": "A field the Library is defining.\n\nThe kind is chosen here and never afterwards. Changing it would reinterpret\nevery value already under it: a TEXT field turned URL would start linking\nstrings nobody wrote as links, and the other direction would silently\nunmake links people are using. Delete and redefine is the honest version of\nthat, and it says out loud that the values go.",
         "properties": {
@@ -2733,6 +2879,16 @@
             "title": "Book Count",
             "type": "integer"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadingKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -2759,6 +2915,16 @@
         ],
         "title": "HeadingFacetOut",
         "type": "object"
+      },
+      "HeadingKind": {
+        "description": "What a record was asserting when it cited a heading, where it said.\n\n**A different question from the scheme, and that is the whole reason this\nexists.** `ClassificationScheme` names the file an identifier is in, which\nis what makes the number resolvable: `004` is computing in Dewey and\nnothing at all in Library of Congress notation. This names what the citing\nrecord was doing with it. `(DE-588)4139307-7` is one GND record whether a\ncatalogue writes it under `$2 gnd` or under `$2 gnd-carrier`, so the code\ncannot be a scheme without making that column carry two questions at once.\n\nThe distinction is not cosmetic. The DNB writes CD-ROM into a subject field\nwith a GND number on it, so before this existed a disc was stored as a\nheading about what the book is about, filtered beside Samoainseln and\ncounted in the same facet list.\n\n**Three members, and only two of them are ever a surprise.** A subject is\nthe ordinary case and everything without a declaration is one.\n\n**Null on the row is not a fourth member**, it is the record never having\nsaid, which is true of every row written before this and of every scheme\nbut GND today: MARC 082 declares no vocabulary and neither does a MODS\n`<subject authority=\"lcsh\">`. `classifications.kind_of` is the one place\nthat reads a null as a subject, so the fallback is stated once.\n\n**This is the whole argument for the shape, and the other sites point here\nrather than restating it.** Keeping the null rather than defaulting the\ncolumn is what lets `add_headings` fill one in later from a record that does\ndeclare, exactly as it fills in a missing caption. A column defaulted to\n`subject` cannot tell a stored guess from a stored assertion, so the\nmis-filed rows this was built for would never heal; and `subject` sorts\nafter both other words, so one such row would also win\n`shelf._heading_counts`'s `max` and make a shared heading stop reading as a\ncarrier for every book carrying it. Both were reachable through\n`POST /api/books` before `ck_classifications_kind` and the validator on\n`ClassificationIn` closed them.",
+        "enum": [
+          "subject",
+          "content",
+          "carrier"
+        ],
+        "title": "HeadingKind",
+        "type": "string"
       },
       "ImportPreviewOut": {
         "description": "What the file turned out to be, before anything is written.\n\nExists because a column guessed wrong is invisible until after the import,\nand after the import is too late: the fix is deleting a few hundred books.\nThe reader sees which header filled which field, and the first few rows as\nthe parser actually read them.",
@@ -3274,6 +3440,15 @@
         ],
         "title": "MarcPreviewRow",
         "type": "object"
+      },
+      "MatcherName": {
+        "description": "The matchers a caller may ask for by name.\n\nAn enum rather than free strings, for the reason `SuggestionReason` is one:\nthe value crosses the API, so the client gets a union and an unknown name is\na 422 from FastAPI rather than a silent fall back to whatever the server\nwould have done anyway.",
+        "enum": [
+          "default",
+          "exact"
+        ],
+        "title": "MatcherName",
+        "type": "string"
       },
       "MemberEmailOut": {
         "description": "One member's address, on the only routes that serve one.\n\n**One model for the caller's own address and for an admin reading\nsomebody's**, rather than two. The two differ in who may ask, which is the\nroute's business, and not in what an address is. Two models would be two\nentries in the guard above and two places for the next field to be added to\none of.\n\n`id` and `username` are on it even for `GET /me/email`, where the caller\nalready knows both. They cost nothing there and they are what makes the\nadmin list a list of members rather than a list of strings.\n\n`editable` is per row, not per deployment: `auth_backends.directory_owns_email`\nreads that member's own `auth_source`, so a local test account stays\neditable in a library running LDAP. The client draws a read only field\nsaying the address comes from the directory when it is false; the server\nrefuses the write regardless, because a client is not a control.\n\n**`from_directory` is not the negation of `editable`, and that is the whole\nreason it exists.** Three cases, and the two flags separate them where one\ncould not:\n\n| account | `from_directory` | `editable` |\n|---|---|---|\n| local | false | true |\n| directory, no address attribute configured | **true** | **true** |\n| directory, an address attribute configured | true | false |\n| `auth_source` spelled as nothing this build knows | false | true |\n\n**The fourth row is why this is computed from the named directories rather\nthan from \"not local\".** `users.auth_source` carries no `CheckConstraint`,\nwhich `auth_backends.directory_owns_email` states and depends on, so a\nrestored or hand edited row can hold anything. Under `!= LOCAL` such a row\nread as a directory account and its owner was told a directory they do not\nhave supplies no address.\n\nThe middle row is #103's open question and the one nobody could be told\nabout: the account appeared at a first sign in with nobody filling in a\nform, and the directory carries no address, so it has none and its owner is\nthe only person who can give it one. `editable` alone says \"you may type\nhere\" and cannot say why the box is empty. This is what lets the screen say\nthe directory did not supply one rather than leaving a member to infer it.\n\nIt discloses no address and widens nothing: this model is already restricted\nto the four routes in `routers/users.py`, and the caller is the member\nthemselves or an admin.",
@@ -4020,6 +4195,16 @@
       "PublicClassificationOut": {
         "description": "A published scheme heading: the call number and what it was captioned.\n\n**Its own model rather than `ClassificationOut`**, which is the rule applied\nto `PublicTagOut` beside it and which the first draft did not apply here. A\nfield added to `ClassificationOut` would otherwise reach a public reader\nwith nothing failing, and the library mode epic extends classifications\nnext.\n`tests/schemas/test_public.py::TestThePublicPayloadIsBuiltOnlyFromPublicModels`\nmakes that structural rather than a habit: every model reachable from\n`PublicBookOut` has to be declared in this module.\n\nIdentical to `ClassificationOut` today, and being identical is not an\nargument for sharing it. What differs is who may change it without a review.",
         "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadingKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "anyOf": [
               {
@@ -4320,6 +4505,36 @@
         "title": "ReadStatus",
         "type": "string"
       },
+      "RecoveryPhraseIn": {
+        "description": "A key typed back in, on a new machine or after it was lost.\n\nWhitespace and case are the caller's problem to get wrong and this\napplication's to absorb: `credentials.normalise_phrase` NFKD-normalises,\nlowercases and re-joins, because the encoder rejects an uppercase phrase\noutright and a person pasting from a document that capitalised the first\nword has not made a mistake.",
+        "properties": {
+          "phrase": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Phrase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phrase"
+        ],
+        "title": "RecoveryPhraseIn",
+        "type": "object"
+      },
+      "RecoveryPhraseOut": {
+        "description": "The key itself, as words, returned exactly once.\n\n**This is the one response body in this application that carries a secret,\nand the exception is bounded by the route rather than by a promise.**\n`POST /api/settings/credential-key` refuses when a key already exists, so\nthere is no call that renders a key in being: \"shown once\" is a property of\nthe server, not something the browser is trusted to honour. Every other\nsurface reports *about* the key.\n\nThe phrase is the key. It is never logged, never in a diagnostic, and the\nonly other route that mentions one takes it as input.",
+        "properties": {
+          "phrase": {
+            "title": "Phrase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phrase"
+        ],
+        "title": "RecoveryPhraseOut",
+        "type": "object"
+      },
       "RefusedAssertionOut": {
         "description": "A catalogue said one thing, this Library already held another.\n\n**Not stored anywhere**: a fact about the refresh or enrichment that\nproduced it, served on that response and nowhere else. The store holds one\nvalue per spelling per scheme, which is what makes an identifier\nunretypeable, so a second value has no row to go in. Reporting it here is\nthe alternative to discarding it silently, which would be resolution by\nprecedence and is what this feature refuses to do anywhere else.\n\n`kept_provenance` is the field to read first. `catalogue` means two\ncatalogues disagree, which is somebody else's problem to look at.\n`member` means a person's guess is outranking a national library, and the\nfix is to delete the guess and refresh again.",
         "properties": {
@@ -4364,6 +4579,12 @@
           "books": {
             "minimum": 0.0,
             "title": "Books",
+            "type": "integer"
+          },
+          "catalogue_credentials": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Catalogue Credentials",
             "type": "integer"
           },
           "collections": {
@@ -5060,6 +5281,29 @@
           }
         },
         "title": "SettingsUpdate",
+        "type": "object"
+      },
+      "SourceCredentialIn": {
+        "description": "A username and a password for one catalogue, on their way to being sealed.\n\n**No `source` field**: the source is the path, so a body cannot name a row\nother than the one the route resolved and checked.\n\nA colon in the username is refused rather than accepted and mangled. RFC\n7617 forbids one in a Basic user-id, and the sealed pair uses the same\nseparator, so accepting one would store a credential that comes back\ndifferent from the one that was typed.",
+        "properties": {
+          "password": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "SourceCredentialIn",
         "type": "object"
       },
       "StatsOut": {
@@ -6265,10 +6509,70 @@
         ]
       }
     },
+    "/api/books/authors/merge/batch": {
+      "post": {
+        "description": "Fold several groups at once, or none of them.\n\n**What the caller confirmed, not what a matcher proposed.** The groups are\napplied as sent, which is what makes `GET /authors/suggestions` a review rather\nthan a decoration. Each group folds its spellings into one of its own names;\na name none of them has is the single merge's job, because a batch that\ncould invent a name could also fold away the name another group in the same\nrequest is keeping.\n\n**All of it or none of it.** Every group is checked before any row is\nwritten, so a refusal leaves the library exactly as it was and there is no\nhalf applied state for anybody to reconstruct. Nothing in `books` is\nwritten by any of it, and deleting the rows undoes it one group at a time.\n\nAn author nobody can see is **404**, exactly as it is for one merge. A group\nthat would repoint an alias row somebody already wrote is **409**: a merge\na person made is an assertion and a rule's grouping is a guess, so the\nassertion wins and the batch is refused rather than applied over it.",
+        "operationId": "merge_authors_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorMergeBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorBatchMergeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Merge Authors Batch",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/authors/suggestions": {
       "get": {
-        "description": "Names that are probably one person.\n\nA suggestion and never a verdict: it is offered because accepting one\nwrites an alias row and deleting that row puts the shelf back exactly as it\nwas. `authors.suggest_merges` records which rule produced each group so a\nreader can tell a near-certainty from a guess before pressing anything.",
+        "description": "Names that are probably one person, and what folding them would keep.\n\nA suggestion and never a verdict: it is offered because accepting one\nwrites an alias row and deleting that row puts the shelf back exactly as it\nwas. `reasons` records which rule produced each group so a reader can tell a\nnear-certainty from a guess before pressing anything.\n\n`matcher` names the strategy. `default` is every rule. `exact` keeps only\nthe rules that group on an equal value, a shared authority record or one\nname that is another with the spaces moved, and drops the two that compare\nnames in pairs. A matcher can only ever take rules away, so no strategy\nproposes a group `default` does not.\n\n**`keep_name` is what `POST /authors/merge/batch` would fold each group\ninto**, so this list is the review a batch is confirmed against rather than\na summary of one. Null means the group is held back: applying it would\nrepoint an alias row somebody already wrote, and a merge somebody made\noutranks a rule's guess. Nothing says whose row it was, which is not this\ncaller's to know.\n\nNothing here writes.",
         "operationId": "list_author_suggestions",
+        "parameters": [
+          {
+            "description": "Which matching strategy proposes the groups",
+            "in": "query",
+            "name": "matcher",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MatcherName",
+              "default": "default",
+              "description": "Which matching strategy proposes the groups"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6283,6 +6587,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -10214,6 +10528,232 @@
           }
         ],
         "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/catalogue-sources/{source}/credential": {
+      "delete": {
+        "description": "Drop a stored login for one catalogue.\n\n**Succeeds whether or not one was stored**, and needs no key to do it: a\ncredential nobody can read is exactly the one somebody most wants to be rid\nof, and requiring the key to delete it would make a rotated key\nunrecoverable without a database edit. It is also what lets somebody who\nlost the recovery phrase reach a state where a new key may be made.\n\n**Reaches a row whose catalogue is no longer in the roster**, which the\nwrite above does not. `catalogue_credentials` carries no foreign key, on\npurpose, so that one credential for a source a later release dropped cannot\nfail an entire restore; the cost of that is an orphan, and an orphan nothing\ncan delete would be a row needing a database edit to remove. Deleting sends\nnothing anywhere, so the roster check buys nothing here and costs that.\n\n**The pinned check fires only when nothing is stored, and that ordering is\nload bearing.** It read \"there is nothing stored to remove\", which stopped\nbeing true the moment `unreadable_sources` began counting a pinned source's\nsealed row: a login stored for a source the environment also pins **blocks\nkey creation**, and refusing to delete it made that a dead end whose only\nexit was unsetting the variable, deleting, and setting it again, with\nnothing on screen saying so. An archive carries `catalogue_credentials`, so\na restore onto a deployment that pins that source arrives there without\nanybody doing anything unusual.\n\nSo: a row is a row, pinned or not, and deleting one sends nothing anywhere\nand does not touch the environment. With nothing stored the 409 is honest\nagain, because then there really is nothing here to remove and the\nenvironment's is not this route's to clear.",
+        "operationId": "forget_source_credential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Source Credential",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Store a login for one catalogue, sealed.\n\n**Any roster source, not only one that declares it needs a credential.** A\nlibrary may hold an account at a catalogue that also answers anonymously,\nand refusing it would be the storage deciding who may have an account\nsomewhere else.\n\n409 when the deployment pinned this source's credential, the same rule and\nthe same reason `_refuse_if_pinned` states for a settings row: a value the\nenvironment supplies wins, so storing a different one produces a screen that\ndisagrees with what the next request actually sends.",
+        "operationId": "set_source_credential",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCredentialIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Set Source Credential",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/credential-key": {
+      "delete": {
+        "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says how many**\nrather than this route hiding it: `unreadable_credentials` on the way out is\nthe count of stored logins that now have to be typed again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when the deployment pinned the key through the environment: a process\ncannot unset a variable for its own next start, so there is nothing here to\nclear.",
+        "operationId": "forget_credential_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Forget Credential Key",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "description": "Whether this deployment holds an encryption key, and where from.\n\nNever the key. A phrase leaves this application through exactly one route,\nthe POST below, and only when there was nothing to overwrite.",
+        "operationId": "get_credential_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Credential Key",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "description": "Make an encryption key, store it, and return the phrase **once**.\n\n**The one response in this application that carries a secret**, and the\nexception is bounded by the route rather than by a promise: it refuses when\na key already exists, so replaying it cannot re-display one. Write the words\ndown; there is no second chance to read them, by construction.\n\nWhere the key is kept is this machine's business: its keychain where it has\none, otherwise a file readable only by the account the app runs as. Neither\ntravels in a backup archive, which is what makes the archive safe to hand\naround and is also why the phrase matters.",
+        "operationId": "create_credential_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryPhraseOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Credential Key",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Take a recovery phrase back in, on a new machine or after one was lost.\n\n**The checksum is what makes a wrong word an error rather than a different\nkey.** A phrase with a word mistyped, misread off paper, or two words\nswapped is refused here; without it this route would cheerfully store a key\nthat opens nothing and report success.\n\nReplacing a key that currently works is allowed and is not guarded against:\nit is what a person restoring a backup onto a new machine is doing, and the\nresponse says how many stored credentials the new key cannot open, which is\nthe only honest report available.",
+        "operationId": "restore_credential_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryPhraseIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Restore Credential Key",
         "tags": [
           "settings"
         ]

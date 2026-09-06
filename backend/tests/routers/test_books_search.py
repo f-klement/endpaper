@@ -843,6 +843,7 @@ class TestOneBadRecordCostsOneResult:
             "scheme": "ddc",
             "number": "830",
             "label": None,
+            "kind": None,
         }
         assert len(match["classifications"]) == 8
 
@@ -897,7 +898,7 @@ class TestOneBadRecordCostsOneResult:
         ).json()["matches"]
 
         assert match["classifications"] == [
-            {"scheme": "ddc", "number": "610", "label": None}
+            {"scheme": "ddc", "number": "610", "label": None, "kind": None}
         ]
 
 
@@ -948,6 +949,7 @@ class TestSubjectHeadingsOnASearchRow:
             "scheme": "lcsh",
             "number": "Computer software -- Development",
             "label": None,
+            "kind": None,
         } in match["classifications"]
 
     def test_a_heading_longer_than_any_call_number_survives_whole(

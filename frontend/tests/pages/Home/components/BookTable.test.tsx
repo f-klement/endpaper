@@ -9,6 +9,7 @@ import {
   BookFormat,
   BookSort,
   ClassificationScheme,
+  HeadingKind,
   LendingWillingness,
   ReadStatus,
 } from "../../../../src/api/generated/model";
@@ -265,6 +266,37 @@ describe("BookTable, the cataloguer's columns", () => {
       "Stress management, Stressbewältigung",
     );
     expect(cell(/Subjects/)).not.toHaveTextContent("155.9042");
+  });
+
+  it("keeps a carrier out of the column headed Subjects", () => {
+    // `#162` on the one surface that asserts "subject" in words. A carrier is
+    // the physical form of the thing, so listing `CD-ROM` under a header
+    // reading Subjects is the defect stated in the table's own heading. It is
+    // still shown on the book page and in the filter panel, marked.
+    renderTable({
+      books: [
+        makeBook({
+          title: "Emotion and stress",
+          classifications: [
+            {
+              scheme: ClassificationScheme.gnd,
+              number: "4203576-4",
+              label: "Stressbewältigung",
+            },
+            {
+              scheme: ClassificationScheme.gnd,
+              number: "4139307-7",
+              label: "CD-ROM",
+              kind: HeadingKind.carrier,
+            },
+          ],
+        }),
+      ],
+      columns: ["title", "classification"],
+    });
+
+    expect(cell(/Subjects/)).toHaveTextContent("Stressbewältigung");
+    expect(cell(/Subjects/)).not.toHaveTextContent("CD-ROM");
   });
 
   it("shows the GND heading rather than its identifier", () => {

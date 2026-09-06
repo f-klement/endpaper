@@ -21,6 +21,7 @@ from typing import Any, Final
 from sqlalchemy.orm import Session
 
 import config
+import credentials
 import sources
 from enums import CatalogueSource, Locale, SettingKey
 from models import Setting
@@ -246,6 +247,55 @@ def google_books_api_key(db: Session) -> str:
     return in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
 
 
+#: The sources whose credential is a **settings row** rather than a sealed login.
+#:
+#: **One member, named here rather than spelled inline**, and the distinction it
+#: draws is the one `credentials.py` opens with: Google Books' credential is an
+#: API key in a query string, this deployment's own, held in `settings`. Every
+#: other source that needs one needs a login at somebody else's server, held
+#: sealed in `catalogue_credentials`. Two kinds of secret, and this is where the
+#: routing between them lives.
+#:
+#: **A set is not the right shape and this is not the fix.** Which store a
+#: source's secret uses is a property of the source, so it belongs beside
+#: `Capability.NEEDS_A_CREDENTIAL` as a second capability, read through
+#: `Target.can` like every other. That is an enum member, a column on
+#: `models.CatalogueTarget`, a value on every seeded row, a line in the seeder
+#: and a migration, which is more than this ticket may take for a rule with one
+#: member. #210 carries this paragraph. Until then the
+#: exception is named and in one place, which is what stops it being a
+#: condition somebody has to notice inside a comprehension.
+_SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset(
+    {CatalogueSource.GOOGLE_BOOKS}
+)
+
+
+def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
+    """Which credential-needing sources hold a readable sealed login.
+
+    **Empty today, and that is a fact about the roster rather than about this
+    function.** `sources.NEEDS_A_KEY` is Google Books alone on this date, whose
+    secret is a settings row, so the loop runs zero times. It is written for the
+    set rather than for the member because the next source to declare that
+    capability is the reason #180 was opened, and a rule spelled per source is
+    one somebody has to remember to extend.
+    `tests/test_settings_store.py` exercises it against a roster with a second
+    such source in it.
+
+    **Readable, not merely stored.** A credential written under a rotated key
+    would otherwise report the source as ready and leave a member's search to
+    discover otherwise.
+
+    The key is resolved once for the whole loop rather than per source: see
+    `credentials.KeyState`.
+    """
+    sealed = sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW
+    if not sealed:
+        return set()
+    state = credentials.key_state()
+    return {source for source in sealed if credentials.is_held(db, source.value, state)}
+
+
 def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     """The sources a credential is actually in force for.
 
@@ -258,7 +308,7 @@ def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     held = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
     if google_books_api_key(db):
         held.add(CatalogueSource.GOOGLE_BOOKS)
-    return frozenset(held)
+    return frozenset(held | _sources_with_a_credential(db))
 
 
 def ready_sources(db: Session) -> frozenset[CatalogueSource]:
@@ -272,7 +322,7 @@ def ready_sources(db: Session) -> frozenset[CatalogueSource]:
     ready = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
     if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db):
         ready.add(CatalogueSource.GOOGLE_BOOKS)
-    return frozenset(ready)
+    return frozenset(ready | _sources_with_a_credential(db))
 
 
 def stored_catalogue_sources(db: Session) -> sources.Plan:

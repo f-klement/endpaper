@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import type {
   AuthorSuggestionOut,
   SuggestionReason,
@@ -10,6 +8,12 @@ interface SuggestionCardProps {
   group: AuthorSuggestionOut;
   isMerging: boolean;
   onMerge: (keys: string[], keepName: string) => void;
+  /** Whether this group is ticked for the batch above. */
+  isBatched: boolean;
+  onToggleBatch: () => void;
+  /** Keys the reader has taken out of this group. Owned by the page. */
+  excluded: string[];
+  onToggleName: (key: string) => void;
 }
 
 /**
@@ -44,26 +48,34 @@ const REASONS: Record<SuggestionReason, MessageKey> = {
  * on a surface that is already the busiest on the page. The catalogue-order
  * repair ("Le Guin, Ursula K." split into two people, neither spelled
  * correctly) is still one selection and one typed name away.
+ *
+ * **Two ways to finish a group, and they are not the same act.** A button below
+ * folds this group alone, keeping the name beside it. The checkbox at the top
+ * puts the group in the batch, which folds it into `keep_name`, the name the
+ * server proposed. A group the server held back carries no `keep_name` and gets
+ * no checkbox: the batch would repoint a merge somebody already made, and the
+ * card says so rather than going quiet.
+ *
+ * **The per-name checkboxes bind both of them, which is why the page owns
+ * them.** They were local state here, so a name unticked in this card was still
+ * folded by the batch above: the one control that exists because the grouping is
+ * transitive did nothing for the one action that folds a hundred groups at once.
+ * Lifting the state is what makes the sentence at the top of this docstring true
+ * of the batch as well as of the button.
  */
 export default function SuggestionCard({
   group,
   isMerging,
   onMerge,
+  isBatched,
+  onToggleBatch,
+  excluded,
+  onToggleName,
 }: SuggestionCardProps) {
   const { t } = useTranslation();
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
-  const included = group.keys.filter((key) => !excluded.has(key));
+  const included = group.keys.filter((key) => !excluded.includes(key));
   const nameFor = (key: string) => group.names[group.keys.indexOf(key)] ?? key;
-
-  function toggle(key: string) {
-    setExcluded((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
 
   function confirmAndMerge(keepName: string, keys: string[]) {
     if (keys.length < 2) return;
@@ -76,6 +88,24 @@ export default function SuggestionCard({
 
   return (
     <div className="bg-paper-0 border border-paper-200 rounded-2xl p-4 space-y-3 dark:bg-paper-900 dark:border-paper-700">
+      {group.keep_name != null ? (
+        <label className="flex items-center gap-2 text-sm text-paper-700 dark:text-paper-200">
+          <input
+            type="checkbox"
+            checked={isBatched}
+            onChange={onToggleBatch}
+            className="shrink-0"
+          />
+          <span className="min-w-0 truncate">
+            {t("authors.wouldKeep", { name: group.keep_name })}
+          </span>
+        </label>
+      ) : (
+        <p className="text-sm text-paper-600 dark:text-paper-400">
+          {t("authors.heldBack")}
+        </p>
+      )}
+
       <p className="text-xs text-paper-600 dark:text-paper-400">
         {group.reasons
           .map((reason) => REASONS[reason])
@@ -106,8 +136,8 @@ export default function SuggestionCard({
           >
             <input
               type="checkbox"
-              checked={!excluded.has(key)}
-              onChange={() => toggle(key)}
+              checked={!excluded.includes(key)}
+              onChange={() => onToggleName(key)}
               aria-label={t("authors.include", { name: nameFor(key) })}
               className="shrink-0"
             />
@@ -116,7 +146,9 @@ export default function SuggestionCard({
             </span>
             <button
               type="button"
-              disabled={isMerging || excluded.has(key) || included.length < 2}
+              disabled={
+                isMerging || excluded.includes(key) || included.length < 2
+              }
               onClick={() => confirmAndMerge(nameFor(key), included)}
               className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
             >

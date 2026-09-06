@@ -30,6 +30,19 @@ MAX_MAIL_ADDRESS = 320
 MAX_MAIL_RECIPIENT_LIST = 1000
 MAX_MAIL_PASSWORD = 200
 MAX_MAIL_USERNAME = 320
+#: Bounds on a catalogue source's credential.
+#:
+#: Sized like the mail pair beside them and for the same reason: both are typed
+#: into a form and stored, so the bound is what stops a row becoming a
+#: multi-megabyte string an outbound request reads.
+MAX_CREDENTIAL_USERNAME = 320
+MAX_CREDENTIAL_PASSWORD = 200
+
+#: A 24 word BIP-39 phrase. The longest English word in the list is 8
+#: characters, so 24 of them with separators cannot exceed 216; 400 leaves room
+#: for the whitespace a paste brings with it and for nothing else.
+MAX_RECOVERY_PHRASE = 400
+
 #: A bot token is `<digits>:<35 characters>` today. 300 is room for Telegram
 #: changing its mind without being room for anything else.
 MAX_TELEGRAM_TOKEN = 300
@@ -119,6 +132,35 @@ class CatalogueSourceOut(BaseModel):
     #: a field that went false only once the source was already enabled could
     #: not say so first. See `sources.describe`.
     ready: bool
+    #: Whether a login for this catalogue is in force, from the environment or
+    #: the table. **Not the same field as `has_key`**, which answers the Google
+    #: Books API key: that is this deployment's own secret in a query string,
+    #: and this is an institution's account at somebody else's server.
+    has_credential: bool = False
+    #: The username, masked. Enough to tell one account from another and
+    #: nothing a browser could use, the rule every other secret here follows.
+    #: Empty when none is held, and **also empty when one is held and cannot be
+    #: read**, which is what `credential_needs_reentry` beside it says.
+    credential_username_preview: str = ""
+    #: True when the deployment pinned it. It then wins over anything stored and
+    #: cannot be changed here, so the UI disables the field rather than offering
+    #: an edit the server would 409. Reporting *where* a credential comes from
+    #: is not reporting the credential.
+    credential_from_env: bool = False
+    #: True when a login is held and cannot be opened, for any reason: the key
+    #: was rotated, is not configured, the keychain is locked, or a pinned
+    #: variable is set to something that is not a credential.
+    #:
+    #: **It does not say which, deliberately.** It was called
+    #: `credential_needs_reentry` and it meant "type this login in again", which
+    #: is the right advice for exactly one of those causes. For the others the
+    #: remedy is on the key and recovers every login at once, so the diagnosis
+    #: lives on `CredentialKeyOut` where the remedy is.
+    #:
+    #: **A boolean rather than the envelope's key generation tag**, which is the
+    #: other thing the server could send. The tag is derived from the key, and
+    #: publishing key-derived material to every admin session buys nothing.
+    credential_unreadable: bool = False
     #: The ISBN registration groups this catalogue's collecting remit covers, as
     #: `978-960`, and empty for a catalogue with no remit to state.
     #:
@@ -306,6 +348,107 @@ class SettingsOut(BaseModel):
     #: `library_mode and public_catalogue_enabled`, computed on the server so
     #: the browser cannot get the rule wrong. See `FeatureFlagsOut`.
     public_catalogue_published: bool = False
+
+
+class SourceCredentialIn(BaseModel):
+    """A username and a password for one catalogue, on their way to being sealed.
+
+    **No `source` field**: the source is the path, so a body cannot name a row
+    other than the one the route resolved and checked.
+
+    A colon in the username is refused rather than accepted and mangled. RFC
+    7617 forbids one in a Basic user-id, and the sealed pair uses the same
+    separator, so accepting one would store a credential that comes back
+    different from the one that was typed.
+    """
+
+    username: str = Field(min_length=1, max_length=MAX_CREDENTIAL_USERNAME)
+    password: str = Field(min_length=1, max_length=MAX_CREDENTIAL_PASSWORD)
+
+    @field_validator("username")
+    @classmethod
+    def _no_colon(cls, value: str) -> str:
+        if ":" in value:
+            raise ValueError("A username may not contain a colon.")
+        return value
+
+
+class CredentialKeyOut(BaseModel):
+    """What this deployment can say about its encryption key, and never the key.
+
+    Every field here is *about* the key. Reporting where a value comes from is
+    not reporting the value, which is the rule `mail_from_env` already runs on,
+    and it is what lets this be served beside a screen that holds secrets.
+    """
+
+    #: Whether a key is in force at all. False means credentials cannot be
+    #: stored and any already stored cannot be read.
+    configured: bool = False
+    #: Which of the three sources it came from, as a token: `env`, `keychain`
+    #: or `file`. Empty when none.
+    #:
+    #: **A token rather than a sentence**, because the screen puts it inside a
+    #: translated line. Server prose interpolated into a German string produced
+    #: "Ein Schlüssel liegt vor, verwahrt in this machine's keychain", which
+    #: compiles and is still wrong; each catalogue carries the three phrases.
+    location: str = ""
+    #: Whether this machine has somewhere to keep a key it made, so the screen
+    #: knows whether to offer to make one.
+    #:
+    #: False where there is no keychain **and** the key file's directory cannot
+    #: be written. It was unconditionally true, because the file source was
+    #: built without an availability test, so a read only data directory turned
+    #: a refusal naming the problem into an unhandled `OSError` and a 500.
+    can_generate: bool = False
+    #: A configuration problem stated for a person to fix: two sources holding
+    #: different keys, a phrase that failed its checksum, a locked keychain.
+    #: Empty when there is none. **Never contains a phrase or any part of one**,
+    #: which is why `credentials` refuses by position rather than by word.
+    problem: str = ""
+    #: Which stored logins cannot be opened as things stand, by source.
+    #:
+    #: Non-empty beside `configured: false` means the key is missing and the
+    #: phrase will bring them all back; non-empty beside `configured: true`
+    #: means this key is not the one that wrote them.
+    #:
+    #: **The sources rather than a count, and read off the table rather than
+    #: the roster.** A count beside a list is the same fact twice. Reading the
+    #: roster is worse than that: `catalogue_credentials` carries no foreign
+    #: key, so a restored archive can hold a login for a catalogue this build
+    #: dropped, and a screen counting the ten roster rows told a person there
+    #: was nothing to remove while the server refused to make a key until they
+    #: removed it.
+    unreadable_sources: list[str] = Field(default_factory=list)
+
+
+class RecoveryPhraseOut(BaseModel):
+    """The key itself, as words, returned exactly once.
+
+    **This is the one response body in this application that carries a secret,
+    and the exception is bounded by the route rather than by a promise.**
+    `POST /api/settings/credential-key` refuses when a key already exists, so
+    there is no call that renders a key in being: "shown once" is a property of
+    the server, not something the browser is trusted to honour. Every other
+    surface reports *about* the key.
+
+    The phrase is the key. It is never logged, never in a diagnostic, and the
+    only other route that mentions one takes it as input.
+    """
+
+    phrase: str
+
+
+class RecoveryPhraseIn(BaseModel):
+    """A key typed back in, on a new machine or after it was lost.
+
+    Whitespace and case are the caller's problem to get wrong and this
+    application's to absorb: `credentials.normalise_phrase` NFKD-normalises,
+    lowercases and re-joins, because the encoder rejects an uppercase phrase
+    outright and a person pasting from a document that capitalised the first
+    word has not made a mistake.
+    """
+
+    phrase: str = Field(min_length=1, max_length=MAX_RECOVERY_PHRASE)
 
 
 class SettingsUpdate(BaseModel):
@@ -562,3 +705,9 @@ class RestoreResult(BaseModel):
     #: missing from `backup._TABLES` entirely until 2026-08-26 and no count
     #: reported its absence.
     author_aliases: int = Field(default=0, ge=0)
+    #: Sealed catalogue logins. Counted for the reason every field above it is,
+    #: and with one difference worth stating: these cannot be re-derived from
+    #: anything. A restore that silently dropped them leaves a library whose
+    #: catalogue sources look configured and answer with an authentication
+    #: error, and the only repair is somebody typing them in again.
+    catalogue_credentials: int = Field(default=0, ge=0)

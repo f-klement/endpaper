@@ -333,6 +333,16 @@ class ClassificationScheme(StrEnum):
     `author_identifiers` table, which is a different store keyed on a name
     rather than on a book.
 
+    **`gnd-content` and `gnd-carrier` are not two more members**, though they
+    are `$2` codes beside `gnd` and were nearly added here. They fail this
+    enum's own test: a scheme is what gives a number a reading, and those codes
+    give `(DE-588)4113937-9` the same reading `gnd` does, in the same file, at
+    the same address. What they say is what the record was asserting with it,
+    which is `HeadingKind` and a separate column. Storing them here would also
+    change the key `uq_classifications_book_scheme_number` is on, so the next
+    enrichment of a book that already carries one would deposit the concept a
+    second time rather than finding the row it has.
+
     Only DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read
     now: a book shows the headings it carries, and any of them can be filtered
     on. What DDC has that the others do not is a second reading, the division,
@@ -345,6 +355,62 @@ class ClassificationScheme(StrEnum):
     LCC = "lcc"
     GND = "gnd"
     LCSH = "lcsh"
+
+
+class HeadingKind(StrEnum):
+    """What a record was asserting when it cited a heading, where it said.
+
+    **A different question from the scheme, and that is the whole reason this
+    exists.** `ClassificationScheme` names the file an identifier is in, which
+    is what makes the number resolvable: `004` is computing in Dewey and
+    nothing at all in Library of Congress notation. This names what the citing
+    record was doing with it. `(DE-588)4139307-7` is one GND record whether a
+    catalogue writes it under `$2 gnd` or under `$2 gnd-carrier`, so the code
+    cannot be a scheme without making that column carry two questions at once.
+
+    The distinction is not cosmetic. The DNB writes CD-ROM into a subject field
+    with a GND number on it, so before this existed a disc was stored as a
+    heading about what the book is about, filtered beside Samoainseln and
+    counted in the same facet list.
+
+    **Three members, and only two of them are ever a surprise.** A subject is
+    the ordinary case and everything without a declaration is one.
+
+    **Null on the row is not a fourth member**, it is the record never having
+    said, which is true of every row written before this and of every scheme
+    but GND today: MARC 082 declares no vocabulary and neither does a MODS
+    `<subject authority="lcsh">`. `classifications.kind_of` is the one place
+    that reads a null as a subject, so the fallback is stated once.
+
+    **This is the whole argument for the shape, and the other sites point here
+    rather than restating it.** Keeping the null rather than defaulting the
+    column is what lets `add_headings` fill one in later from a record that does
+    declare, exactly as it fills in a missing caption. A column defaulted to
+    `subject` cannot tell a stored guess from a stored assertion, so the
+    mis-filed rows this was built for would never heal; and `subject` sorts
+    after both other words, so one such row would also win
+    `shelf._heading_counts`'s `max` and make a shared heading stop reading as a
+    carrier for every book carrying it. Both were reachable through
+    `POST /api/books` before `ck_classifications_kind` and the validator on
+    `ClassificationIn` closed them.
+    """
+
+    #: What the book is about. Every Dewey number, every call number, every
+    #: LCSH string, and every GND heading a record does not mark as one of the
+    #: two below.
+    #:
+    #: **Never written to the column, and that is enforced twice rather than
+    #: agreed.** `ck_classifications_kind` permits `content`, `carrier` and the
+    #: null only, and `ClassificationIn.a_subject_is_the_absence_of_a_kind`
+    #: turns a client's `subject` into the null it means before it gets there.
+    #: This member is what `classifications.kind_of` **answers** for a null, not
+    #: a value the store holds.
+    SUBJECT = "subject"
+    #: What kind of text it is: `$2 gnd-content`, which is where
+    #: `Fiktionale Darstellung`, `Hochschulschrift` and `Kochbuch` arrive.
+    CONTENT = "content"
+    #: What physical thing it is: `$2 gnd-carrier`, which is CD-ROM.
+    CARRIER = "carrier"
 
 
 class AuthorityScheme(StrEnum):

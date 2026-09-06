@@ -24,10 +24,11 @@ import marc
 import metadata
 import settings_store
 from auth import require_admin
-from authors import AUTHOR_NAME_MAX
+from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
 from authorship import (
     AuthorNotFound,
     Authorship,
+    DecisionStands,
     IdentifierConflict,
     RecordedAssertions,
 )
@@ -86,10 +87,12 @@ from reading import Reading, resolve_merge
 from schemas import (
     MAX_CLASSIFICATIONS_PER_BOOK,
     MAX_ROW_ID,
+    AuthorBatchMergeOut,
     AuthorIdentifierOut,
     AuthorIdentifierRequest,
     AuthorityCandidateOut,
     AuthorityDisagreementOut,
+    AuthorMergeBatchRequest,
     AuthorMergeRequest,
     AuthorOut,
     AuthorSuggestionOut,
@@ -1504,16 +1507,36 @@ def list_authors(db: DbSession, current_user: CurrentUser) -> list[AuthorOut]:
 
 @router.get("/authors/suggestions", response_model=list[AuthorSuggestionOut])
 def list_author_suggestions(
-    db: DbSession, current_user: CurrentUser
+    db: DbSession,
+    current_user: CurrentUser,
+    matcher: Annotated[
+        MatcherName,
+        Query(description="Which matching strategy proposes the groups"),
+    ] = MatcherName.DEFAULT,
 ) -> list[AuthorSuggestionOut]:
-    """Names that are probably one person.
+    """Names that are probably one person, and what folding them would keep.
 
     A suggestion and never a verdict: it is offered because accepting one
     writes an alias row and deleting that row puts the shelf back exactly as it
-    was. `authors.suggest_merges` records which rule produced each group so a
-    reader can tell a near-certainty from a guess before pressing anything.
+    was. `reasons` records which rule produced each group so a reader can tell a
+    near-certainty from a guess before pressing anything.
+
+    `matcher` names the strategy. `default` is every rule. `exact` keeps only
+    the rules that group on an equal value, a shared authority record or one
+    name that is another with the spaces moved, and drops the two that compare
+    names in pairs. A matcher can only ever take rules away, so no strategy
+    proposes a group `default` does not.
+
+    **`keep_name` is what `POST /authors/merge/batch` would fold each group
+    into**, so this list is the review a batch is confirmed against rather than
+    a summary of one. Null means the group is held back: applying it would
+    repoint an alias row somebody already wrote, and a merge somebody made
+    outranks a rule's guess. Nothing says whose row it was, which is not this
+    caller's to know.
+
+    Nothing here writes.
     """
-    return Authorship.seen_by(db, current_user.id).suggestions()
+    return Authorship.seen_by(db, current_user.id).suggestions(MATCHERS[matcher])
 
 
 @router.get("/authors/wikipedia", response_model=list[AuthorWikipediaOut])
@@ -1589,6 +1612,45 @@ def merge_authors(
         )
     except AuthorNotFound:
         raise _author_not_found() from None
+
+
+@router.post("/authors/merge/batch", response_model=AuthorBatchMergeOut)
+def merge_authors_batch(
+    payload: AuthorMergeBatchRequest, db: DbSession, current_user: CurrentUser
+) -> AuthorBatchMergeOut:
+    """Fold several groups at once, or none of them.
+
+    **What the caller confirmed, not what a matcher proposed.** The groups are
+    applied as sent, which is what makes `GET /authors/suggestions` a review rather
+    than a decoration. Each group folds its spellings into one of its own names;
+    a name none of them has is the single merge's job, because a batch that
+    could invent a name could also fold away the name another group in the same
+    request is keeping.
+
+    **All of it or none of it.** Every group is checked before any row is
+    written, so a refusal leaves the library exactly as it was and there is no
+    half applied state for anybody to reconstruct. Nothing in `books` is
+    written by any of it, and deleting the rows undoes it one group at a time.
+
+    An author nobody can see is **404**, exactly as it is for one merge. A group
+    that would repoint an alias row somebody already wrote is **409**: a merge
+    a person made is an assertion and a rule's grouping is a guess, so the
+    assertion wins and the batch is refused rather than applied over it.
+    """
+    try:
+        return Authorship.seen_by(db, current_user.id).merge_batch(
+            payload.groups, by_user_id=current_user.id
+        )
+    except AuthorNotFound:
+        raise _author_not_found() from None
+    except DecisionStands as refused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A merge somebody already made covers "
+                f"{', '.join(refused.keys)}. Reload the proposal and try again."
+            ),
+        ) from None
 
 
 @router.delete("/authors/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1984,6 +2046,7 @@ def list_classifications(
                     scheme=row.scheme,
                     number=row.number,
                     label=row.label,
+                    kind=row.kind,
                     book_count=row.book_count,
                 )
                 for row in headings
@@ -2328,6 +2391,12 @@ def _repoint_relations(db: Session, keeper: Book, losers: list[Book]) -> None:
         if survivor is not None:
             if survivor.label is None and heading.label is not None:
                 survivor.label = heading.label
+            # And its kind, on the same rule and for a sharper reason: the
+            # loser's row may be the corrected one. Only a record that declares
+            # a `$2` ever sets this, so a merge that dropped the half that had
+            # it would put a disc back among the subjects with nothing to see.
+            if survivor.kind is None and heading.kind is not None:
+                survivor.kind = heading.kind
             db.delete(heading)
             continue
         if len(kept) >= MAX_CLASSIFICATIONS_PER_BOOK:

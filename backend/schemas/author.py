@@ -1,8 +1,19 @@
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
-from authors import AUTHOR_NAME_MAX, SuggestionReason, author_key
+from authors import (
+    AUTHOR_NAME_MAX,
+    MAX_SUGGESTIONS,
+    SuggestionReason,
+    author_key,
+)
 from enums import AuthorityProvenance, AuthorityScheme
 from models import AUTHOR_KEY_MAX, AUTHORITY_IDENTIFIER_MAX
 
@@ -15,6 +26,30 @@ from models import AUTHOR_KEY_MAX, AUTHORITY_IDENTIFIER_MAX
 #: an identity either: a key is derived from a name, so a merge retires it with
 #: the spelling it came from. A retired one is resolved through the alias rows.
 AuthorKeyField = Annotated[str, StringConstraints(min_length=1, max_length=AUTHOR_KEY_MAX)]
+
+#: How many spellings one batch may fold in total, across every group in it.
+#:
+#: **The keys and not the groups, because the keys are what is written**: a
+#: batch inserts one alias row per key, and a hundred groups of two cost less
+#: than two groups of a hundred. Bounding the groups alone would let the cheap
+#: number hide the expensive one.
+#:
+#: 1,000 is chosen against what the preview can offer rather than pulled from
+#: the air: `GET /authors/suggestions` returns at most `MAX_SUGGESTIONS` groups, and
+#: a shelf whose suggestion groups average ten names is already an unusual one.
+#:
+#: **This is why there is no job runner**, and it is measured rather than
+#: assumed. The batch is two index reads, one pass and one commit, and its
+#: ceiling is this number rather than the size of the shelf, so the shape a
+#: background job exists for is unreachable.
+#: `tests/routers/test_books_authors.py::TestFoldingABatch::
+#: test_a_batch_at_the_cap_is_one_request_rather_than_a_job` runs the full cap
+#: through the handler, index read included, and it completes in well under a
+#: second on the slower and busier of the two runners this project uses, which
+#: is the one it happened to land on. **A duration from one of them is not
+#: comparable with the other's**, so the figure and the runner's name are kept
+#: with the session notes rather than here.
+MAX_BATCH_KEYS = 1000
 
 #: How many authors one merge may fold at once.
 #:
@@ -308,6 +343,20 @@ class AuthorSuggestionOut(BaseModel):
     keys: list[str]
     names: list[str]
     reasons: list[SuggestionReason]
+    #: The name a batch would fold this group into, or null where it is held
+    #: back.
+    #:
+    #: **One field rather than a name and a flag**, because there is exactly one
+    #: thing that holds a group back: applying it would repoint an alias row
+    #: somebody already wrote, and a decision somebody made outranks a rule's
+    #: guess. A reader is told the group exists and is not offered, which is all
+    #: they can act on. Which decision it was is deliberately not said, because
+    #: that is somebody else's row.
+    #:
+    #: A single merge ignores it and keeps whichever name the person picked.
+    #: This is what `POST /authors/merge/batch` would use, which is why it is
+    #: here rather than on a second endpoint answering the same question.
+    keep_name: str | None = None
 
 
 class AuthorMergeRequest(BaseModel):
@@ -339,3 +388,109 @@ class AuthorMergeRequest(BaseModel):
         if not author_key(cleaned):
             raise ValueError("An author needs a name with a letter or a digit in it.")
         return cleaned
+
+
+class AuthorMergeGroup(BaseModel):
+    """One group inside a batch: fold these spellings into one of them.
+
+    **`keep_name` has to be one of the group's own names, and that is the whole
+    difference from `AuthorMergeRequest`.** A single merge accepts a name no
+    Book carries, which is the catalogue order repair and is the point of it. A
+    batch may not, and that refusal is what keeps the groups independent: every
+    group then writes rows pointing at a key inside itself, so a group cannot
+    fold away the name another group in the same request is keeping, and
+    validating each group against the state the batch started in stays honest
+    for every one of them. It rests on a rule rather than on care, and the rule
+    is enforced below: `test_a_name_none_of_them_has_is_refused` and
+    `test_one_spelling_in_two_groups_is_refused` are the two halves of it.
+
+    Nothing is lost. The preview only ever proposes one of the group's own
+    names, and a typed name is one selection and one field away on the same
+    page.
+
+    Two names minimum, because a group of one folds nothing: that is a rename,
+    which is the single merge's job and reads as an accident here.
+    """
+
+    keys: Annotated[
+        list[AuthorKeyField],
+        Field(min_length=2, max_length=MAX_MERGE_KEYS),
+    ]
+    keep_name: Annotated[str, StringConstraints(min_length=1, max_length=AUTHOR_NAME_MAX)]
+
+    @model_validator(mode="after")
+    def keep_one_of_them(self) -> AuthorMergeGroup:
+        """The kept name is one of the keys, compared the way the write compares.
+
+        On `author_key` rather than on the string, because that is what the
+        alias row is keyed on: a caller sending the display name `J.R.R.
+        Tolkien` for the key `j r r tolkien` is naming the same person, and
+        refusing it would make the field a key field with a misleading name.
+        """
+        if author_key(self.keep_name) not in {author_key(key) for key in self.keys}:
+            raise ValueError("A batch keeps one of the group's own names.")
+        return self
+
+
+class AuthorMergeBatchRequest(BaseModel):
+    """Fold several groups at once, each exactly as one merge folds one.
+
+    **What a Member confirmed, not what the matcher proposed.** The server does
+    not re-derive the groups from a matcher at write time: it applies the list
+    in front of the person who pressed the button, which is what makes the
+    preview a review rather than a decoration. Every group is checked against
+    the rule that a decision already standing is never repointed, and one group
+    failing it refuses the whole request.
+
+    Bounded twice, and the two bounds answer different questions.
+    `MAX_SUGGESTIONS` is how many groups, because a batch cannot honestly exceed
+    what a preview can offer. `MAX_BATCH_KEYS` is how many spellings, because
+    that is what is written.
+    """
+
+    groups: Annotated[
+        list[AuthorMergeGroup],
+        Field(min_length=1, max_length=MAX_SUGGESTIONS),
+    ]
+
+    @field_validator("groups")
+    @classmethod
+    def disjoint_and_bounded(cls, value: list[AuthorMergeGroup]) -> list[AuthorMergeGroup]:
+        """Refuse a batch that contradicts itself, or that is bigger than the cap.
+
+        **Two groups naming one spelling are two answers to "who is this".**
+        Applied in order they would not fail: the second would quietly win, and
+        which one that is depends on the order somebody's client happened to
+        send. A preview cannot produce this, because grouping is a union find
+        and its groups are disjoint by construction, so a request carrying it
+        was written by hand and the honest answer is 422 rather than a silent
+        precedence rule.
+
+        Compared on `author_key`, not on the raw string, because that is what
+        the write is keyed on: `J.R.R. Tolkien` in one group and `J. R. R.
+        Tolkien` in another are one key and therefore one contradiction.
+        """
+        seen: set[str] = set()
+        total = 0
+        for group in value:
+            for key in group.keys:
+                normalised = author_key(key)
+                if normalised in seen:
+                    raise ValueError("A spelling may only appear in one group.")
+                seen.add(normalised)
+                total += 1
+        if total > MAX_BATCH_KEYS:
+            raise ValueError(f"A batch may fold at most {MAX_BATCH_KEYS} spellings.")
+        return value
+
+
+class AuthorBatchMergeOut(BaseModel):
+    """Every author the batch left standing, one per group it applied.
+
+    The same `AuthorOut` the single merge answers with, once per group, so a
+    client renders one shape rather than two. There is no per group outcome
+    field because there are no per group outcomes: the batch is one transaction
+    and either all of it happened or none of it did.
+    """
+
+    merged: list[AuthorOut] = Field(default_factory=list)

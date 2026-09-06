@@ -4,6 +4,8 @@ import AdminSettings from "../components/AdminSettings";
 import SettingsSubPage from "../components/SettingsSubPage";
 import ToggleField from "../components/ToggleField";
 import { useSettings } from "../hooks";
+import CatalogueLoginsSection from "./components/CatalogueLoginsSection";
+import CredentialKeySection from "./components/CredentialKeySection";
 import GoogleBooksSection from "./components/GoogleBooksSection";
 import ProviderSection from "./components/ProviderSection";
 
@@ -35,6 +37,13 @@ export default function CatalogueSettingsPage() {
         {(settings) => (
           <>
             <ProviderSection settings={settings} onSave={state.save} />
+
+            {/* Logins first, the key they are sealed with beneath them: the
+                notice on an unreadable login points down at it, and a key with
+                nothing to protect is not what anybody came here for. */}
+            <CatalogueLoginsSection settings={settings} />
+
+            <CredentialKeySection settings={settings} />
 
             <GoogleBooksSection
               settings={settings}

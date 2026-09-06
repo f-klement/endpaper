@@ -36,6 +36,7 @@ from sqlalchemy import Date, DateTime, Table, delete
 from sqlalchemy.orm import Session
 
 import covers
+import credentials
 import filing
 import settings_store
 from config import COVERS_DIR
@@ -44,6 +45,7 @@ from models import (
     AuthorAlias,
     AuthorIdentifier,
     Book,
+    CatalogueCredential,
     CatalogueTarget,
     Classification,
     Collection,
@@ -179,6 +181,33 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # an archive written before this restores with none, which is the state
         # it was written in.
         ("catalogue_targets", CatalogueTarget),
+        # The sealed catalogue logins, straight after the rows they hang off.
+        # No foreign key between them, so the position is free; here because
+        # reading one without the other is meaningless.
+        #
+        # **This is the table that makes the archive safe to hand around, and
+        # the one that makes a restore onto a new machine incomplete.** The
+        # column holds ciphertext and the key is never in the database, so
+        # `endpaper.json` carries a credential nobody can use without a key the
+        # archive does not contain. That is the whole design and it is strictly
+        # better than the plaintext this feature started as.
+        #
+        # **The same property is the trap on a machine nobody administers.** A
+        # restore onto a new laptop, or onto the same one after a reinstall,
+        # brings these rows back unreadable unless the person still has the
+        # recovery phrase: the key lives in that machine's keychain or in a file
+        # under `DATA_DIR`, and neither travels in the zip. "Keep your key safe"
+        # is not a plan for somebody who double clicked an installer, which is
+        # why the phrase exists at all and why the settings screen says this
+        # beside the field rather than only here. `RestoreResult` counts these
+        # rows for the reason it counts `author_aliases`: silently restoring
+        # none leaves a library whose sources look configured and answer with an
+        # authentication error.
+        #
+        # Absent from `_REQUIRED_TABLES`, like every table added after
+        # `FORMAT_VERSION` 1: an archive written before this restores with none,
+        # which is the state it was written in.
+        ("catalogue_credentials", CatalogueCredential),
         ("settings", Setting),
     )
 )
@@ -408,6 +437,43 @@ def _parse_row(
                 f"{repr(number)[:120]}"
             )
         parsed["sort_key"] = filing.sort_key_for(parsed.get("scheme"), number)
+
+    # The fifth, and the one whose failure is a 500 rather than a wrong value.
+    # `ck_catalogue_credentials_envelope` refuses anything that is not an
+    # envelope, which is what stands between a hand-edited archive and a
+    # plaintext password being sent to a catalogue. But a CHECK fires as
+    # `IntegrityError`, which is not `RestoreError`, so the route answered 500
+    # where this module's docstring promises 400. Exactly the shape the `tags`
+    # arm above records for a colliding key.
+    #
+    # **The rule is asked of the module that owns the format, not restated.**
+    # `credentials.generation_of` answers empty for anything that is not a
+    # version this build knows, so the constraint and this check cannot drift
+    # into two definitions of "an envelope". The constraint stays as the last
+    # line, for a write that never comes through here.
+    #
+    # No value in the message: the column holds a secret, and an archive whose
+    # row is not an envelope holds whatever a person put there.
+    if table.name == "catalogue_credentials":
+        if not credentials.generation_of(str(parsed.get("envelope") or "")):
+            raise RestoreError(
+                f"A row in {table.name!r} does not carry an encrypted credential."
+            )
+        # **The key travels too, and that is newer than the column.** The
+        # settings screen is sent the source of any login it cannot open so
+        # somebody can remove it, and a client puts that value in a URL path.
+        # A hand-edited archive naming a source of `../../books/5?` steered an
+        # admin's own authenticated DELETE at another route. Refused here for
+        # the 400, and by `ck_catalogue_credentials_source` for the write that
+        # does not come through here.
+        #
+        # The value is in the message because it is not a secret and is the
+        # only thing that identifies the bad row, unlike the envelope above.
+        if not credentials.is_safe_source(str(parsed.get("source") or "")):
+            raise RestoreError(
+                f"A row in {table.name!r} names a source that is not a catalogue: "
+                f"{str(parsed.get('source'))[:60]!r}"
+            )
     return parsed
 
 
