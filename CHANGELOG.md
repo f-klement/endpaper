@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.13.0
+
+_2026-09-06_
 
 ### Added
 
@@ -199,6 +201,29 @@ byte identical, which is about the schema and was never about this.
   counted when it was taken.
 
 ### Fixed
+
+- **The guard that recomputes a roster count in prose now reads every document the
+  repository versions.** It walked seven globs, which reached 19 of the 42 Markdown
+  documents in the tree and left four of the eighteen the published mirror carries with no
+  verdict at all, including both test coverage registers. A document written in a directory
+  nobody had listed was a document nothing checked. The walk is now what the repository
+  versions minus what cannot hold prose about this application, so a document added
+  tomorrow is judged by the commit that creates it.
+- **A number in one table column no longer claims the roster noun in the next.** The claim
+  grammar read across a cell boundary, so a row's test count and the sentence beside it read
+  as one phrase.
+
+- **Ten more of the column names real exports write are recognised, so less of a file is
+  thrown away.** Open Library's `My Ratings` and `First Publish Year`, BookWyrm's
+  `review_content`, Libib's `creators`, `upc_isbn10`, `ean_isbn13`, `completed_date` and
+  `length_of`, a bare `completed` beside that last one, and Openreads' `book_format` and its
+  `planned` shelf. Two had to go in a position rather than at the end: `length of` stands
+  before the bare `length`, which on a LibraryThing export is a shelf dimension, and
+  `my ratings` stands with `my rating` rather than after the bare `rating`, which on a site
+  publishing an average is the crowd's number. Open Library and BookWyrm are complete on
+  names alone; LibraryThing and Libib are not, and Openreads only partly, because those
+  files carry things no candidate name can reach. The Libib names are read off that vendor's
+  import template rather than off an export, and the importer says so beside them.
 
 - **The CSV importer's column priority is the candidate list's, not the file's.**
   `build_mapping` iterated the file's headers, so the same two columns in the other order

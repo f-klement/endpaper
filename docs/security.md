@@ -1192,6 +1192,11 @@ credential carries and answers nothing anywhere else. The header is never set on
 client, which is the arrangement neither guard could see. Both halves of the credential are
 `repr=False` with `__str__` overridden, so a `logger.exception` cannot print one.
 
+**A login is resolved by the route that is about to ask, never by the module that makes the
+request**, because that module reaches no database. The route hands down a mapping of source
+to credential, and the module states what it needs of one by taking a protocol rather than
+the store's class, so nothing that sends a request can read the store that holds it.
+
 **A source is a closed value, because it travels.** The key section is sent the source of
 any login it cannot open so that somebody can remove one, and a client puts that value in a
 URL path. `catalogue_credentials` carries no foreign key and a restore inserts through Core,

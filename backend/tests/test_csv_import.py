@@ -184,6 +184,19 @@ class TestColumnGuessing:
     def test_matching_ignores_case_and_separators(self):
         assert build_mapping(["TITLE", "date_read"])["date_read"] == "date_read"
 
+    def test_completed_is_a_header_in_one_table_and_a_cell_value_in_the_other(self):
+        """`COLUMN_GUESSES` is matched against headers, `STATUS_GUESSES` against cells.
+
+        The word is in both. Conflating the two namespaces would read a header
+        row as a status, or leave a `Completed` column unmapped because the
+        word was spoken for.
+        """
+        mapping = build_mapping(["Title", "Completed"])
+
+        assert mapping["date_read"] == "Completed"
+        assert mapping["status"] is None
+        assert match_status("Completed") is ReadStatus.READ
+
 
 class TestTheCandidateTableIsWellFormed:
     """Two properties of `COLUMN_GUESSES` that nothing else can observe.
@@ -482,6 +495,24 @@ class TestTheCandidateListSetsPriority:
     def test_a_page_count_beats_a_column_that_holds_a_shelf_dimension(self):
         assert build_mapping(["Title", "Length", "Page Count"])["pages"] == "Page Count"
 
+    def test_a_length_of_column_beats_a_bare_length_column(self):
+        """The position `length of` was added in, asserted rather than described.
+
+        Appending it after `length` passes every Libib test, because no Libib
+        file carries both. This is the file that tells the two apart, and it is
+        what stops the next reader tidying the name to the end of the list.
+        """
+        assert build_mapping(["Title", "Length", "length_of"])["pages"] == "length_of"
+
+    def test_the_members_own_ratings_column_beats_a_bare_rating_column(self):
+        """The other position, and the same diagonal.
+
+        `My Ratings` after `rating` in the candidate list would hand this field
+        the `Rating` column, which is where a site that publishes an average
+        puts everyone else's number.
+        """
+        assert build_mapping(["Title", "Rating", "My Ratings"])["rating"] == "My Ratings"
+
     def test_a_librarything_row_keeps_its_page_count(self):
         """What the defect cost on a real file: 471 pages read as 5."""
         [row] = parse(LIBRARYTHING_DIMENSIONS).rows
@@ -637,11 +668,6 @@ class TestOpenLibraryReadingLog:
             parse(OPEN_LIBRARY_2021)
         assert "Work Id" in str(error.value)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="The column is `My Ratings`; the candidate is `my rating`.",
-    )
     def test_the_members_own_rating_is_read(self):
         [row] = parse(OPEN_LIBRARY).rows
         assert row.rating == 5
@@ -656,11 +682,6 @@ class TestOpenLibraryReadingLog:
         """
         assert build_mapping(["Title", "Rating", "My Rating"])["rating"] == "My Rating"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`First Publish Year` is not a year candidate.",
-    )
     def test_the_publication_year_is_read(self):
         [row] = parse(OPEN_LIBRARY).rows
         assert row.year == 1969
@@ -681,11 +702,6 @@ class TestBookWyrmExport:
         shelves = ["to-read", "currently-reading", "read", "stopped-reading"]
         assert all(match_status(shelf) is not None for shelf in shelves)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`review_content` is not one of the notes candidates.",
-    )
     def test_the_review_becomes_the_note(self):
         [row] = parse(BOOKWYRM).rows
         assert row.notes == "An ocean that thinks."
@@ -708,60 +724,69 @@ class TestLibibsCurrentVocabulary:
         assert row.publisher == "Harper"
         assert row.year == 1974
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="The column is `creators`, plural.",
-    )
     def test_the_author_is_read(self):
         [row] = parse(LIBIB_TEMPLATE).rows
         assert row.author == "Ursula K. Le Guin"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`upc_isbn10` and `ean_isbn13` are not candidates.",
-    )
     def test_the_isbn_is_read(self):
-        """Without this and the author, a Libib row is a bare title."""
-        [row] = parse(LIBIB_TEMPLATE).rows
+        """Without this and the author, a Libib row is a bare title.
+
+        **The mapping is asserted beside the value, because the value cannot
+        say which column produced it.** `parse` builds `isbn` from
+        `parse_isbn(cell("isbn13")) or parse_isbn(cell("isbn"))`, so dropping
+        `ean isbn13` leaves the file's own 13 ignored and this same string
+        rebuilt from the 10, silently.
+
+        **`status` is the other field fed by two columns**, and by control flow
+        rather than by an expression: `parse` derives READ from a parsed
+        `date_read` when the status column matched nothing. A test asserting a
+        derived status has the same blind spot, which is what
+        `test_the_status_word_is_recognised_rather_than_inferred_from_the_date`
+        answers, by taking the date away. Every other field reads one column.
+
+        Deleting either assertion below stops this test seeing the candidate it
+        is named for.
+        """
+        parsed = parse(LIBIB_TEMPLATE)
+        assert parsed.mapping["isbn13"] == "ean_isbn13"
+        assert parsed.mapping["isbn"] == "upc_isbn10"
+        [row] = parsed.rows
         assert row.isbn == "9780441478125"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`completed_date` is not a date candidate.",
-    )
+    def test_the_status_word_is_recognised_rather_than_inferred_from_the_date(self):
+        """`Completed` read from the status column, on a row with no date.
+
+        The template carries a status and a completed date, and `parse` derives
+        READ from a parsed date whenever the status column matched nothing, so
+        `test_the_columns_that_match` cannot tell the two routes apart. This
+        row empties the date, which is the only shape that can: the status has
+        to carry itself.
+
+        Asking `match_status` directly instead would test the vocabulary rather
+        than this file, and the vocabulary is already asked in
+        `TestColumnGuessing`.
+        """
+        no_date = LIBIB_TEMPLATE.replace(b",2026-02-06,", b",,")
+
+        [row] = parse(no_date).rows
+        assert row.date_read is None
+        assert row.status is ReadStatus.READ
+
     def test_the_completed_date_is_the_date_read(self):
         [row] = parse(LIBIB_TEMPLATE).rows
         assert row.date_read is not None and row.date_read.year == 2026
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`length_of` is not a pages candidate.",
-    )
     def test_the_page_count_is_read(self):
         [row] = parse(LIBIB_TEMPLATE).rows
         assert row.pages == 304
 
 
-class TestOpenreadsGaps:
+class TestOpenreads:
     """From `bookwyrm/tests/data/openreads-csv-example.csv`, committed 2025-03-31."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`planned` is not in the want to read list.",
-    )
     def test_planned_is_a_book_somebody_wants_to_read(self):
         assert match_status("planned") is ReadStatus.WANT_TO_READ
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="`book_format` is not a format candidate.",
-    )
     def test_the_book_format_column_is_found(self):
         assert build_mapping(["title", "book_format"])["format"] == "book_format"
 

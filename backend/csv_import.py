@@ -69,20 +69,34 @@ MAX_NEW_TAGS_PER_IMPORT: Final = 200
 #: because that is the form headers are reduced to before matching. A guess
 #: spelled `publish_date` can never match anything.
 #:
-#: Drawn from the real exports: Goodreads, LibraryThing, StoryGraph, Libib,
-#: Openreads and this app's own. Adding a service is usually adding a name
-#: here rather than writing any code.
+#: Drawn from the services people arrive from: Goodreads, LibraryThing,
+#: StoryGraph, Libib, Openreads, Open Library, BookWyrm and this app's own.
+#: Adding a service is usually adding a name here rather than writing any code.
+#:
+#: **The Libib names are read off that vendor's import template rather than off
+#: an export**, so they stand on the assumption that its export writes the
+#: template's column names, and nothing has confirmed that. Which artefact each
+#: name was quoted from, and when, is beside the fixture in
+#: `tests/test_csv_import.py`.
 COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("title", ("title", "book title", "name")),
     (
         "author",
-        ("author", "authors", "author text", "primary author", "creator", "by"),
+        (
+            "author",
+            "authors",
+            "author text",
+            "primary author",
+            "creator",
+            "creators",
+            "by",
+        ),
     ),
     # `ean` belongs to the 13: an EAN printed on a book is its ISBN-13. Which
     # of the two fields a row ends up using is `parse`'s decision, not this
     # order's, and it is stated at that site.
-    ("isbn13", ("isbn13", "isbn 13", "isbns", "ean")),
-    ("isbn", ("isbn", "isbn10", "isbn 10", "isbn/uid", "uid")),
+    ("isbn13", ("isbn13", "isbn 13", "isbns", "ean isbn13", "ean")),
+    ("isbn", ("isbn", "isbn10", "isbn 10", "upc isbn10", "isbn/uid", "uid")),
     # Specific names before generic ones: `shelf` and `collections` are what a
     # file calls a shelf when it has no status column at all, so a file
     # carrying both gives this field the one that really is the status.
@@ -105,9 +119,19 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "bookshelf",
         ),
     ),
-    ("rating", ("my rating", "star rating", "your rating", "rating")),
+    # `my ratings` is Open Library's spelling, and it stands with `my rating`
+    # rather than at the end for the reason `my rating` is first: the member's
+    # own number beats a column that may hold everyone's. Deliberately not a
+    # loose `ratings`, which would claim a column named exactly that, and on a
+    # site publishing an average that column is the crowd's count.
+    ("rating", ("my rating", "my ratings", "star rating", "your rating", "rating")),
     # The key stays `date_read`: it names the field on `ImportRow`, and only
     # the candidate strings are normalised.
+    #
+    # `completed` is a header name here and a READ value in `STATUS_GUESSES`.
+    # Those are separate namespaces: this table is matched against the header
+    # row and that one against a cell, so a file with a `Completed` column and
+    # a `Completed` status value fills both fields and neither reads the other.
     (
         "date_read",
         (
@@ -117,6 +141,8 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "finish date",
             "finished",
             "read date",
+            "completed date",
+            "completed",
         ),
     ),
     ("publisher", ("publisher", "publishers")),
@@ -125,16 +151,25 @@ COLUMN_GUESSES: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
         (
             "year published",
             "original publication year",
+            "first publish year",
             "publication year",
             "publish date",
             "date published",
             "year",
         ),
     ),
-    ("pages", ("number of pages", "page count", "pages", "length")),
-    ("format", ("format", "binding", "edition format", "media")),
+    # `length of` stands **before** `length`, not after it. The bare `length`
+    # is a page count in some files and the shelf dimension this module's
+    # docstring names in a LibraryThing export, while Libib's `length_of` is
+    # only ever a page count. Appending it hands a file carrying both the
+    # dimension, and no Libib file carries both, so nothing else notices.
+    ("pages", ("number of pages", "page count", "pages", "length of", "length")),
+    ("format", ("format", "binding", "edition format", "book format", "media")),
     ("tags", ("bookshelves", "tags", "genres", "labels")),
-    ("notes", ("my review", "review", "private notes", "notes", "comments")),
+    (
+        "notes",
+        ("my review", "review content", "review", "private notes", "notes", "comments"),
+    ),
 )
 
 #: Their status vocabularies, mapped onto ours. Lower case, exact match after
@@ -164,6 +199,7 @@ STATUS_GUESSES: Final[dict[ReadStatus, tuple[str, ...]]] = {
         "tbr",
         "not begun",
         "plan to read",
+        "planned",
         "moechte ich lesen",
     ),
     # Goodreads and StoryGraph both express this, as a custom shelf and as a

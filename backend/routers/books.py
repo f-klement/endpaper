@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 import authority
 import catalogue
 import covers
+import credentials
 import custom_fields
 import ddc
 import google_books
@@ -23,6 +24,8 @@ import isbn as isbn_utils
 import marc
 import metadata
 import settings_store
+import sources
+import targets
 from auth import require_admin
 from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
 from authorship import (
@@ -55,6 +58,7 @@ from enums import (
     BookFormat,
     BookSort,
     BulkAction,
+    CatalogueSource,
     ClassificationScheme,
     ExportFormat,
     LendingWillingness,
@@ -396,6 +400,47 @@ def delete_custom_field(
     logger.info("Deleted custom field %r and %d value(s) under it", name, removed)
 
 
+def _catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
+    """The login each catalogue's request will carry, resolved before it is made.
+
+    **Resolved here rather than in `metadata`, and that is the same rule the
+    Google Books key follows.** `metadata` builds every outbound catalogue
+    request and reaches no database; opening a sealed row there would put the
+    ORM behind every request to every catalogue. So this answers "what will the
+    next request send", which is `credentials.for_request`'s own question, and
+    hands the answer over as an argument.
+
+    **Only the targets whose door carries one**, which is
+    `metadata.carries_a_credential` and is asked rather than restated here: the
+    rule and this loop must not be able to disagree about which rows to resolve,
+    because a row skipped here is a request that goes out unauthenticated with
+    nothing saying so.
+
+    **It costs nothing on today's roster and it is not free**, and the second
+    half is the one to plan against. The loop runs per source declaring
+    `Capability.NEEDS_A_CREDENTIAL` whose door carries a login, and that is empty
+    today only because the sources declaring it are bespoke. Each turn resolves
+    the encryption key again: `credentials.for_request` takes no
+    `credentials.KeyState`, so a sealed source costs a keychain round trip and a
+    BIP-39 decode per key source held, on the path that adds a book.
+    `settings_store._sources_with_a_credential` resolves the key once for its own
+    loop and states why; this cannot until `for_request` takes a `KeyState`, which
+    is raised rather than taken here.
+
+    Written for the set rather than for its members because the next source to
+    declare that capability is the reason this plumbing exists.
+    """
+    resolved: dict[CatalogueSource, credentials.Credential] = {}
+    for source in sources.NEEDS_A_KEY:
+        target = targets.SEEDED[source]
+        if not metadata.carries_a_credential(target):
+            continue
+        login = credentials.for_request(db, source.value, target.base_url)
+        if login is not None:
+            resolved[source] = login
+    return resolved
+
+
 @router.get("/lookup", response_model=BookLookup)
 async def lookup_isbn(
     db: DbSession,
@@ -421,6 +466,7 @@ async def lookup_isbn(
         canonical,
         settings_store.google_books_api_key(db),
         plan=settings_store.catalogue_sources(db),
+        logins=_catalogue_logins(db),
     )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
@@ -657,7 +703,13 @@ async def search_books(
         raise HTTPException(**_no_sources("answer a title search"))
 
     found = await metadata.title_search(
-        q, api_key, limit=limit, prefer_language=lang, plan=plan, harder=harder
+        q,
+        api_key,
+        limit=limit,
+        prefer_language=lang,
+        plan=plan,
+        logins=_catalogue_logins(db),
+        harder=harder,
     )
 
     # Both read off what the fan out did rather than off `harder`, which is only
@@ -3341,6 +3393,7 @@ async def refresh_metadata(book: BookForWrite, db: DbSession, current_user: Curr
         lookup_key,
         settings_store.google_books_api_key(db),
         plan=settings_store.catalogue_sources(db),
+        logins=_catalogue_logins(db),
     )
     if not result.found:
         raise HTTPException(**_lookup_failure(result))
@@ -3633,6 +3686,9 @@ async def enrich_book(
     plan = settings_store.catalogue_sources(db)
     if not plan.asked:
         raise HTTPException(**_no_sources())
+    # Resolved once for the same reason `plan` is: this handler reaches outward
+    # more than once and must not be able to send a different login each time.
+    logins = _catalogue_logins(db)
 
     # `as_match()` on both paths, and it carries no Classifications by
     # construction. That is ADR 0006 held by the type rather than by this
@@ -3641,7 +3697,7 @@ async def enrich_book(
     assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
     recorded = RecordedAssertions(stored=[], refused=[])
     if book.isbn:
-        result = await metadata.lookup(book.isbn, api_key, plan=plan)
+        result = await metadata.lookup(book.isbn, api_key, plan=plan, logins=logins)
         # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
         # test for the record. This is the third consumer of a `Lookup` and the
         # only one that writes to a Book without telling the Member why nothing
@@ -3665,7 +3721,9 @@ async def enrich_book(
     if fields is None:
         # No ISBN, or no catalogue carries this edition under it.
         query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await metadata.search(query, api_key, limit=1, plan=plan)
+        matches = await metadata.search(
+            query, api_key, limit=1, plan=plan, logins=logins
+        )
         if matches:
             fields = matches[0].as_match()
 
@@ -3805,6 +3863,7 @@ async def enrichment_candidates(
         limit=5,
         prefer_language=book.language,
         plan=plan,
+        logins=_catalogue_logins(db),
     )
     return _match_rows(matches, all_tags=None)
 

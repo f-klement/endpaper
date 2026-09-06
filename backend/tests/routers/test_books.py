@@ -6,12 +6,16 @@ the suite never touches the network.
 
 import csv
 import io
+from base64 import b64encode
 
 import httpx
 import pytest
 import respx
 
 import catalogue
+import credentials
+import sources
+from enums import CatalogueSource
 from models import (
     DESCRIPTION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
@@ -1357,3 +1361,102 @@ class TestTheCostOfAListing:
             "the cost moves with the page, which is the N+1 this exists to catch"
         )
         assert long_cost == 11, f"{long_cost} selects for 25 books"
+
+
+class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
+    """The route resolves a stored login and the catalogue receives it.
+
+    **The end #209 was actually about.** `metadata` threading a credential is
+    only half of it: nothing resolved one, so a login could be sealed, reported
+    as held on the settings screen and counted as making its source ready while
+    every request went out unauthenticated.
+    `test_metadata.py::TestACatalogueLoginReachesTheRequestItWasStoredFor` pins
+    the other half.
+
+    **A roster with a credentialled SRU source, because the real one has none.**
+    `sources.NEEDS_A_KEY` holds Google Books, which is bespoke and whose secret
+    is a settings row, so on today's rows the resolver has nothing to find and a
+    test against them would pass with the wiring deleted. The DNB stands in for
+    the source #180 exists to add.
+
+    **Pinned in the environment rather than sealed**, which needs no encryption
+    key and no keychain: `credentials.for_request` prefers the pinned value
+    anyway, so this exercises the same resolution the settings screen reports.
+    """
+
+    ISBN = "9783960092353"
+    SENT = "Basic " + b64encode(b"alice:hunter2").decode()
+
+    def _asked_the_dnb(self, mock) -> list[httpx.Request]:
+        sent = [
+            call.request
+            for call in mock.calls
+            if str(call.request.url).startswith(DNB)
+        ]
+        assert sent, "the DNB was never asked, so the headers say nothing"
+        return sent
+
+    def test_a_login_this_deployment_holds_reaches_the_catalogue(
+        self, client, admin, dnb_hit, monkeypatch
+    ):
+        monkeypatch.setattr(
+            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB})
+        )
+        monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
+
+        res = client.get(
+            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        for request in self._asked_the_dnb(dnb_hit):
+            assert request.headers.get("authorization") == self.SENT
+
+    def test_a_catalogue_needing_no_login_is_asked_anonymously(
+        self, client, admin, dnb_hit
+    ):
+        """The arm that makes the one above evidence rather than a tautology.
+
+        Nothing is patched here, so this is the roster as it ships.
+        """
+        res = client.get(
+            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        for request in self._asked_the_dnb(dnb_hit):
+            assert "authorization" not in request.headers
+
+    def test_a_login_held_for_another_catalogue_reaches_nothing(
+        self, client, admin, dnb_hit, monkeypatch
+    ):
+        """A login resolved for K10plus is not attached to the DNB's request.
+
+        The refusal is the credential's own origin binding, reached here through
+        the route, so a resolver that handed every source the same entry fails.
+        K10plus is asserted to have received it, or this passes on a login that
+        was never resolved at all.
+        """
+        monkeypatch.setattr(
+            sources, "NEEDS_A_KEY", frozenset({CatalogueSource.K10PLUS})
+        )
+        monkeypatch.setenv(
+            credentials.env_variable_name("k10plus"), "alice:hunter2"
+        )
+
+        res = client.get(
+            "/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        for request in self._asked_the_dnb(dnb_hit):
+            assert "authorization" not in request.headers
+        asked = [
+            call.request
+            for call in dnb_hit.calls
+            if str(call.request.url).startswith(K10PLUS)
+        ]
+        assert asked, "K10plus was never asked, so its login was never resolved"
+        for request in asked:
+            assert request.headers.get("authorization") == self.SENT
+

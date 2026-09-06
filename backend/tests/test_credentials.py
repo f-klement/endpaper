@@ -646,39 +646,76 @@ class TestTheKeyIsResolvedOncePerCaller:
         assert "Different encryption keys" in state.problem
 
 
-class TestAStoredCredentialCannotBeReportedReadyWhileNothingSendsIt:
-    """A guard against a gap that is empty today and silent when it is not.
+def _carries_a_sealed_login(source: CatalogueSource) -> bool:
+    """Whether a request to this source would actually carry a sealed login.
 
-    `credentials.for_request` has no production caller: `metadata.py` builds
-    every catalogue request and does not pass a credential yet, which is
-    correct while no roster target needs one. The day a target declares
-    `NEEDS_A_CREDENTIAL`, `ready_sources` switches that source on, the settings
-    screen reports a login as held, and every request goes out unauthenticated
-    with nothing saying so. That wiring is in a file this seat does not own, so
-    it is raised rather than taken (#209); this is what stops it being
-    discovered by a member instead.
+    **Asks `metadata.carries_a_credential` rather than spelling the rule again.**
+    It was spelled again, and that was a defect of exactly the kind this class
+    guards: `routers/books.py` skips the rows the rule rejects, so a second copy
+    here means the day a transport starts carrying a login the red test below
+    demands an edit to *this* copy, which greens the suite while the router goes
+    on skipping the row and the request goes on unauthenticated.
 
-    **Two weaknesses, named because a guard nobody has attacked is not
-    evidence.** It asserts a **signature and not a send**: a `_lookup_one` that
-    accepts `credential` and drops it passes. And **its body has never
-    executed**, because the set it guards is empty on every commit so far, so
-    neither the assertion nor its message has been observed failing. It is a
-    tripwire on the day the set grows, not a proof about today.
+    A module level function rather than a line inside the roster check, so the
+    rule can be put to a row directly. That is the only way either verdict is
+    ever observed while the set the check reads is empty.
+    """
+    import metadata
+    import targets
+
+    return metadata.carries_a_credential(targets.SEEDED[source])
+
+
+class TestASealedLoginNeedsATransportThatCarriesIt:
+    """The residual of #209, which threaded a login down the SRU door only.
+
+    `routers/books.py` resolves a login per source and `metadata` passes it to
+    `fetch.get_once`, so the gap this class was opened for is closed and
+    `test_metadata.py::TestACatalogueLoginReachesTheRequestItWasStoredFor` is the
+    send that proves it. What is left is the door a login does **not** go
+    through: a row declaring `Capability.NEEDS_A_CREDENTIAL` whose secret is a
+    sealed login and whose transport is bespoke would be resolved by the router
+    and dropped by `metadata._lookup_one`, silently, exactly as before.
+
+    **It cannot be refused in `metadata.resolve`**, which is where a row naming a
+    capability nothing can serve is turned away at boot. Which store a source's
+    secret lives in is `settings_store._SECRET_IS_A_SETTINGS_ROW`, and #210 is
+    open to make it a capability on the row. Until it is, `resolve` cannot tell a
+    sealed login from an API key and this is the tripwire instead.
+
+    **The weakness the earlier version carried is gone.** It asserted a
+    signature, which a door accepting the argument and dropping it satisfied,
+    and its body never executed because the set it reads is empty. The rule is a
+    function now, so it is exercised against a target the roster has not got as
+    well as against the roster.
     """
 
-    def test_a_second_credentialled_source_needs_the_outbound_wiring_first(self):
-        import inspect
+    def test_a_bespoke_row_is_reported_as_carrying_nothing(self):
+        """The arm that runs today, and the reason the rule is not inline.
 
-        import metadata
+        Google Books is the roster's bespoke credentialled row. It is fine
+        because its secret is a settings row rather than a sealed login, which
+        is precisely the distinction this file cannot see and #210 exists for.
+        """
+        assert not _carries_a_sealed_login(CatalogueSource.GOOGLE_BOOKS)
+
+    def test_an_sru_row_is_reported_as_carrying_one(self):
+        """The other end of the diagonal, or the arm above passes on everything."""
+        assert _carries_a_sealed_login(CatalogueSource.DNB)
+
+    def test_every_source_needing_a_sealed_login_is_on_such_a_transport(self):
+        import settings_store
         import sources
 
-        sealed = sources.NEEDS_A_KEY - {CatalogueSource.GOOGLE_BOOKS}
+        sealed = sources.NEEDS_A_KEY - settings_store._SECRET_IS_A_SETTINGS_ROW
         if not sealed:
             pytest.skip("no roster source needs a sealed login yet")
-        signature = inspect.signature(metadata._lookup_one)
-        assert "credential" in signature.parameters, (
-            f"{sorted(source.value for source in sealed)} need a sealed login and "
-            "metadata still sends none"
+        stranded = sorted(
+            source.value for source in sealed if not _carries_a_sealed_login(source)
+        )
+        assert not stranded, (
+            f"{stranded} need a sealed login on a transport that sends none. "
+            "See #210."
         )
 
 

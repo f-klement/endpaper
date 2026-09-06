@@ -28,9 +28,11 @@ catalogue.
 
 import ast
 import asyncio
+import inspect
 import math
 import random
 import re
+from base64 import b64encode
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -40,6 +42,7 @@ import pytest
 import respx
 
 import covers
+import credentials
 import fetch
 import google_books
 import metadata
@@ -75,12 +78,14 @@ from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.helpers import (
     silence_bne,
+    silence_catalogues,
     silence_covers,
     silence_nkp,
     silence_nlg,
     silence_oenb,
     silence_open_library,
     silence_sru_catalogues,
+    sru_response,
 )
 
 #: The `backend/` directory, so a doc guard can reach the repository root.
@@ -117,7 +122,9 @@ def patch_lookup_adapters(
     a source the plan asks about should fail loudly rather than record a miss.
     """
 
-    async def door(target: Any, isbn: str, api_key: str) -> metadata.Lookup:
+    async def door(
+        target: Any, isbn: str, api_key: str, *, credential: Any = None
+    ) -> metadata.Lookup:
         return await table[target.source](isbn, api_key)
 
     monkeypatch.setattr(metadata, "_lookup_one", door)
@@ -127,7 +134,7 @@ def patch_lookup_adapters(
 def _nlg_search(query: str, limit: int):
     """The NLG's title search, which is now the shared SRU door plus a row."""
     return metadata._search_one(
-        targets.SEEDED[CatalogueSource.NLG], query, limit, ""
+        targets.SEEDED[CatalogueSource.NLG], query, limit, "", credential=None
     )
 
 
@@ -5050,7 +5057,9 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_RECORD))
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NLG], self.ISBN, "", credential=None
+            )
 
         assert result.record is not None
         assert [
@@ -5067,7 +5076,9 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_WRONG_BOOK))
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NLG], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.NOT_FOUND
 
@@ -5079,7 +5090,7 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             route = mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
-            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "")
+            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "", credential=None)
 
         assert route.calls[0].request.url.params["query"] == f"dc.isbn={self.ISBN}"
 
@@ -5088,7 +5099,9 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NLG).mock(return_value=_xml(NLG_EMPTY))
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NLG], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.NOT_FOUND
 
@@ -5102,7 +5115,9 @@ class TestTheNationalLibraryOfGreece:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=NLG).mock(return_value=_xml(article))
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NLG], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NLG], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.NOT_FOUND
 
@@ -5299,7 +5314,9 @@ class TestTheCzechNationalLibrary:
             mock.get(url__startswith=NKP).mock(
                 return_value=_xml(_nkp_envelope(NKP_RECORD))
             )
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.FOUND
         assert result.record is not None
@@ -5320,7 +5337,9 @@ class TestTheCzechNationalLibrary:
             mock.get(url__startswith=NKP).mock(
                 return_value=_xml(_nkp_envelope(NKP_RECORD, empty_stubs=19))
             )
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.FOUND
 
@@ -5334,7 +5353,9 @@ class TestTheCzechNationalLibrary:
             mock.get(url__startswith=NKP).mock(
                 return_value=_xml(_nkp_envelope(NKP_RECORD))
             )
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
 
         assert result.record is not None
         # `_flip_catalogue_name` puts the forename first and `_PERSON_NOISE`
@@ -5352,7 +5373,9 @@ class TestTheCzechNationalLibrary:
                     )
                 )
             )
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.NOT_FOUND
 
@@ -5373,7 +5396,7 @@ class TestTheCzechNationalLibrary:
             route = mock.get(url__startswith=NKP).mock(
                 return_value=_xml(NKP_EMPTY)
             )
-            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None)
 
         params = route.calls[0].request.url.params
         assert params["x-pquery"] == f'@attr 1=7 "{self.ISBN}"'
@@ -5386,7 +5409,7 @@ class TestTheCzechNationalLibrary:
             route = mock.get(url__startswith=NKP).mock(
                 return_value=_xml(NKP_EMPTY)
             )
-            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None)
 
         assert route.calls[0].request.url.params["maximumRecords"] == "1"
 
@@ -5402,7 +5425,9 @@ class TestTheCzechNationalLibrary:
             mock.get(url__startswith=NKP).mock(
                 return_value=_xml(_nkp_envelope(online))
             )
-            result = await metadata._lookup_one(targets.SEEDED[CatalogueSource.NKP], self.ISBN, "")
+            result = await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.NKP], self.ISBN, "", credential=None
+            )
 
         assert result.outcome is Outcome.NOT_FOUND
 
@@ -6035,7 +6060,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=host).mock(return_value=response)
-            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key")
+            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key", credential=None)
 
         assert result.outcome is Outcome.FOUND, (
             f"the {name} body no longer resolves, so this asserts nothing"
@@ -6057,7 +6082,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             mock.get(url__startswith=host).mock(return_value=response)
-            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key")
+            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key", credential=None)
 
         assert result.record is not None
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
@@ -7120,7 +7145,9 @@ class TestSearchingHarder:
         # One door now, so the recorder replaces it and reads the source off
         # the row rather than off a table key. Same question as before: which
         # catalogues were asked, and under which deadline.
-        async def door(target, query: str, limit: int, api_key: str) -> list[Record]:
+        async def door(
+            target, query: str, limit: int, api_key: str, *, credential: Any = None
+        ) -> list[Record]:
             return await recorder(target.source)(query, limit)
 
         monkeypatch.setattr(metadata, "_search_one", door)
@@ -7317,3 +7344,373 @@ class TestGoogleIdentifiersAreParsedRatherThanTrusted:
         record = metadata._google_record(self._fields("978-3-16-148410-0"))
 
         assert record.isbn == "9783161484100"
+
+
+class TestACatalogueLoginReachesTheRequestItWasStoredFor:
+    """A stored login is sent, to the catalogue it was stored for and nowhere else.
+
+    This is what #209 was: `credentials.for_request` had no production caller, so
+    a login could be sealed, reported as held and counted as making its source
+    ready while every request went out unauthenticated. The old guard for it
+    asserted a **signature**, and a door that accepted the argument and dropped
+    it would have passed.
+
+    **The real `credentials.Credential`, not a double.** The property under test
+    spans the resolver and the door: the origin binding is the secret's and the
+    attachment is `fetch`'s, and a double carrying a `header_for` of its own
+    would exercise neither. `metadata` still imports nothing from `credentials`,
+    which is the rule the ticket drew and `test_house_rules.py` is where an
+    import of it would be caught.
+    """
+
+    ISBN = "9783960092353"
+    #: RFC 7617 Basic for `alice:hunter2`, spelled out so the assertion is about
+    #: the bytes on the wire rather than about a re-run of the encoder.
+    SENT = "Basic " + b64encode(b"alice:hunter2").decode()
+
+    def _login(self, base_url: str) -> credentials.Credential:
+        return credentials.Credential(
+            credentials.origin_of(base_url), "alice", "hunter2"
+        )
+
+    async def _headers_the_dnb_saw(self, credential) -> httpx.Headers:
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=DNB).mock(return_value=sru_response())
+            silence_sru_catalogues(mock)
+            await metadata._lookup_one(
+                targets.SEEDED[CatalogueSource.DNB],
+                self.ISBN,
+                "",
+                credential=credential,
+            )
+        assert route.called
+        return route.calls.last.request.headers
+
+    async def test_a_login_for_this_catalogue_is_sent_with_its_lookup(self):
+        headers = await self._headers_the_dnb_saw(self._login(DNB))
+
+        assert headers["authorization"] == self.SENT
+
+    async def test_a_catalogue_with_no_login_is_asked_anonymously(self):
+        """The arm that makes the one above evidence rather than a tautology."""
+        headers = await self._headers_the_dnb_saw(None)
+
+        assert "authorization" not in headers
+
+    async def test_a_login_set_for_another_catalogue_is_withheld(self):
+        """A caller holding the wrong login sends no login, and not the wrong one.
+
+        The refusal is `credentials.Credential.header_for`'s and is exercised
+        here through the door rather than against it, because a door that pinned
+        the header to the client instead of computing it per hop would satisfy
+        that unit test and fail this.
+        """
+        headers = await self._headers_the_dnb_saw(self._login(K10PLUS))
+
+        assert "authorization" not in headers
+
+    async def test_a_title_search_carries_the_login_too(self):
+        """The search door, which reaches the same catalogues by another query."""
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=DNB).mock(return_value=sru_response())
+            silence_sru_catalogues(mock)
+            await metadata._search_one(
+                targets.SEEDED[CatalogueSource.DNB],
+                "praxiswissen docker",
+                5,
+                "",
+                credential=self._login(DNB),
+            )
+
+        assert route.called
+        assert route.calls.last.request.headers["authorization"] == self.SENT
+
+    async def test_a_lookup_hands_each_catalogue_the_login_stored_for_it(self):
+        """The mapping, which is the part a router fills in.
+
+        A login for the DNB and none for K10plus, so a door that took the mapping
+        and sent the same entry to everything in the fan out fails here.
+        """
+        with respx.mock(assert_all_called=False) as mock:
+            dnb = mock.get(url__startswith=DNB).mock(return_value=sru_response())
+            k10plus = mock.get(url__startswith=K10PLUS).mock(
+                return_value=sru_response()
+            )
+            silence_catalogues(mock)
+            await metadata.lookup(
+                self.ISBN,
+                "",
+                plan=ALL_SOURCES,
+                logins={CatalogueSource.DNB: self._login(DNB)},
+            )
+
+        assert dnb.called and k10plus.called
+        assert dnb.calls.last.request.headers["authorization"] == self.SENT
+        assert "authorization" not in k10plus.calls.last.request.headers
+
+    async def test_a_title_search_hands_each_catalogue_the_login_stored_for_it(self):
+        """The same mapping down the other path, which threads through `search`."""
+        with respx.mock(assert_all_called=False) as mock:
+            dnb = mock.get(url__startswith=DNB).mock(return_value=sru_response())
+            k10plus = mock.get(url__startswith=K10PLUS).mock(
+                return_value=sru_response()
+            )
+            silence_catalogues(mock)
+            await metadata.search(
+                "praxiswissen docker",
+                "",
+                plan=ALL_SOURCES,
+                logins={CatalogueSource.DNB: self._login(DNB)},
+            )
+
+        assert dnb.called and k10plus.called
+        assert dnb.calls.last.request.headers["authorization"] == self.SENT
+        assert "authorization" not in k10plus.calls.last.request.headers
+
+
+def _metadata_calls(source: str, doors: frozenset[str]) -> list[tuple[str, int, bool]]:
+    """Every call to one of `doors` in this source, and whether it carries `logins`.
+
+    **Keyed on the module, never on the local binding.** `import metadata as m`
+    binds `m`, and a walk testing the spelling `metadata` walks past it. Same
+    reasoning, and the same recorded evasion, as `test_marc.py::_private_reads`.
+
+    **`from metadata import lookup` reaches the same door by the other route**,
+    where the call is a bare `ast.Name` and there is no attribute to match at
+    all. The first version of this saw neither shape.
+
+    `doors` is passed in rather than derived here, so this answers about a
+    subject somebody else pinned. Deriving it from the entry points that already
+    take `logins` is what made the first version green under the evasion it
+    exists to catch.
+    """
+    tree = ast.parse(source)
+    aliases = {
+        (alias.asname or alias.name.split(".")[0])
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name.split(".")[0] == "metadata"
+    }
+    bound = {
+        (alias.asname or alias.name): alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.split(".")[0] == "metadata"
+        for alias in node.names
+        if alias.name in doors
+    }
+    found: list[tuple[str, int, bool]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func
+        if (
+            isinstance(called, ast.Attribute)
+            and isinstance(called.value, ast.Name)
+            and called.value.id in aliases
+            and called.attr in doors
+        ):
+            door = called.attr
+        elif isinstance(called, ast.Name) and called.id in bound:
+            door = bound[called.id]
+        else:
+            continue
+        found.append(
+            (door, node.lineno, any(word.arg == "logins" for word in node.keywords))
+        )
+    return found
+
+
+def _wrapped(body: str) -> str:
+    """An evasion as a module the parser accepts: `await` needs a coroutine."""
+    imports, _, call = body.partition("\n")
+    return f"{imports}\n\n\nasync def route(i, k, p, g):\n    {call.strip()}\n"
+
+
+
+class TestWhichDoorCarriesALogin:
+    """`metadata.carries_a_credential` measured against the wire, row by row.
+
+    **The rule is asked wherever it is needed and spelled in a single place.**
+    `routers/books.py` resolves a login only for the rows it admits,
+    `test_credentials.py` asks it of the roster, and `_lookup_one` is the branch
+    it describes. Spelled out at each site instead, the day a transport starts
+    carrying a login the tripwire goes red and the edit it demands is to the
+    tripwire's own copy, which greens the suite while the router still skips the
+    row.
+
+    **So the rule is not compared with the branch, which would be the same
+    comparison written again.** Every seeded row that answers a lookup is asked through
+    `_lookup_one` holding a login for its own origin, and the verdict is whether
+    an `Authorization` header actually left the process. That is a different
+    instrument from reading the transport field, and it is the one that would
+    notice a door which took the argument and dropped it.
+    """
+
+    ISBN = "9783960092353"
+    ASKED = [source for source, row in targets.SEEDED.items() if row.answers_lookup]
+
+    def test_the_roster_answers_a_lookup_at_all(self):
+        """Or every arm below is parametrised over nothing and passes vacuously."""
+        assert self.ASKED
+
+    @pytest.mark.parametrize("source", ASKED, ids=lambda source: source.value)
+    async def test_the_rule_predicts_what_reaches_the_wire(self, source):
+        target = targets.SEEDED[source]
+        login = credentials.Credential(
+            credentials.origin_of(target.base_url), "alice", "hunter2"
+        )
+
+        with respx.mock(assert_all_called=False) as mock:
+            silence_catalogues(mock)
+            await metadata._lookup_one(target, self.ISBN, "a-key", credential=login)
+            # Read inside the block: respx clears the router's call log on exit,
+            # and an empty log after it looks exactly like a source never asked.
+            asked = [
+                call.request
+                for call in mock.calls
+                if str(call.request.url).startswith(target.base_url)
+            ]
+
+        assert asked, f"{source.value} was never asked, so its verdict is vacuous"
+        sent = any("authorization" in request.headers for request in asked)
+
+        assert sent is metadata.carries_a_credential(target), (
+            f"{source.value}: the rule says "
+            f"{metadata.carries_a_credential(target)} and the wire says {sent}"
+        )
+
+
+class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
+    """A login cannot be forgotten at a door or at a call site.
+
+    **`logins` has a default and `plan` does not, which is why this exists.**
+    `test_house_rules.py::TestEveryOutboundEntryPointTakesTheProviderList` can
+    lean on mypy: `plan` is keyword only with no default, so a call site that
+    forgets it does not compile. A login is optional by design, because most
+    catalogues need none, so nothing static stands here and this is what does.
+
+    **The subject is pinned, not derived from the fix.** The first version of
+    this asked which entry points already take `logins` and checked those, which
+    is an inclusion list wearing a derivation: removing the parameter from a door
+    removed it from the guard's subject in the same edit, and the guard stayed
+    green. Measured 2026-09-06, router sha256 identical before and after:
+    dropping `logins` from `title_search` and from its call site left the walk
+    reporting nothing missing. `DOORS` below is the same remedy
+    `TestEveryOutboundEntryPointTakesTheProviderList` uses for the same class of
+    hole, and `NO_LOGIN_NEEDED` is a mapping rather than a set so a door cannot
+    join the exclusion without a reason beside it.
+    """
+
+    #: Every public entry point in `metadata.py` a login has to reach.
+    DOORS = frozenset({"lookup", "search", "title_search", "candidates"})
+
+    #: Every other public coroutine there, mapped to why a login is not its
+    #: business. A door added and left out of either set fails the union arm.
+    NO_LOGIN_NEEDED = {
+        "editions": (
+            "Open Library's edition cluster, which is bespoke and free: its "
+            "adapter takes no login and there is none to hand it"
+        ),
+    }
+
+    ROUTER = BACKEND / "routers" / "books.py"
+
+    def _public_coroutines(self) -> set[str]:
+        return {
+            name
+            for name, value in vars(metadata).items()
+            if not name.startswith("_") and inspect.iscoroutinefunction(value)
+        }
+
+    def test_the_doors_are_the_ones_this_rule_was_written_against(self):
+        """A door removed, renamed or added is a finding, not a quieter pass."""
+        assert self._public_coroutines() == self.DOORS | set(self.NO_LOGIN_NEEDED)
+
+    def test_every_door_that_needs_a_login_declares_one(self):
+        missing = {
+            name
+            for name in self.DOORS
+            if "logins" not in inspect.signature(getattr(metadata, name)).parameters
+        }
+        assert missing == set(), f"these reach a catalogue with no login: {sorted(missing)}"
+
+    def test_a_login_is_keyword_only_wherever_it_is_taken(self):
+        """Positional would let a caller supply it by accident, or an argument
+        it added ahead of it silently become the mapping."""
+        for name in self.DOORS:
+            parameter = inspect.signature(getattr(metadata, name)).parameters["logins"]
+            assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, name
+
+    def test_no_route_asks_a_catalogue_without_them(self):
+        found = _metadata_calls(self.ROUTER.read_text(), self.DOORS)
+
+        # **Before the verdict, not after it.** Measured 2026-09-06: pointing
+        # this at a module that asks no catalogue passed green, because an empty
+        # walk has nothing to report. A guard that reads the wrong file has to
+        # fail, not abstain.
+        assert found, f"{self.ROUTER.name} asks no catalogue: the walk read nothing"
+
+        missing = [
+            f"metadata.{door} at line {line}" for door, line, carried in found if not carried
+        ]
+        assert not missing, (
+            f"{missing} ask a catalogue without the logins the deployment holds, "
+            "so a stored login is never sent on that path"
+        )
+
+
+#: A call shape per import spelling, each omitting `logins`.
+#:
+#: **Parametrised so a shape is reported by name.** A single sample carrying every
+#: shape at once cannot say which of them a change stopped seeing, and dropping
+#: support for a shape is exactly the evasion this walk shipped with.
+_EVASIONS = {
+    "a plain module import": "import metadata\nawait metadata.lookup(i, k, plan=p)\n",
+    "an aliased module import": "import metadata as m\nawait m.lookup(i, k, plan=p)\n",
+    "a name imported directly": (
+        "from metadata import lookup as _lookup\nawait _lookup(i, k, plan=p)\n"
+    ),
+}
+
+
+class TestTheWalkSeesEveryWayADoorIsReached:
+    """The walk finds a call however the module was imported.
+
+    **Found by attacking it, not by reading it.** The first version matched
+    `ast.Attribute` whose value was the bare name `metadata`, so rewriting any
+    one of the router's call sites as `import metadata as m` or as
+    `from metadata import title_search` walked straight past it and the guard
+    stayed green. That is the same blind spot `test_marc.py::_private_reads` and
+    `test_shelf.py` each record against their own first versions.
+
+    **The blind spots left, stated rather than left to be found.** A door reached
+    through a variable holding the function, or through `getattr`, is invisible;
+    so is a door re-exported by some other module and called through that. Each
+    fails in the direction of a missed report rather than a false one, which is
+    why they are written down. No such shape appears in this package.
+    """
+
+    DOORS = TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt.DOORS
+
+    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
+    def test_a_call_omitting_them_is_reported(self, shape):
+        found = _metadata_calls(_wrapped(_EVASIONS[shape]), self.DOORS)
+
+        assert [(door, carried) for door, _, carried in found] == [("lookup", False)]
+
+    @pytest.mark.parametrize("shape", sorted(_EVASIONS), ids=lambda shape: shape)
+    def test_the_same_call_carrying_them_is_not(self, shape):
+        """The diagonal: an arm that reported everything would pass the one above."""
+        supplied = _EVASIONS[shape].replace("plan=p)", "plan=p, logins=g)")
+        found = _metadata_calls(_wrapped(supplied), self.DOORS)
+
+        assert [(door, carried) for door, _, carried in found] == [("lookup", True)]
+
+    def test_a_call_on_something_that_is_not_a_door_is_ignored(self):
+        """Or the walk reports every attribute call and its verdict means nothing."""
+        source = _wrapped("import metadata\nawait metadata.clear_cache()\n")
+
+        assert _metadata_calls(source, self.DOORS) == []

@@ -53,8 +53,8 @@ rather than reread, because this file's own prose is inside its subject.
 
 The census reads a quantified noun phrase, so a roster count written any other
 way is invisible. Each of the first five rows is a real sentence in this tree,
-correct today and unguarded. The sixth names a shape and deliberately names no
-sentence, for a reason given under it:
+correct today and unguarded. The last two name a shape and deliberately name no
+sentence, each for its own reason:
 
 * the noun is elided, `docs/api.md` "A new install has all nine on". It was
   stale at "eight" and was corrected in the commit that added this file, by
@@ -76,11 +76,18 @@ sentence, for a reason given under it:
 * **the value has drifted out of the bound.** A candidate is admitted only if
   its value is a live cardinality, so a count that goes far enough out of date
   leaves the census's scope on the very commit that makes it wrong.
+* **the number and its noun are in different table cells**, `| 8 | sources
+  asked at once |`. The gap may not carry a `|`, because reading across a cell
+  boundary turns a row's count into a claim about whatever the description
+  beside it mentions, which is what both coverage registers are full of. The
+  cost and the count of what it refuses are at `_CLAIM`. No sentence is named
+  because the tree holds none of that shape, counted the same way.
 
-**No sentence is named for that row, and the omission is the row.** Every
-instance of it is by construction a count that is wrong, so every instance gets
-corrected, and a row naming one is stale as soon as it works. The five rows
-above can name a sentence precisely because those sentences are right.
+**No sentence is named for the drift row either, and there the omission is the
+row.** Every instance of it is by construction a count that is wrong, so every
+instance gets corrected, and a row naming one is stale as soon as it works. The
+five rows at the head of the list can name a sentence precisely because those
+sentences are right.
 
 **It is the bound narrowing, where the comment at `live_cardinalities` says only
 that it widens.** Both are true and the second is the one nobody expects, and it
@@ -187,9 +194,36 @@ exactly what a snapshot does and why the reason above for not asserting one is
 still the right call.
 
 All four were recounted on 2026-09-03 with `docs/decisions.md` in scope for the
-first time. What moves least is the multiple: the widened bound takes in roughly
-four times as many occurrences, 3.88 today against 3.72 at the merge, so the
-shape of the refusal survives a recount even though neither figure does.
+first time, and the multiple then read 3.88 against 3.72 at the merge.
+
+**Recounted again on 2026-09-06, and the paragraph that used to stand here was
+wrong about why they had moved.** It said a fresh count would be a second
+instrument's number in the first one's place. It is the same instrument and the
+tree moved under it: this scope reads **52, 319, 30 and 15** where the four
+above read 77, 299, 52 and 25, so the multiple is 6.13 rather than 3.88 and
+"roughly four times" is the ratio of the roster of eight rather than a constant.
+**Almost none of that is this walk.** Re-derived against this branch's base the
+four read 52, 316, 31 and 15, so widening the walk moved one of them by three
+and left the census where it was; what moved the rest is the tenth source, which
+took the live set from {6, 7, 8, 9} to {7, 8, 10} and is the same commit
+`OUT_OF_BOUND` was pinned for.
+
+**The base census figure is 52, and it took a third route to settle it.** Two
+readings of this instrument over the working tree with the base module
+substituted disagreed with each other by one. What settled it carries no working
+tree state at all: a clean detached checkout of `cf28ea4` running that commit's
+own code reports 591 candidates, 581 in scope and **52**. Substituting a module
+into a tree it did not come from is a route with a seam in it, and the way to
+close a disagreement between two readings is a third instrument rather than a
+third reading.
+
+**One figure still does not reproduce and is left open rather than tidied.**
+"The other N" re-derives as 24 by the instrument above at `38aabd6`, the commit
+whose prose says 25. Nothing here explains that and nothing here resolves it.
+
+**So the four above are a photograph of one tree**, and they are kept because the
+refusal they justify does not turn on their value. That is still why nothing
+asserts one.
 
 **The table's size is the comfort to distrust.** A complete classification reads
 like a complete sweep and is not one: it is complete over the census's grammar,
@@ -212,6 +246,7 @@ an optional extra the guard verifies where the prose already carries one.
 """
 
 import ast
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,7 +255,12 @@ import pytest
 
 import sources
 from enums import CatalogueSource
-from tests.test_house_rules import _is_vendored
+from tests.test_house_rules import (
+    _ignore_patterns,
+    _is_ignored,
+    _is_vendored,
+    _markdown_sources,
+)
 
 #: This module's own docstring, bound while it is still the nearest one.
 #: `__doc__` inside a method body is an ordinary global lookup and reads
@@ -309,13 +349,41 @@ SPELLED = {
 _NUMBER = rf"(?:{'|'.join(SPELLED)}|\d{{1,3}})"
 _NOUN = r"(?:sources?|catalogues?|providers?)"
 
-#: A number, at most two words, a roster noun.
+#: A number, at most two words, a roster noun, within one table cell.
 #:
 #: **Wrapped in a lookahead so matches may overlap.** Consuming the match makes
 #: the scan miss a second claim starting inside the first: measured, one claim
 #: in `test_fetch.py` disappears when the pattern consumes.
+#:
+#: **The gap may not carry a `|`, because a Markdown row is several facts and
+#: not one phrase.** A count in one column and a roster noun opening the next is
+#: two cells, and reading across them turns any number in a table into a claim
+#: about whatever the description beside it happens to mention. Measured
+#: 2026-09-06 over the walk this replaces: **zero** of the 423 grammar matches
+#: it read cross a cell boundary, so this refuses nothing that was being read.
+#: The figure is that walk's and is not reproducible from `scope()` here, which
+#: reads the two `COVERAGE.md` files the old one missed: over the 590 files in
+#: scope the strict pattern matches 428 against a permissive 435, and **seven**
+#: cross a cell. **Five** of the ten in the two `COVERAGE.md` files do, every
+#: one of them a test count beside a roster noun in the next column. Remove it
+#: and those five become candidates the moment a test count passes through a
+#: live cardinality, which is a number that moves whenever anybody writes a
+#: test. The other two are this file's own examples of the shape.
+#:
+#: **What it refuses that nothing else would**: a claim genuinely written as a
+#: value column and a description column, `| 8 | sources asked at once |`. There
+#: is none in the tree today, counted the same way, and a count written that way
+#: is invisible here.
+#:
+#: **Those examples are the rule's only live subjects and deleting them weakens
+#: the evidence.** Removing the `|` from the class turns up **two** census
+#: candidates in the whole tree, this row and the matching bullet in the module
+#: docstring, so `test_every_candidate_the_census_finds_carries_a_verdict` fires
+#: on the sentences that document the refusal. The guard proper is
+#: `test_a_number_in_one_table_cell_does_not_claim_the_next_one`, which does not
+#: depend on any prose surviving.
 _CLAIM = re.compile(
-    rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s]+){{0,2}}[ \t]+)({_NOUN})\b)", re.I
+    rf"(?=\b({_NUMBER})\b((?:[ \t]+[^\s|]+){{0,2}}[ \t]+)({_NOUN})\b)", re.I
 )
 
 #: A line break plus whatever prefix the next line carries in a comment or a
@@ -361,12 +429,12 @@ _WRAP = re.compile(r"\n[ \t]*(?:#:?|\*|//)?[ \t]*")
 #: thing it counts.
 #:
 #: **The architecture decision records are the third of these and are not named
-#: here**, because they are not published and this file is. `scope()` reads
-#: `docs/*.md` rather than `docs/**/*.md`, and every subdirectory under `docs/`
-#: is stripped from the public mirror, so naming one would leave a published
-#: file pointing at a stripped path. The publish gate refuses that, and it
-#: refused two drafts of this comment: once for the record it named, once for
-#: the script it credited.
+#: here**, because they are not published and this file is: naming one would
+#: leave a published file pointing at a stripped path. The publish gate refuses
+#: that, and it refused two drafts of this comment: once for the record it
+#: named, once for the script it credited. The walk reaches them now and the
+#: declaration rule drops them, which is the same rule that drops every other
+#: unpublished document and needs no entry here.
 DATED_REGISTERS = ("CHANGELOG.md",)
 
 #: Generated trees under this project's own source, holding no prose a person
@@ -400,28 +468,32 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: exists. Editing either to say "eight sources" turned the backend suite red,
 #: and a session plan is deleted at the end of the wave, so the failure landed
 #: in a file about to stop existing. Neither carried a roster count on the day
-#: this was written, which is exactly what made the trap silent.
+#: this was written, which is exactly what made the trap silent. The plan is
+#: gone from the walk for a second reason now, that the repository ignores it,
+#: and the working notes are still here on this one alone.
 #:
 #: **Keyed on the declaration rather than on a list of names**, because the
 #: names are themselves stripped paths, so a published file may not spell them,
 #: and because the gate already requires this line of every document it strips.
 #: One convention, enforced at both ends.
 #:
-#: **Measured when this replaced the name list**, over the candidate set
-#: `len(candidates())` reports, 547 files recounted 2026-09-03: six carry the
-#: declaration, every one of them is stripped from the mirror, and between them
-#: they hold **zero** census candidates. So the rule drops exactly what the
-#: mirror drops and costs no coverage today.
+#: **Recounted 2026-09-06 over the widened walk**, across the 629 files
+#: `len(candidates())` reports: 29 carry the declaration in their header, every
+#: one of them is stripped from the mirror, and between them they hold **zero**
+#: census candidates. So the rule drops exactly what the mirror drops and costs
+#: no coverage today. It read six of 547 when the walk was a list of globs, and
+#: the ratio moving that far on a change to the **walk** rather than to the tree
+#: is the reminder that a corpus figure measures the instrument too.
 #:
 #: **The anchoring is a rule about shape and this corpus does not justify it**,
 #: which is worth saying because the first version of this comment claimed it
-#: did. There are seven occurrences of the phrase across those six files and
-#: **all seven match the anchored pattern**: the one that is a prose mention
-#: rather than a declaration is backticked at the start of its own line, so
-#: `[^A-Za-z0-9]{0,6}` eats the backtick and matches it too. On this evidence a
-#: bare substring would drop the same six. The anchor is kept because it is the
-#: publish gate's own pattern and a rule about mentioning is not a rule about
-#: declaring, not because anything here separates the two.
+#: did. The phrase occurs 34 times across 31 files, this file's own `_DECLARES`
+#: among them. Five of those sit outside the header window this reads and are
+#: not the question; of the 29 inside it,
+#: the anchored pattern matches all 29 and so does a bare substring, so nothing
+#: in this tree separates a mention from a declaration. The anchor is kept
+#: because it is the publish gate's own pattern, not because the corpus argues
+#: for it.
 #:
 #: **The gate's own corpus would separate them and is deliberately not quoted.**
 #: Not because the measurement cannot be stated without naming a stripped path,
@@ -429,21 +501,76 @@ NOT_PROSE = ("/generated/", "/dist/")
 #: being re-derived, which is this file's whole subject, and re-deriving it means
 #: walking a directory the mirror strips to justify a rule about shape.
 #:
-#: **The two ends bound different windows**, and that is a difference rather
-#: than a defect: this reads the first 2000 characters and the gate reads the
-#: first 30 lines. Measured across every candidate, they disagree about nothing
-#: today; a file with a long enough header would separate them.
+#: **One window, and it is the gate's.** The two ends have to answer the same
+#: question about the same file, so this reads the same number of opening lines
+#: the gate's own guard reads. They used to differ, this reading 2000 characters
+#: and the gate 30 lines, and the difference was written down as harmless on the
+#: strength of the two agreeing about every candidate. They do still agree,
+#: measured over all 629, **and that agreement was luck rather than structure**:
+#: **573** of the 629 have thirty lines or more counting newlines, the way
+#: `wc -l` does, and their opening thirty run under 2000 characters by as much
+#: as **1475**. Every declaration in this tree sits by line 24, counted 1 based
+#: the way `grep -n` reports one. So the old window read past the end of line 30
+#: in most of the tree, and one declaration written into that span in a
+#: **published** document would be dropped here and published there, quietly.
+#:
+#: **Both figures need their counting rule beside them or they are three
+#: numbers each.** The population is 626 over every candidate, which folds in
+#: files with no line 31 and compares nothing; 575 if a line is what
+#: `split("\n")` returns, which counts a trailing empty; 571 if it must exceed
+#: thirty. And the bound is 1475 measured to the end of line 30's text and 1474
+#: measured to the end of its newline, which is what `head -n 30` actually
+#: writes. The bound does not move with the population, only with that.
+#:
+#: **The number is copied, so it is pinned rather than trusted.** A published
+#: file cannot read the gate's script, for the reason two paragraphs up, so the
+#: window is spelled here and `test_the_window_is_the_number_the_publish_gate_uses`
+#: spells it once more, which is what makes moving it something somebody has to
+#: write twice.
+#:
+#: **Neither drift is caught by the tree, which is why the pin is not
+#: decoration.** Wider drops a published file from the census and is the silent
+#: direction this replaced. Narrower keeps a file the mirror strips, and that
+#: reaches the publish gate only where the kept file holds a claim: measured, a
+#: window of three would admit **six** declaring files and not one of them holds
+#: a census candidate, so nothing at either end would fail.
 _INTERNAL = re.compile(
     r"^[^A-Za-z0-9]{0,6}[ \t]*\*\*This file is internal\.\*\*", re.M
 )
 
+#: The opening lines a declaration has to sit in, which is the publish gate's
+#: own window. Spelled rather than read, because reading it means naming a
+#: stripped path from a published file. `_INTERNAL` says why neither direction
+#: of a drift is caught by the tree, which is what the pin in
+#: `test_the_window_is_the_number_the_publish_gate_uses` is for.
+_HEADER_LINES = 30
+
 
 def declares_itself_internal(path) -> bool:
-    """Whether a file carries the declaration in its opening lines."""
+    """Whether a file carries the declaration in its opening lines.
+
+    **Lines, not characters, and the unit is the whole of it.** The gate reads
+    the first `_HEADER_LINES` lines; anything counted another way is a second
+    rule wearing the gate's name, and it fails in the silent direction.
+
+    **`split` and not `splitlines`, which is that same sentence one level
+    down.** The class is the characters `str.splitlines` treats as a break and
+    `head -n` does not, counted rather than listed: a sweep of the whole of
+    Unicode, `range(0x110000)`, with the character embedded in text rather than
+    standing alone, finds nine, and the carriage return is one of them. Naming
+    them instead invites the taxonomy this file already refuses, and the first
+    attempt at that sentence omitted the one member a reader thinks of first.
+    A file carrying any of the nine would have its thirtieth line arrive early
+    here and not at the gate, so the window would be narrower for that file
+    only. Measured over the 629 candidates, **none** holds one, which is a
+    corpus cooperating rather than a rule holding, and it is cheaper to make
+    the rule hold.
+    """
     try:
-        return _INTERNAL.search(path.read_text(encoding="utf-8")[:2000]) is not None
+        header = path.read_text(encoding="utf-8").split("\n")[:_HEADER_LINES]
     except (OSError, UnicodeDecodeError):
         return False
+    return _INTERNAL.search("\n".join(header)) is not None
 
 
 @dataclass(frozen=True)
@@ -618,48 +745,165 @@ def scan_unbounded(name: str, text: str):
         )
 
 
-def candidates():
+#: The file kinds the census reads.
+#:
+#: **The one dimension of this walk that is still an inclusion, stated rather
+#: than pretended away.** Measured 2026-09-06: the versioned tree holds 45 files
+#: of other kinds, and between them the grammar reaches two roster claims. One
+#: is a generated OpenAPI description, a copy of a route docstring that already
+#: carries a verdict at its source, so admitting it buys a second verdict for a
+#: sentence somebody wrote once. The other sits in a survey input inside the
+#: build tooling, whose path no verdict here may spell for the reason given at
+#: `internal_trees`. That one is refused twice over: by this bound, and by the
+#: tree its file sits in.
+#:
+#: **So this bound does not decide what is covered, it decides what is covered
+#: twice.** The thing an inclusion list gets wrong is missing a place; the kinds
+#: left out here hold one claim between them that is not already judged, and it
+#: is one this file could not name.
+READS = (".py", ".ts", ".tsx", ".md")
+
+
+def candidates(root: Path | None = None) -> list[Path]:
     """Every file the census would read before the declaration rule is applied.
 
-    Split out so the declaration rule can be pinned over the whole set rather
-    than over the corner of it somebody remembers to glob.
+    **What the repository versions, minus what cannot hold prose about this
+    application.** The seven globs this replaced named five directories, and a
+    document written anywhere else was a document nobody checked: measured
+    2026-09-06, they reached 19 of the 42 Markdown files the repository versions
+    and left 4 of the 18 the publish gate publishes outside the census
+    altogether. A walk cannot be kept in step with a tree by remembering to edit
+    it, which is the property `scope()`'s docstring already claimed and the walk
+    under it did not have.
+
+    **Not hidden and not ignored, which is git's own answer** rather than a
+    second one written here. The ignore rules are read through the helpers the
+    Markdown walk in `test_house_rules` uses, so the build output, the caches,
+    the dependency trees, a wave's plan and a wave's working notes fall out at
+    once and stay out when somebody adds the next one.
+
+    **Pruned while walking**, so a directory that is out of scope is never
+    descended: `node_modules` is thousands of files that no filter afterwards
+    should have to look at.
+
+    `root` is a parameter so the walk can be driven over a fixture tree. A rule
+    about a directory nobody thought of cannot be demonstrated against a tree
+    where somebody thought of every directory.
     """
-    paths = []
-    for pattern in (
-        "backend/**/*.py",
-        "docs/*.md",
-        "*.md",
-        "frontend/src/**/*.ts",
-        "frontend/src/**/*.tsx",
-        "frontend/tests/**/*.ts",
-        "frontend/tests/**/*.tsx",
-    ):
-        paths += sorted(REPO.glob(pattern))
+    root = REPO if root is None else root
+    patterns = _ignore_patterns(root)
     skip = NOT_PROSE + DATED_REGISTERS
-    return [
-        p
-        for p in dict.fromkeys(paths)
-        if not _is_vendored(p, REPO)
-        and not any(s in str(p.relative_to(REPO)) or s in str(p) for s in skip)
-    ]
+    found: list[Path] = []
+    for directory, subdirectories, files in os.walk(root):
+        here = Path(directory)
+        subdirectories[:] = [
+            name
+            for name in subdirectories
+            if not name.startswith(".")
+            and not _is_ignored((here / name).relative_to(root), patterns)
+        ]
+        for name in files:
+            path = here / name
+            relative = path.relative_to(root)
+            if path.suffix not in READS:
+                continue
+            if _is_ignored(relative, patterns) or _is_vendored(path, root):
+                continue
+            if any(s in str(relative) or s in str(path) for s in skip):
+                continue
+            found.append(path)
+    return sorted(found)
 
 
-def scope():
+def internal_trees(paths: list[Path], root: Path) -> set[Path]:
+    """Every directory whose own `README.md` declares itself internal.
+
+    **The census cannot reach further than the mirror publishes, and that is a
+    constraint rather than a preference.** A verdict is keyed on its file's path
+    and this file is published, so a candidate in a stripped tree would demand a
+    key naming that tree, and the publish gate's "no published file may point at
+    a stripped one" rejects the build. The failure would land two guards away
+    from its cause: the suite goes red asking for a verdict, and writing the
+    verdict turns the publish gate red instead.
+
+    **The declaration convention already covers every stripped document**, which
+    is what the gate requires of one. It does not cover a stripped tree's
+    source, because the gate asks an English sentence of documents only, so the
+    build tooling's Python carries no mark of its own. That source is the whole
+    of what this function is for: every stripped **document** is already dropped
+    one at a time, and dropping the records and the agent configuration as trees
+    changes nothing.
+
+    **The README, and not every document under the directory**, which is the
+    correction that matters and was found by attacking rather than by reading.
+    Quantifying over all of them quantifies over an accident: measured
+    2026-09-06, **six** directories holding Markdown in the candidate set hold
+    exactly one document and four of the six are published, and one coverage
+    register is that sole document for two of the four, with 203 and 92
+    candidates beneath it counting itself. Driving that register to declare
+    itself turned eight directories internal and took `scope()` from **590 to
+    392**, and three tests failed with none of them naming the walk. A README is
+    the document that speaks for its directory; a coverage register is not, and
+    at one document the two are indistinguishable to a quantifier. Under this
+    rule the same edit costs one file, which is that file itself.
+
+    **What the quantifier refused and this accepts**: a stripped tree carrying an
+    internal document under some other name and no README of its own. Every such
+    directory in this tree is one whose documents the per file rule drops anyway,
+    so the set `scope()` returns is unchanged, counted.
+
+    **The hole at each end, stated rather than left to be found.** A stripped
+    tree with no README is invisible here, and is covered only by an ancestor
+    that has one, or by nothing. And a declaration written into a **published**
+    README would drop everything under it: 29 candidates for the documentation
+    tree, three and one for the two smallest. What stands behind both is the
+    publish gate, and that only holds because the two read the same window: see
+    `_INTERNAL`, where for a while they did not and the difference ran the silent
+    way. It refuses to publish any file carrying the declaration in its opening
+    lines, so that second edit fails the gate naming the file, and a claim
+    appearing in an uncovered tree fails it naming the path a verdict may not
+    spell.
+
+    **The repository root is excluded.** It is not a tree that can declare
+    itself, and a root README that satisfied this would empty the census in
+    silence, which is the one failure a census must not have.
+
+    Read off the candidate set rather than by a second walk, so a document this
+    census does not read cannot decide what it reads.
+    """
+    return {
+        path.relative_to(root).parent
+        for path in paths
+        if path.name == "README.md"
+        and path.relative_to(root).parent != Path(".")
+        and declares_itself_internal(path)
+    }
+
+
+def scope(root: Path | None = None) -> list[Path]:
     """Where prose a person wrote about this application lives.
 
     **Everything, minus what cannot hold it.** A new file is covered by default
     rather than by somebody remembering to add it, which is the property an
-    enumeration of sites cannot have.
+    enumeration of sites cannot have and which the walk in `candidates()` now
+    has.
 
-    **`docs/*.md` and not `docs/**/*.md`, which is the docs that ship.** Every
-    subdirectory under `docs/` is stripped from the public mirror, so a count
-    in one is unpublished by construction and naming its path here would make
-    this file point at a stripped one.
+    **A file declaring itself internal is dropped**, by its own opening line
+    rather than by name. See `_INTERNAL`.
 
-    **A file declaring itself internal is dropped last**, by its own opening
-    line rather than by name. See `_INTERNAL`.
+    **A file under a tree whose own README declares itself is dropped too**,
+    which is the same rule read one level up and the reason the build tooling's
+    source is not censused. See `internal_trees`.
     """
-    return [p for p in candidates() if not declares_itself_internal(p)]
+    root = REPO if root is None else root
+    paths = candidates(root)
+    internal = internal_trees(paths, root)
+    return [
+        path
+        for path in paths
+        if not declares_itself_internal(path)
+        and not internal.intersection(path.relative_to(root).parents)
+    ]
 
 
 def census():
@@ -1748,6 +1992,28 @@ class TestTheCensusSeesWhatItClaimsTo:
         word, _value = a_spelled_cardinality()
         assert not list(scan("t.py", f"{word} of the third party catalogues.\n"))
 
+    def test_a_number_in_one_table_cell_does_not_claim_the_next_one(self):
+        """A row is several facts and the grammar used to read across them.
+
+        Both `COVERAGE.md` tables put a test count in one column and a sentence
+        about the catalogue chain in the next, so the count of a test file was a
+        roster claim whenever it passed through a live cardinality, which is a
+        number that moves whenever anybody writes a test. Measured 2026-09-06,
+        five such rows sit in those two documents and none of them is a claim.
+        """
+        _word, value = a_spelled_cardinality()
+        row = f"| `test_thing.py` | {value} | **The catalogue chain.** Merging |\n"
+        assert list(scan("COVERAGE.md", row)) == []
+
+    def test_a_claim_written_inside_one_table_cell_is_still_read(self):
+        """The other half, and the reason the rule is about the cell boundary
+        rather than about tables. A document that states a roster count in a
+        table states it, and refusing the whole table would drop it."""
+        word, value = a_spelled_cardinality()
+        row = f"| the roster | {word} sources answer an ISBN |\n"
+        found = list(scan("COVERAGE.md", row))
+        assert [(o.value, o.phrase) for o in found] == [(value, "{n} sources")]
+
     def test_a_paragraph_stops_at_a_blank_line(self):
         """`near` and `dated` are claims about the sentence's surroundings. A
         paragraph that ran to the end of the file would make both vacuous."""
@@ -2084,11 +2350,10 @@ def test_every_sentence_the_census_stopped_seeing_is_named():
 def test_a_file_that_declares_itself_internal_is_out_of_scope():
     """Pinned without naming one, because their names are stripped paths.
 
-    **Over the whole candidate set, not the root markdown corner of it**, which
-    was the first version and pinned two of the six. Whichever files carry the
-    declaration, none may be in scope: they are unpublished, so a count in one
-    is unpublished too, and one of them is deleted when the wave that wrote it
-    ends.
+    **Over the whole candidate set, not the root Markdown corner of it**, which
+    was the first version and pinned only the two declaring documents that
+    happened to sit in that corner. Whichever files carry the declaration, none
+    may be in scope: they are unpublished, so a count in one is unpublished too.
     """
     declared = [p for p in candidates() if declares_itself_internal(p)]
     assert declared, (
@@ -2096,6 +2361,293 @@ def test_a_file_that_declares_itself_internal_is_out_of_scope():
         "rule now guards nothing and the reason in `_INTERNAL` is stale"
     )
     assert not [p for p in declared if p in set(scope())]
+
+
+#: The declaration, spelled once for the fixtures below.
+#:
+#: **Written out rather than read from the publish gate**, which this file may
+#: not open: that script is stripped from the mirror and this file is published,
+#: so a path to it here fails the gate before a reader ever sees the test. The
+#: pattern and the sentence are held together by
+#: `test_the_fixture_declaration_is_one_the_pattern_reads` instead.
+_DECLARES = "**This file is internal.**"
+
+
+def _fixture_tree(root, files: dict[str, str]):
+    """Write a tree of fixture files under `root` and return it."""
+    for name, text in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
+    """The census walks what the repository versions, and it is driven over a
+    fixture tree rather than over this one.
+
+    **A rule about a directory nobody thought of cannot be shown against a tree
+    where somebody thought of every directory.** The seven globs this replaced
+    passed every test in this file: they reached 19 of the 42 Markdown documents
+    the repository versions and left 4 of the 18 the publish gate publishes
+    unjudged, and nothing here went red, because every assertion was written
+    against the corner the globs already covered. So the fixtures below put a
+    document and a module somewhere no pattern would have named, and an
+    inclusion list of any shape fails them.
+    """
+
+    def _tree(self, tmp_path):
+        return _fixture_tree(tmp_path, {
+            ".gitignore": "frontend/node_modules/\nbuilt/\nscratch.md\n",
+            "README.md": "a published document\n",
+            "docs/api.md": "a published document\n",
+            "nowhere/anybody/listed/GUIDE.md": "a document in a new directory\n",
+            "nowhere/anybody/listed/helper.py": "# a module in a new directory\n",
+            "built/output.md": "the build output, which the repository ignores\n",
+            "scratch.md": "a working note, which the repository ignores\n",
+            ".hidden/notes.md": "hidden, so not versioned\n",
+            "frontend/node_modules/dep.ts": "// somebody else's source, ignored\n",
+            "vendor/node_modules/lib.ts": "// somebody else's source, not ignored\n",
+            ".hidden.ts": "// a dotted file rather than a dotted directory\n",
+            "src/api/generated/model.ts": "// written by a generator\n",
+            "tooling/README.md": f"{_DECLARES}\n\nthe tooling's own notes\n",
+            "tooling/run.py": "# carrying no declaration of its own\n",
+            "tooling/deeper/probe.py": "# in a subdirectory with no document at all\n",
+            "registers/COVERAGE.md": f"{_DECLARES}\n\nnot this tree's README\n",
+            "registers/module.py": "# 91 of these sit under the live instance\n",
+        })
+
+    def _named(self, paths, root):
+        return sorted(str(path.relative_to(root)) for path in paths)
+
+    def test_a_document_in_a_directory_nobody_listed_is_walked(self, tmp_path):
+        """The failure the ticket was raised for, as a shape rather than as four
+        names. A walk enumerating directories cannot pass this whatever it
+        enumerates, because the fixture's directory is chosen to be one nobody
+        would write down."""
+        root = self._tree(tmp_path)
+        assert "nowhere/anybody/listed/GUIDE.md" in self._named(candidates(root), root)
+
+    def test_a_module_in_a_directory_nobody_listed_is_walked(self, tmp_path):
+        """The same rule on the other kind, because the globs enumerated the two
+        dimensions separately and a fix to one of them is not a fix."""
+        root = self._tree(tmp_path)
+        assert "nowhere/anybody/listed/helper.py" in self._named(candidates(root), root)
+
+    def test_the_walk_drops_what_the_repository_does_not_version(self, tmp_path):
+        """Ignored, hidden, somebody else's, and written by a generator. Four
+        rules, and all four have to hold at once or the walk reads a build
+        output as source."""
+        root = self._tree(tmp_path)
+        walked = self._named(candidates(root), root)
+        assert "built/output.md" not in walked
+        assert "scratch.md" not in walked
+        assert ".hidden/notes.md" not in walked
+        assert "frontend/node_modules/dep.ts" not in walked
+        assert "src/api/generated/model.ts" not in walked
+
+    def test_the_vendor_rule_reaches_what_the_ignore_rule_does_not(self, tmp_path):
+        """`_is_vendored` is not a second spelling of `.gitignore`, and dropping
+        it from the walk used to change nothing observable.
+
+        Two shapes it alone catches, and this repository's own `.gitignore` has
+        the first: the dependency tree is named **anchored**, so a
+        `node_modules` anywhere else is not ignored. The second is a dotted
+        **file**, which the directory prune never sees because that runs on
+        directory names. Neither exists in this tree today, which is exactly why
+        the arm needs driving rather than observing.
+        """
+        root = self._tree(tmp_path)
+        patterns = _ignore_patterns(root)
+        for name in ("vendor/node_modules/lib.ts", ".hidden.ts"):
+            assert not _is_ignored(Path(name), patterns), (
+                f"{name} is ignored here, so this drives the ignore rule and not "
+                "the vendor rule"
+            )
+            assert name not in self._named(candidates(root), root)
+
+    def test_a_tree_whose_own_readme_declares_itself_is_out_of_scope(
+        self, tmp_path
+    ):
+        """The build tooling, and the reason is at `internal_trees`. The module
+        beside the declaring README carries no declaration of its own, so the
+        per file rule cannot reach it and the census would demand a verdict
+        keyed on a path the publish gate refuses to publish."""
+        root = self._tree(tmp_path)
+        walked = self._named(candidates(root), root)
+        seen = self._named(scope(root), root)
+        assert "tooling/run.py" in walked, "the walk has to reach it to drop it"
+        assert "tooling/run.py" not in seen
+        assert "tooling/README.md" not in seen
+        # **Every ancestor, not the immediate parent**, and this line is the
+        # whole of the difference. `tooling/deeper/` holds no document of its
+        # own, so it can never satisfy the quantifier and only `tooling/` above
+        # it drops what is in it. Comparing the parent alone passed every other
+        # assertion in this class and left a stripped tree's deeper source in
+        # the census, where a candidate would demand a verdict the publish gate
+        # refuses to publish.
+        assert "tooling/deeper/probe.py" in walked
+        assert "tooling/deeper/probe.py" not in seen
+
+    def test_a_tree_whose_readme_is_published_stays_in_scope(self, tmp_path):
+        """The discriminating half. A rule that read the README's existence
+        rather than what it says would drop every tree that has one, which is
+        most of them, and the census would go quiet."""
+        root = _fixture_tree(tmp_path, {
+            ".gitignore": "\n",
+            "mixed/README.md": "a published document\n",
+            "mixed/PRIVATE.md": f"{_DECLARES}\n",
+            "mixed/module.py": "# code beside both\n",
+        })
+        seen = self._named(scope(root), root)
+        assert "mixed/module.py" in seen
+        assert "mixed/README.md" in seen
+        assert "mixed/PRIVATE.md" not in seen
+
+    def test_a_declaring_document_that_is_not_the_readme_leaves_its_tree_alone(
+        self, tmp_path
+    ):
+        """The finding that narrowed this rule from every document to the README.
+
+        Quantifying over every document under a directory quantifies over an
+        accident: in this repository one coverage register is the sole Markdown
+        file under two directories carrying 203 and 92 candidates, so a
+        declaration written into it took the scope from 590 to 392 and no test
+        named the walk. A README speaks for its directory. A register that
+        happens to be the only document in it does not, and at one document a
+        quantifier cannot tell them apart.
+        """
+        root = self._tree(tmp_path)
+        seen = self._named(scope(root), root)
+        assert "registers/module.py" in seen, (
+            "a declaring document that is not the tree's README took its whole "
+            "tree out of the census"
+        )
+        assert "registers/COVERAGE.md" not in seen, (
+            "the per file rule still has to drop the declaring document itself"
+        )
+
+    def test_the_repository_root_is_never_an_internal_tree(self, tmp_path):
+        """The one failure a census must not have is going quiet. A root README
+        carrying the declaration would otherwise take the whole repository out
+        of scope, so the root is excluded. The publish gate refuses such a
+        README too, which is the second of the two and not a reason to drop
+        this one: this is the arm that keeps the census reading."""
+        root = _fixture_tree(tmp_path, {
+            ".gitignore": "\n",
+            "README.md": f"{_DECLARES}\n",
+            "module.py": "# code beside it\n",
+        })
+        assert internal_trees(candidates(root), root) == set()
+        assert "module.py" in self._named(scope(root), root)
+
+    def test_the_declaration_is_read_in_the_window_the_publish_gate_reads(
+        self, tmp_path
+    ):
+        """The two ends have to answer the same question about the same file.
+
+        This read 2000 characters where the gate reads lines, and the two agreed
+        about every candidate, which was luck: 573 of the 629 have thirty lines
+        or more by `wc -l`, and their opening thirty run under 2000 characters
+        by as much as 1475, with every declaration in the tree sitting by line
+        24. Both figures carry their counting rule at `_INTERNAL`, because each
+        is three different numbers without one. A declaration written into that
+        span in a published document was dropped here and published there, so
+        the census stopped reading a file the mirror carries and nothing said
+        so.
+
+        **Driven with short lines, because that is the only thing that separates
+        a line count from a character count.** The fixture whose declaration sits
+        past the window is asserted to be inside a character window first, so a
+        rule counting characters answers the opposite way and this fails.
+        """
+        header = "\n".join(f"line {n}" for n in range(1, _HEADER_LINES + 1))
+        inside = tmp_path / "inside.md"
+        inside.write_text(f"{_DECLARES}\n{header}\n", encoding="utf-8")
+        outside = tmp_path / "outside.md"
+        outside.write_text(f"{header}\n{_DECLARES}\n", encoding="utf-8")
+
+        assert len(outside.read_text(encoding="utf-8")) < 2000, (
+            "the fixture is long enough to fall outside a character window too, "
+            "so it no longer tells the two units apart"
+        )
+        assert declares_itself_internal(inside)
+        assert not declares_itself_internal(outside)
+
+    def test_the_window_is_the_number_the_publish_gate_uses(self):
+        """The value, where the test above drives only the unit.
+
+        **A literal, and that is the whole of its value.** The number's home is
+        the publish gate's own bound on a document's opening lines, and a
+        published file may not read that script, so nothing here can derive it.
+        Spelling it a second time means moving it has to be written twice, which
+        is the same reason `PINNED_OUT_OF_SCOPE` is a literal rather than the
+        tuple it pins.
+
+        **Measured, because the pair divides the work and neither half does it
+        alone.** Narrowing the constant to three changes nothing the unit test
+        above asserts, and it is silent in the tree as well: six declaring files
+        sit past line three and none of them holds a census candidate, so
+        admitting all six fails nothing anywhere. Widening it is caught up there
+        only by an anti vacuity arm noticing that its own fixture stopped telling
+        lines from characters, which is a report about the fixture rather than
+        about the window.
+        """
+        assert _HEADER_LINES == 30, (
+            "the declaration window no longer matches the publish gate's bound on "
+            "a document's opening lines. Move it there first, then here."
+        )
+
+    def test_the_fixture_declaration_is_one_the_pattern_reads(self, tmp_path):
+        """`_DECLARES` is a copy of a sentence whose home is the publish gate,
+        and a copy that stopped matching would make every fixture above assert
+        that a document with no declaration is dropped, which is not the rule
+        under test."""
+        document = tmp_path / "note.md"
+        document.write_text(f"{_DECLARES}\n", encoding="utf-8")
+        assert declares_itself_internal(document)
+
+    def test_every_markdown_document_the_repository_versions_is_a_candidate(self):
+        """Against this tree and by a second walk, which is what the fixtures
+        cannot give: `_markdown_sources` prunes with `os.walk` where this globs
+        nothing at all, and the two have to agree about every document.
+
+        The dated registers are the one deliberate difference and they are named
+        from `DATED_REGISTERS` rather than spelled here.
+        """
+        walked = set(candidates())
+        missing = sorted(
+            str(path.relative_to(REPO))
+            for path in _markdown_sources()
+            if path not in walked
+            and not any(
+                register in str(path.relative_to(REPO)) for register in DATED_REGISTERS
+            )
+        )
+        assert missing == [], missing
+
+    def test_the_scope_holds_documents_outside_the_corner_the_globs_named(self):
+        """Anti vacuity, stated as the shape of the old walk rather than as the
+        files it missed. The globs reached the repository root and one level of
+        `docs/`, so a document in scope from anywhere else is the property this
+        change bought.
+
+        **It answers that corner and no other, measured rather than assumed.** A
+        narrowing to one level of every directory passes this and fails
+        `test_every_markdown_document_the_repository_versions_is_a_candidate`,
+        which is the general rule. This one is the cheap check that the class is
+        not empty.
+        """
+        outside = sorted(
+            str(path.relative_to(REPO))
+            for path in scope()
+            if path.suffix == ".md" and path.parent not in (REPO, REPO / "docs")
+        )
+        assert outside, (
+            "no Markdown document outside the repository root and `docs/` is in "
+            "scope, so the walk has been narrowed back to the corner the globs "
+            "covered"
+        )
 
 
 #: The exclusions spelled out a second time, so widening one has to be written

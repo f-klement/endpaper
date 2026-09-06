@@ -10137,3 +10137,213 @@ still stated rather than derived was the sentence's other half: "every source th
 `Heading` at all" is false, because `marc._record` builds them out of an uploaded file and
 `routers/imports` hands them to `bounded_headings` directly. Corrected to catalogues in both
 places that carry the sentence.
+
+## A candidate name added at the end of a list is a different change from one added in it
+
+`build_mapping` iterates the candidates, so a list's order is the priority. That makes adding
+a name two decisions, and only one of them is visible in a diff: which name, and where.
+
+The two the 2026 audit turned up carry a comment each, because a file where the position
+decides nothing passes either way and the next reader tidies the name to the end. `length of`
+is Libib's page count and stands before the bare `length`, which some files use for a page
+count and LibraryThing uses for a shelf dimension. `my ratings` is Open Library's spelling of
+the member's own rating and stands before the bare `rating`, which on a site publishing an
+average is the crowd's number. Both are pinned by a test naming a file that carries the pair,
+which is the only file that can tell the two placements apart:
+`TestTheCandidateListSetsPriority::test_a_length_of_column_beats_a_bare_length_column` and
+`::test_the_members_own_ratings_column_beats_a_bare_rating_column`.
+
+**A name is also taken from a later field.** A matched header leaves the pool, so a string
+added to an earlier field's list is one a later field can no longer claim. Matching is exact
+after normalising, so a header matches at most one candidate string, and
+`TestTheCandidateTableIsWellFormed::test_no_two_fields_name_the_same_column` fails on a
+string written in two lists. That test is what makes the pool safe to add to.
+
+**`completed` is a header candidate for `date_read` and a READ value in `STATUS_GUESSES`, and
+those are separate namespaces**: one table is matched against the header row, the other
+against a cell. A file with a `Completed` column and a `Completed` status value fills both
+fields and neither reads the other, pinned by
+`TestColumnGuessing::test_completed_is_a_header_in_one_table_and_a_cell_value_in_the_other`.
+
+## A value assertion names its input only where one column feeds it
+
+`parse` builds `isbn` from `parse_isbn(cell("isbn13")) or parse_isbn(cell("isbn"))`, so a
+test asserting the derived ISBN passes with either candidate name deleted: the 13 is rebuilt
+from the 10 and the file quietly stops using the column it was given.
+`TestLibibsCurrentVocabulary::test_the_isbn_is_read` therefore asserts the mapping beside the
+value and says why, since the assertion looks redundant and is not.
+
+**`status` is the second such field, and the instrument that found the first could not see
+it.** An `ast` pass listing the `cell()` calls each output reaches answers `status` from the
+status column alone, because the second column arrives through control flow rather than
+through the expression: `parse` derives READ from a parsed `date_read` whenever the status
+column matched nothing. So an assertion on a derived status is blind the same way, and
+`test_the_columns_that_match` passes with `completed` deleted from the READ vocabulary.
+`test_the_status_word_is_recognised_rather_than_inferred_from_the_date` takes the date away
+instead, which is the only shape that observes the row: asking `match_status` directly would
+test the vocabulary rather than this file, and it was the first attempt at this test, caught
+in review as a mutation that was already covered elsewhere.
+
+The lesson is about the instrument rather than these two fields: **a value flow pass does not
+see a control dependency**, and the sentence claiming `isbn` was the only such field was
+written on the strength of one.
+
+**Where a name came from is a fact about the name.** The Libib names are read off that
+vendor's import template, not off an export, so they stand on the assumption that Libib's
+export writes its import template's column names. Nothing has confirmed it, and it is written
+at the table, beside the fixture and in the Libib test class rather than being quietly
+promoted to a fact.
+
+## A catalogue login is resolved by the route, never read by the module that sends it
+
+`metadata.py` makes every outbound catalogue request and touches no database. A login is an
+encrypted row, so reading one there would put the ORM behind every request to every
+catalogue, and the same argument already keeps the Google Books API key an argument threaded
+down from `routers/books.py`. So the route resolves a login per source with
+`credentials.for_request` and hands the mapping over; `metadata` states what it needs of one
+by taking `fetch.Credential`, which is a protocol rather than the store's class.
+
+`credentials.for_request` had no production caller at all until this. A login could be
+sealed, reported as held on the settings screen and counted as making its source ready while
+every request went out unauthenticated, which was invisible only because `sources.NEEDS_A_KEY`
+held one bespoke source whose secret is a settings row.
+
+**The mapping is resolved for the SRU targets and no others**, because the SRU door is what
+passes a credential to `fetch`. A bespoke target's secret is an argument to its own adapter,
+so a login resolved for one would be dropped without a word. That residual cannot be refused
+in `metadata.resolve`, which is where a row naming an unservable capability is turned away at
+boot: which store a source's secret lives in is `settings_store._SECRET_IS_A_SETTINGS_ROW`,
+and the capability that would make it refusable is not built yet. Until then
+`tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is the tripwire.
+
+**Which transport carries a login has one spelling, `metadata.carries_a_credential`, and the
+router and the tripwire both ask it.** Written at both sites instead, the day a transport
+starts carrying one turns the tripwire red and the cheap edit is to the test's own copy,
+which greens the suite while the router still skips the row and the request still goes out
+unauthenticated. The predicate is measured against the wire rather than compared with a
+second reading of the transport field: `TestWhichDoorCarriesALogin` drives every seeded row
+that answers a lookup through `_lookup_one` holding a login for that row's own origin, and
+asserts the answer matches whether an `Authorization` header left the process. `_lookup_one`
+still spells the transport test at its own branch, deliberately, because calling the
+predicate there would make that test compare the rule with itself.
+
+**The call sites are guarded structurally rather than by one behavioural test each.** Measured
+by mutation: dropping the credential inside `metadata._sru_search` was caught only in
+`test_metadata.py`, because no route test drove a title search with a login held, so an
+omitted `logins=` on a searching route was silent. The guard walks the router with `ast`.
+
+**Its subject is pinned, not derived from the fix it checks for.** The first version selected
+the doors that already declared a login, so a door that never declared one was invisible, and
+`editions` was such a door. Both critic seats found that independently. The subject is now a
+literal door set plus a mapping of stated exclusions, asserted equal to the module's public
+coroutines, and the walk keys on the imported module rather than the local binding, so an
+aliased import no longer evades it. This matters because `logins` carries a default, unlike
+the provider list, so mypy stands nowhere here and the guard is what stands instead.
+
+## A test count is not a roster count, and the census refuses one by grammar
+
+The roster census walked seven globs. Measured 2026-09-06: they reached 19 of the 42
+Markdown documents the repository versions, and four of the eighteen the publish gate
+publishes sat outside them, `conformance/README.md`, both `COVERAGE.md` registers and
+`frontend/tests/doubles/README.md`. The walk's own docstring argued for the property an
+enumeration cannot have while the walk under it was an enumeration.
+
+**Widening it raised the question of the two coverage registers**, which are dense with
+numbers beside nouns and looked certain to produce a batch of claims needing verdicts.
+Measured with the census's own scanner, and again with the unbounded one, and again by
+grep: **zero** census candidates in either. A test count is not a roster count because the
+census admits a number only when a roster noun stands within two words of it, and
+`sources`, `catalogues` and `providers` are the whole noun set. A count of tests never
+carries one.
+
+**What it does carry is a table row**, and that turned out to be the real finding. Five
+rows across the two registers put a test count in one column and a sentence about the
+catalogue chain in the next, and the grammar read across the cell boundary and joined them.
+None is a claim today, because none of those counts is currently a live cardinality. Each
+would have become one the day its file gained or lost a test, and gone away again on the
+next, taking a verdict with it each way. **So the exclusion is a property of the grammar
+and not a name in a list**: a claim's gap may not carry a `|`. Measured over the walk this
+replaces, zero of the 423 grammar matches it read crossed a cell boundary, so the rule
+refuses nothing that was being read. That figure is the old walk's and does not reproduce
+from the new scope, which reads the two registers the old one missed: 428 strict matches
+against 435 permissive over 590 files, seven of them crossing a cell. Five are the register
+rows and two are the guard's own written out examples of the shape. What it refuses that
+nothing else would is a count genuinely written as a value column beside a description
+column, of which this tree has none.
+
+**The walk is now what the repository versions**, read through the same `.gitignore`
+helpers the Markdown fence walk uses, minus the generated trees and the dated register, and
+pruned while walking. The kinds it reads are still an inclusion and that is stated where it
+is written: 45 versioned files are of other kinds and hold two roster claims between them,
+one a generated copy of a route docstring that already carries a verdict at its source and
+one in a survey input inside the build tooling.
+
+**The census cannot reach further than the mirror publishes, and that is a constraint
+rather than a taste.** A verdict is keyed on its file's path and the census lives in a
+published file, so a candidate in a stripped tree would demand a key the gate's "no
+published file may point at a stripped one" rejects: the suite would go red asking for a
+verdict and writing the verdict would turn the publish gate red instead. The declaration
+convention already drops every stripped **document**, which is what the gate requires of
+one. It does not reach a stripped tree's source, because the gate asks an English sentence
+of documents only. So a tree is internal when **its own README** declares itself, which is
+the same convention read one level up and kept true by the gate's own pre-strip
+requirement.
+
+**The README, and not every document under the directory, and the difference is the whole
+of the rule's safety.** Quantifying over all of them quantifies over an accident: six
+directories holding Markdown in the candidate set hold exactly one document and four of the
+six are published, and one coverage register is that sole document for two of the four, with
+203 and 92 candidates beneath it counting itself. Driving that register to declare itself turned eight directories internal and took
+the scope from 590 to 392, with three tests failing and none of them naming the walk. A
+README speaks for its directory; a register that happens to be the only document in it does
+not, and at one document a quantifier cannot tell them apart. Under the narrower rule the
+same edit costs one file, which is that file itself, and the set in scope today is
+unchanged, counted.
+
+Its holes are stated at the function and there are two. A stripped tree with no README is
+invisible to it, covered only by an ancestor that has one. And a declaration written into a
+**published** README would drop everything beneath it, 29 candidates for the documentation
+tree. What stands behind both is the publish gate, and that mitigation held only for as long
+as the two read the same window.
+
+**They did not, and the difference ran the silent way.** The census read the first 2000
+characters and the gate reads the first 30 lines, so a declaration below line 30 in a
+document whose header is short was invisible to the gate and visible to the census: measured
+by planting one at line 35, the gate exits 0 for all three published READMEs the rule is
+about, and the census drops two of them, taking the scope from 590 to 589 and to 587. The two
+agreed about every candidate before that, and the agreement was luck: **573** of the 629 have
+thirty lines or more counting newlines, the way `wc -l` does, and their opening thirty run
+under 2000 characters by as much as **1475**, with every declaration in the tree sitting by
+line 24, counted 1 based the way `grep -n` reports one.
+
+**Both figures need their counting rule beside them, because each is three numbers without
+one.** The population is 626 over every candidate, which folds in files that have no line 31
+and so compares nothing, 575 if a line is what splitting on a newline returns, and 571 if it
+must exceed thirty. The bound is 1475 measured to the end of line 30's text and 1474 measured
+to the end of its newline. The bound does not move with the population; it moves with that.
+Two review seats disagreed by exactly one on each, and both disagreements were a definition
+rather than a count.
+
+The census now reads the same window the gate reads, which makes the mitigation true by
+construction rather than by a caveat somebody has to keep in step. **Neither direction of a
+drift is caught by the tree**, and saying so is the point of writing it down: wider drops a
+published file from the census, and narrower keeps a file the mirror strips, which reaches
+the gate only where that file holds a claim. Measured, a window of three admits six declaring
+files and none of them holds a census candidate, so nothing would fail at either end. What
+catches a drift is a literal pin spelling the number a second time, on the same reasoning as
+the register exclusion pinned beside its own rule.
+
+**The rule bought nothing today and that is the honest report of it.** It drops ten files
+holding zero census candidates. It is a named test that fails on its deletion, not a
+measurement of anything it has caught. **What would delete it** is the build tooling's own
+source carrying the declaration, which the per file rule already reads: the pattern matches
+a comment prefixed line, so a `#` and the sentence is enough. Those are files this trio does
+not own.
+
+**Attacking it found what reading it did not, twice, and neither was visible to a reader.**
+Comparing a file's immediate parent against the internal trees instead of every ancestor was
+caught by nothing: the fixture's declaring tree held its module one level down, and so does
+every such tree in this repository today except one, whose deeper source holds no claim to
+fail on. A fixture arm for a subdirectory carrying no document of its own is what catches it
+now. The second was the quantifier above, found by driving the one document case rather than
+reading it. Both are one shape: a fixture named for the rule was not testing the rule.

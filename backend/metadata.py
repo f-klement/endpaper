@@ -37,9 +37,10 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
+from types import MappingProxyType
 from typing import Any, Final
 from xml.etree import ElementTree
 
@@ -67,6 +68,25 @@ from isbn import registration_group
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 logger = logging.getLogger("endpaper.metadata")
+
+#: The login each catalogue's request carries, by source.
+#:
+#: **`fetch.Credential` and not `credentials.Credential`**, and the difference is
+#: the whole reason this is a parameter. The store reaches the ORM; this module
+#: makes every outbound catalogue request and reaches no database, so it states
+#: what it needs of a login and lets the caller satisfy it. That is the same
+#: argument the Google Books key already uses, and the reason a credential is
+#: resolved in `routers/books.py` rather than read here.
+#:
+#: A source absent from the mapping sends nothing, which is what every free
+#: catalogue does.
+Logins = Mapping[CatalogueSource, fetch.Credential]
+
+#: No login for any catalogue, and the default everywhere one is optional.
+#:
+#: A `MappingProxyType` rather than a literal, so a caller cannot mutate the
+#: shared default and leave another library's login on it for the next request.
+_NO_LOGINS: Final[Logins] = MappingProxyType({})
 
 
 class Outcome(StrEnum):
@@ -3690,8 +3710,15 @@ _SEARCH_READERS: Final[
 }
 
 
-async def _sru_lookup(target: targets.Target, isbn: str) -> Lookup:
+async def _sru_lookup(
+    target: targets.Target, isbn: str, credential: fetch.Credential | None
+) -> Lookup:
     """One ISBN lookup against an SRU target.
+
+    **`credential` is offered to the request and attached by nothing else.**
+    `fetch` hands it to each hop and `credentials.Credential.header_for` decides,
+    per hop, whether this is the origin it was set for. None is the ordinary case
+    and means an unauthenticated GET, which is what every free catalogue takes.
 
     **The query is built inside the `try`, because building one raises.**
     `targets.cql_term` refuses a value that is not a term and `z3950.pqf_term`
@@ -3702,7 +3729,9 @@ async def _sru_lookup(target: targets.Target, isbn: str) -> Lookup:
     name = target.source.value
     try:
         params = target.sru_params(target.isbn_query(isbn), target.lookup_records)
-        response = await fetch.get_once(target.base_url, params=params)
+        response = await fetch.get_once(
+            target.base_url, params=params, credential=credential
+        )
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source=name)
         if response.status_code != 200:
@@ -3720,9 +3749,11 @@ async def _sru_lookup(target: targets.Target, isbn: str) -> Lookup:
 
 
 async def _sru_search(
-    target: targets.Target, query: str, limit: int
+    target: targets.Target, query: str, limit: int, credential: fetch.Credential | None
 ) -> list[Record]:
     """One title search against an SRU target.
+
+    `credential` carries the same rule it does at a lookup: see `_sru_lookup`.
 
     The shape of the query is the row's, out of the four `targets.TitleQuery`
     holds, and every term in it has been through `targets.cql_term`. Asking for
@@ -3737,7 +3768,9 @@ async def _sru_search(
         params = target.sru_params(
             target.title_query(terms), target.search_records(limit)
         )
-        response = await fetch.get_once(target.base_url, params=params)
+        response = await fetch.get_once(
+            target.base_url, params=params, credential=credential
+        )
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -3800,19 +3833,87 @@ def resolve(target: targets.Target) -> None:
             )
 
 
-async def _lookup_one(target: targets.Target, isbn: str, api_key: str) -> Lookup:
-    """Ask one target about one ISBN, through whichever door its row names."""
+def carries_a_credential(target: targets.Target) -> bool:
+    """Whether a request to this target would actually carry a login.
+
+    **The SRU door takes one and hands it to `fetch`, and no other door does.** A
+    bespoke target's secret is an argument to its own adapter, which is where the
+    Google Books key goes, so a login handed to `_lookup_one` for a bespoke row is
+    dropped without a word.
+
+    **Public, and asked rather than restated, which is the whole reason it is a
+    function.** `routers/books.py` resolves a login only for the targets this
+    admits, and `tests/test_credentials.py` asks the same question of the roster.
+    Written out at both sites instead, the day a transport starts carrying one
+    would turn the test red and the edit it demands is to the test's own copy,
+    which greens the suite while the router still skips the row and the request
+    still goes out unauthenticated. That is #209 recurring with its own tripwire
+    green.
+
+    **Measured against the wire rather than stated**, by
+    `tests/test_metadata.py::TestWhichDoorCarriesALogin`, which asks every seeded
+    row that answers a lookup through `_lookup_one` and compares this answer with
+    whether an `Authorization` header left the process. So this is not a second
+    spelling of the branch below: it is a claim about that branch's effect, and
+    the two are checked against each other rather than kept in step by hand.
+
+    **That instrument reaches the rows with a lookup door, which is not all of
+    them.** The rows whose only door is the search door are off it, because
+    `_lookup_one` is not the door they use; `test_a_title_search_carries_the_login_too`
+    is what covers that side, behaviourally rather than per row. The count is
+    deliberately not written here: it is a live cardinality, and one written into
+    this module would be a number nothing recomputes.
+
+    `Z3950` answers False and must, because `fetch.py` never opens that socket.
+    #129 is where that door and what it carries are decided together.
+    """
+    return target.transport is targets.Transport.SRU
+
+
+async def _lookup_one(
+    target: targets.Target,
+    isbn: str,
+    api_key: str,
+    *,
+    credential: fetch.Credential | None,
+) -> Lookup:
+    """Ask one target about one ISBN, through whichever door its row names.
+
+    **`credential` is keyword only with no default, so mypy refuses a call site
+    that forgets it.** That is the property worth having here: an omitted login
+    is an unauthenticated GET that a catalogue answers with a diagnostic and
+    this module reports as "not found", which is the failure #209 was opened
+    for. The public entry points take `plan` keyword only with no default for
+    exactly the same reason.
+
+    **A bespoke target is handed `api_key` and never a sealed login**, because
+    that is where its secret lives: Google Books' key is an argument to its own
+    adapter. A row that needed a sealed login on a bespoke transport would be
+    resolved by the router and dropped here. `carries_a_credential` above is that
+    rule as a question anything may ask, and
+    `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
+    the tripwire that asks it of the roster.
+    """
     if target.transport is targets.Transport.SRU:
-        return await _sru_lookup(target, isbn)
+        return await _sru_lookup(target, isbn, credential)
     return await _BESPOKE_LOOKUPS[target.reader](isbn, api_key)
 
 
 async def _search_one(
-    target: targets.Target, query: str, limit: int, api_key: str
+    target: targets.Target,
+    query: str,
+    limit: int,
+    api_key: str,
+    *,
+    credential: fetch.Credential | None,
 ) -> list[Record]:
-    """Ask one target for title matches, through whichever door its row names."""
+    """Ask one target for title matches, through whichever door its row names.
+
+    `credential` carries the rule `_lookup_one` states, including which doors
+    take one.
+    """
     if target.transport is targets.Transport.SRU:
-        return await _sru_search(target, query, limit)
+        return await _sru_search(target, query, limit, credential)
     if target.can(Capability.METERED):
         return await _METERED_SEARCHES[target.reader](query, limit, api_key)
     return await _FREE_SEARCHES[target.reader](query, limit)
@@ -4046,6 +4147,7 @@ async def search(
     prefer_language: str | None = None,
     *,
     plan: sources.Plan,
+    logins: Logins = _NO_LOGINS,
     harder: bool = False,
 ) -> list[Record]:
     """The rows alone, for a caller with no use for the roster.
@@ -4061,6 +4163,7 @@ async def search(
             limit,
             prefer_language,
             plan=plan,
+            logins=logins,
             harder=harder,
         )
     ).matches
@@ -4073,6 +4176,7 @@ async def title_search(
     prefer_language: str | None = None,
     *,
     plan: sources.Plan,
+    logins: Logins = _NO_LOGINS,
     harder: bool = False,
 ) -> Search:
     """Find a book by title and author, across every catalogue this library asks.
@@ -4080,6 +4184,9 @@ async def title_search(
     **Which catalogues those are is `plan`**, the household's choice rather than
     this module's: a source switched off is never constructed and never awaited.
     What follows describes the eight a new install asks.
+
+    **`logins` is what a catalogue asking for one is sent**, resolved by the
+    caller: see `Logins`.
 
     Three tiers, which is what keeps this both broad and quick.
 
@@ -4178,7 +4285,13 @@ async def title_search(
         )
         tiers = await _within_deadline(
             [
-                _search_one(targets.SEEDED[name], trimmed, limit, api_key)
+                _search_one(
+                    targets.SEEDED[name],
+                    trimmed,
+                    limit,
+                    api_key,
+                    credential=logins.get(name),
+                )
                 for name in roster
             ],
             deadline,
@@ -4739,6 +4852,7 @@ async def candidates(
     prefer_language: str | None = None,
     *,
     plan: sources.Plan,
+    logins: Logins = _NO_LOGINS,
 ) -> list[Record]:
     """Editions to choose between for a book that already exists, cluster first.
 
@@ -4760,7 +4874,14 @@ async def candidates(
     """
     cluster, searched = await asyncio.gather(
         _work_cluster(isbn, max(limit - 1, 0), prefer_language, plan),
-        search(query, api_key, limit=limit, prefer_language=prefer_language, plan=plan),
+        search(
+            query,
+            api_key,
+            limit=limit,
+            prefer_language=prefer_language,
+            plan=plan,
+            logins=logins,
+        ),
     )
     rows = list(cluster)
     # **Deduplicated on the ISBN and on nothing else**, which is the one thing
@@ -4886,7 +5007,11 @@ def _worst(attempts: list[tuple[str, Outcome]]) -> Outcome:
 
 
 async def lookup(
-    raw_isbn: str, api_key: str = "", *, plan: sources.Plan
+    raw_isbn: str,
+    api_key: str = "",
+    *,
+    plan: sources.Plan,
+    logins: Logins = _NO_LOGINS,
 ) -> Lookup:
     """Resolve an ISBN to the best record the free catalogues can produce.
 
@@ -4905,6 +5030,11 @@ async def lookup(
 
     The ISBN is canonicalised first, so a lookup costs nothing for input that
     could not be a book, and the cache is keyed on one spelling.
+
+    **`logins` is what a catalogue asking for one is sent**, resolved by the
+    caller: see `Logins`. It is deliberately not part of the cache key, because
+    a cached record is a book rather than a session: the same edition comes back
+    whoever asked for it.
     """
     isbn = parse_isbn(raw_isbn)
     if isbn is None:
@@ -4923,7 +5053,12 @@ async def lookup(
     # them is a bug worth seeing rather than a network condition to absorb.
     together = plan.lookup_together
     fast = await asyncio.gather(
-        *(_lookup_one(targets.SEEDED[name], isbn, api_key) for name in together)
+        *(
+            _lookup_one(
+                targets.SEEDED[name], isbn, api_key, credential=logins.get(name)
+            )
+            for name in together
+        )
     )
     attempts.extend(
         (name, result.outcome) for name, result in zip(together, fast, strict=True)
@@ -4955,7 +5090,9 @@ async def lookup(
     # hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
     # carries the measurement and the bound that keeps it from losing a book.
     for name in plan.lookup_in_turn(registration_group(isbn)):
-        result = await _lookup_one(targets.SEEDED[name], isbn, api_key)
+        result = await _lookup_one(
+            targets.SEEDED[name], isbn, api_key, credential=logins.get(name)
+        )
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
             # Open Library's own record carries a cover URL and Google's
