@@ -2574,6 +2574,41 @@ class TestTheWalkIsTheTreeRatherThanAListOfPlaces:
         assert declares_itself_internal(inside)
         assert not declares_itself_internal(outside)
 
+    def test_a_line_is_what_the_gate_counts_as_one(self, tmp_path):
+        """The unit again, one method call down, and it was unguarded.
+
+        `str.splitlines` breaks on the vertical tab, the form feed, three
+        separators and three Unicode line breaks. `head -n` counts the newline
+        alone. So a document carrying one of those reaches its thirtieth line
+        earlier here than at the gate, and the census window is narrower than
+        the gate's for that file: it publishes, and the census has already
+        stopped reading it.
+
+        **Zero of the 629 candidates hold one of those characters, which is why
+        this needs a fixture rather than the tree.** Measured before it was
+        written: reverting the split to `splitlines` was caught by nothing at
+        all, so the rule was a sentence in a docstring and not a guard.
+
+        The fixture puts thirty five form feeds on the first newline delimited
+        line, so `splitlines` spends the whole window inside line one while the
+        gate, and this, still reach line five.
+        """
+        document = tmp_path / "odd.md"
+        document.write_text(
+            "\f" * 35 + "\nsecond\nthird\nfourth\n" + _DECLARES + "\n",
+            encoding="utf-8",
+        )
+        text = document.read_text(encoding="utf-8")
+        assert text.count("\n") < _HEADER_LINES, (
+            "the gate would truncate this fixture too, so it no longer shows the "
+            "two units disagreeing"
+        )
+        assert len(text.splitlines()) > _HEADER_LINES, (
+            "`splitlines` no longer overruns the window here, so this fixture "
+            "cannot tell the two apart"
+        )
+        assert declares_itself_internal(document)
+
     def test_the_window_is_the_number_the_publish_gate_uses(self):
         """The value, where the test above drives only the unit.
 

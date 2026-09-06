@@ -202,6 +202,13 @@ byte identical, which is about the schema and was never about this.
 
 ### Fixed
 
+- **The unit the census counts a line in is now guarded.** It splits on the newline because
+  that is what the publish gate counts, and `str.splitlines` also breaks on eight other
+  characters, so a document carrying one would reach its thirtieth line earlier in the
+  census than at the gate: it publishes, and the census has already stopped reading it.
+  Nothing enforced that, and no file in the tree distinguishes the two units, so the guard
+  takes a fixture and asserts it still discriminates before it asserts the answer.
+
 - **The guard that recomputes a roster count in prose now reads every document the
   repository versions.** It walked seven globs, which reached 19 of the 42 Markdown
   documents in the tree and left four of the eighteen the published mirror carries with no

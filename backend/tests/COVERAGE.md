@@ -1,16 +1,16 @@
 # Backend test coverage
 
-**5762 tests**, in 89 files, recounted with `--collect-only` on 2026-09-06.
+**5763 tests**, in 89 files, recounted with `--collect-only` on 2026-09-06.
 
 **The headline is no longer equal to the passed count, and the difference is deliberate.** The
-gate reports `5760 passed, 1 skipped, 1 xfailed`: one test is a strict `xfail`, recording a
+gate reports `5761 passed, 1 skipped, 1 xfailed`: one test is a strict `xfail`, recording a
 defect the CSV importer has today, so it fails on purpose and the run is green.
 **Collected is the number this table sums to; passed is the number the gate prints.** They
 differ by the count of open recorded defects **plus the skips**, two here, so if they ever
 differ by anything else, one of the two is wrong. Stating it without the skip made the check
 undoable, which is how it sat wrong through a wave.
 
-**The rows below sum to 5721, forty one short, and the shortfall is deliberate.** Those
+**The rows below sum to 5722, forty one short, and the shortfall is deliberate.** Those
 tests live in five files on the publish gate's DENY list, which this published register may not
 name: a published file pointing at a stripped path fails the gate. **The number moves whenever
 one of those files gains a test and is not derivable from anything below.**
@@ -92,7 +92,7 @@ why the helper uses regexes.
 | `test_main.py` | 59 | App wiring, tag seeding, the operationId guard, the overdue ticker's lifespan, what the built files say about being reused, the shell that has to answer a client route |
 | `test_house_rules.py` | 204 | **Defects a person found four times.** Every caller-supplied row id bounded at both ends, whether it arrives as a query parameter |
 | `test_scratch_report.py` | 4 | **The scratch report names the filesystem the databases landed on.** `conftest._fastest_scratch()` falls back from `/dev/shm` to disk silently |
-| `test_roster_counts.py` | 77 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
+| `test_roster_counts.py` | 78 | **A number spelled in prose, recomputed.** Every number written beside a roster noun is found by a census and must carry a verdict naming a cardinality computed from `sources.py`. The census walks the tree minus what a tool owns, so a new file is covered without anybody remembering, and it reads this register. |
 | `schemas/test_book.py` | 39 | **Two request bodies writing one column must agree about it.** `BookMatch` bounded four of its seventeen fields while `merge_into` wrote them all |
 | `schemas/test_settings.py` | 2 | **A row the router builds must carry every field the source describes.** The settings row is built by splatting the description into the response model |
 | `test_serialisation.py` | 47 | Assembling `BookOut`: the per-request fields, the tag suggestion by caption and by DDC number, that a tag name inside a longer word is not a caption match |
