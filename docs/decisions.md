@@ -11027,3 +11027,54 @@ cannot see", because separating them is an oracle for whether such a Book exists
 count is deliberately not folded in with them: it is derived entirely from the member's own
 upload and says nothing about the instance, and a member who exported 400 titles and imported
 380 is owed the other twenty.
+
+## A source carries a remit, so a catalogue is asked about books it might hold
+
+Owner's decision, 2026-09-07. A national catalogue answering only for its own country was a
+property nobody had to state while a credential had to be typed in by hand: an install that
+had not configured one never asked. Shipping a published login removed that accident, so
+every install now reaches such a catalogue on any lookup the earlier sources miss.
+
+**A remit is a field on the row rather than a branch in the lookup**, because the breadth
+work adds more catalogues on the same terms and a rule written once per source is one
+somebody has to remember to extend.
+
+**The measurement comes first, and it decides whether any rule can work.** The obvious rule
+is wrong: an ISBN's registration group says where the publisher registered, not where a book
+is held or catalogued, so a prefix filter would refuse exactly the long tail a national
+catalogue is added for. What settles it is how many of the answers such a row actually
+contributes carry their own country's group, which is a pass over a sample already in the
+repository rather than new probing.
+
+## Provenance is published, because a catalogue that hides its sources is not a catalogue
+
+Owner's decision, 2026-09-07, against the recommendation that it stay internal.
+
+The recommendation rested on asymmetry: adding a column to the public whitelist later is
+easy and removing a published one is not. **What outweighs it is what the public surface is
+for.** A library catalogue states where a record came from, and a reader judging a record is
+entitled to the same thing here. Treating that as this instance's private workflow detail
+would make the public catalogue a weaker artefact than the thing it imitates.
+
+**The public surface stays a column whitelist rather than becoming a row filter**, so this is
+one named field joining it and not a relaxation of the rule. The security seat owns the check
+that it is the only surface that moved.
+
+## A harvested Book is owned by the harvest, not by the admin who ran it
+
+Owner's decision, 2026-09-07, against the recommendation that it be attributed to the
+running admin.
+
+Attribution to a person is a claim, and a bulk import of three thousand records is not that
+person's shelf. **A service account says what actually happened**, and it keeps the harvest
+out of every place that reasons about what a member added.
+
+**This needs a non human owner, which does not exist today**, and that is the cost the
+decision accepts rather than a reason to refuse it. Every row needs an owner and the column
+is not nullable, so the concept has to be built rather than worked around. **It is very
+likely the same concept the patron record needs**, which also introduces an actor who is not
+a member of the household, and building two would be storing one fact twice.
+
+Harvested rows are not private: an institution cataloguing its holdings is publishing them,
+which is the whole point of the harvest, and a bulk import that lands three thousand private
+rows only defers the same decision to whoever has to unprivate them.
